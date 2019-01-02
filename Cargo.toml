@@ -1,0 +1,9 @@
+[package]
+name = "vulkan-tutorial"
+version = "0.1.0"
+authors = ["Niklas Jonsson <niklasandersjonsson@gmail.com>"]
+edition = "2018"
+
+[dependencies]
+vulkano = "*"
+winit = "*"
