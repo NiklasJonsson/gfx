@@ -1,33 +1,43 @@
 extern crate vulkano;
 extern crate winit;
 
+use winit::{Event, ControlFlow, WindowEvent};
+use winit::dpi::LogicalSize;
+
 struct App {
-
-
+    events_loop: winit::EventsLoop,
+    window: winit::Window,
 }
 
 impl App {
-    fn setup_window(&mut self) {
-        println!("setup_window()");
-    }
-
-    fn setup_vulkan(&mut self) {
-        println!("setup_vulkan()");
-    }
-
     fn main_loop(&mut self) {
         println!("main_loop()");
+
+        let mut quit = false;
+
+        while !quit {
+            self.events_loop.poll_events(|event| {
+                match event {
+                    Event::WindowEvent {
+                        event: WindowEvent::CloseRequested,
+                        ..
+                    } => quit = true,
+                    _ => ()
+                }
+            });
+        }
     }
 
     fn run(&mut self) {
         println!("run()");
-        self.setup_window();
-        self.setup_vulkan();
         self.main_loop();
     }
 
     fn new() -> App {
-        return App{};
+        println!("new()");
+        let events_loop = winit::EventsLoop::new();
+        let window = winit::Window::new(&events_loop).unwrap();
+        return App{events_loop, window};
     }
 }
 
