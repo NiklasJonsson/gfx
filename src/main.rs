@@ -1,13 +1,20 @@
+#[macro_use]
 extern crate vulkano;
+extern crate vulkano_shaders;
 extern crate vulkano_win;
 extern crate winit;
 
+use vulkano::descriptor::PipelineLayoutAbstract;
 use vulkano::device::{Device, DeviceExtensions, Features, Queue};
 use vulkano::format::Format;
+use vulkano::framebuffer::{Subpass, RenderPassAbstract};
 use vulkano::image::swapchain::SwapchainImage;
 use vulkano::image::ImageUsage;
 use vulkano::instance;
 use vulkano::instance::{Instance, InstanceExtensions, PhysicalDevice};
+use vulkano::pipeline::{GraphicsPipeline};
+use vulkano::pipeline::vertex::BufferlessDefinition;
+use vulkano::pipeline::viewport::Viewport;
 use vulkano::swapchain::{
     ColorSpace, CompositeAlpha, PresentMode, Surface, SurfaceTransform, Swapchain,
 };
@@ -19,6 +26,8 @@ use winit::dpi::LogicalSize;
 use winit::{Event, EventsLoop, Window, WindowBuilder, WindowEvent};
 
 use std::sync::Arc;
+
+type ConcreteGraphicsPipeline = GraphicsPipeline<BufferlessDefinition, Box<PipelineLayoutAbstract + Send + Sync + 'static>, Arc<RenderPassAbstract + Send + Sync + 'static>>;
 
 struct App {
     events_loop: EventsLoop,
@@ -228,6 +237,59 @@ impl App {
         .expect("Failed to create swap chain");
     }
 
+    fn create_graphics_pipeline(device: &Arc<Device>,
+                                format: Format,
+                                swapchain_dimensions: [u32; 2]) -> Arc<ConcreteGraphicsPipeline> {
+        let vs = vs::Shader::load(Arc::clone(device)).expect("Vertex shader compilation failed");
+        let fs = fs::Shader::load(Arc::clone(device)).expect("Fragment shader compilation failed");
+
+        // Use trait-based type to make ConcreteGraphicsPipeline compile
+        let render_pass: Arc<RenderPassAbstract + Send + Sync> = Arc::new(
+            single_pass_renderpass!(Arc::clone(device),
+            attachments: {
+                color: {
+                    load: Clear,
+                    store: Store,
+                    format: format,
+                    samples: 1,
+                }
+            },
+            pass: {
+                color: [color],
+                depth_stencil: {}
+            }).unwrap()
+            );
+
+        let dims = [swapchain_dimensions[0] as f32, swapchain_dimensions[1] as f32];
+
+        let viewport = Viewport {
+            origin: [0.0, 0.0],
+            dimensions: dims,
+            depth_range: 0.0..1.0
+        };
+
+        let pipeline = Arc::new(
+            GraphicsPipeline::start()
+            .vertex_input(BufferlessDefinition {})
+            // How to interpret the vertex input
+            .triangle_list()
+            .vertex_shader(vs.main_entry_point(), ())
+            // Whether to support special indices in in the vertex buffer to split triangles
+            .primitive_restart(false)
+            .viewports([viewport].iter().cloned())
+            .fragment_shader(fs.main_entry_point(), ())
+            .depth_clamp(false)
+            .polygon_mode_fill()
+            .line_width(1.0)
+            .cull_mode_back()
+            .front_face_clockwise()
+            .render_pass(Subpass::from(Arc::clone(&render_pass), 0).unwrap())
+            .build(Arc::clone(device))
+            .expect("Could not create graphics pipeline"));
+
+        return pipeline;
+    }
+
     fn new() -> App {
         let vk_instance = App::setup_vk_instance();
         let (events_loop, vk_surface) = App::setup_surface(&vk_instance);
@@ -250,6 +312,8 @@ impl App {
 
         let (mut swapchain, images) = App::create_swap_chain(&vk_device, &vk_surface, sharing_mode);
 
+        let g_pipeline = App::create_graphics_pipeline(&vk_device, swapchain.format(), swapchain.dimensions());
+
         return App {
             events_loop,
             vk_instance,
@@ -261,4 +325,51 @@ impl App {
 fn main() {
     let mut app = App::new();
     app.run();
+}
+
+mod vs {
+    vulkano_shaders::shader! {
+        ty: "vertex",
+        src: "
+#version 450
+#extension GL_ARB_separate_shader_objects : enable
+
+layout(location = 0) out vec3 fragColor;
+
+vec2 positions[3] = vec2[](
+    vec2(0.0, -0.5),
+    vec2(0.5, 0.5),
+    vec2(-0.5, 0.5)
+);
+
+vec3 colors[3] = vec3[](
+    vec3(1.0, 0.0, 0.0),
+    vec3(0.0, 1.0, 0.0),
+    vec3(0.0, 0.0, 1.0)
+);
+
+void main() {
+    gl_Position = vec4(positions[gl_VertexIndex], 0.0, 1.0);
+    fragColor = colors[gl_VertexIndex];
+}
+"
+    }
+}
+
+mod fs {
+    vulkano_shaders::shader! {
+        ty: "fragment",
+        src: "
+#version 450
+#extension GL_ARB_separate_shader_objects : enable
+
+layout(location = 0) in vec3 fragColor;
+
+layout(location = 0) out vec4 outColor;
+
+void main() {
+    outColor = vec4(fragColor, 1.0);
+}
+"
+    }
 }
