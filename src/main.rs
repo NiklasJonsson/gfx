@@ -4,21 +4,24 @@ extern crate vulkano_shaders;
 extern crate vulkano_win;
 extern crate winit;
 
+use vulkano::command_buffer::{AutoCommandBuffer, AutoCommandBufferBuilder, DynamicState};
 use vulkano::descriptor::PipelineLayoutAbstract;
 use vulkano::device::{Device, DeviceExtensions, Features, Queue};
-use vulkano::command_buffer::{AutoCommandBufferBuilder, AutoCommandBuffer, DynamicState};
 use vulkano::format::Format;
-use vulkano::framebuffer::{Subpass, RenderPassAbstract, Framebuffer, FramebufferAbstract};
+use vulkano::framebuffer::{Framebuffer, FramebufferAbstract, RenderPassAbstract, Subpass};
 use vulkano::image::swapchain::SwapchainImage;
 use vulkano::image::ImageUsage;
 use vulkano::instance;
 use vulkano::instance::{Instance, InstanceExtensions, PhysicalDevice, QueueFamily};
-use vulkano::pipeline::{GraphicsPipeline};
-use vulkano::pipeline::{vertex::BufferlessDefinition, vertex::BufferlessVertices, viewport::Viewport};
+use vulkano::pipeline::GraphicsPipeline;
+use vulkano::pipeline::{
+    vertex::BufferlessDefinition, vertex::BufferlessVertices, viewport::Viewport,
+};
+use vulkano::swapchain;
 use vulkano::swapchain::{
     ColorSpace, CompositeAlpha, PresentMode, Surface, SurfaceTransform, Swapchain,
 };
-use vulkano::sync::SharingMode;
+use vulkano::sync::{GpuFuture, SharingMode};
 
 use vulkano_win::VkSurfaceBuild;
 
@@ -27,7 +30,11 @@ use winit::{Event, EventsLoop, Window, WindowBuilder, WindowEvent};
 
 use std::sync::Arc;
 
-type ConcreteGraphicsPipeline = GraphicsPipeline<BufferlessDefinition, Box<PipelineLayoutAbstract + Send + Sync + 'static>, Arc<RenderPassAbstract + Send + Sync + 'static>>;
+type ConcreteGraphicsPipeline = GraphicsPipeline<
+    BufferlessDefinition,
+    Box<PipelineLayoutAbstract + Send + Sync + 'static>,
+    Arc<RenderPassAbstract + Send + Sync + 'static>,
+>;
 
 struct App {
     events_loop: EventsLoop,
@@ -45,17 +52,54 @@ struct App {
 }
 
 impl App {
+    fn draw_frame(&mut self) {
+        println!(
+            "gq: {:?}\npq: {:?}",
+            self.graphics_queue, self.presentation_queue
+        );
+
+        let (img_idx, swapchain_img_acquired) =
+            swapchain::acquire_next_image(Arc::clone(&self.swapchain), None).unwrap();
+
+        let drawn_and_presented = swapchain_img_acquired
+            .then_execute(
+                Arc::clone(&self.graphics_queue),
+                Arc::clone(&self.command_buffers[img_idx]),
+            )
+            .unwrap()
+            // TODO: This should be done on the presentation queue when possible (can't have a
+            // different queue after CommandBufferExecFuture as of now)
+            .then_swapchain_present(
+                Arc::clone(&self.graphics_queue),
+                Arc::clone(&self.swapchain),
+                img_idx,
+            )
+            .then_signal_fence_and_flush()
+            .unwrap();
+
+        drawn_and_presented.wait(None).unwrap();
+    }
+
     fn main_loop(&mut self) {
         let mut quit = false;
 
-        while !quit {
+        loop {
+            let mut quit = false;
             self.events_loop.poll_events(|event| match event {
                 Event::WindowEvent {
                     event: WindowEvent::CloseRequested,
                     ..
-                } => quit = true,
+                } => {
+                    quit = true;
+                }
                 _ => (),
             });
+
+            if quit {
+                break;
+            }
+
+            self.draw_frame();
         }
     }
 
@@ -130,7 +174,7 @@ impl App {
 
         for qf in physical_device.queue_families() {
             println!(
-                "Queue {}[{}]. graphics:{}, compute:{}",
+                "\tQueue {}[{}]. graphics:{}, compute:{}",
                 qf.id(),
                 qf.queues_count(),
                 qf.supports_graphics(),
@@ -246,9 +290,10 @@ impl App {
         .expect("Failed to create swap chain");
     }
 
-    fn create_render_pass(device: &Arc<Device>,
-                          format: Format) -> Arc<RenderPassAbstract + Send + Sync> {
-
+    fn create_render_pass(
+        device: &Arc<Device>,
+        format: Format,
+    ) -> Arc<RenderPassAbstract + Send + Sync> {
         Arc::new(
             single_pass_renderpass!(Arc::clone(device),
             attachments: {
@@ -262,85 +307,107 @@ impl App {
             pass: {
                 color: [color],
                 depth_stencil: {}
-            }).unwrap()) 
+            })
+            .unwrap(),
+        )
     }
 
-    fn create_graphics_pipeline(device: &Arc<Device>,
-                                render_pass: &Arc<RenderPassAbstract + Send + Sync>,
-                                swapchain_dimensions: [u32; 2]) -> Arc<ConcreteGraphicsPipeline> {
+    fn create_graphics_pipeline(
+        device: &Arc<Device>,
+        render_pass: &Arc<RenderPassAbstract + Send + Sync>,
+        swapchain_dimensions: [u32; 2],
+    ) -> Arc<ConcreteGraphicsPipeline> {
         let vs = vs::Shader::load(Arc::clone(device)).expect("Vertex shader compilation failed");
         let fs = fs::Shader::load(Arc::clone(device)).expect("Fragment shader compilation failed");
 
-        let dims = [swapchain_dimensions[0] as f32, swapchain_dimensions[1] as f32];
+        let dims = [
+            swapchain_dimensions[0] as f32,
+            swapchain_dimensions[1] as f32,
+        ];
 
         let viewport = Viewport {
             origin: [0.0, 0.0],
             dimensions: dims,
-            depth_range: 0.0..1.0
+            depth_range: 0.0..1.0,
         };
 
         let pipeline = Arc::new(
             GraphicsPipeline::start()
-            .vertex_input(BufferlessDefinition {})
-            // How to interpret the vertex input
-            .triangle_list()
-            .vertex_shader(vs.main_entry_point(), ())
-            // Whether to support special indices in in the vertex buffer to split triangles
-            .primitive_restart(false)
-            .viewports([viewport].iter().cloned())
-            .fragment_shader(fs.main_entry_point(), ())
-            .depth_clamp(false)
-            .polygon_mode_fill()
-            .line_width(1.0)
-            .cull_mode_back()
-            .front_face_clockwise()
-            .render_pass(Subpass::from(Arc::clone(render_pass), 0).unwrap())
-            .build(Arc::clone(device))
-            .expect("Could not create graphics pipeline"));
+                .vertex_input(BufferlessDefinition {})
+                // How to interpret the vertex input
+                .triangle_list()
+                .vertex_shader(vs.main_entry_point(), ())
+                // Whether to support special indices in in the vertex buffer to split triangles
+                .primitive_restart(false)
+                .viewports([viewport].iter().cloned())
+                .fragment_shader(fs.main_entry_point(), ())
+                .depth_clamp(false)
+                .polygon_mode_fill()
+                .line_width(1.0)
+                .cull_mode_back()
+                .front_face_clockwise()
+                .render_pass(Subpass::from(Arc::clone(render_pass), 0).unwrap())
+                .build(Arc::clone(device))
+                .expect("Could not create graphics pipeline"),
+        );
 
         return pipeline;
     }
 
-
-    fn create_framebuffers(render_pass: &Arc<RenderPassAbstract + Send + Sync>,
-                           sc_images: &[Arc<SwapchainImage<Window>>])
-        -> Vec<Arc<FramebufferAbstract + Send + Sync>> {
-
-        sc_images.iter().map(|image| {
-            Arc::new(
-                Framebuffer::start(Arc::clone(&render_pass))
-                .add(Arc::clone(image))
-                .unwrap()
-                .build()
-                .unwrap()
+    fn create_framebuffers(
+        render_pass: &Arc<RenderPassAbstract + Send + Sync>,
+        sc_images: &[Arc<SwapchainImage<Window>>],
+    ) -> Vec<Arc<FramebufferAbstract + Send + Sync>> {
+        sc_images
+            .iter()
+            .map(|image| {
+                Arc::new(
+                    Framebuffer::start(Arc::clone(&render_pass))
+                        .add(Arc::clone(image))
+                        .unwrap()
+                        .build()
+                        .unwrap(),
                 ) as Arc<FramebufferAbstract + Send + Sync>
-        }).collect::<Vec<_>>()
+            })
+            .collect::<Vec<_>>()
     }
 
-    fn create_command_buffers(device: &Arc<Device>,
-                              queue: QueueFamily,
-                              pipeline: &Arc<ConcreteGraphicsPipeline>,
-                              render_pass: &Arc<RenderPassAbstract + Send + Sync>,
-                              framebuffers: &[Arc<FramebufferAbstract + Send + Sync>])
-        -> Vec<Arc<AutoCommandBuffer>> {
+    fn create_command_buffers(
+        device: &Arc<Device>,
+        queue: QueueFamily,
+        pipeline: &Arc<ConcreteGraphicsPipeline>,
+        render_pass: &Arc<RenderPassAbstract + Send + Sync>,
+        framebuffers: &[Arc<FramebufferAbstract + Send + Sync>],
+    ) -> Vec<Arc<AutoCommandBuffer>> {
+        framebuffers
+            .iter()
+            .map(|fb| {
+                let vertices = BufferlessVertices {
+                    vertices: 3,
+                    instances: 1,
+                };
+                let clear_color = vec![[0.0, 0.0, 0.0, 1.0].into()];
 
-
-            framebuffers.iter().map(|fb| {
-
-                let vertices = BufferlessVertices { vertices: 3, instances: 1 };
-                let clear_color = vec!([0.0, 0.0, 1.0, 1.0].into());
-
-                Arc::new(AutoCommandBufferBuilder::primary_simultaneous_use(Arc::clone(device), queue).unwrap()
-                    .begin_render_pass(Arc::clone(fb), false, clear_color)
-                    .unwrap()
-                    .draw(Arc::clone(pipeline), &DynamicState::none(), vertices, (), ())
-                    .unwrap()
-                    .end_render_pass()
-                    .unwrap()
-                    .build()
-                    .unwrap()
+                Arc::new(
+                    AutoCommandBufferBuilder::primary_simultaneous_use(Arc::clone(device), queue)
+                        .unwrap()
+                        .begin_render_pass(Arc::clone(fb), false, clear_color)
+                        .unwrap()
+                        .draw(
+                            Arc::clone(pipeline),
+                            &DynamicState::none(),
+                            vertices,
+                            (),
+                            (),
+                        )
+                        .unwrap()
+                        .end_render_pass()
+                        .unwrap()
+                        .build()
+                        .unwrap(),
                 )
-            }).collect::<Vec<_>>()
+            })
+            .collect::<Vec<_>>()
     }
 
     fn new() -> Self {
@@ -366,11 +433,17 @@ impl App {
         let (swapchain, images) = Self::create_swap_chain(&vk_device, &vk_surface, sharing_mode);
 
         let render_pass = Self::create_render_pass(&vk_device, swapchain.format());
-        let g_pipeline = Self::create_graphics_pipeline(&vk_device, &render_pass, swapchain.dimensions());
+        let g_pipeline =
+            Self::create_graphics_pipeline(&vk_device, &render_pass, swapchain.dimensions());
         let framebuffers = Self::create_framebuffers(&render_pass, &images);
 
-        let cmd_bufs = Self::create_command_buffers(&vk_device, graphics_queue.family(), &g_pipeline, &render_pass, &framebuffers);
-
+        let cmd_bufs = Self::create_command_buffers(
+            &vk_device,
+            graphics_queue.family(),
+            &g_pipeline,
+            &render_pass,
+            &framebuffers,
+        );
 
         return App {
             events_loop,
@@ -396,7 +469,7 @@ fn main() {
 
 mod vs {
     vulkano_shaders::shader! {
-        ty: "vertex",
+    ty: "vertex",
         src: "
 #version 450
 #extension GL_ARB_separate_shader_objects : enable
@@ -425,7 +498,7 @@ void main() {
 
 mod fs {
     vulkano_shaders::shader! {
-        ty: "fragment",
+    ty: "fragment",
         src: "
 #version 450
 #extension GL_ARB_separate_shader_objects : enable
