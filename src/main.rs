@@ -33,6 +33,15 @@ struct App {
     events_loop: EventsLoop,
     vk_instance: Arc<Instance>,
     vk_surface: Arc<Surface<Window>>,
+    vk_device: Arc<Device>,
+    graphics_queue: Arc<Queue>,
+    presentation_queue: Arc<Queue>,
+    swapchain: Arc<Swapchain<Window>>,
+    swapchain_images: Vec<Arc<SwapchainImage<Window>>>,
+    render_pass: Arc<RenderPassAbstract + Send + Sync>,
+    framebuffers: Vec<Arc<FramebufferAbstract + Send + Sync>>,
+    g_pipeline: Arc<ConcreteGraphicsPipeline>,
+    command_buffers: Vec<Arc<AutoCommandBuffer>>,
 }
 
 impl App {
@@ -354,7 +363,7 @@ impl App {
             sharing_mode = SharingMode::Concurrent(vec![g_fid, p_fid]);
         }
 
-        let (mut swapchain, images) = Self::create_swap_chain(&vk_device, &vk_surface, sharing_mode);
+        let (swapchain, images) = Self::create_swap_chain(&vk_device, &vk_surface, sharing_mode);
 
         let render_pass = Self::create_render_pass(&vk_device, swapchain.format());
         let g_pipeline = Self::create_graphics_pipeline(&vk_device, &render_pass, swapchain.dimensions());
@@ -367,6 +376,15 @@ impl App {
             events_loop,
             vk_instance,
             vk_surface,
+            vk_device,
+            graphics_queue,
+            presentation_queue,
+            swapchain,
+            swapchain_images: images,
+            render_pass,
+            framebuffers,
+            g_pipeline,
+            command_buffers: cmd_bufs,
         };
     }
 }
