@@ -6,15 +6,15 @@ extern crate winit;
 
 use vulkano::descriptor::PipelineLayoutAbstract;
 use vulkano::device::{Device, DeviceExtensions, Features, Queue};
+use vulkano::command_buffer::{AutoCommandBufferBuilder, AutoCommandBuffer, DynamicState};
 use vulkano::format::Format;
-use vulkano::framebuffer::{Subpass, RenderPassAbstract};
+use vulkano::framebuffer::{Subpass, RenderPassAbstract, Framebuffer, FramebufferAbstract};
 use vulkano::image::swapchain::SwapchainImage;
 use vulkano::image::ImageUsage;
 use vulkano::instance;
-use vulkano::instance::{Instance, InstanceExtensions, PhysicalDevice};
+use vulkano::instance::{Instance, InstanceExtensions, PhysicalDevice, QueueFamily};
 use vulkano::pipeline::{GraphicsPipeline};
-use vulkano::pipeline::vertex::BufferlessDefinition;
-use vulkano::pipeline::viewport::Viewport;
+use vulkano::pipeline::{vertex::BufferlessDefinition, vertex::BufferlessVertices, viewport::Viewport};
 use vulkano::swapchain::{
     ColorSpace, CompositeAlpha, PresentMode, Surface, SurfaceTransform, Swapchain,
 };
@@ -135,7 +135,7 @@ impl App {
         surface: &Arc<Surface<Window>>,
         device_extensions: &DeviceExtensions,
     ) -> (Arc<Device>, Arc<Queue>, Arc<Queue>) {
-        App::print_queue_families(physical_device);
+        Self::print_queue_families(physical_device);
 
         let graphics_queue_family = physical_device
             .queue_families()
@@ -237,14 +237,10 @@ impl App {
         .expect("Failed to create swap chain");
     }
 
-    fn create_graphics_pipeline(device: &Arc<Device>,
-                                format: Format,
-                                swapchain_dimensions: [u32; 2]) -> Arc<ConcreteGraphicsPipeline> {
-        let vs = vs::Shader::load(Arc::clone(device)).expect("Vertex shader compilation failed");
-        let fs = fs::Shader::load(Arc::clone(device)).expect("Fragment shader compilation failed");
+    fn create_render_pass(device: &Arc<Device>,
+                          format: Format) -> Arc<RenderPassAbstract + Send + Sync> {
 
-        // Use trait-based type to make ConcreteGraphicsPipeline compile
-        let render_pass: Arc<RenderPassAbstract + Send + Sync> = Arc::new(
+        Arc::new(
             single_pass_renderpass!(Arc::clone(device),
             attachments: {
                 color: {
@@ -257,8 +253,14 @@ impl App {
             pass: {
                 color: [color],
                 depth_stencil: {}
-            }).unwrap()
-            );
+            }).unwrap()) 
+    }
+
+    fn create_graphics_pipeline(device: &Arc<Device>,
+                                render_pass: &Arc<RenderPassAbstract + Send + Sync>,
+                                swapchain_dimensions: [u32; 2]) -> Arc<ConcreteGraphicsPipeline> {
+        let vs = vs::Shader::load(Arc::clone(device)).expect("Vertex shader compilation failed");
+        let fs = fs::Shader::load(Arc::clone(device)).expect("Fragment shader compilation failed");
 
         let dims = [swapchain_dimensions[0] as f32, swapchain_dimensions[1] as f32];
 
@@ -283,24 +285,66 @@ impl App {
             .line_width(1.0)
             .cull_mode_back()
             .front_face_clockwise()
-            .render_pass(Subpass::from(Arc::clone(&render_pass), 0).unwrap())
+            .render_pass(Subpass::from(Arc::clone(render_pass), 0).unwrap())
             .build(Arc::clone(device))
             .expect("Could not create graphics pipeline"));
 
         return pipeline;
     }
 
-    fn new() -> App {
-        let vk_instance = App::setup_vk_instance();
-        let (events_loop, vk_surface) = App::setup_surface(&vk_instance);
+
+    fn create_framebuffers(render_pass: &Arc<RenderPassAbstract + Send + Sync>,
+                           sc_images: &[Arc<SwapchainImage<Window>>])
+        -> Vec<Arc<FramebufferAbstract + Send + Sync>> {
+
+        sc_images.iter().map(|image| {
+            Arc::new(
+                Framebuffer::start(Arc::clone(&render_pass))
+                .add(Arc::clone(image))
+                .unwrap()
+                .build()
+                .unwrap()
+                ) as Arc<FramebufferAbstract + Send + Sync>
+        }).collect::<Vec<_>>()
+    }
+
+    fn create_command_buffers(device: &Arc<Device>,
+                              queue: QueueFamily,
+                              pipeline: &Arc<ConcreteGraphicsPipeline>,
+                              render_pass: &Arc<RenderPassAbstract + Send + Sync>,
+                              framebuffers: &[Arc<FramebufferAbstract + Send + Sync>])
+        -> Vec<Arc<AutoCommandBuffer>> {
+
+
+            framebuffers.iter().map(|fb| {
+
+                let vertices = BufferlessVertices { vertices: 3, instances: 1 };
+                let clear_color = vec!([0.0, 0.0, 1.0, 1.0].into());
+
+                Arc::new(AutoCommandBufferBuilder::primary_simultaneous_use(Arc::clone(device), queue).unwrap()
+                    .begin_render_pass(Arc::clone(fb), false, clear_color)
+                    .unwrap()
+                    .draw(Arc::clone(pipeline), &DynamicState::none(), vertices, (), ())
+                    .unwrap()
+                    .end_render_pass()
+                    .unwrap()
+                    .build()
+                    .unwrap()
+                )
+            }).collect::<Vec<_>>()
+    }
+
+    fn new() -> Self {
+        let vk_instance = Self::setup_vk_instance();
+        let (events_loop, vk_surface) = Self::setup_surface(&vk_instance);
         let device_extensions = DeviceExtensions {
             khr_swapchain: true,
             ..DeviceExtensions::none()
         };
 
-        let physical_device = App::pick_physical_device(&vk_instance, &device_extensions);
+        let physical_device = Self::pick_physical_device(&vk_instance, &device_extensions);
         let (vk_device, graphics_queue, presentation_queue) =
-            App::create_logical_device(physical_device, &vk_surface, &device_extensions);
+            Self::create_logical_device(physical_device, &vk_surface, &device_extensions);
         let sharing_mode: SharingMode;
         let g_fid = graphics_queue.family().id();
         let p_fid = presentation_queue.family().id();
@@ -310,9 +354,14 @@ impl App {
             sharing_mode = SharingMode::Concurrent(vec![g_fid, p_fid]);
         }
 
-        let (mut swapchain, images) = App::create_swap_chain(&vk_device, &vk_surface, sharing_mode);
+        let (mut swapchain, images) = Self::create_swap_chain(&vk_device, &vk_surface, sharing_mode);
 
-        let g_pipeline = App::create_graphics_pipeline(&vk_device, swapchain.format(), swapchain.dimensions());
+        let render_pass = Self::create_render_pass(&vk_device, swapchain.format());
+        let g_pipeline = Self::create_graphics_pipeline(&vk_device, &render_pass, swapchain.dimensions());
+        let framebuffers = Self::create_framebuffers(&render_pass, &images);
+
+        let cmd_bufs = Self::create_command_buffers(&vk_device, graphics_queue.family(), &g_pipeline, &render_pass, &framebuffers);
+
 
         return App {
             events_loop,
