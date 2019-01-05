@@ -19,9 +19,9 @@ use vulkano::pipeline::{
 };
 use vulkano::swapchain;
 use vulkano::swapchain::{
-    ColorSpace, CompositeAlpha, PresentMode, Surface, SurfaceTransform, Swapchain,
+    AcquireError, ColorSpace, CompositeAlpha, PresentMode, Surface, SurfaceTransform, Swapchain,
 };
-use vulkano::sync::{GpuFuture, SharingMode};
+use vulkano::sync::{FlushError, GpuFuture, SharingMode};
 
 use vulkano_win::VkSurfaceBuild;
 
@@ -53,36 +53,43 @@ struct App {
 
 impl App {
     fn draw_frame(&mut self) {
-        println!(
-            "gq: {:?}\npq: {:?}",
-            self.graphics_queue, self.presentation_queue
-        );
-
         let (img_idx, swapchain_img_acquired) =
-            swapchain::acquire_next_image(Arc::clone(&self.swapchain), None).unwrap();
+            match swapchain::acquire_next_image(Arc::clone(&self.swapchain), None) {
+                Ok(r) => r,
+                Err(AcquireError::OutOfDate) => {
+                    self.recreate_swap_chain();
+                    return;
+                }
+                Err(e) => panic!("Can't acquire next image from swapchain: \t{}", e),
+            };
 
         let drawn_and_presented = swapchain_img_acquired
             .then_execute(
                 Arc::clone(&self.graphics_queue),
                 Arc::clone(&self.command_buffers[img_idx]),
             )
-            .unwrap()
-            // TODO: This should be done on the presentation queue when possible (can't have a
-            // different queue after CommandBufferExecFuture as of now)
+            .expect("Then execute")
+            // TODO: This should be done on the presentation queue but it seems Vulkano does not
+            // support this.
             .then_swapchain_present(
                 Arc::clone(&self.graphics_queue),
                 Arc::clone(&self.swapchain),
                 img_idx,
             )
-            .then_signal_fence_and_flush()
-            .unwrap();
+            .then_signal_fence_and_flush();
+        let drawn_and_presented = match drawn_and_presented {
+            Ok(r) => r,
+            Err(FlushError::OutOfDate) => {
+                self.recreate_swap_chain();
+                return;
+            }
+            Err(e) => panic!("Can't acquire next image from swapchain: \t{}", e),
+        };
 
         drawn_and_presented.wait(None).unwrap();
     }
 
     fn main_loop(&mut self) {
-        let mut quit = false;
-
         loop {
             let mut quit = false;
             self.events_loop.poll_events(|event| match event {
@@ -222,7 +229,7 @@ impl App {
     fn create_swap_chain(
         device: &Arc<Device>,
         surface: &Arc<Surface<Window>>,
-        sharing_mode: SharingMode,
+        queue_family_ids: &[u32; 2],
     ) -> (Arc<Swapchain<Window>>, Vec<Arc<SwapchainImage<Window>>>) {
         let physical_device = device.physical_device();
         let capabilities = surface
@@ -270,6 +277,12 @@ impl App {
             ..ImageUsage::none()
         };
 
+        let sharing_mode: SharingMode =
+            match queue_family_ids.iter().all(|&x| x == queue_family_ids[0]) {
+                true => SharingMode::Exclusive(queue_family_ids[0]),
+                false => SharingMode::Concurrent(queue_family_ids.to_vec()),
+            };
+
         let alpha = CompositeAlpha::Opaque;
 
         return Swapchain::new(
@@ -285,7 +298,7 @@ impl App {
             alpha,
             present_mode,
             /* clipped */ true,
-            /* Old swapchain */ None,
+            None,
         )
         .expect("Failed to create swap chain");
     }
@@ -376,7 +389,6 @@ impl App {
         device: &Arc<Device>,
         queue: QueueFamily,
         pipeline: &Arc<ConcreteGraphicsPipeline>,
-        render_pass: &Arc<RenderPassAbstract + Send + Sync>,
         framebuffers: &[Arc<FramebufferAbstract + Send + Sync>],
     ) -> Vec<Arc<AutoCommandBuffer>> {
         framebuffers
@@ -410,6 +422,44 @@ impl App {
             .collect::<Vec<_>>()
     }
 
+    fn recreate_swap_chain(&mut self) {
+        // Setup swap chain dimensions to that of the window
+        let dimensions = self
+            .vk_surface
+            .window()
+            .get_inner_size()
+            .map(|dims| {
+                let dim_scaled: (u32, u32) = dims
+                    .to_physical(self.vk_surface.window().get_hidpi_factor())
+                    .into();
+                return [dim_scaled.0, dim_scaled.1];
+            })
+            .expect("Was not able to setup swapchain dimensions, is window open?");
+
+        let (swapchain, swapchain_images) = self
+            .swapchain
+            .recreate_with_dimension(dimensions)
+            .expect("Unable to recreated swap chain");
+
+        self.swapchain = swapchain;
+        self.swapchain_images = swapchain_images;
+
+        self.render_pass = Self::create_render_pass(&self.vk_device, self.swapchain.format());
+        self.g_pipeline = Self::create_graphics_pipeline(
+            &self.vk_device,
+            &self.render_pass,
+            self.swapchain.dimensions(),
+        );
+        self.framebuffers = Self::create_framebuffers(&self.render_pass, &self.swapchain_images);
+
+        self.command_buffers = Self::create_command_buffers(
+            &self.vk_device,
+            self.graphics_queue.family(),
+            &self.g_pipeline,
+            &self.framebuffers,
+        );
+    }
+
     fn new() -> Self {
         let vk_instance = Self::setup_vk_instance();
         let (events_loop, vk_surface) = Self::setup_surface(&vk_instance);
@@ -421,16 +471,15 @@ impl App {
         let physical_device = Self::pick_physical_device(&vk_instance, &device_extensions);
         let (vk_device, graphics_queue, presentation_queue) =
             Self::create_logical_device(physical_device, &vk_surface, &device_extensions);
-        let sharing_mode: SharingMode;
-        let g_fid = graphics_queue.family().id();
-        let p_fid = presentation_queue.family().id();
-        if g_fid == p_fid {
-            sharing_mode = SharingMode::Exclusive(g_fid);
-        } else {
-            sharing_mode = SharingMode::Concurrent(vec![g_fid, p_fid]);
-        }
 
-        let (swapchain, images) = Self::create_swap_chain(&vk_device, &vk_surface, sharing_mode);
+        let (swapchain, images) = Self::create_swap_chain(
+            &vk_device,
+            &vk_surface,
+            &[
+                graphics_queue.family().id(),
+                presentation_queue.family().id(),
+            ],
+        );
 
         let render_pass = Self::create_render_pass(&vk_device, swapchain.format());
         let g_pipeline =
@@ -441,7 +490,6 @@ impl App {
             &vk_device,
             graphics_queue.family(),
             &g_pipeline,
-            &render_pass,
             &framebuffers,
         );
 
