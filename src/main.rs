@@ -4,7 +4,7 @@ extern crate vulkano_shaders;
 extern crate vulkano_win;
 extern crate winit;
 
-use vulkano::buffer::{BufferUsage, cpu_access::CpuAccessibleBuffer};
+use vulkano::buffer::{BufferUsage, CpuAccessibleBuffer, ImmutableBuffer};
 use vulkano::command_buffer::{AutoCommandBuffer, AutoCommandBufferBuilder, DynamicState};
 use vulkano::descriptor::PipelineLayoutAbstract;
 use vulkano::device::{Device, DeviceExtensions, Features, Queue};
@@ -391,6 +391,7 @@ impl App {
     fn create_command_buffers(
         device: &Arc<Device>,
         queue: QueueFamily,
+        buffer_copy_queue: &Arc<Queue>,
         pipeline: &Arc<GraphicsPipelineAbstract + Send + Sync>,
         framebuffers: &[Arc<FramebufferAbstract + Send + Sync>],
     ) -> Vec<Arc<AutoCommandBuffer>> {
@@ -404,10 +405,16 @@ impl App {
                     Vertex{position: [-0.5, 0.5], color: [0.0, 0.0, 1.0]}
                     ];
 
-                let vertex_buffer = CpuAccessibleBuffer::from_data(
-                    Arc::clone(device),
+                // TODO: This shouldn't be created here, but rather earlier, as
+                // these do not need to be recopied for recreate_swapchain
+
+                let (vertex_buffer, data_copied) = ImmutableBuffer::from_data(
+                    vertex_data,
                     BufferUsage::vertex_buffer(),
-                    vertex_data).expect("Could not create vertex buffer");
+                    Arc::clone(buffer_copy_queue))
+                    .expect("Could not create vertex buffer");
+
+                data_copied.flush().unwrap();
 
                 let clear_color = vec![[0.0, 0.0, 0.0, 1.0].into()];
 
@@ -466,6 +473,7 @@ impl App {
         self.command_buffers = Self::create_command_buffers(
             &self.vk_device,
             self.graphics_queue.family(),
+            &self.graphics_queue,
             &self.g_pipeline,
             &self.framebuffers,
         );
@@ -500,6 +508,7 @@ impl App {
         let cmd_bufs = Self::create_command_buffers(
             &vk_device,
             graphics_queue.family(),
+            &graphics_queue,
             &g_pipeline,
             &framebuffers,
         );
