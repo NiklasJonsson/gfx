@@ -4,6 +4,7 @@ extern crate vulkano_shaders;
 extern crate vulkano_win;
 extern crate winit;
 
+use vulkano::buffer::{BufferUsage, cpu_access::CpuAccessibleBuffer};
 use vulkano::command_buffer::{AutoCommandBuffer, AutoCommandBufferBuilder, DynamicState};
 use vulkano::descriptor::PipelineLayoutAbstract;
 use vulkano::device::{Device, DeviceExtensions, Features, Queue};
@@ -13,7 +14,7 @@ use vulkano::image::swapchain::SwapchainImage;
 use vulkano::image::ImageUsage;
 use vulkano::instance;
 use vulkano::instance::{Instance, InstanceExtensions, PhysicalDevice, QueueFamily};
-use vulkano::pipeline::GraphicsPipeline;
+use vulkano::pipeline::{GraphicsPipeline, GraphicsPipelineAbstract};
 use vulkano::pipeline::{
     vertex::BufferlessDefinition, vertex::BufferlessVertices, viewport::Viewport,
 };
@@ -30,11 +31,12 @@ use winit::{Event, EventsLoop, Window, WindowBuilder, WindowEvent};
 
 use std::sync::Arc;
 
-type ConcreteGraphicsPipeline = GraphicsPipeline<
-    BufferlessDefinition,
-    Box<PipelineLayoutAbstract + Send + Sync + 'static>,
-    Arc<RenderPassAbstract + Send + Sync + 'static>,
->;
+struct Vertex {
+    position: [f32; 2],
+    color: [f32; 3],
+}
+
+impl_vertex!(Vertex, position, color);
 
 struct App {
     events_loop: EventsLoop,
@@ -47,7 +49,7 @@ struct App {
     swapchain_images: Vec<Arc<SwapchainImage<Window>>>,
     render_pass: Arc<RenderPassAbstract + Send + Sync>,
     framebuffers: Vec<Arc<FramebufferAbstract + Send + Sync>>,
-    g_pipeline: Arc<ConcreteGraphicsPipeline>,
+    g_pipeline: Arc<GraphicsPipelineAbstract + Send + Sync>,
     command_buffers: Vec<Arc<AutoCommandBuffer>>,
 }
 
@@ -111,6 +113,7 @@ impl App {
     }
 
     fn run(&mut self) {
+
         self.main_loop();
     }
 
@@ -329,7 +332,7 @@ impl App {
         device: &Arc<Device>,
         render_pass: &Arc<RenderPassAbstract + Send + Sync>,
         swapchain_dimensions: [u32; 2],
-    ) -> Arc<ConcreteGraphicsPipeline> {
+    ) -> Arc<GraphicsPipelineAbstract + Send + Sync> {
         let vs = vs::Shader::load(Arc::clone(device)).expect("Vertex shader compilation failed");
         let fs = fs::Shader::load(Arc::clone(device)).expect("Fragment shader compilation failed");
 
@@ -346,7 +349,7 @@ impl App {
 
         let pipeline = Arc::new(
             GraphicsPipeline::start()
-                .vertex_input(BufferlessDefinition {})
+                .vertex_input_single_buffer::<Vertex>()
                 // How to interpret the vertex input
                 .triangle_list()
                 .vertex_shader(vs.main_entry_point(), ())
@@ -388,16 +391,24 @@ impl App {
     fn create_command_buffers(
         device: &Arc<Device>,
         queue: QueueFamily,
-        pipeline: &Arc<ConcreteGraphicsPipeline>,
+        pipeline: &Arc<GraphicsPipelineAbstract + Send + Sync>,
         framebuffers: &[Arc<FramebufferAbstract + Send + Sync>],
     ) -> Vec<Arc<AutoCommandBuffer>> {
         framebuffers
             .iter()
             .map(|fb| {
-                let vertices = BufferlessVertices {
-                    vertices: 3,
-                    instances: 1,
-                };
+                let vertex_data: [Vertex; 3] =
+                    [
+                    Vertex{position: [0.0, -0.5], color: [1.0, 0.0, 0.0]},
+                    Vertex{position: [0.5, 0.5], color: [0.0, 1.0, 0.0]},
+                    Vertex{position: [-0.5, 0.5], color: [0.0, 0.0, 1.0]}
+                    ];
+
+                let vertex_buffer = CpuAccessibleBuffer::from_data(
+                    Arc::clone(device),
+                    BufferUsage::vertex_buffer(),
+                    vertex_data).expect("Could not create vertex buffer");
+
                 let clear_color = vec![[0.0, 0.0, 0.0, 1.0].into()];
 
                 Arc::new(
@@ -408,7 +419,7 @@ impl App {
                         .draw(
                             Arc::clone(pipeline),
                             &DynamicState::none(),
-                            vertices,
+                            vec![vertex_buffer],
                             (),
                             (),
                         )
@@ -522,23 +533,14 @@ mod vs {
 #version 450
 #extension GL_ARB_separate_shader_objects : enable
 
+layout(location = 0) in vec2 position;
+layout(location = 1) in vec3 color;
+
 layout(location = 0) out vec3 fragColor;
 
-vec2 positions[3] = vec2[](
-    vec2(0.0, -0.5),
-    vec2(0.5, 0.5),
-    vec2(-0.5, 0.5)
-);
-
-vec3 colors[3] = vec3[](
-    vec3(1.0, 0.0, 0.0),
-    vec3(0.0, 1.0, 0.0),
-    vec3(0.0, 0.0, 1.0)
-);
-
 void main() {
-    gl_Position = vec4(positions[gl_VertexIndex], 0.0, 1.0);
-    fragColor = colors[gl_VertexIndex];
+    gl_Position = vec4(position, 0.0, 1.0);
+    fragColor = color;
 }
 "
     }
