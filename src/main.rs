@@ -4,7 +4,7 @@ extern crate vulkano_shaders;
 extern crate vulkano_win;
 extern crate winit;
 
-use vulkano::buffer::{BufferUsage, CpuAccessibleBuffer, ImmutableBuffer};
+use vulkano::buffer::{BufferUsage, CpuAccessibleBuffer, ImmutableBuffer, BufferAccess, TypedBufferAccess};
 use vulkano::command_buffer::{AutoCommandBuffer, AutoCommandBufferBuilder, DynamicState};
 use vulkano::descriptor::PipelineLayoutAbstract;
 use vulkano::device::{Device, DeviceExtensions, Features, Queue};
@@ -31,6 +31,7 @@ use winit::{Event, EventsLoop, Window, WindowBuilder, WindowEvent};
 
 use std::sync::Arc;
 
+#[derive(Copy, Clone)]
 struct Vertex {
     position: [f32; 2],
     color: [f32; 3],
@@ -47,6 +48,7 @@ struct App {
     presentation_queue: Arc<Queue>,
     swapchain: Arc<Swapchain<Window>>,
     swapchain_images: Vec<Arc<SwapchainImage<Window>>>,
+    vertex_buffer: Arc<BufferAccess + Send + Sync>,
     render_pass: Arc<RenderPassAbstract + Send + Sync>,
     framebuffers: Vec<Arc<FramebufferAbstract + Send + Sync>>,
     g_pipeline: Arc<GraphicsPipelineAbstract + Send + Sync>,
@@ -306,6 +308,31 @@ impl App {
         .expect("Failed to create swap chain");
     }
 
+    fn create_vertex_data() -> Vec<Vertex> {
+
+        return vec![
+                    Vertex{position: [0.0, -0.5], color: [1.0, 0.0, 0.0]},
+                    Vertex{position: [0.5, 0.5], color: [0.0, 1.0, 0.0]},
+                    Vertex{position: [-0.5, 0.5], color: [0.0, 0.0, 1.0]}
+                    ];
+    }
+
+    // Create a vertex buffer and send it to the device on buffer_copy_queue
+    fn create_and_submit_vertex_buffer(
+        buffer_copy_queue: &Arc<Queue>,
+        vertex_data: Vec<Vertex>) -> Arc<BufferAccess + Send + Sync> {
+
+        let (vertex_buffer, data_copied) = ImmutableBuffer::from_iter(
+            vertex_data.iter().cloned(),
+            BufferUsage::vertex_buffer(),
+            Arc::clone(buffer_copy_queue))
+            .expect("Could not create vertex buffer");
+
+        data_copied.flush().expect("Could not send vertex buffer to device");
+
+        return vertex_buffer;
+    }
+
     fn create_render_pass(
         device: &Arc<Device>,
         format: Format,
@@ -391,31 +418,14 @@ impl App {
     fn create_command_buffers(
         device: &Arc<Device>,
         queue: QueueFamily,
-        buffer_copy_queue: &Arc<Queue>,
+        vertex_buffer: &Arc<BufferAccess + Send + Sync>,
         pipeline: &Arc<GraphicsPipelineAbstract + Send + Sync>,
         framebuffers: &[Arc<FramebufferAbstract + Send + Sync>],
     ) -> Vec<Arc<AutoCommandBuffer>> {
         framebuffers
             .iter()
             .map(|fb| {
-                let vertex_data: [Vertex; 3] =
-                    [
-                    Vertex{position: [0.0, -0.5], color: [1.0, 0.0, 0.0]},
-                    Vertex{position: [0.5, 0.5], color: [0.0, 1.0, 0.0]},
-                    Vertex{position: [-0.5, 0.5], color: [0.0, 0.0, 1.0]}
-                    ];
-
-                // TODO: This shouldn't be created here, but rather earlier, as
-                // these do not need to be recopied for recreate_swapchain
-
-                let (vertex_buffer, data_copied) = ImmutableBuffer::from_data(
-                    vertex_data,
-                    BufferUsage::vertex_buffer(),
-                    Arc::clone(buffer_copy_queue))
-                    .expect("Could not create vertex buffer");
-
-                data_copied.flush().unwrap();
-
+                          
                 let clear_color = vec![[0.0, 0.0, 0.0, 1.0].into()];
 
                 Arc::new(
@@ -426,7 +436,7 @@ impl App {
                         .draw(
                             Arc::clone(pipeline),
                             &DynamicState::none(),
-                            vec![vertex_buffer],
+                            vec![Arc::clone(vertex_buffer)],
                             (),
                             (),
                         )
@@ -473,7 +483,7 @@ impl App {
         self.command_buffers = Self::create_command_buffers(
             &self.vk_device,
             self.graphics_queue.family(),
-            &self.graphics_queue,
+            &self.vertex_buffer,
             &self.g_pipeline,
             &self.framebuffers,
         );
@@ -500,6 +510,9 @@ impl App {
             ],
         );
 
+        let vertex_data = Self::create_vertex_data();
+        let vertex_buffer = Self::create_and_submit_vertex_buffer(&graphics_queue, vertex_data);
+
         let render_pass = Self::create_render_pass(&vk_device, swapchain.format());
         let g_pipeline =
             Self::create_graphics_pipeline(&vk_device, &render_pass, swapchain.dimensions());
@@ -508,7 +521,7 @@ impl App {
         let cmd_bufs = Self::create_command_buffers(
             &vk_device,
             graphics_queue.family(),
-            &graphics_queue,
+            &vertex_buffer,
             &g_pipeline,
             &framebuffers,
         );
@@ -522,6 +535,7 @@ impl App {
             presentation_queue,
             swapchain,
             swapchain_images: images,
+            vertex_buffer,
             render_pass,
             framebuffers,
             g_pipeline,
