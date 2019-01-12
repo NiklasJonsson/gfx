@@ -1,24 +1,26 @@
 #[macro_use]
 extern crate vulkano;
+extern crate nalgebra_glm as glm;
 extern crate vulkano_shaders;
 extern crate vulkano_win;
 extern crate winit;
-extern crate nalgebra_glm as glm;
 
-use vulkano::buffer::{BufferUsage, CpuAccessibleBuffer, ImmutableBuffer, BufferAccess, TypedBufferAccess};
+use vulkano::buffer::{
+    BufferAccess, BufferUsage, CpuAccessibleBuffer, ImmutableBuffer, TypedBufferAccess,
+};
 use vulkano::command_buffer::{AutoCommandBuffer, AutoCommandBufferBuilder, DynamicState};
-use vulkano::descriptor::{PipelineLayoutAbstract,
-    descriptor_set::PersistentDescriptorSet, DescriptorSet};
+use vulkano::descriptor::{
+    descriptor_set::PersistentDescriptorSet, DescriptorSet, PipelineLayoutAbstract,
+};
 use vulkano::device::{Device, DeviceExtensions, Features, Queue};
 use vulkano::format::Format;
 use vulkano::framebuffer::{Framebuffer, FramebufferAbstract, RenderPassAbstract, Subpass};
-use vulkano::image::swapchain::SwapchainImage;
-use vulkano::image::ImageUsage;
+use vulkano::image::{swapchain::SwapchainImage, ImageUsage};
 use vulkano::instance;
 use vulkano::instance::{Instance, InstanceExtensions, PhysicalDevice, QueueFamily};
-use vulkano::pipeline::{GraphicsPipeline, GraphicsPipelineAbstract};
 use vulkano::pipeline::{
-    vertex::BufferlessDefinition, vertex::BufferlessVertices, viewport::Viewport,
+    vertex::BufferlessDefinition, vertex::BufferlessVertices, viewport::Viewport, GraphicsPipeline,
+    GraphicsPipelineAbstract,
 };
 use vulkano::swapchain;
 use vulkano::swapchain::{
@@ -32,7 +34,6 @@ use winit::{Event, EventsLoop, Window, WindowBuilder, WindowEvent};
 
 use std::sync::Arc;
 use std::time::Instant;
-use std::any::Any;
 
 #[derive(Copy, Clone)]
 struct Vertex {
@@ -53,7 +54,7 @@ struct App {
     swapchain: Arc<Swapchain<Window>>,
     swapchain_images: Vec<Arc<SwapchainImage<Window>>>,
     vertex_buffer: Arc<BufferAccess + Send + Sync>,
-    index_buffer: Arc<TypedBufferAccess<Content=[u16]> + Send + Sync>,
+    index_buffer: Arc<TypedBufferAccess<Content = [u16]> + Send + Sync>,
     mvp_ubo_buffer: Arc<CpuAccessibleBuffer<vs::ty::MVPUniformBufferObject>>,
     mvp_ubo_descriptor_set: Arc<DescriptorSet + Send + Sync>,
     render_pass: Arc<RenderPassAbstract + Send + Sync>,
@@ -63,15 +64,12 @@ struct App {
 }
 
 impl App {
-
     fn update_mvp(&mut self) {
         let diff = Instant::now() - self.rotation_start;
         let diff = diff.as_secs() as f32 + diff.subsec_millis() as f32 / 1000.0;
         let mut content = self.mvp_ubo_buffer.write().unwrap();
-        content.model = glm::rotate_z(
-            &glm::Mat4::identity(),
-            std::f32::consts::FRAC_PI_2 * diff,
-            ).into();
+        content.model =
+            glm::rotate_z(&glm::Mat4::identity(), std::f32::consts::FRAC_PI_2 * diff).into();
     }
 
     fn draw_frame(&mut self) {
@@ -106,7 +104,10 @@ impl App {
                 self.recreate_swap_chain();
                 return;
             }
-            Err(e) => panic!("Can't write to the swapchain image (idx: {}):\n\t{}", img_idx, e),
+            Err(e) => panic!(
+                "Can't write to the swapchain image (idx: {}):\n\t{}",
+                img_idx, e
+            ),
         };
 
         drawn_and_presented.wait(None).unwrap();
@@ -134,7 +135,6 @@ impl App {
     }
 
     fn run(&mut self) {
-
         self.main_loop();
     }
 
@@ -277,15 +277,7 @@ impl App {
             .unwrap_or(PresentMode::Fifo);
 
         // Setup swap chain dimensions to that of the window
-        let dimensions = surface
-            .window()
-            .get_inner_size()
-            .map(|dims| {
-                let dim_scaled: (u32, u32) =
-                    dims.to_physical(surface.window().get_hidpi_factor()).into();
-                return [dim_scaled.0, dim_scaled.1];
-            })
-            .expect("Was not able to setup swapchain dimensions, is window open?");
+        let dimensions = get_physical_window_dims(surface.window());
 
         // Add 1 to try to get triple buffering
         let triple_buffering_img_count = capabilities.min_image_count;
@@ -328,13 +320,24 @@ impl App {
     }
 
     fn create_vertex_data() -> (Vec<Vertex>, Vec<u16>) {
-
-        let vertices =  vec![
-                    Vertex{position: [-0.5, -0.5], color: [1.0, 0.0, 0.0]},
-                    Vertex{position: [0.5, -0.5], color: [0.0, 1.0, 0.0]},
-                    Vertex{position: [0.5, 0.5], color: [0.0, 0.0, 1.0]},
-                    Vertex{position: [-0.5, 0.5], color: [1.0, 1.0, 1.0]},
-                    ];
+        let vertices = vec![
+            Vertex {
+                position: [-0.5, -0.5],
+                color: [1.0, 0.0, 0.0],
+            },
+            Vertex {
+                position: [0.5, -0.5],
+                color: [0.0, 1.0, 0.0],
+            },
+            Vertex {
+                position: [0.5, 0.5],
+                color: [0.0, 0.0, 1.0],
+            },
+            Vertex {
+                position: [-0.5, 0.5],
+                color: [1.0, 1.0, 1.0],
+            },
+        ];
 
         let indices: Vec<u16> = vec![0, 1, 2, 2, 3, 0];
 
@@ -344,20 +347,24 @@ impl App {
     // Create a vertex buffer and send it to the device on buffer_copy_queue
     fn create_and_submit_vertex_buffer(
         buffer_copy_queue: &Arc<Queue>,
-        vertex_data: (Vec<Vertex>, Vec<u16>))
-        -> (Arc<BufferAccess + Send + Sync>, Arc<TypedBufferAccess<Content=[u16]> + Send + Sync>) {
-
+        vertex_data: (Vec<Vertex>, Vec<u16>),
+    ) -> (
+        Arc<BufferAccess + Send + Sync>,
+        Arc<TypedBufferAccess<Content = [u16]> + Send + Sync>,
+    ) {
         let (vertex_buffer, vertex_data_copied) = ImmutableBuffer::from_iter(
             vertex_data.0.iter().cloned(),
             BufferUsage::vertex_buffer(),
-            Arc::clone(buffer_copy_queue))
-            .expect("Could not create vertex buffer");
+            Arc::clone(buffer_copy_queue),
+        )
+        .expect("Could not create vertex buffer");
 
         let (index_buffer, index_data_copied) = ImmutableBuffer::from_iter(
             vertex_data.1.iter().cloned(),
             BufferUsage::index_buffer(),
-            Arc::clone(buffer_copy_queue))
-            .expect("Could not create index buffer");
+            Arc::clone(buffer_copy_queue),
+        )
+        .expect("Could not create index buffer");
 
         vertex_data_copied
             .join(index_data_copied)
@@ -450,51 +457,52 @@ impl App {
     }
 
     fn create_mvp_ubo(aspect_ratio: f32) -> vs::ty::MVPUniformBufferObject {
-
-        let mut proj = glm::perspective(aspect_ratio,
-                                    std::f32::consts::FRAC_PI_2,
-                                    0.1,
-                                    10.0);
+        let mut proj = glm::perspective(aspect_ratio, std::f32::consts::FRAC_PI_2, 0.1, 10.0);
 
         // glm::perspective is based on opengl left-handed coordinate system, vulkan has the y-axis
         // inverted (right-handed upside-down).
-        proj[(1,1)] *= -1.0;
+        proj[(1, 1)] *= -1.0;
 
         let mvp_ubo = vs::ty::MVPUniformBufferObject {
             model: glm::Mat4::identity().into(),
-            view: glm::look_at(&glm::vec3(0.0, 0.0, -2.0),
-                               &glm::vec3(0.0, 0.0, 0.0),
-                               &glm::vec3(0.0, 1.0, 0.0)).into(),
-            proj: proj.into()
+            view: glm::look_at(
+                &glm::vec3(0.0, 0.0, -2.0),
+                &glm::vec3(0.0, 0.0, 0.0),
+                &glm::vec3(0.0, 1.0, 0.0),
+            )
+            .into(),
+            proj: proj.into(),
         };
 
         return mvp_ubo;
     }
 
-    fn create_mvp_ubo_buffer(device: &Arc<Device>,
-        mvp_ubo: vs::ty::MVPUniformBufferObject) -> Arc<CpuAccessibleBuffer<vs::ty::MVPUniformBufferObject>> {
-        CpuAccessibleBuffer::from_data(
-            Arc::clone(device),
-            BufferUsage::uniform_buffer(),
-            mvp_ubo)
+    fn create_mvp_ubo_buffer(
+        device: &Arc<Device>,
+        mvp_ubo: vs::ty::MVPUniformBufferObject,
+    ) -> Arc<CpuAccessibleBuffer<vs::ty::MVPUniformBufferObject>> {
+        CpuAccessibleBuffer::from_data(Arc::clone(device), BufferUsage::uniform_buffer(), mvp_ubo)
             .expect("Unable to create buffer for MVP UBO")
     }
 
-    fn create_dset_for_buf(pipeline: &Arc<GraphicsPipelineAbstract + Send + Sync>,
-                           buffer: &Arc<CpuAccessibleBuffer<vs::ty::MVPUniformBufferObject>>)
-        -> Arc<DescriptorSet + Send + Sync> {
-        Arc::new(PersistentDescriptorSet::start(Arc::clone(pipeline), 0)
-            .add_buffer(Arc::clone(buffer))
-            .unwrap()
-            .build()
-            .expect("Failed to create persistent descriptor set for mvp ubo"))
+    fn create_dset_for_buf(
+        pipeline: &Arc<GraphicsPipelineAbstract + Send + Sync>,
+        buffer: &Arc<CpuAccessibleBuffer<vs::ty::MVPUniformBufferObject>>,
+    ) -> Arc<DescriptorSet + Send + Sync> {
+        Arc::new(
+            PersistentDescriptorSet::start(Arc::clone(pipeline), 0)
+                .add_buffer(Arc::clone(buffer))
+                .unwrap()
+                .build()
+                .expect("Failed to create persistent descriptor set for mvp ubo"),
+        )
     }
 
     fn create_command_buffers(
         device: &Arc<Device>,
         queue_family: QueueFamily,
         vertex_buffer: &Arc<BufferAccess + Send + Sync>,
-        index_buffer: &Arc<TypedBufferAccess<Content=[u16]> + Send + Sync>,
+        index_buffer: &Arc<TypedBufferAccess<Content = [u16]> + Send + Sync>,
         descriptor_set: &Arc<DescriptorSet + Send + Sync>,
         pipeline: &Arc<GraphicsPipelineAbstract + Send + Sync>,
         framebuffers: &[Arc<FramebufferAbstract + Send + Sync>],
@@ -502,27 +510,29 @@ impl App {
         framebuffers
             .iter()
             .map(|fb| {
-                          
                 let clear_color = vec![[0.0, 0.0, 0.0, 1.0].into()];
 
                 Arc::new(
-                    AutoCommandBufferBuilder::primary_simultaneous_use(Arc::clone(device), queue_family)
-                        .expect("Failed to create command buffer builder")
-                        .begin_render_pass(Arc::clone(fb), false, clear_color)
-                        .expect("Failed after begin render pass")
-                        .draw_indexed(
-                            Arc::clone(pipeline),
-                            &DynamicState::none(),
-                            vec![Arc::clone(vertex_buffer)],
-                            Arc::clone(index_buffer),
-                            Arc::clone(descriptor_set),
-                            (),
-                        )
-                        .expect("Failed after draw_indexed")
-                        .end_render_pass()
-                        .unwrap()
-                        .build()
-                        .unwrap(),
+                    AutoCommandBufferBuilder::primary_simultaneous_use(
+                        Arc::clone(device),
+                        queue_family,
+                    )
+                    .expect("Failed to create command buffer builder")
+                    .begin_render_pass(Arc::clone(fb), false, clear_color)
+                    .expect("Failed after begin render pass")
+                    .draw_indexed(
+                        Arc::clone(pipeline),
+                        &DynamicState::none(),
+                        vec![Arc::clone(vertex_buffer)],
+                        Arc::clone(index_buffer),
+                        Arc::clone(descriptor_set),
+                        (),
+                    )
+                    .expect("Failed after draw_indexed")
+                    .end_render_pass()
+                    .unwrap()
+                    .build()
+                    .unwrap(),
                 )
             })
             .collect::<Vec<_>>()
@@ -534,14 +544,15 @@ impl App {
         images: &[Arc<SwapchainImage<Window>>],
         mvp_buf: &Arc<CpuAccessibleBuffer<vs::ty::MVPUniformBufferObject>>,
         vertex_buffer: &Arc<BufferAccess + Send + Sync>,
-        index_buffer: &Arc<TypedBufferAccess<Content=[u16]> + Send + Sync>,
+        index_buffer: &Arc<TypedBufferAccess<Content = [u16]> + Send + Sync>,
         graphics_queue_family: QueueFamily,
-        ) -> (Arc<RenderPassAbstract + Send + Sync>,
-              Arc<GraphicsPipelineAbstract + Send + Sync>,
-              Vec<Arc<FramebufferAbstract + Send + Sync>>,
-              Arc<DescriptorSet + Send + Sync>,
-              Vec<Arc<AutoCommandBuffer>>) {
-
+    ) -> (
+        Arc<RenderPassAbstract + Send + Sync>,
+        Arc<GraphicsPipelineAbstract + Send + Sync>,
+        Vec<Arc<FramebufferAbstract + Send + Sync>>,
+        Arc<DescriptorSet + Send + Sync>,
+        Vec<Arc<AutoCommandBuffer>>,
+    ) {
         let render_pass = Self::create_render_pass(device, swapchain.format());
         let g_pipeline =
             Self::create_graphics_pipeline(device, &render_pass, swapchain.dimensions());
@@ -564,17 +575,7 @@ impl App {
 
     fn recreate_swap_chain(&mut self) {
         // Setup swap chain dimensions to that of the window
-        let dimensions = self
-            .vk_surface
-            .window()
-            .get_inner_size()
-            .map(|dims| {
-                let dim_scaled: (u32, u32) = dims
-                    .to_physical(self.vk_surface.window().get_hidpi_factor())
-                    .into();
-                return [dim_scaled.0, dim_scaled.1];
-            })
-            .expect("Was not able to setup swapchain dimensions, is window open?");
+        let dimensions = get_physical_window_dims(self.vk_surface.window());
 
         let (swapchain, swapchain_images) = self
             .swapchain
@@ -584,18 +585,16 @@ impl App {
         self.swapchain = swapchain;
         self.swapchain_images = swapchain_images;
 
-        let (render_pass,
-             g_pipeline,
-             framebuffers,
-             dset,
-             cmd_bufs) = App::create_swapchain_dependent_objects(
-                 &self.vk_device,
-                 &self.swapchain,
-                 self.swapchain_images.as_slice(),
-                 &self.mvp_ubo_buffer,
-                 &self.vertex_buffer,
-                 &self.index_buffer,
-                 self.graphics_queue.family());
+        let (render_pass, g_pipeline, framebuffers, dset, cmd_bufs) =
+            App::create_swapchain_dependent_objects(
+                &self.vk_device,
+                &self.swapchain,
+                self.swapchain_images.as_slice(),
+                &self.mvp_ubo_buffer,
+                &self.vertex_buffer,
+                &self.index_buffer,
+                self.graphics_queue.family(),
+            );
 
         self.render_pass = render_pass;
         self.g_pipeline = g_pipeline;
@@ -615,19 +614,10 @@ impl App {
         let physical_device = Self::pick_physical_device(&vk_instance, &device_extensions);
         let (vk_device, graphics_queue, presentation_queue) =
             Self::create_logical_device(physical_device, &vk_surface, &device_extensions);
-            
-        // TODO: Move into its own function
-        let dims: (u32, u32) = vk_surface
-            .window()
-            .get_inner_size()
-            .map(|dims| {
-                dims
-                .to_physical(vk_surface.window().get_hidpi_factor())
-                .into()
-            })
-            .expect("Was not able to read window dimensions, is it open?");
 
-        let mvp_ubo = Self::create_mvp_ubo(dims.0 as f32 / dims.1 as f32);
+        let dims = get_physical_window_dims(vk_surface.window());
+
+        let mvp_ubo = Self::create_mvp_ubo(dims[0] as f32 / dims[1] as f32);
         let mvp_buf = Self::create_mvp_ubo_buffer(&vk_device, mvp_ubo);
 
         let vertex_data = Self::create_vertex_data();
@@ -643,22 +633,19 @@ impl App {
             ],
         );
 
-
-        let (render_pass,
-             g_pipeline,
-             framebuffers,
-             dset,
-             cmd_bufs) = App::create_swapchain_dependent_objects(
-                 &vk_device,
-                 &swapchain,
-                 images.as_slice(),
-                 &mvp_buf,
-                 &vertex_buffer,
-                 &index_buffer,
-                 graphics_queue.family());
+        let (render_pass, g_pipeline, framebuffers, dset, cmd_bufs) =
+            App::create_swapchain_dependent_objects(
+                &vk_device,
+                &swapchain,
+                images.as_slice(),
+                &mvp_buf,
+                &vertex_buffer,
+                &index_buffer,
+                graphics_queue.family(),
+            );
 
         let rotation_start = Instant::now();
-        
+
         return App {
             rotation_start,
             events_loop,
@@ -684,6 +671,16 @@ impl App {
 fn main() {
     let mut app = App::new();
     app.run();
+}
+
+fn get_physical_window_dims(window: &Window) -> [u32; 2] {
+    window
+        .get_inner_size()
+        .map(|dims| {
+            let dims: (u32, u32) = dims.to_physical(window.get_hidpi_factor()).into();
+            return [dims.0, dims.1];
+        })
+        .expect("Was not able to read window dimensions, is it open?")
 }
 
 mod vs {
