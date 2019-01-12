@@ -29,6 +29,7 @@ use vulkano_win::VkSurfaceBuild;
 
 use winit::{Event, EventsLoop, Window, WindowBuilder, WindowEvent};
 
+use std::collections::HashSet;
 use std::sync::Arc;
 use std::time::Instant;
 
@@ -86,7 +87,7 @@ impl App {
                 Arc::clone(&self.graphics_queue),
                 Arc::clone(&self.command_buffers[img_idx]),
             )
-            .expect("Then execute")
+            .expect("Unable to execute command buffer")
             // TODO: This should be done on the presentation queue but it seems Vulkano does not
             // support this.
             .then_swapchain_present(
@@ -107,7 +108,11 @@ impl App {
             ),
         };
 
+        // This forces a wait on the image presentation, serializing frame rendering.
         drawn_and_presented.wait(None).unwrap();
+        // TODO: Save this per image and replace when the same image_idx is returned with
+        // swapchain::acquire_next_image
+
     }
 
     fn main_loop(&mut self) {
@@ -194,30 +199,12 @@ impl App {
         return ph_dev;
     }
 
-    fn print_queue_families(physical_device: PhysicalDevice) {
-        println!(
-            "Found {} queue families",
-            physical_device.queue_families().len()
-        );
-
-        for qf in physical_device.queue_families() {
-            println!(
-                "Queue {}[{}]. graphics:{}, compute:{}",
-                qf.id(),
-                qf.queues_count(),
-                qf.supports_graphics(),
-                qf.supports_compute()
-            );
-        }
-    }
-
     fn create_logical_device(
         physical_device: PhysicalDevice,
         surface: &Arc<Surface<Window>>,
         device_extensions: &DeviceExtensions,
     ) -> (Arc<Device>, Arc<Queue>, Arc<Queue>) {
-        Self::print_queue_families(physical_device);
-
+        // TODO: These families need to be unique when passed to device creation.
         let graphics_queue_family = physical_device
             .queue_families()
             .find(|&q| q.supports_graphics())
@@ -228,21 +215,26 @@ impl App {
             .find(|&q| surface.is_supported(q).unwrap_or(false))
             .expect("Could not find suitable queue");
 
-        let q_families = [
-            (graphics_queue_family, 1.0),
-            (presentation_queue_family, 1.0),
-        ];
+        // TODO: This should not be necessary, it's a bug in vulkano
+        let q_families = [graphics_queue_family, presentation_queue_family];
+        use std::iter::FromIterator;
+        let unique_queue_families: HashSet<u32> = HashSet::from_iter(q_families.iter().map(|qf| qf.id()));
+
+        let queue_priority = 1.0; 
+        let q_families = unique_queue_families.iter().map(|&i| { 
+            (physical_device.queue_family_by_id(i).unwrap(), queue_priority) 
+        });
 
         let (device, mut queues) = Device::new(
             physical_device,
             /* features */ &Features::none(),
             /* extensions */ device_extensions,
-            q_families.iter().cloned(),
+            q_families,
         )
         .expect("Failed to create device");
 
         let graphics_queue = queues.next().expect("Device queues not created");
-        let presentation_queue = queues.next().expect("Presentation queue not created");
+        let presentation_queue = queues.next().unwrap_or(Arc::clone(&graphics_queue));
 
         return (device, graphics_queue, presentation_queue);
     }
