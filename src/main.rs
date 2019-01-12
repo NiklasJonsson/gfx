@@ -18,10 +18,7 @@ use vulkano::framebuffer::{Framebuffer, FramebufferAbstract, RenderPassAbstract,
 use vulkano::image::{swapchain::SwapchainImage, ImageUsage};
 use vulkano::instance;
 use vulkano::instance::{Instance, InstanceExtensions, PhysicalDevice, QueueFamily};
-use vulkano::pipeline::{
-    vertex::BufferlessDefinition, vertex::BufferlessVertices, viewport::Viewport, GraphicsPipeline,
-    GraphicsPipelineAbstract,
-};
+use vulkano::pipeline::{viewport::Viewport, GraphicsPipeline, GraphicsPipelineAbstract};
 use vulkano::swapchain;
 use vulkano::swapchain::{
     AcquireError, ColorSpace, CompositeAlpha, PresentMode, Surface, SurfaceTransform, Swapchain,
@@ -55,8 +52,8 @@ struct App {
     swapchain_images: Vec<Arc<SwapchainImage<Window>>>,
     vertex_buffer: Arc<BufferAccess + Send + Sync>,
     index_buffer: Arc<TypedBufferAccess<Content = [u16]> + Send + Sync>,
-    mvp_ubo_buffer: Arc<CpuAccessibleBuffer<vs::ty::MVPUniformBufferObject>>,
-    mvp_ubo_descriptor_set: Arc<DescriptorSet + Send + Sync>,
+    // TODO: Use ringbuffer
+    mvp_ubo_buffers: Vec<Arc<CpuAccessibleBuffer<vs::ty::MVPUniformBufferObject>>>,
     render_pass: Arc<RenderPassAbstract + Send + Sync>,
     framebuffers: Vec<Arc<FramebufferAbstract + Send + Sync>>,
     g_pipeline: Arc<GraphicsPipelineAbstract + Send + Sync>,
@@ -64,16 +61,15 @@ struct App {
 }
 
 impl App {
-    fn update_mvp(&mut self) {
+    fn update_mvp(&mut self, idx: usize) {
         let diff = Instant::now() - self.rotation_start;
         let diff = diff.as_secs() as f32 + diff.subsec_millis() as f32 / 1000.0;
-        let mut content = self.mvp_ubo_buffer.write().unwrap();
+        let mut content = self.mvp_ubo_buffers[idx].write().unwrap();
         content.model =
             glm::rotate_z(&glm::Mat4::identity(), std::f32::consts::FRAC_PI_2 * diff).into();
     }
 
     fn draw_frame(&mut self) {
-        self.update_mvp();
         let (img_idx, swapchain_img_acquired) =
             match swapchain::acquire_next_image(Arc::clone(&self.swapchain), None) {
                 Ok(r) => r,
@@ -84,6 +80,7 @@ impl App {
                 Err(e) => panic!("Can't acquire next image from swapchain: \t{}", e),
             };
 
+        self.update_mvp(img_idx);
         let drawn_and_presented = swapchain_img_acquired
             .then_execute(
                 Arc::clone(&self.graphics_queue),
@@ -477,25 +474,39 @@ impl App {
         return mvp_ubo;
     }
 
-    fn create_mvp_ubo_buffer(
+    fn create_mvp_ubo_buffers(
         device: &Arc<Device>,
-        mvp_ubo: vs::ty::MVPUniformBufferObject,
-    ) -> Arc<CpuAccessibleBuffer<vs::ty::MVPUniformBufferObject>> {
-        CpuAccessibleBuffer::from_data(Arc::clone(device), BufferUsage::uniform_buffer(), mvp_ubo)
-            .expect("Unable to create buffer for MVP UBO")
+        mvp_ubos: &[vs::ty::MVPUniformBufferObject],
+    ) -> Vec<Arc<CpuAccessibleBuffer<vs::ty::MVPUniformBufferObject>>> {
+        mvp_ubos
+            .iter()
+            .map(|&mvp_ubo| {
+                CpuAccessibleBuffer::from_data(
+                    Arc::clone(device),
+                    BufferUsage::uniform_buffer(),
+                    mvp_ubo,
+                )
+                .expect("Unable to create buffer for MVP UBO")
+            })
+            .collect::<Vec<_>>()
     }
 
-    fn create_dset_for_buf(
+    fn create_dsets_for_buffers(
         pipeline: &Arc<GraphicsPipelineAbstract + Send + Sync>,
-        buffer: &Arc<CpuAccessibleBuffer<vs::ty::MVPUniformBufferObject>>,
-    ) -> Arc<DescriptorSet + Send + Sync> {
-        Arc::new(
-            PersistentDescriptorSet::start(Arc::clone(pipeline), 0)
-                .add_buffer(Arc::clone(buffer))
-                .unwrap()
-                .build()
-                .expect("Failed to create persistent descriptor set for mvp ubo"),
-        )
+        buffers: &[Arc<CpuAccessibleBuffer<vs::ty::MVPUniformBufferObject>>],
+    ) -> Vec<Arc<DescriptorSet + Send + Sync>> {
+        buffers
+            .iter()
+            .map(|buffer| {
+                Arc::new(
+                    PersistentDescriptorSet::start(Arc::clone(pipeline), 0)
+                        .add_buffer(Arc::clone(buffer))
+                        .unwrap()
+                        .build()
+                        .expect("Failed to create persistent descriptor set for mvp ubo"),
+                ) as Arc<DescriptorSet + Send + Sync>
+            })
+            .collect::<Vec<_>>()
     }
 
     fn create_command_buffers(
@@ -503,13 +514,14 @@ impl App {
         queue_family: QueueFamily,
         vertex_buffer: &Arc<BufferAccess + Send + Sync>,
         index_buffer: &Arc<TypedBufferAccess<Content = [u16]> + Send + Sync>,
-        descriptor_set: &Arc<DescriptorSet + Send + Sync>,
+        descriptor_sets: &[Arc<DescriptorSet + Send + Sync>],
         pipeline: &Arc<GraphicsPipelineAbstract + Send + Sync>,
         framebuffers: &[Arc<FramebufferAbstract + Send + Sync>],
     ) -> Vec<Arc<AutoCommandBuffer>> {
         framebuffers
             .iter()
-            .map(|fb| {
+            .enumerate()
+            .map(|(i, fb)| {
                 let clear_color = vec![[0.0, 0.0, 0.0, 1.0].into()];
 
                 Arc::new(
@@ -525,7 +537,7 @@ impl App {
                         &DynamicState::none(),
                         vec![Arc::clone(vertex_buffer)],
                         Arc::clone(index_buffer),
-                        Arc::clone(descriptor_set),
+                        Arc::clone(&descriptor_sets[i]),
                         (),
                     )
                     .expect("Failed after draw_indexed")
@@ -542,7 +554,7 @@ impl App {
         device: &Arc<Device>,
         swapchain: &Arc<Swapchain<Window>>,
         images: &[Arc<SwapchainImage<Window>>],
-        mvp_buf: &Arc<CpuAccessibleBuffer<vs::ty::MVPUniformBufferObject>>,
+        mvp_bufs: &[Arc<CpuAccessibleBuffer<vs::ty::MVPUniformBufferObject>>],
         vertex_buffer: &Arc<BufferAccess + Send + Sync>,
         index_buffer: &Arc<TypedBufferAccess<Content = [u16]> + Send + Sync>,
         graphics_queue_family: QueueFamily,
@@ -550,7 +562,6 @@ impl App {
         Arc<RenderPassAbstract + Send + Sync>,
         Arc<GraphicsPipelineAbstract + Send + Sync>,
         Vec<Arc<FramebufferAbstract + Send + Sync>>,
-        Arc<DescriptorSet + Send + Sync>,
         Vec<Arc<AutoCommandBuffer>>,
     ) {
         let render_pass = Self::create_render_pass(device, swapchain.format());
@@ -558,19 +569,19 @@ impl App {
             Self::create_graphics_pipeline(device, &render_pass, swapchain.dimensions());
         let framebuffers = Self::create_framebuffers(&render_pass, images);
 
-        let dset = Self::create_dset_for_buf(&g_pipeline, mvp_buf);
+        let dsets = Self::create_dsets_for_buffers(&g_pipeline, mvp_bufs);
 
         let cmd_bufs = Self::create_command_buffers(
             device,
             graphics_queue_family,
             vertex_buffer,
             index_buffer,
-            &dset,
+            dsets.as_slice(),
             &g_pipeline,
             &framebuffers,
         );
 
-        return (render_pass, g_pipeline, framebuffers, dset, cmd_bufs);
+        return (render_pass, g_pipeline, framebuffers, cmd_bufs);
     }
 
     fn recreate_swap_chain(&mut self) {
@@ -585,12 +596,12 @@ impl App {
         self.swapchain = swapchain;
         self.swapchain_images = swapchain_images;
 
-        let (render_pass, g_pipeline, framebuffers, dset, cmd_bufs) =
+        let (render_pass, g_pipeline, framebuffers, cmd_bufs) =
             App::create_swapchain_dependent_objects(
                 &self.vk_device,
                 &self.swapchain,
                 self.swapchain_images.as_slice(),
-                &self.mvp_ubo_buffer,
+                self.mvp_ubo_buffers.as_slice(),
                 &self.vertex_buffer,
                 &self.index_buffer,
                 self.graphics_queue.family(),
@@ -599,7 +610,6 @@ impl App {
         self.render_pass = render_pass;
         self.g_pipeline = g_pipeline;
         self.framebuffers = framebuffers;
-        self.mvp_ubo_descriptor_set = dset;
         self.command_buffers = cmd_bufs;
     }
 
@@ -615,11 +625,6 @@ impl App {
         let (vk_device, graphics_queue, presentation_queue) =
             Self::create_logical_device(physical_device, &vk_surface, &device_extensions);
 
-        let dims = get_physical_window_dims(vk_surface.window());
-
-        let mvp_ubo = Self::create_mvp_ubo(dims[0] as f32 / dims[1] as f32);
-        let mvp_buf = Self::create_mvp_ubo_buffer(&vk_device, mvp_ubo);
-
         let vertex_data = Self::create_vertex_data();
         let (vertex_buffer, index_buffer) =
             Self::create_and_submit_vertex_buffer(&graphics_queue, vertex_data);
@@ -633,12 +638,21 @@ impl App {
             ],
         );
 
-        let (render_pass, g_pipeline, framebuffers, dset, cmd_bufs) =
+        let dims = get_physical_window_dims(vk_surface.window());
+        let aspect_ratio = dims[0] as f32 / dims[1] as f32;
+        let mvp_ubos = vec![
+            Self::create_mvp_ubo(aspect_ratio),
+            Self::create_mvp_ubo(aspect_ratio),
+            Self::create_mvp_ubo(aspect_ratio),
+        ];
+        let mvp_bufs = Self::create_mvp_ubo_buffers(&vk_device, mvp_ubos.as_slice());
+
+        let (render_pass, g_pipeline, framebuffers, cmd_bufs) =
             App::create_swapchain_dependent_objects(
                 &vk_device,
                 &swapchain,
                 images.as_slice(),
-                &mvp_buf,
+                mvp_bufs.as_slice(),
                 &vertex_buffer,
                 &index_buffer,
                 graphics_queue.family(),
@@ -658,8 +672,7 @@ impl App {
             swapchain_images: images,
             vertex_buffer,
             index_buffer,
-            mvp_ubo_buffer: mvp_buf,
-            mvp_ubo_descriptor_set: dset,
+            mvp_ubo_buffers: mvp_bufs,
             render_pass,
             framebuffers,
             g_pipeline,
