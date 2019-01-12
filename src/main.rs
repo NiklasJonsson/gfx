@@ -31,6 +31,8 @@ use vulkano_win::VkSurfaceBuild;
 use winit::{Event, EventsLoop, Window, WindowBuilder, WindowEvent};
 
 use std::sync::Arc;
+use std::time::Instant;
+use std::any::Any;
 
 #[derive(Copy, Clone)]
 struct Vertex {
@@ -41,6 +43,7 @@ struct Vertex {
 impl_vertex!(Vertex, position, color);
 
 struct App {
+    rotation_start: Instant,
     events_loop: EventsLoop,
     vk_instance: Arc<Instance>,
     vk_surface: Arc<Surface<Window>>,
@@ -51,7 +54,7 @@ struct App {
     swapchain_images: Vec<Arc<SwapchainImage<Window>>>,
     vertex_buffer: Arc<BufferAccess + Send + Sync>,
     index_buffer: Arc<TypedBufferAccess<Content=[u16]> + Send + Sync>,
-    mvp_ubo_buffer: Arc<BufferAccess + Send + Sync>,
+    mvp_ubo_buffer: Arc<CpuAccessibleBuffer<vs::ty::MVPUniformBufferObject>>,
     mvp_ubo_descriptor_set: Arc<DescriptorSet + Send + Sync>,
     render_pass: Arc<RenderPassAbstract + Send + Sync>,
     framebuffers: Vec<Arc<FramebufferAbstract + Send + Sync>>,
@@ -61,11 +64,18 @@ struct App {
 
 impl App {
 
+    fn update_mvp(&mut self) {
+        let diff = Instant::now() - self.rotation_start;
+        let diff = diff.as_secs() as f32 + diff.subsec_millis() as f32 / 1000.0;
+        let mut content = self.mvp_ubo_buffer.write().unwrap();
+        content.model = glm::rotate_z(
+            &glm::Mat4::identity(),
+            std::f32::consts::FRAC_PI_2 * diff,
+            ).into();
+    }
+
     fn draw_frame(&mut self) {
-
-
-
-
+        self.update_mvp();
         let (img_idx, swapchain_img_acquired) =
             match swapchain::acquire_next_image(Arc::clone(&self.swapchain), None) {
                 Ok(r) => r,
@@ -462,7 +472,7 @@ impl App {
     }
 
     fn create_mvp_ubo_buffer(device: &Arc<Device>,
-        mvp_ubo: vs::ty::MVPUniformBufferObject) -> Arc<BufferAccess + Send + Sync> {
+        mvp_ubo: vs::ty::MVPUniformBufferObject) -> Arc<CpuAccessibleBuffer<vs::ty::MVPUniformBufferObject>> {
         CpuAccessibleBuffer::from_data(
             Arc::clone(device),
             BufferUsage::uniform_buffer(),
@@ -471,7 +481,7 @@ impl App {
     }
 
     fn create_dset_for_buf(pipeline: &Arc<GraphicsPipelineAbstract + Send + Sync>,
-                           buffer: &Arc<BufferAccess + Send + Sync>)
+                           buffer: &Arc<CpuAccessibleBuffer<vs::ty::MVPUniformBufferObject>>)
         -> Arc<DescriptorSet + Send + Sync> {
         Arc::new(PersistentDescriptorSet::start(Arc::clone(pipeline), 0)
             .add_buffer(Arc::clone(buffer))
@@ -522,7 +532,7 @@ impl App {
         device: &Arc<Device>,
         swapchain: &Arc<Swapchain<Window>>,
         images: &[Arc<SwapchainImage<Window>>],
-        mvp_buf: &Arc<BufferAccess + Send + Sync>,
+        mvp_buf: &Arc<CpuAccessibleBuffer<vs::ty::MVPUniformBufferObject>>,
         vertex_buffer: &Arc<BufferAccess + Send + Sync>,
         index_buffer: &Arc<TypedBufferAccess<Content=[u16]> + Send + Sync>,
         graphics_queue_family: QueueFamily,
@@ -646,8 +656,11 @@ impl App {
                  &vertex_buffer,
                  &index_buffer,
                  graphics_queue.family());
+
+        let rotation_start = Instant::now();
         
         return App {
+            rotation_start,
             events_loop,
             vk_instance,
             vk_surface,
