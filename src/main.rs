@@ -23,7 +23,7 @@ use vulkano::swapchain;
 use vulkano::swapchain::{
     AcquireError, ColorSpace, CompositeAlpha, PresentMode, Surface, SurfaceTransform, Swapchain,
 };
-use vulkano::sync::{FlushError, GpuFuture, SharingMode};
+use vulkano::sync::{FenceSignalFuture, FlushError, GpuFuture, NowFuture, SharingMode};
 
 use vulkano_win::VkSurfaceBuild;
 
@@ -31,7 +31,7 @@ use winit::{Event, EventsLoop, Window, WindowBuilder, WindowEvent};
 
 use std::collections::HashSet;
 use std::sync::Arc;
-use std::time::Instant;
+use std::time::{Duration, Instant};
 
 #[derive(Copy, Clone)]
 struct Vertex {
@@ -40,6 +40,23 @@ struct Vertex {
 }
 
 impl_vertex!(Vertex, position, color);
+
+// Extra trait specialization for GpuFuture, intended for storing NowFuture or FenceSignalFuture
+trait WaitableFuture {
+    fn wait_for(&self, timeout: Option<Duration>) -> Result<(), FlushError>;
+}
+
+impl WaitableFuture for NowFuture {
+    fn wait_for(&self, _timeout: Option<Duration>) -> Result<(), FlushError> {
+        Ok(())
+    }
+}
+
+impl<F: GpuFuture> WaitableFuture for FenceSignalFuture<F> {
+    fn wait_for(&self, timeout: Option<Duration>) -> Result<(), FlushError> {
+        self.wait(timeout)
+    }
+}
 
 struct App {
     rotation_start: Instant,
@@ -53,12 +70,12 @@ struct App {
     swapchain_images: Vec<Arc<SwapchainImage<Window>>>,
     vertex_buffer: Arc<BufferAccess + Send + Sync>,
     index_buffer: Arc<TypedBufferAccess<Content = [u16]> + Send + Sync>,
-    // TODO: Use ringbuffer
     mvp_ubo_buffers: Vec<Arc<CpuAccessibleBuffer<vs::ty::MVPUniformBufferObject>>>,
     render_pass: Arc<RenderPassAbstract + Send + Sync>,
     framebuffers: Vec<Arc<FramebufferAbstract + Send + Sync>>,
     g_pipeline: Arc<GraphicsPipelineAbstract + Send + Sync>,
     command_buffers: Vec<Arc<AutoCommandBuffer>>,
+    frame_completions: Vec<Box<WaitableFuture>>,
 }
 
 impl App {
@@ -81,15 +98,25 @@ impl App {
                 Err(e) => panic!("Can't acquire next image from swapchain: \t{}", e),
             };
 
+        // tmp_future is only used as an intermediary while we submit this frame
+        let tmp_future = Box::new(vulkano::sync::now(Arc::clone(&self.vk_device)));
+        let prev_frame_completed =
+            std::mem::replace(&mut self.frame_completions[img_idx], tmp_future);
+
+        // Wait for previous frame before we update MVP buffer
+        prev_frame_completed.wait_for(None).unwrap();
+
+        // This writes to the uniform buffer for the comming frame
         self.update_mvp(img_idx);
+
         let drawn_and_presented = swapchain_img_acquired
             .then_execute(
                 Arc::clone(&self.graphics_queue),
                 Arc::clone(&self.command_buffers[img_idx]),
             )
             .expect("Unable to execute command buffer")
-            // TODO: This should be done on the presentation queue but it seems Vulkano does not
-            // support this.
+            // TODO: This should be done on the presentation queue but add a signal_semaphore in
+            // between.
             .then_swapchain_present(
                 Arc::clone(&self.graphics_queue),
                 Arc::clone(&self.swapchain),
@@ -108,11 +135,7 @@ impl App {
             ),
         };
 
-        // This forces a wait on the image presentation, serializing frame rendering.
-        drawn_and_presented.wait(None).unwrap();
-        // TODO: Save this per image and replace when the same image_idx is returned with
-        // swapchain::acquire_next_image
-
+        self.frame_completions[img_idx] = Box::new(drawn_and_presented);
     }
 
     fn main_loop(&mut self) {
@@ -218,11 +241,15 @@ impl App {
         // TODO: This should not be necessary, it's a bug in vulkano
         let q_families = [graphics_queue_family, presentation_queue_family];
         use std::iter::FromIterator;
-        let unique_queue_families: HashSet<u32> = HashSet::from_iter(q_families.iter().map(|qf| qf.id()));
+        let unique_queue_families: HashSet<u32> =
+            HashSet::from_iter(q_families.iter().map(|qf| qf.id()));
 
-        let queue_priority = 1.0; 
-        let q_families = unique_queue_families.iter().map(|&i| { 
-            (physical_device.queue_family_by_id(i).unwrap(), queue_priority) 
+        let queue_priority = 1.0;
+        let q_families = unique_queue_families.iter().map(|&i| {
+            (
+                physical_device.queue_family_by_id(i).unwrap(),
+                queue_priority,
+            )
         });
 
         let (device, mut queues) = Device::new(
@@ -587,6 +614,7 @@ impl App {
 
         self.swapchain = swapchain;
         self.swapchain_images = swapchain_images;
+        self.frame_completions = init_frame_completions(&self.vk_device);
 
         let (render_pass, g_pipeline, framebuffers, cmd_bufs) =
             App::create_swapchain_dependent_objects(
@@ -651,6 +679,7 @@ impl App {
             );
 
         let rotation_start = Instant::now();
+        let frame_completions = init_frame_completions(&vk_device);
 
         return App {
             rotation_start,
@@ -669,6 +698,7 @@ impl App {
             framebuffers,
             g_pipeline,
             command_buffers: cmd_bufs,
+            frame_completions,
         };
     }
 }
@@ -676,6 +706,14 @@ impl App {
 fn main() {
     let mut app = App::new();
     app.run();
+}
+
+fn init_frame_completions(device: &Arc<Device>) -> Vec<Box<WaitableFuture>> {
+    vec![
+        Box::new(vulkano::sync::now(Arc::clone(device))),
+        Box::new(vulkano::sync::now(Arc::clone(device))),
+        Box::new(vulkano::sync::now(Arc::clone(device))),
+    ]
 }
 
 fn get_physical_window_dims(window: &Window) -> [u32; 2] {
