@@ -115,8 +115,7 @@ impl App {
                 Arc::clone(&self.command_buffers[img_idx]),
             )
             .expect("Unable to execute command buffer")
-            // TODO: This should be done on the presentation queue but add a signal_semaphore in
-            // between.
+            // Use presentation queue + semaphore when vulkano supports it
             .then_swapchain_present(
                 Arc::clone(&self.graphics_queue),
                 Arc::clone(&self.swapchain),
@@ -614,7 +613,12 @@ impl App {
 
         self.swapchain = swapchain;
         self.swapchain_images = swapchain_images;
-        self.frame_completions = init_frame_completions(&self.vk_device);
+
+        for idx in (0..self.frame_completions.len()) {
+            let now = Box::new(vulkano::sync::now(Arc::clone(&self.vk_device)));
+            let prev = std::mem::replace(&mut self.frame_completions[idx], now);
+            prev.wait_for(None).unwrap();
+        }
 
         let (render_pass, g_pipeline, framebuffers, cmd_bufs) =
             App::create_swapchain_dependent_objects(
@@ -658,13 +662,14 @@ impl App {
             ],
         );
 
+        let n_frames = images.len();
+
         let dims = get_physical_window_dims(vk_surface.window());
         let aspect_ratio = dims[0] as f32 / dims[1] as f32;
-        let mvp_ubos = vec![
-            Self::create_mvp_ubo(aspect_ratio),
-            Self::create_mvp_ubo(aspect_ratio),
-            Self::create_mvp_ubo(aspect_ratio),
-        ];
+        let mvp_ubos = (0..n_frames)
+            .map(|_| Self::create_mvp_ubo(aspect_ratio))
+            .collect::<Vec<_>>();
+
         let mvp_bufs = Self::create_mvp_ubo_buffers(&vk_device, mvp_ubos.as_slice());
 
         let (render_pass, g_pipeline, framebuffers, cmd_bufs) =
@@ -679,7 +684,7 @@ impl App {
             );
 
         let rotation_start = Instant::now();
-        let frame_completions = init_frame_completions(&vk_device);
+        let frame_completions = init_frame_completions(&vk_device, n_frames);
 
         return App {
             rotation_start,
@@ -708,12 +713,10 @@ fn main() {
     app.run();
 }
 
-fn init_frame_completions(device: &Arc<Device>) -> Vec<Box<WaitableFuture>> {
-    vec![
-        Box::new(vulkano::sync::now(Arc::clone(device))),
-        Box::new(vulkano::sync::now(Arc::clone(device))),
-        Box::new(vulkano::sync::now(Arc::clone(device))),
-    ]
+fn init_frame_completions(device: &Arc<Device>, n_frames: usize) -> Vec<Box<WaitableFuture>> {
+    (0..n_frames)
+        .map(|_| Box::new(vulkano::sync::now(Arc::clone(device))) as Box<WaitableFuture>)
+        .collect::<Vec<_>>()
 }
 
 fn get_physical_window_dims(window: &Window) -> [u32; 2] {
