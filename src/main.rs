@@ -4,18 +4,21 @@ extern crate nalgebra_glm as glm;
 extern crate vulkano_shaders;
 extern crate vulkano_win;
 extern crate winit;
+extern crate image;
+
+use image::ImageDecoder;
 
 use vulkano::buffer::{
     BufferAccess, BufferUsage, CpuAccessibleBuffer, ImmutableBuffer, TypedBufferAccess,
 };
-use vulkano::command_buffer::{AutoCommandBuffer, AutoCommandBufferBuilder, DynamicState};
+use vulkano::command_buffer::{AutoCommandBuffer, AutoCommandBufferBuilder, DynamicState, CommandBufferExecFuture};
 use vulkano::descriptor::{
     descriptor_set::PersistentDescriptorSet, DescriptorSet, PipelineLayoutAbstract,
 };
 use vulkano::device::{Device, DeviceExtensions, Features, Queue};
 use vulkano::format::Format;
 use vulkano::framebuffer::{Framebuffer, FramebufferAbstract, RenderPassAbstract, Subpass};
-use vulkano::image::{swapchain::SwapchainImage, ImageUsage};
+use vulkano::image::{swapchain::SwapchainImage, ImageAccess, ImageViewAccess, ImageUsage, Dimensions, immutable::ImmutableImage};
 use vulkano::instance;
 use vulkano::instance::{Instance, InstanceExtensions, PhysicalDevice, QueueFamily};
 use vulkano::pipeline::{viewport::Viewport, GraphicsPipeline, GraphicsPipelineAbstract};
@@ -23,6 +26,8 @@ use vulkano::swapchain;
 use vulkano::swapchain::{
     AcquireError, ColorSpace, CompositeAlpha, PresentMode, Surface, SurfaceTransform, Swapchain,
 };
+
+use vulkano::sampler::Sampler;
 use vulkano::sync::{FenceSignalFuture, FlushError, GpuFuture, NowFuture, SharingMode};
 
 use vulkano_win::VkSurfaceBuild;
@@ -30,6 +35,11 @@ use vulkano_win::VkSurfaceBuild;
 use winit::{Event, EventsLoop, Window, WindowBuilder, WindowEvent};
 
 use std::collections::HashSet;
+
+use std::fs::File;
+use std::io::BufReader;
+use std::prelude::*;
+
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
@@ -37,9 +47,10 @@ use std::time::{Duration, Instant};
 struct Vertex {
     position: [f32; 2],
     color: [f32; 3],
+    tex_coords: [f32; 2],
 }
 
-impl_vertex!(Vertex, position, color);
+impl_vertex!(Vertex, position, color, tex_coords);
 
 // Extra trait specialization for GpuFuture, intended for storing NowFuture or FenceSignalFuture
 trait WaitableFuture {
@@ -70,6 +81,8 @@ struct App {
     swapchain_images: Vec<Arc<SwapchainImage<Window>>>,
     vertex_buffer: Arc<BufferAccess + Send + Sync>,
     index_buffer: Arc<TypedBufferAccess<Content = [u16]> + Send + Sync>,
+    image_buffer: Arc<ImageViewAccess + Send + Sync>,
+    sampler: Arc<Sampler>,
     mvp_ubo_buffers: Vec<Arc<CpuAccessibleBuffer<vs::ty::MVPUniformBufferObject>>>,
     render_pass: Arc<RenderPassAbstract + Send + Sync>,
     framebuffers: Vec<Arc<FramebufferAbstract + Send + Sync>>,
@@ -282,7 +295,7 @@ impl App {
         let format = capabilities
             .supported_formats
             .iter()
-            .find(|&format| format == &(Format::B8G8R8A8Unorm, ColorSpace::SrgbNonLinear))
+            .find(|&format| format == &(Format::B8G8R8A8Srgb, ColorSpace::SrgbNonLinear))
             .expect("Unable to find proper format in surface capabilities");
 
         let present_mode = capabilities
@@ -339,18 +352,22 @@ impl App {
             Vertex {
                 position: [-0.5, -0.5],
                 color: [1.0, 0.0, 0.0],
+                tex_coords: [1.0, 0.0],
             },
             Vertex {
                 position: [0.5, -0.5],
                 color: [0.0, 1.0, 0.0],
+                tex_coords: [0.0, 0.0],
             },
             Vertex {
                 position: [0.5, 0.5],
                 color: [0.0, 0.0, 1.0],
+                tex_coords: [0.0, 1.0],
             },
             Vertex {
                 position: [-0.5, 0.5],
                 color: [1.0, 1.0, 1.0],
+                tex_coords: [1.0, 1.0],
             },
         ];
 
@@ -359,36 +376,59 @@ impl App {
         return (vertices, indices);
     }
 
-    // Create a vertex buffer and send it to the device on buffer_copy_queue
+    fn load_image() -> Vec<u8> {
+        // TODO: Try to use JPEGDecoder + BufReader for better error handling
+        let image = image::load_from_memory_with_format(include_bytes!("../textures/statue-texture.jpg"), image::ImageFormat::JPEG).unwrap().to_rgba();
+
+        let data =  image.into_raw().clone();
+        return data;
+    }
+
+
+    // TODO: Try to refactor here
     fn create_and_submit_vertex_buffer(
-        buffer_copy_queue: &Arc<Queue>,
-        vertex_data: (Vec<Vertex>, Vec<u16>),
-    ) -> (
-        Arc<BufferAccess + Send + Sync>,
-        Arc<TypedBufferAccess<Content = [u16]> + Send + Sync>,
-    ) {
-        let (vertex_buffer, vertex_data_copied) = ImmutableBuffer::from_iter(
-            vertex_data.0.iter().cloned(),
+        queue: &Arc<Queue>,
+        vertex_data: Vec<Vertex>,
+    ) -> (Arc<BufferAccess + Send + Sync>, CommandBufferExecFuture<NowFuture, AutoCommandBuffer>) {
+        let (buf,fut) = ImmutableBuffer::from_iter(
+            vertex_data.iter().cloned(),
             BufferUsage::vertex_buffer(),
-            Arc::clone(buffer_copy_queue),
+            Arc::clone(queue),
         )
         .expect("Could not create vertex buffer");
 
-        let (index_buffer, index_data_copied) = ImmutableBuffer::from_iter(
-            vertex_data.1.iter().cloned(),
+        return (buf, fut);
+    }
+
+    fn create_and_submit_index_buffer(
+        queue: &Arc<Queue>,
+        index_data: Vec<u16>) -> 
+        (Arc<TypedBufferAccess<Content=[u16]> + Send + Sync>, CommandBufferExecFuture<NowFuture, AutoCommandBuffer>) {
+
+        let (buf, fut) = ImmutableBuffer::from_iter(
+            index_data.iter().cloned(),
             BufferUsage::index_buffer(),
-            Arc::clone(buffer_copy_queue),
+            Arc::clone(queue),
         )
         .expect("Could not create index buffer");
 
-        vertex_data_copied
-            .join(index_data_copied)
-            .flush()
-            .expect("Could not send index/vertex buffer to device");
-
-        return (vertex_buffer, index_buffer);
+        return (buf, fut);
     }
 
+    fn create_and_submit_texture_image(
+        queue: &Arc<Queue>,
+        image: &[u8]) -> (Arc<ImageViewAccess + Send + Sync>, CommandBufferExecFuture<NowFuture, AutoCommandBuffer>){
+        let owned_copy = image.to_owned();
+        // Destruct and combine again to more easilyinfer types
+        let (buf, fut) = ImmutableImage::from_iter(
+            owned_copy.into_iter(),
+            Dimensions::Dim2d{width: 1280, height: 920},
+            Format::R8G8B8A8Srgb,
+            Arc::clone(queue))
+            .expect("Unable to create vertex buffer");
+
+        return (buf, fut);
+    }
     fn create_render_pass(
         device: &Arc<Device>,
         format: Format,
@@ -440,6 +480,7 @@ impl App {
                 .primitive_restart(false)
                 .viewports([viewport].iter().cloned())
                 .fragment_shader(fs.main_entry_point(), ())
+                .blend_alpha_blending()
                 .depth_clamp(false)
                 .polygon_mode_fill()
                 .line_width(1.0)
@@ -481,7 +522,7 @@ impl App {
         let mvp_ubo = vs::ty::MVPUniformBufferObject {
             model: glm::Mat4::identity().into(),
             view: glm::look_at(
-                &glm::vec3(0.0, 0.0, -2.0),
+                &glm::vec3(0.0, 0.0, -1.0),
                 &glm::vec3(0.0, 0.0, 0.0),
                 &glm::vec3(0.0, 1.0, 0.0),
             )
@@ -509,9 +550,11 @@ impl App {
             .collect::<Vec<_>>()
     }
 
-    fn create_dsets_for_buffers(
+    fn create_dsets(
         pipeline: &Arc<GraphicsPipelineAbstract + Send + Sync>,
         buffers: &[Arc<CpuAccessibleBuffer<vs::ty::MVPUniformBufferObject>>],
+        image: &Arc<ImageViewAccess + Send + Sync>,
+        sampler: &Arc<Sampler>
     ) -> Vec<Arc<DescriptorSet + Send + Sync>> {
         buffers
             .iter()
@@ -519,6 +562,8 @@ impl App {
                 Arc::new(
                     PersistentDescriptorSet::start(Arc::clone(pipeline), 0)
                         .add_buffer(Arc::clone(buffer))
+                        .unwrap()
+                        .add_sampled_image(Arc::clone(image), Arc::clone(sampler))
                         .unwrap()
                         .build()
                         .expect("Failed to create persistent descriptor set for mvp ubo"),
@@ -575,6 +620,8 @@ impl App {
         mvp_bufs: &[Arc<CpuAccessibleBuffer<vs::ty::MVPUniformBufferObject>>],
         vertex_buffer: &Arc<BufferAccess + Send + Sync>,
         index_buffer: &Arc<TypedBufferAccess<Content = [u16]> + Send + Sync>,
+        image: &Arc<ImageViewAccess + Send + Sync>,
+        sampler: &Arc<Sampler>,
         graphics_queue_family: QueueFamily,
     ) -> (
         Arc<RenderPassAbstract + Send + Sync>,
@@ -587,7 +634,7 @@ impl App {
             Self::create_graphics_pipeline(device, &render_pass, swapchain.dimensions());
         let framebuffers = Self::create_framebuffers(&render_pass, images);
 
-        let dsets = Self::create_dsets_for_buffers(&g_pipeline, mvp_bufs);
+        let dsets = Self::create_dsets(&g_pipeline, mvp_bufs, image, sampler);
 
         let cmd_bufs = Self::create_command_buffers(
             device,
@@ -614,7 +661,7 @@ impl App {
         self.swapchain = swapchain;
         self.swapchain_images = swapchain_images;
 
-        for idx in (0..self.frame_completions.len()) {
+        for idx in 0..self.frame_completions.len() {
             let now = Box::new(vulkano::sync::now(Arc::clone(&self.vk_device)));
             let prev = std::mem::replace(&mut self.frame_completions[idx], now);
             prev.wait_for(None).unwrap();
@@ -628,6 +675,8 @@ impl App {
                 self.mvp_ubo_buffers.as_slice(),
                 &self.vertex_buffer,
                 &self.index_buffer,
+                &self.image_buffer,
+                &self.sampler,
                 self.graphics_queue.family(),
             );
 
@@ -649,9 +698,23 @@ impl App {
         let (vk_device, graphics_queue, presentation_queue) =
             Self::create_logical_device(physical_device, &vk_surface, &device_extensions);
 
-        let vertex_data = Self::create_vertex_data();
-        let (vertex_buffer, index_buffer) =
-            Self::create_and_submit_vertex_buffer(&graphics_queue, vertex_data);
+        let (vertex_data, index_data) = Self::create_vertex_data();
+
+        // TODO: Use transfer queue here
+        let (vertex_buffer, vertex_data_copied) = Self::create_and_submit_vertex_buffer(&graphics_queue, vertex_data);
+        let (index_buffer, index_data_copied) = Self::create_and_submit_index_buffer(&graphics_queue, index_data);
+        let data_copied = vertex_data_copied.join(index_data_copied)
+            .then_signal_fence_and_flush()
+            .expect("Unable to signal fence and flush vertex + index data copy command");
+
+        let image_data = Self::load_image();
+        let (image_buffer, texture_data_copied) = Self::create_and_submit_texture_image(&graphics_queue, image_data.as_slice());
+
+        let data_copied = data_copied.join(texture_data_copied)
+            .then_signal_fence_and_flush()
+            .expect("Unable to signal fence and flush texture data copy command");
+
+        let sampler = Sampler::simple_repeat_linear(Arc::clone(&vk_device));
 
         let (swapchain, images) = Self::create_swap_chain(
             &vk_device,
@@ -680,11 +743,15 @@ impl App {
                 mvp_bufs.as_slice(),
                 &vertex_buffer,
                 &index_buffer,
+                &image_buffer,
+                &sampler,
                 graphics_queue.family(),
             );
 
         let rotation_start = Instant::now();
         let frame_completions = init_frame_completions(&vk_device, n_frames);
+
+        data_copied.wait(None).expect("Transfer of application constant data failed");
 
         return App {
             rotation_start,
@@ -698,6 +765,8 @@ impl App {
             swapchain_images: images,
             vertex_buffer,
             index_buffer,
+            image_buffer,
+            sampler,
             mvp_ubo_buffers: mvp_bufs,
             render_pass,
             framebuffers,
@@ -744,12 +813,15 @@ layout(binding = 0) uniform MVPUniformBufferObject {
 
 layout(location = 0) in vec2 position;
 layout(location = 1) in vec3 color;
+layout(location = 2) in vec2 tex_coords;
 
-layout(location = 0) out vec3 fragColor;
+layout(location = 0) out vec3 frag_color;
+layout(location = 1) out vec2 frag_tex_coords;
 
 void main() {
     gl_Position = ubo.proj * ubo.view * ubo.model * vec4(position, 0.0, 1.0);
-    fragColor = color;
+    frag_color = color;
+    frag_tex_coords = tex_coords;
 }
 "
     }
@@ -762,12 +834,15 @@ mod fs {
 #version 450
 #extension GL_ARB_separate_shader_objects : enable
 
-layout(location = 0) in vec3 fragColor;
+layout(binding = 1) uniform sampler2D texSampler;
+
+layout(location = 0) in vec3 frag_color;
+layout(location = 1) in vec2 frag_tex_coords;
 
 layout(location = 0) out vec4 outColor;
 
 void main() {
-    outColor = vec4(fragColor, 1.0);
+    outColor = texture(texSampler, frag_tex_coords);
 }
 "
     }
