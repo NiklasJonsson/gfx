@@ -970,11 +970,13 @@ version = "1.0.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 
 [[package]]
-name = "vulkan-tutorial"
+name = "vulkan-experiments"
 version = "0.1.0"
 dependencies = [
  "image 0.21.0 (registry+https://github.com/rust-lang/crates.io-index)",
  "nalgebra-glm 0.2.1 (registry+https://github.com/rust-lang/crates.io-index)",
+ "num-derive 0.2.3 (registry+https://github.com/rust-lang/crates.io-index)",
+ "num-traits 0.2.6 (registry+https://github.com/rust-lang/crates.io-index)",
  "vulkano 0.11.1 (registry+https://github.com/rust-lang/crates.io-index)",
  "vulkano-shaders 0.11.1 (registry+https://github.com/rust-lang/crates.io-index)",
  "vulkano-win 0.11.1 (registry+https://github.com/rust-lang/crates.io-index)",

@@ -1,5 +1,5 @@
 [package]
-name = "vulkan-tutorial"
+name = "vulkan-experiments"
 version = "0.1.0"
 authors = ["Niklas Jonsson <niklasandersjonsson@gmail.com>"]
 edition = "2018"
@@ -11,3 +11,5 @@ vulkano-win = "*"
 vulkano-shaders = "*"
 nalgebra-glm = "*"
 image = "*"
+num-derive = "*"
+num-traits = "*"

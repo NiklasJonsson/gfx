@@ -1,24 +1,32 @@
 #[macro_use]
 extern crate vulkano;
+#[macro_use]
+extern crate num_derive;
+
+extern crate image;
 extern crate nalgebra_glm as glm;
 extern crate vulkano_shaders;
 extern crate vulkano_win;
 extern crate winit;
-extern crate image;
 
 use image::ImageDecoder;
 
 use vulkano::buffer::{
     BufferAccess, BufferUsage, CpuAccessibleBuffer, ImmutableBuffer, TypedBufferAccess,
 };
-use vulkano::command_buffer::{AutoCommandBuffer, AutoCommandBufferBuilder, DynamicState, CommandBufferExecFuture};
+use vulkano::command_buffer::{
+    AutoCommandBuffer, AutoCommandBufferBuilder, CommandBufferExecFuture, DynamicState,
+};
 use vulkano::descriptor::{
     descriptor_set::PersistentDescriptorSet, DescriptorSet, PipelineLayoutAbstract,
 };
 use vulkano::device::{Device, DeviceExtensions, Features, Queue};
 use vulkano::format::Format;
 use vulkano::framebuffer::{Framebuffer, FramebufferAbstract, RenderPassAbstract, Subpass};
-use vulkano::image::{swapchain::SwapchainImage, ImageAccess, ImageViewAccess, ImageUsage, Dimensions, immutable::ImmutableImage};
+use vulkano::image::{
+    immutable::ImmutableImage, swapchain::SwapchainImage, Dimensions, ImageAccess, ImageUsage,
+    ImageViewAccess,
+};
 use vulkano::instance;
 use vulkano::instance::{Instance, InstanceExtensions, PhysicalDevice, QueueFamily};
 use vulkano::pipeline::{viewport::Viewport, GraphicsPipeline, GraphicsPipelineAbstract};
@@ -32,7 +40,7 @@ use vulkano::sync::{FenceSignalFuture, FlushError, GpuFuture, NowFuture, Sharing
 
 use vulkano_win::VkSurfaceBuild;
 
-use winit::{Event, EventsLoop, Window, WindowBuilder, WindowEvent};
+use winit::{Event, EventsLoop, VirtualKeyCode, Window, WindowBuilder, WindowEvent};
 
 use std::collections::HashSet;
 
@@ -40,8 +48,15 @@ use std::fs::File;
 use std::io::BufReader;
 use std::prelude::*;
 
+use std::cell::RefCell;
+use std::rc::Rc;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
+
+mod camera;
+mod input;
+use crate::camera::{Camera, CameraController};
+use crate::input::InputManager;
 
 #[derive(Copy, Clone)]
 struct Vertex {
@@ -89,6 +104,7 @@ struct App {
     g_pipeline: Arc<GraphicsPipelineAbstract + Send + Sync>,
     command_buffers: Vec<Arc<AutoCommandBuffer>>,
     frame_completions: Vec<Box<WaitableFuture>>,
+    camera: Rc<RefCell<Camera>>,
 }
 
 impl App {
@@ -98,6 +114,12 @@ impl App {
         let mut content = self.mvp_ubo_buffers[idx].write().unwrap();
         content.model =
             glm::rotate_z(&glm::Mat4::identity(), std::f32::consts::FRAC_PI_2 * diff).into();
+        content.view = glm::look_at(
+            self.camera.borrow().get_pos(),
+            &glm::vec3(0.0, 0.0, 0.0),
+            self.camera.borrow().get_up(),
+        )
+        .into();
     }
 
     fn draw_frame(&mut self) {
@@ -151,21 +173,37 @@ impl App {
     }
 
     fn main_loop(&mut self) {
+        // TODO: EventManager handling all events, passing appropriate ones down to InputManager
+        let mut input_manager = InputManager::new();
+        let camera_controller = CameraController::new(&mut input_manager, &self.camera);
         loop {
             let mut quit = false;
-            self.events_loop.poll_events(|event| match event {
-                Event::WindowEvent {
-                    event: WindowEvent::CloseRequested,
+            self.events_loop.poll_events(|event| {
+                // event is either WindowEvent or DeviceEvent, ignore the latter
+                if let Event::WindowEvent {
+                    event: window_event,
                     ..
-                } => {
-                    quit = true;
+                } = event {
+                    match window_event {
+                        WindowEvent::CloseRequested => quit = true,
+                        WindowEvent::KeyboardInput {
+                            device_id: _device_id,
+                            input,
+                        } => {
+                            if let Some(key) = input.virtual_keycode {
+                                input_manager.handle_button_input(key);
+                            }
+                        }
+                        _ => (),
+                    }
                 }
-                _ => (),
             });
 
             if quit {
                 break;
             }
+
+            input_manager.dispatch();
 
             self.draw_frame();
         }
@@ -225,12 +263,6 @@ impl App {
             })
             .expect("No device available");
 
-        println!(
-            "Chose physical device, {}, which is a {:?}",
-            ph_dev.name(),
-            ph_dev.ty()
-        );
-
         return ph_dev;
     }
 
@@ -239,7 +271,6 @@ impl App {
         surface: &Arc<Surface<Window>>,
         device_extensions: &DeviceExtensions,
     ) -> (Arc<Device>, Arc<Queue>, Arc<Queue>) {
-        // TODO: These families need to be unique when passed to device creation.
         let graphics_queue_family = physical_device
             .queue_families()
             .find(|&q| q.supports_graphics())
@@ -378,19 +409,26 @@ impl App {
 
     fn load_image() -> Vec<u8> {
         // TODO: Try to use JPEGDecoder + BufReader for better error handling
-        let image = image::load_from_memory_with_format(include_bytes!("../textures/statue-texture.jpg"), image::ImageFormat::JPEG).unwrap().to_rgba();
+        let image = image::load_from_memory_with_format(
+            include_bytes!("../textures/statue-texture.jpg"),
+            image::ImageFormat::JPEG,
+        )
+        .unwrap()
+        .to_rgba();
 
-        let data =  image.into_raw().clone();
+        let data = image.into_raw().clone();
         return data;
     }
-
 
     // TODO: Try to refactor here
     fn create_and_submit_vertex_buffer(
         queue: &Arc<Queue>,
         vertex_data: Vec<Vertex>,
-    ) -> (Arc<BufferAccess + Send + Sync>, CommandBufferExecFuture<NowFuture, AutoCommandBuffer>) {
-        let (buf,fut) = ImmutableBuffer::from_iter(
+    ) -> (
+        Arc<BufferAccess + Send + Sync>,
+        CommandBufferExecFuture<NowFuture, AutoCommandBuffer>,
+    ) {
+        let (buf, fut) = ImmutableBuffer::from_iter(
             vertex_data.iter().cloned(),
             BufferUsage::vertex_buffer(),
             Arc::clone(queue),
@@ -402,9 +440,11 @@ impl App {
 
     fn create_and_submit_index_buffer(
         queue: &Arc<Queue>,
-        index_data: Vec<u16>) -> 
-        (Arc<TypedBufferAccess<Content=[u16]> + Send + Sync>, CommandBufferExecFuture<NowFuture, AutoCommandBuffer>) {
-
+        index_data: Vec<u16>,
+    ) -> (
+        Arc<TypedBufferAccess<Content = [u16]> + Send + Sync>,
+        CommandBufferExecFuture<NowFuture, AutoCommandBuffer>,
+    ) {
         let (buf, fut) = ImmutableBuffer::from_iter(
             index_data.iter().cloned(),
             BufferUsage::index_buffer(),
@@ -417,15 +457,23 @@ impl App {
 
     fn create_and_submit_texture_image(
         queue: &Arc<Queue>,
-        image: &[u8]) -> (Arc<ImageViewAccess + Send + Sync>, CommandBufferExecFuture<NowFuture, AutoCommandBuffer>){
+        image: &[u8],
+    ) -> (
+        Arc<ImageViewAccess + Send + Sync>,
+        CommandBufferExecFuture<NowFuture, AutoCommandBuffer>,
+    ) {
         let owned_copy = image.to_owned();
         // Destruct and combine again to more easilyinfer types
         let (buf, fut) = ImmutableImage::from_iter(
             owned_copy.into_iter(),
-            Dimensions::Dim2d{width: 1280, height: 920},
+            Dimensions::Dim2d {
+                width: 1280,
+                height: 920,
+            },
             Format::R8G8B8A8Srgb,
-            Arc::clone(queue))
-            .expect("Unable to create vertex buffer");
+            Arc::clone(queue),
+        )
+        .expect("Unable to create vertex buffer");
 
         return (buf, fut);
     }
@@ -554,7 +602,7 @@ impl App {
         pipeline: &Arc<GraphicsPipelineAbstract + Send + Sync>,
         buffers: &[Arc<CpuAccessibleBuffer<vs::ty::MVPUniformBufferObject>>],
         image: &Arc<ImageViewAccess + Send + Sync>,
-        sampler: &Arc<Sampler>
+        sampler: &Arc<Sampler>,
     ) -> Vec<Arc<DescriptorSet + Send + Sync>> {
         buffers
             .iter()
@@ -701,16 +749,21 @@ impl App {
         let (vertex_data, index_data) = Self::create_vertex_data();
 
         // TODO: Use transfer queue here
-        let (vertex_buffer, vertex_data_copied) = Self::create_and_submit_vertex_buffer(&graphics_queue, vertex_data);
-        let (index_buffer, index_data_copied) = Self::create_and_submit_index_buffer(&graphics_queue, index_data);
-        let data_copied = vertex_data_copied.join(index_data_copied)
+        let (vertex_buffer, vertex_data_copied) =
+            Self::create_and_submit_vertex_buffer(&graphics_queue, vertex_data);
+        let (index_buffer, index_data_copied) =
+            Self::create_and_submit_index_buffer(&graphics_queue, index_data);
+        let data_copied = vertex_data_copied
+            .join(index_data_copied)
             .then_signal_fence_and_flush()
             .expect("Unable to signal fence and flush vertex + index data copy command");
 
         let image_data = Self::load_image();
-        let (image_buffer, texture_data_copied) = Self::create_and_submit_texture_image(&graphics_queue, image_data.as_slice());
+        let (image_buffer, texture_data_copied) =
+            Self::create_and_submit_texture_image(&graphics_queue, image_data.as_slice());
 
-        let data_copied = data_copied.join(texture_data_copied)
+        let data_copied = data_copied
+            .join(texture_data_copied)
             .then_signal_fence_and_flush()
             .expect("Unable to signal fence and flush texture data copy command");
 
@@ -751,7 +804,11 @@ impl App {
         let rotation_start = Instant::now();
         let frame_completions = init_frame_completions(&vk_device, n_frames);
 
-        data_copied.wait(None).expect("Transfer of application constant data failed");
+        data_copied
+            .wait(None)
+            .expect("Transfer of application constant data failed");
+
+        let camera = Rc::new(RefCell::new(Camera::new([0.0, 0.0, -1.0], [0.0, 0.0, 0.0])));
 
         return App {
             rotation_start,
@@ -773,6 +830,7 @@ impl App {
             g_pipeline,
             command_buffers: cmd_bufs,
             frame_completions,
+            camera,
         };
     }
 }
