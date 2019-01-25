@@ -60,9 +60,15 @@ use crate::input::InputManager;
 
 #[derive(Copy, Clone)]
 struct Vertex {
-    position: [f32; 2],
+    position: [f32; 3],
     color: [f32; 3],
     tex_coords: [f32; 2],
+}
+
+impl Vertex {
+    fn new(position: [f32; 3], color: [f32; 3], tex_coords: [f32; 2]) -> Vertex {
+        Vertex{position, color, tex_coords}
+    }
 }
 
 impl_vertex!(Vertex, position, color, tex_coords);
@@ -380,29 +386,49 @@ impl App {
 
     fn create_vertex_data() -> (Vec<Vertex>, Vec<u16>) {
         let vertices = vec![
-            Vertex {
-                position: [-0.5, -0.5],
-                color: [1.0, 0.0, 0.0],
-                tex_coords: [1.0, 0.0],
-            },
-            Vertex {
-                position: [0.5, -0.5],
-                color: [0.0, 1.0, 0.0],
-                tex_coords: [0.0, 0.0],
-            },
-            Vertex {
-                position: [0.5, 0.5],
-                color: [0.0, 0.0, 1.0],
-                tex_coords: [0.0, 1.0],
-            },
-            Vertex {
-                position: [-0.5, 0.5],
-                color: [1.0, 1.0, 1.0],
-                tex_coords: [1.0, 1.0],
-            },
+            Vertex::new(
+                [-0.5, -0.5, 0.0],
+                [1.0, 0.0, 0.0],
+                [1.0, 0.0],
+            ),
+            Vertex::new(
+                [0.5, -0.5, 0.0],
+                [0.0, 1.0, 0.0],
+                [0.0, 0.0],
+            ),
+            Vertex::new(
+                [0.5, 0.5, 0.0],
+                [0.0, 0.0, 1.0],
+                [0.0, 1.0],
+            ),
+            Vertex::new(
+                [-0.5, 0.5, 0.0],
+                [1.0, 1.0, 1.0],
+                [1.0, 1.0],
+            ),
+            Vertex::new(
+                [-0.5, -0.5, -0.5],
+                [1.0, 0.0, 0.0],
+                [1.0, 0.0],
+            ),
+            Vertex::new(
+                [0.5, -0.5, -0.5],
+                [0.0, 1.0, 0.0],
+                [0.0, 0.0],
+            ),
+            Vertex::new(
+                [0.5, 0.5, -0.5],
+                [0.0, 0.0, 1.0],
+                [0.0, 1.0],
+            ),
+            Vertex::new(
+                [-0.5, 0.5, -0.5],
+                [1.0, 1.0, 1.0],
+                [1.0, 1.0],
+            )
         ];
 
-        let indices: Vec<u16> = vec![0, 1, 2, 2, 3, 0];
+        let indices: Vec<u16> = vec![0, 1, 2, 2, 3, 0, 4, 5, 6, 6, 7, 4];
 
         return (vertices, indices);
     }
@@ -529,11 +555,10 @@ impl App {
                 .viewports([viewport].iter().cloned())
                 .fragment_shader(fs.main_entry_point(), ())
                 .blend_alpha_blending()
-                .depth_clamp(false)
                 .polygon_mode_fill()
                 .line_width(1.0)
                 .cull_mode_back()
-                .front_face_clockwise()
+                .front_face_counter_clockwise()
                 .render_pass(Subpass::from(Arc::clone(render_pass), 0).unwrap())
                 .build(Arc::clone(device))
                 .expect("Could not create graphics pipeline"),
@@ -808,7 +833,7 @@ impl App {
             .wait(None)
             .expect("Transfer of application constant data failed");
 
-        let camera = Rc::new(RefCell::new(Camera::new([0.0, 0.0, -1.0], [0.0, 0.0, 0.0])));
+        let camera = Rc::new(RefCell::new(Camera::new([2.0, 2.0, 2.0], [0.0, 0.0, 0.0])));
 
         return App {
             rotation_start,
@@ -869,7 +894,7 @@ layout(binding = 0) uniform MVPUniformBufferObject {
     mat4 proj;
 } ubo;
 
-layout(location = 0) in vec2 position;
+layout(location = 0) in vec3 position;
 layout(location = 1) in vec3 color;
 layout(location = 2) in vec2 tex_coords;
 
@@ -877,7 +902,7 @@ layout(location = 0) out vec3 frag_color;
 layout(location = 1) out vec2 frag_tex_coords;
 
 void main() {
-    gl_Position = ubo.proj * ubo.view * ubo.model * vec4(position, 0.0, 1.0);
+    gl_Position = ubo.proj * ubo.view * ubo.model * vec4(position, 1.0);
     frag_color = color;
     frag_tex_coords = tex_coords;
 }
