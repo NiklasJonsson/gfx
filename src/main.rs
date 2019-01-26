@@ -5,6 +5,7 @@ extern crate num_derive;
 
 extern crate image;
 extern crate nalgebra_glm as glm;
+extern crate tobj;
 extern crate vulkano_shaders;
 extern crate vulkano_win;
 extern crate winit;
@@ -24,8 +25,8 @@ use vulkano::device::{Device, DeviceExtensions, Features, Queue};
 use vulkano::format::Format;
 use vulkano::framebuffer::{Framebuffer, FramebufferAbstract, RenderPassAbstract, Subpass};
 use vulkano::image::{
-    immutable::ImmutableImage, swapchain::SwapchainImage, Dimensions, ImageAccess, ImageUsage,
-    ImageViewAccess, attachment::AttachmentImage,
+    attachment::AttachmentImage, immutable::ImmutableImage, swapchain::SwapchainImage, Dimensions,
+    ImageAccess, ImageUsage, ImageViewAccess,
 };
 use vulkano::instance;
 use vulkano::instance::{Instance, InstanceExtensions, PhysicalDevice, QueueFamily};
@@ -46,6 +47,7 @@ use std::collections::HashSet;
 
 use std::fs::File;
 use std::io::BufReader;
+use std::path::Path;
 use std::prelude::*;
 
 use std::cell::RefCell;
@@ -67,7 +69,11 @@ struct Vertex {
 
 impl Vertex {
     fn new(position: [f32; 3], color: [f32; 3], tex_coords: [f32; 2]) -> Vertex {
-        Vertex{position, color, tex_coords}
+        Vertex {
+            position,
+            color,
+            tex_coords,
+        }
     }
 }
 
@@ -91,7 +97,6 @@ impl<F: GpuFuture> WaitableFuture for FenceSignalFuture<F> {
 }
 
 struct App {
-    rotation_start: Instant,
     events_loop: EventsLoop,
     vk_instance: Arc<Instance>,
     vk_surface: Arc<Surface<Window>>,
@@ -101,7 +106,7 @@ struct App {
     swapchain: Arc<Swapchain<Window>>,
     swapchain_images: Vec<Arc<SwapchainImage<Window>>>,
     vertex_buffer: Arc<BufferAccess + Send + Sync>,
-    index_buffer: Arc<TypedBufferAccess<Content = [u16]> + Send + Sync>,
+    index_buffer: Arc<TypedBufferAccess<Content = [u32]> + Send + Sync>,
     image_buffer: Arc<ImageViewAccess + Send + Sync>,
     sampler: Arc<Sampler>,
     mvp_ubo_buffers: Vec<Arc<CpuAccessibleBuffer<vs::ty::MVPUniformBufferObject>>>,
@@ -115,11 +120,7 @@ struct App {
 
 impl App {
     fn update_mvp(&mut self, idx: usize) {
-        let diff = Instant::now() - self.rotation_start;
-        let diff = diff.as_secs() as f32 + diff.subsec_millis() as f32 / 1000.0;
         let mut content = self.mvp_ubo_buffers[idx].write().unwrap();
-        content.model =
-            glm::rotate_z(&glm::Mat4::identity(), std::f32::consts::FRAC_PI_2 * diff).into();
         content.view = glm::look_at(
             self.camera.borrow().get_pos(),
             &glm::vec3(0.0, 0.0, 0.0),
@@ -189,7 +190,8 @@ impl App {
                 if let Event::WindowEvent {
                     event: window_event,
                     ..
-                } = event {
+                } = event
+                {
                     match window_event {
                         WindowEvent::CloseRequested => quit = true,
                         WindowEvent::KeyboardInput {
@@ -384,7 +386,9 @@ impl App {
         .expect("Failed to create swap chain");
     }
 
-    fn create_vertex_data() -> (Vec<Vertex>, Vec<u16>) {
+    /*
+
+    fn create_vertex_data() -> (Vec<Vertex>, Vec<u32>) {
         let vertices = vec![
             Vertex::new(
                 [-0.5, -0.5, 0.0],
@@ -428,7 +432,89 @@ impl App {
             )
         ];
 
-        let indices: Vec<u16> = vec![0, 1, 2, 2, 3, 0, 4, 5, 6, 6, 7, 4];
+        let indices: Vec<u32> = vec![0, 1, 2, 2, 3, 0, 4, 5, 6, 6, 7, 4];
+
+        return (vertices, indices);
+    }
+
+    */
+
+    fn debug_obj(path: &str) {
+        let data = tobj::load_obj(&Path::new(path));
+        assert!(data.is_ok());
+        let (models, materials) = data.unwrap();
+
+        println!("# of models: {}", models.len());
+        println!("# of materials: {}", materials.len());
+        for (i, m) in models.iter().enumerate() {
+            let mesh = &m.mesh;
+            println!("model[{}].name = \'{}\'", i, m.name);
+            println!("model[{}].mesh.material_id = {:?}", i, mesh.material_id);
+
+            println!("Size of model[{}].indices: {}", i, mesh.indices.len());
+            /*
+            for f in 0..mesh.indices.len() / 3 {
+                println!("    idx[{}] = {}, {}, {}.", f, mesh.indices[3 * f],
+                         mesh.indices[3 * f + 1], mesh.indices[3 * f + 2]);
+            }
+            */
+
+            // Normals and texture coordinates are also loaded, but not printed in this example
+            println!("model[{}].vertices: {}", i, mesh.positions.len() / 3);
+            assert!(mesh.positions.len() % 3 == 0);
+            /*
+            for v in 0..mesh.positions.len() / 3 {
+                println!("    v[{}] = ({}, {}, {})", v, mesh.positions[3 * v],
+                mesh.positions[3 * v + 1], mesh.positions[3 * v + 2]);
+            }
+            */
+
+            for (i, m) in materials.iter().enumerate() {
+                println!("material[{}].name = \'{}\'", i, m.name);
+                println!(
+                    "    material.Ka = ({}, {}, {})",
+                    m.ambient[0], m.ambient[1], m.ambient[2]
+                );
+                println!(
+                    "    material.Kd = ({}, {}, {})",
+                    m.diffuse[0], m.diffuse[1], m.diffuse[2]
+                );
+                println!(
+                    "    material.Ks = ({}, {}, {})",
+                    m.specular[0], m.specular[1], m.specular[2]
+                );
+                println!("    material.Ns = {}", m.shininess);
+                println!("    material.d = {}", m.dissolve);
+                println!("    material.map_Ka = {}", m.ambient_texture);
+                println!("    material.map_Kd = {}", m.diffuse_texture);
+                println!("    material.map_Ks = {}", m.specular_texture);
+                println!("    material.map_Ns = {}", m.normal_texture);
+                println!("    material.map_d = {}", m.dissolve_texture);
+                for (k, v) in &m.unknown_param {
+                    println!("    material.{} = {}", k, v);
+                }
+            }
+        }
+    }
+
+    fn load_obj(path: &str) -> (Vec<Vertex>, Vec<u32>) {
+        let data = tobj::load_obj(&Path::new(path)).unwrap();;
+        let tex_coords = data.0[0].mesh.texcoords.chunks_exact(2);
+        let vertices = data.0[0]
+            .mesh
+            .positions
+            .chunks_exact(3)
+            .zip(tex_coords)
+            .map(|(pos, tx_cs)| {
+                Vertex::new(
+                    [pos[0], pos[1], pos[2]],
+                    [1.0, 1.0, 1.0],
+                    [tx_cs[0], 1.0 - tx_cs[1]],
+                )
+            })
+            .collect::<Vec<_>>();
+
+        let indices = data.0[0].mesh.indices.to_owned();
 
         return (vertices, indices);
     }
@@ -436,7 +522,7 @@ impl App {
     fn load_image() -> Vec<u8> {
         // TODO: Try to use JPEGDecoder + BufReader for better error handling
         let image = image::load_from_memory_with_format(
-            include_bytes!("../textures/statue-texture.jpg"),
+            include_bytes!("../textures/chalet.jpg"),
             image::ImageFormat::JPEG,
         )
         .unwrap()
@@ -466,9 +552,9 @@ impl App {
 
     fn create_and_submit_index_buffer(
         queue: &Arc<Queue>,
-        index_data: Vec<u16>,
+        index_data: Vec<u32>,
     ) -> (
-        Arc<TypedBufferAccess<Content = [u16]> + Send + Sync>,
+        Arc<TypedBufferAccess<Content = [u32]> + Send + Sync>,
         CommandBufferExecFuture<NowFuture, AutoCommandBuffer>,
     ) {
         let (buf, fut) = ImmutableBuffer::from_iter(
@@ -493,8 +579,8 @@ impl App {
         let (buf, fut) = ImmutableImage::from_iter(
             owned_copy.into_iter(),
             Dimensions::Dim2d {
-                width: 1280,
-                height: 920,
+                width: 800,
+                height: 600,
             },
             Format::R8G8B8A8Srgb,
             Arc::clone(queue),
@@ -583,10 +669,12 @@ impl App {
         sc_images
             .iter()
             .map(|image| {
-                let depth_buffer = AttachmentImage::transient(Arc::clone(device),
+                let depth_buffer = AttachmentImage::transient(
+                    Arc::clone(device),
                     SwapchainImage::dimensions(&image),
                     render_pass.attachment_desc(1).unwrap().format, // Depth format
-                    ).unwrap();
+                )
+                .unwrap();
                 Arc::new(
                     Framebuffer::start(Arc::clone(&render_pass))
                         .add(Arc::clone(image))
@@ -664,7 +752,7 @@ impl App {
         device: &Arc<Device>,
         queue_family: QueueFamily,
         vertex_buffer: &Arc<BufferAccess + Send + Sync>,
-        index_buffer: &Arc<TypedBufferAccess<Content = [u16]> + Send + Sync>,
+        index_buffer: &Arc<TypedBufferAccess<Content = [u32]> + Send + Sync>,
         descriptor_sets: &[Arc<DescriptorSet + Send + Sync>],
         pipeline: &Arc<GraphicsPipelineAbstract + Send + Sync>,
         framebuffers: &[Arc<FramebufferAbstract + Send + Sync>],
@@ -707,7 +795,7 @@ impl App {
         images: &[Arc<SwapchainImage<Window>>],
         mvp_bufs: &[Arc<CpuAccessibleBuffer<vs::ty::MVPUniformBufferObject>>],
         vertex_buffer: &Arc<BufferAccess + Send + Sync>,
-        index_buffer: &Arc<TypedBufferAccess<Content = [u16]> + Send + Sync>,
+        index_buffer: &Arc<TypedBufferAccess<Content = [u32]> + Send + Sync>,
         image: &Arc<ImageViewAccess + Send + Sync>,
         sampler: &Arc<Sampler>,
         graphics_queue_family: QueueFamily,
@@ -786,7 +874,11 @@ impl App {
         let (vk_device, graphics_queue, presentation_queue) =
             Self::create_logical_device(physical_device, &vk_surface, &device_extensions);
 
+        /*
         let (vertex_data, index_data) = Self::create_vertex_data();
+        */
+        Self::debug_obj("models/chalet.obj");
+        let (vertex_data, index_data) = Self::load_obj("models/chalet.obj");
 
         // TODO: Use transfer queue here
         let (vertex_buffer, vertex_data_copied) =
@@ -841,7 +933,6 @@ impl App {
                 graphics_queue.family(),
             );
 
-        let rotation_start = Instant::now();
         let frame_completions = init_frame_completions(&vk_device, n_frames);
 
         data_copied
@@ -851,7 +942,6 @@ impl App {
         let camera = Rc::new(RefCell::new(Camera::new([2.0, 2.0, 2.0], [0.0, 0.0, 0.0])));
 
         return App {
-            rotation_start,
             events_loop,
             vk_instance,
             vk_surface,
