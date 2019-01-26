@@ -25,7 +25,7 @@ use vulkano::format::Format;
 use vulkano::framebuffer::{Framebuffer, FramebufferAbstract, RenderPassAbstract, Subpass};
 use vulkano::image::{
     immutable::ImmutableImage, swapchain::SwapchainImage, Dimensions, ImageAccess, ImageUsage,
-    ImageViewAccess,
+    ImageViewAccess, attachment::AttachmentImage,
 };
 use vulkano::instance;
 use vulkano::instance::{Instance, InstanceExtensions, PhysicalDevice, QueueFamily};
@@ -515,11 +515,18 @@ impl App {
                     store: Store,
                     format: format,
                     samples: 1,
+                },
+                depth: {
+                    load: Clear,
+                    store: DontCare,
+                    // TODO: Choose this based on availability
+                    format: Format::D32Sfloat,
+                    samples: 1,
                 }
             },
             pass: {
                 color: [color],
-                depth_stencil: {}
+                depth_stencil: {depth}
             })
             .unwrap(),
         )
@@ -553,6 +560,7 @@ impl App {
                 // Whether to support special indices in in the vertex buffer to split triangles
                 .primitive_restart(false)
                 .viewports([viewport].iter().cloned())
+                .depth_stencil_simple_depth()
                 .fragment_shader(fs.main_entry_point(), ())
                 .blend_alpha_blending()
                 .polygon_mode_fill()
@@ -568,15 +576,22 @@ impl App {
     }
 
     fn create_framebuffers(
+        device: &Arc<Device>,
         render_pass: &Arc<RenderPassAbstract + Send + Sync>,
         sc_images: &[Arc<SwapchainImage<Window>>],
     ) -> Vec<Arc<FramebufferAbstract + Send + Sync>> {
         sc_images
             .iter()
             .map(|image| {
+                let depth_buffer = AttachmentImage::transient(Arc::clone(device),
+                    SwapchainImage::dimensions(&image),
+                    render_pass.attachment_desc(1).unwrap().format, // Depth format
+                    ).unwrap();
                 Arc::new(
                     Framebuffer::start(Arc::clone(&render_pass))
                         .add(Arc::clone(image))
+                        .unwrap()
+                        .add(depth_buffer)
                         .unwrap()
                         .build()
                         .unwrap(),
@@ -658,7 +673,7 @@ impl App {
             .iter()
             .enumerate()
             .map(|(i, fb)| {
-                let clear_color = vec![[0.0, 0.0, 0.0, 1.0].into()];
+                let clear_color = vec![[0.0, 0.0, 0.0, 1.0].into(), 1.0f32.into()];
 
                 Arc::new(
                     AutoCommandBufferBuilder::primary_simultaneous_use(
@@ -705,7 +720,7 @@ impl App {
         let render_pass = Self::create_render_pass(device, swapchain.format());
         let g_pipeline =
             Self::create_graphics_pipeline(device, &render_pass, swapchain.dimensions());
-        let framebuffers = Self::create_framebuffers(&render_pass, images);
+        let framebuffers = Self::create_framebuffers(device, &render_pass, images);
 
         let dsets = Self::create_dsets(&g_pipeline, mvp_bufs, image, sampler);
 
