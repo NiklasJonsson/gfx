@@ -80,7 +80,7 @@ impl Vertex {
 impl_vertex!(Vertex, position, color, tex_coords);
 
 // Extra trait specialization for GpuFuture, intended for storing NowFuture or FenceSignalFuture
-trait WaitableFuture {
+trait WaitableFuture : GpuFuture {
     fn wait_for(&self, timeout: Option<Duration>) -> Result<(), FlushError>;
 }
 
