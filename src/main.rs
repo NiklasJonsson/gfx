@@ -3,6 +3,9 @@ extern crate vulkano;
 #[macro_use]
 extern crate num_derive;
 
+extern crate log;
+extern crate env_logger;
+
 extern crate image;
 extern crate nalgebra_glm as glm;
 extern crate tobj;
@@ -11,6 +14,8 @@ extern crate vulkano_win;
 extern crate winit;
 
 use image::ImageDecoder;
+
+use log::{info};
 
 use vulkano::buffer::{
     BufferAccess, BufferUsage, CpuAccessibleBuffer, ImmutableBuffer, TypedBufferAccess,
@@ -221,6 +226,35 @@ impl App {
         self.main_loop();
     }
 
+    fn choose_validation_layers() -> Vec<String> {
+        info!("Choosing vulkan validation layers.");
+
+        let requested = vec!["VK_LAYER_LUNARG_standard_validation", "VK_LAYER_LUNARG_monitor"];
+
+        info!("Requested layers:");
+        for req in &requested {
+            info!("\t{}", req);
+        }
+
+        info!("Available layers:");
+        for avail in instance::layers_list().expect("Can't query validation layers") {
+            info!("\t{}", avail.name());
+        }
+
+        let chosen = instance::layers_list()
+            .unwrap()
+            .map(|l| String::from(l.name()))
+            .filter(|name| requested.iter().find(|&req| req == name).is_some())
+            .collect::<Vec<String>>();
+
+        info!("Chosen layers:");
+        for choice in &chosen {
+            info!("\t{}", choice);
+        }
+
+        return chosen;
+    }
+
     fn setup_vk_instance() -> Arc<Instance> {
         let available_extensions =
             InstanceExtensions::supported_by_core().expect("can't get supported extensions");
@@ -230,15 +264,10 @@ impl App {
             println!("Can't create a window, not all extensions supported.");
         }
 
-        if instance::layers_list().unwrap().len() == 0 {
-            println!("No layers!");
-        }
+        let layers = Self::choose_validation_layers();
 
-        for layer in instance::layers_list().unwrap() {
-            println!("Layer: {}", layer.name());
-        }
 
-        let vk_instance = Instance::new(None, &required_extensions, None)
+        let vk_instance = Instance::new(None, &required_extensions, layers.iter().map(|s| s.as_str()))
             .expect("Could not create vulkan instance");
 
         return vk_instance;
@@ -966,6 +995,7 @@ impl App {
 }
 
 fn main() {
+    env_logger::init();
     let mut app = App::new();
     app.run();
 }
