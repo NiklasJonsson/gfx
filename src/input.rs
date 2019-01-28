@@ -1,6 +1,6 @@
 use std::collections::HashMap;
 use winit::{Event, VirtualKeyCode, WindowEvent};
-
+use log::{debug, info};
 // Based primarily on https://www.gamedev.net/articles/programming/general-and-gameplay-programming/designing-a-robust-input-handling-system-for-games-r2975
 //
 // Basic idea:
@@ -33,6 +33,12 @@ impl InputContext {
     }
 }
 
+impl std::fmt::Display for InputContext {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter) -> std::fmt::Result {
+        write!(formatter, "{}: {}", self.name, self.description)
+    }
+}
+
 pub struct MappedInput {
     pub actions: Vec<Action>,
 }
@@ -56,14 +62,17 @@ impl InputManager {
     fn get_next_context_id(&mut self) -> InputContextId {
         let id = self.next_context_id;
         self.next_context_id += 1;
+        debug!("InputManager: Generated new InputContextId {}", id);
         return id;
     }
 
     pub fn add_callback<CB: FnMut(&MappedInput) + 'static>(&mut self, callback: CB) {
+        debug!("InputManager: Added new callback");
         self.callbacks.push(Box::new(callback));
     }
 
     pub fn register_input_context(&mut self, input_ctx: InputContext) -> InputContextId {
+        debug!("InputManager: Registered new InputContext: {}", input_ctx);
         let id = self.get_next_context_id();
         self.contexts.push((id, input_ctx));
         return id;

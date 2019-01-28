@@ -13,7 +13,7 @@ extern crate vulkano_shaders;
 extern crate vulkano_win;
 extern crate winit;
 
-use image::ImageDecoder;
+use image::{ImageDecoder, jpeg::JPEGDecoder, RgbaImage};
 
 use log::{info};
 
@@ -62,8 +62,8 @@ use std::time::{Duration, Instant};
 
 mod camera;
 mod input;
-use crate::camera::{Camera, CameraController};
-use crate::input::InputManager;
+use self::camera::{Camera, CameraController};
+use self::input::InputManager;
 
 #[derive(Copy, Clone)]
 struct Vertex {
@@ -226,33 +226,12 @@ impl App {
         self.main_loop();
     }
 
-    fn choose_validation_layers() -> Vec<String> {
-        info!("Choosing vulkan validation layers.");
-
-        let requested = vec!["VK_LAYER_LUNARG_standard_validation", "VK_LAYER_LUNARG_monitor"];
-
-        info!("Requested layers:");
-        for req in &requested {
-            info!("\t{}", req);
-        }
-
+    fn print_validation_layers() {
+        info!("Available vulkan validation layers:");
         info!("Available layers:");
         for avail in instance::layers_list().expect("Can't query validation layers") {
             info!("\t{}", avail.name());
         }
-
-        let chosen = instance::layers_list()
-            .unwrap()
-            .map(|l| String::from(l.name()))
-            .filter(|name| requested.iter().find(|&req| req == name).is_some())
-            .collect::<Vec<String>>();
-
-        info!("Chosen layers:");
-        for choice in &chosen {
-            info!("\t{}", choice);
-        }
-
-        return chosen;
     }
 
     fn setup_vk_instance() -> Arc<Instance> {
@@ -264,10 +243,9 @@ impl App {
             println!("Can't create a window, not all extensions supported.");
         }
 
-        let layers = Self::choose_validation_layers();
+        Self::print_validation_layers();
 
-
-        let vk_instance = Instance::new(None, &required_extensions, layers.iter().map(|s| s.as_str()))
+        let vk_instance = Instance::new(None, &required_extensions, None)
             .expect("Could not create vulkan instance");
 
         return vk_instance;
@@ -298,7 +276,7 @@ impl App {
 
                 return required_supported;
             })
-            .expect("No device available");
+            .expect("No suitable device available");
 
         return ph_dev;
     }
@@ -548,17 +526,15 @@ impl App {
         return (vertices, indices);
     }
 
-    fn load_image() -> Vec<u8> {
-        // TODO: Try to use JPEGDecoder + BufReader for better error handling
-        let image = image::load_from_memory_with_format(
-            include_bytes!("../textures/chalet.jpg"),
-            image::ImageFormat::JPEG,
-        )
-        .unwrap()
+    fn load_image(path: &str) -> image::RgbaImage {
+        info!("Trying to load image from {}", path);
+        let image = image::open(path)
+        .expect("Unable to load image")
         .to_rgba();
 
-        let data = image.into_raw().clone();
-        return data;
+        info!("Loaded RGBA image with dimensions: {:?}", image.dimensions());
+
+        return image;
     }
 
     // TODO: Try to refactor here
@@ -598,19 +574,16 @@ impl App {
 
     fn create_and_submit_texture_image(
         queue: &Arc<Queue>,
-        image: &[u8],
+        image: RgbaImage,
     ) -> (
         Arc<ImageViewAccess + Send + Sync>,
         CommandBufferExecFuture<NowFuture, AutoCommandBuffer>,
     ) {
-        let owned_copy = image.to_owned();
-        // Destruct and combine again to more easilyinfer types
+        let width = image.width();
+        let height = image.height();
         let (buf, fut) = ImmutableImage::from_iter(
-            owned_copy.into_iter(),
-            Dimensions::Dim2d {
-                width: 800,
-                height: 600,
-            },
+            image.into_raw().into_iter(),
+            Dimensions::Dim2d {width, height},
             Format::R8G8B8A8Srgb,
             Arc::clone(queue),
         )
@@ -675,12 +648,13 @@ impl App {
                 // Whether to support special indices in in the vertex buffer to split triangles
                 .primitive_restart(false)
                 .viewports([viewport].iter().cloned())
-                .depth_stencil_simple_depth()
-                .fragment_shader(fs.main_entry_point(), ())
-                .blend_alpha_blending()
+                .depth_clamp(false)
                 .polygon_mode_fill()
                 .line_width(1.0)
                 .cull_mode_back()
+                .depth_stencil_simple_depth()
+                .fragment_shader(fs.main_entry_point(), ())
+                .blend_pass_through()
                 .front_face_counter_clockwise()
                 .render_pass(Subpass::from(Arc::clone(render_pass), 0).unwrap())
                 .build(Arc::clone(device))
@@ -701,6 +675,7 @@ impl App {
                 let depth_buffer = AttachmentImage::transient(
                     Arc::clone(device),
                     SwapchainImage::dimensions(&image),
+                    //TODO: This is hacky
                     render_pass.attachment_desc(1).unwrap().format, // Depth format
                 )
                 .unwrap();
@@ -919,9 +894,9 @@ impl App {
             .then_signal_fence_and_flush()
             .expect("Unable to signal fence and flush vertex + index data copy command");
 
-        let image_data = Self::load_image();
+        let image = Self::load_image("textures/chalet.jpg");
         let (image_buffer, texture_data_copied) =
-            Self::create_and_submit_texture_image(&graphics_queue, image_data.as_slice());
+            Self::create_and_submit_texture_image(&graphics_queue, image);
 
         let data_copied = data_copied
             .join(texture_data_copied)
