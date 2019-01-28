@@ -1,5 +1,5 @@
 [package]
-name = "vulkan-experiments"
+name = "vulkan-renderer"
 version = "0.1.0"
 authors = ["Niklas Jonsson <niklasandersjonsson@gmail.com>"]
 edition = "2018"
