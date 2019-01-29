@@ -2,6 +2,7 @@
 extern crate vulkano;
 #[macro_use]
 extern crate num_derive;
+extern crate vk_sys;
 
 extern crate log;
 extern crate env_logger;
@@ -228,7 +229,6 @@ impl App {
 
     fn print_validation_layers() {
         info!("Available vulkan validation layers:");
-        info!("Available layers:");
         for avail in instance::layers_list().expect("Can't query validation layers") {
             info!("\t{}", avail.name());
         }
@@ -505,6 +505,8 @@ impl App {
     }
 
     fn load_obj(path: &str) -> (Vec<Vertex>, Vec<u32>) {
+        // TODO: "Vertex dedup" instead of storing duplicates of
+        // vertices, we should re-use old ones if they are identical.
         let data = tobj::load_obj(&Path::new(path)).unwrap();;
         let tex_coords = data.0[0].mesh.texcoords.chunks_exact(2);
         let vertices = data.0[0]
@@ -579,6 +581,7 @@ impl App {
         Arc<ImageViewAccess + Send + Sync>,
         CommandBufferExecFuture<NowFuture, AutoCommandBuffer>,
     ) {
+        // TODO: Support mip maps
         let width = image.width();
         let height = image.height();
         let (buf, fut) = ImmutableImage::from_iter(
@@ -866,6 +869,33 @@ impl App {
         self.command_buffers = cmd_bufs;
     }
 
+    fn query_max_sample_count(physical_device: &PhysicalDevice) -> u32 {
+        // 
+        let color_samples = physical_device.limits().framebuffer_color_sample_counts();
+        let depth_samples = physical_device.limits().framebuffer_depth_sample_counts();
+
+        info!("Physical device framebuffer_color_sample_counts: {}, framebuffer_depth_sample_counts: {}", color_samples, depth_samples);
+
+        // TODO: Clean this up (port to vulkano?)
+        let bits = vec![vk_sys::SAMPLE_COUNT_1_BIT,
+                        vk_sys::SAMPLE_COUNT_2_BIT,
+                        vk_sys::SAMPLE_COUNT_4_BIT,
+                        vk_sys::SAMPLE_COUNT_8_BIT,
+                        vk_sys::SAMPLE_COUNT_16_BIT,
+                        vk_sys::SAMPLE_COUNT_32_BIT,
+                        vk_sys::SAMPLE_COUNT_64_BIT,
+        ];
+
+        for (idx, bit) in bits.iter().enumerate().rev() {
+            if (color_samples & bit != 0) && (depth_samples & bit != 0) {
+                info!("Max combined color + depth sample count: {}", 1 << idx);
+                return 1 << idx;
+            }
+        }
+
+        return 1;
+    }
+
     fn new() -> Self {
         let vk_instance = Self::setup_vk_instance();
         let (events_loop, vk_surface) = Self::setup_surface(&vk_instance);
@@ -875,6 +905,8 @@ impl App {
         };
 
         let physical_device = Self::pick_physical_device(&vk_instance, &device_extensions);
+
+        let multi_sample_count = Self::query_max_sample_count(&physical_device);
         let (vk_device, graphics_queue, presentation_queue) =
             Self::create_logical_device(physical_device, &vk_surface, &device_extensions);
 
