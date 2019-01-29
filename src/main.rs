@@ -707,6 +707,7 @@ impl App {
             view: glm::look_at(
                 &glm::vec3(2.0, 2.0, 2.0),
                 &glm::vec3(0.0, 0.0, 0.0),
+                // FIXME: Z-axis is up since tutorial example has edited the chalet model
                 &glm::vec3(0.0, 0.0, 1.0),
             )
             .into(),
