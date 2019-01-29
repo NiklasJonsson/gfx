@@ -751,6 +751,23 @@ dependencies = [
 ]
 
 [[package]]
+name = "ramneryd"
+version = "0.1.0"
+dependencies = [
+ "env_logger 0.6.0 (registry+https://github.com/rust-lang/crates.io-index)",
+ "image 0.21.0 (registry+https://github.com/rust-lang/crates.io-index)",
+ "log 0.4.6 (registry+https://github.com/rust-lang/crates.io-index)",
+ "nalgebra-glm 0.2.1 (registry+https://github.com/rust-lang/crates.io-index)",
+ "num-derive 0.2.3 (registry+https://github.com/rust-lang/crates.io-index)",
+ "num-traits 0.2.6 (registry+https://github.com/rust-lang/crates.io-index)",
+ "tobj 0.1.6 (registry+https://github.com/rust-lang/crates.io-index)",
+ "vulkano 0.11.1 (registry+https://github.com/rust-lang/crates.io-index)",
+ "vulkano-shaders 0.11.1 (registry+https://github.com/rust-lang/crates.io-index)",
+ "vulkano-win 0.11.1 (registry+https://github.com/rust-lang/crates.io-index)",
+ "winit 0.18.0 (registry+https://github.com/rust-lang/crates.io-index)",
+]
+
+[[package]]
 name = "rand"
 version = "0.5.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1094,23 +1111,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 name = "void"
 version = "1.0.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-
-[[package]]
-name = "vulkan-renderer"
-version = "0.1.0"
-dependencies = [
- "env_logger 0.6.0 (registry+https://github.com/rust-lang/crates.io-index)",
- "image 0.21.0 (registry+https://github.com/rust-lang/crates.io-index)",
- "log 0.4.6 (registry+https://github.com/rust-lang/crates.io-index)",
- "nalgebra-glm 0.2.1 (registry+https://github.com/rust-lang/crates.io-index)",
- "num-derive 0.2.3 (registry+https://github.com/rust-lang/crates.io-index)",
- "num-traits 0.2.6 (registry+https://github.com/rust-lang/crates.io-index)",
- "tobj 0.1.6 (registry+https://github.com/rust-lang/crates.io-index)",
- "vulkano 0.11.1 (registry+https://github.com/rust-lang/crates.io-index)",
- "vulkano-shaders 0.11.1 (registry+https://github.com/rust-lang/crates.io-index)",
- "vulkano-win 0.11.1 (registry+https://github.com/rust-lang/crates.io-index)",
- "winit 0.18.0 (registry+https://github.com/rust-lang/crates.io-index)",
-]
 
 [[package]]
 name = "vulkano"

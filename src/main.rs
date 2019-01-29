@@ -129,7 +129,7 @@ impl App {
         content.view = glm::look_at(
             self.camera.borrow().get_pos(),
             &glm::vec3(0.0, 0.0, 0.0),
-            self.camera.borrow().get_up(),
+            &glm::vec3(0.0, 0.0, 1.0)
         )
         .into();
     }
@@ -693,7 +693,7 @@ impl App {
     }
 
     fn create_mvp_ubo(aspect_ratio: f32) -> vs::ty::MVPUniformBufferObject {
-        let mut proj = glm::perspective(aspect_ratio, std::f32::consts::FRAC_PI_2, 0.1, 10.0);
+        let mut proj = glm::perspective(aspect_ratio, std::f32::consts::FRAC_PI_4, 0.1, 10.0);
 
         // glm::perspective is based on opengl left-handed coordinate system, vulkan has the y-axis
         // inverted (right-handed upside-down).
@@ -702,9 +702,9 @@ impl App {
         let mvp_ubo = vs::ty::MVPUniformBufferObject {
             model: glm::Mat4::identity().into(),
             view: glm::look_at(
-                &glm::vec3(0.0, 0.0, -1.0),
+                &glm::vec3(2.0, 2.0, 2.0),
                 &glm::vec3(0.0, 0.0, 0.0),
-                &glm::vec3(0.0, 1.0, 0.0),
+                &glm::vec3(0.0, 0.0, 1.0),
             )
             .into(),
             proj: proj.into(),
