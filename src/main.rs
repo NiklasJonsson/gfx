@@ -16,7 +16,7 @@ extern crate winit;
 
 use image::{ImageDecoder, jpeg::JPEGDecoder, RgbaImage};
 
-use log::{info};
+use log::{info, warn};
 
 use vulkano::buffer::{
     BufferAccess, BufferUsage, CpuAccessibleBuffer, ImmutableBuffer, TypedBufferAccess,
@@ -240,7 +240,8 @@ impl App {
         let required_extensions = vulkano_win::required_extensions();
 
         if available_extensions.intersection(&required_extensions) != required_extensions {
-            println!("Can't create a window, not all extensions supported.");
+            log::error!("Can't create a window, not all extensions supported.");
+            unreachable!();
         }
 
         Self::print_validation_layers();
@@ -334,8 +335,9 @@ impl App {
             .capabilities(physical_device)
             .expect("Can't fetch surface capabilites");
 
+        info!("Surface capabilities, supported formats:");
         for f in &capabilities.supported_formats {
-            println!("{:?}", f);
+            info!("{:?}", f);
         }
 
         let format = capabilities
@@ -446,70 +448,70 @@ impl App {
 
     */
 
-    fn debug_obj(path: &str) {
-        let data = tobj::load_obj(&Path::new(path));
-        assert!(data.is_ok());
-        let (models, materials) = data.unwrap();
-
-        println!("# of models: {}", models.len());
-        println!("# of materials: {}", materials.len());
+    fn debug_obj(models: &[tobj::Model], materials: &[tobj::Material]) {
         for (i, m) in models.iter().enumerate() {
             let mesh = &m.mesh;
-            println!("model[{}].name = \'{}\'", i, m.name);
-            println!("model[{}].mesh.material_id = {:?}", i, mesh.material_id);
+            log::debug!("model[{}].name = \'{}\'", i, m.name);
+            log::debug!("model[{}].mesh.material_id = {:?}", i, mesh.material_id);
 
-            println!("Size of model[{}].indices: {}", i, mesh.indices.len());
+            log::debug!("Size of model[{}].indices: {}", i, mesh.indices.len());
             /*
             for f in 0..mesh.indices.len() / 3 {
-                println!("    idx[{}] = {}, {}, {}.", f, mesh.indices[3 * f],
+                log::debug!("    idx[{}] = {}, {}, {}.", f, mesh.indices[3 * f],
                          mesh.indices[3 * f + 1], mesh.indices[3 * f + 2]);
             }
             */
 
             // Normals and texture coordinates are also loaded, but not printed in this example
-            println!("model[{}].vertices: {}", i, mesh.positions.len() / 3);
+            log::debug!("model[{}].vertices: {}", i, mesh.positions.len() / 3);
             assert!(mesh.positions.len() % 3 == 0);
             /*
             for v in 0..mesh.positions.len() / 3 {
-                println!("    v[{}] = ({}, {}, {})", v, mesh.positions[3 * v],
+                log::debug!("    v[{}] = ({}, {}, {})", v, mesh.positions[3 * v],
                 mesh.positions[3 * v + 1], mesh.positions[3 * v + 2]);
             }
             */
 
             for (i, m) in materials.iter().enumerate() {
-                println!("material[{}].name = \'{}\'", i, m.name);
-                println!(
+                log::debug!("material[{}].name = \'{}\'", i, m.name);
+                log::debug!(
                     "    material.Ka = ({}, {}, {})",
                     m.ambient[0], m.ambient[1], m.ambient[2]
                 );
-                println!(
+                log::debug!(
                     "    material.Kd = ({}, {}, {})",
                     m.diffuse[0], m.diffuse[1], m.diffuse[2]
                 );
-                println!(
+                log::debug!(
                     "    material.Ks = ({}, {}, {})",
                     m.specular[0], m.specular[1], m.specular[2]
                 );
-                println!("    material.Ns = {}", m.shininess);
-                println!("    material.d = {}", m.dissolve);
-                println!("    material.map_Ka = {}", m.ambient_texture);
-                println!("    material.map_Kd = {}", m.diffuse_texture);
-                println!("    material.map_Ks = {}", m.specular_texture);
-                println!("    material.map_Ns = {}", m.normal_texture);
-                println!("    material.map_d = {}", m.dissolve_texture);
+                log::debug!("    material.Ns = {}", m.shininess);
+                log::debug!("    material.d = {}", m.dissolve);
+                log::debug!("    material.map_Ka = {}", m.ambient_texture);
+                log::debug!("    material.map_Kd = {}", m.diffuse_texture);
+                log::debug!("    material.map_Ks = {}", m.specular_texture);
+                log::debug!("    material.map_Ns = {}", m.normal_texture);
+                log::debug!("    material.map_d = {}", m.dissolve_texture);
                 for (k, v) in &m.unknown_param {
-                    println!("    material.{} = {}", k, v);
+                    log::debug!("    material.{} = {}", k, v);
                 }
             }
         }
     }
 
     fn load_obj(path: &str) -> (Vec<Vertex>, Vec<u32>) {
+        info!("Loading models from {}", path);
         // TODO: "Vertex dedup" instead of storing duplicates of
         // vertices, we should re-use old ones if they are identical.
-        let data = tobj::load_obj(&Path::new(path)).unwrap();;
-        let tex_coords = data.0[0].mesh.texcoords.chunks_exact(2);
-        let vertices = data.0[0]
+
+        let (models, materials) = tobj::load_obj(&Path::new(path)).unwrap();
+        info!("Found {} models and {} materials", models.len(), materials.len());
+        warn!("Ignoring materials and models other than model[0]");
+        Self::debug_obj(models.as_slice(), materials.as_slice());
+
+        let tex_coords = models[0].mesh.texcoords.chunks_exact(2);
+        let vertices = models[0]
             .mesh
             .positions
             .chunks_exact(3)
@@ -523,7 +525,7 @@ impl App {
             })
             .collect::<Vec<_>>();
 
-        let indices = data.0[0].mesh.indices.to_owned();
+        let indices = models[0].mesh.indices.to_owned();
 
         return (vertices, indices);
     }
@@ -871,11 +873,11 @@ impl App {
     }
 
     fn query_max_sample_count(physical_device: &PhysicalDevice) -> u32 {
-        // 
         let color_samples = physical_device.limits().framebuffer_color_sample_counts();
         let depth_samples = physical_device.limits().framebuffer_depth_sample_counts();
 
-        info!("Physical device framebuffer_color_sample_counts: {}, framebuffer_depth_sample_counts: {}", color_samples, depth_samples);
+        info!("Physical device, framebuffer_color_sample_counts: {}", color_samples);
+        info!("Physical device, framebuffer_depth_sample_counts: {}", depth_samples);
 
         // TODO: Clean this up (port to vulkano?)
         let bits = vec![vk_sys::SAMPLE_COUNT_1_BIT,
@@ -907,14 +909,13 @@ impl App {
 
         let physical_device = Self::pick_physical_device(&vk_instance, &device_extensions);
 
-        let multi_sample_count = Self::query_max_sample_count(&physical_device);
+        let multisample_count = Self::query_max_sample_count(&physical_device);
         let (vk_device, graphics_queue, presentation_queue) =
             Self::create_logical_device(physical_device, &vk_surface, &device_extensions);
 
         /*
         let (vertex_data, index_data) = Self::create_vertex_data();
         */
-        Self::debug_obj("models/chalet.obj");
         let (vertex_data, index_data) = Self::load_obj("models/chalet.obj");
 
         // TODO: Use transfer queue here
