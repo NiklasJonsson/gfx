@@ -4,8 +4,8 @@ extern crate vulkano;
 extern crate num_derive;
 extern crate vk_sys;
 
-extern crate log;
 extern crate env_logger;
+extern crate log;
 
 extern crate image;
 extern crate nalgebra_glm as glm;
@@ -14,7 +14,7 @@ extern crate vulkano_shaders;
 extern crate vulkano_win;
 extern crate winit;
 
-use image::{ImageDecoder, jpeg::JPEGDecoder, RgbaImage};
+use image::{jpeg::JPEGDecoder, ImageDecoder, RgbaImage};
 
 use log::{info, warn};
 
@@ -86,7 +86,7 @@ impl Vertex {
 impl_vertex!(Vertex, position, color, tex_coords);
 
 // Extra trait specialization for GpuFuture, intended for storing NowFuture or FenceSignalFuture
-trait WaitableFuture : GpuFuture {
+trait WaitableFuture: GpuFuture {
     fn wait_for(&self, timeout: Option<Duration>) -> Result<(), FlushError>;
 }
 
@@ -122,6 +122,7 @@ struct App {
     command_buffers: Vec<Arc<AutoCommandBuffer>>,
     frame_completions: Vec<Box<WaitableFuture>>,
     camera: Rc<RefCell<Camera>>,
+    multisample_count: u32,
 }
 
 impl App {
@@ -130,7 +131,7 @@ impl App {
         content.view = glm::look_at(
             self.camera.borrow().get_pos(),
             &glm::vec3(0.0, 0.0, 0.0),
-            &glm::vec3(0.0, 0.0, 1.0)
+            &glm::vec3(0.0, 0.0, 1.0),
         )
         .into();
     }
@@ -395,59 +396,6 @@ impl App {
         .expect("Failed to create swap chain");
     }
 
-    /*
-
-    fn create_vertex_data() -> (Vec<Vertex>, Vec<u32>) {
-        let vertices = vec![
-            Vertex::new(
-                [-0.5, -0.5, 0.0],
-                [1.0, 0.0, 0.0],
-                [1.0, 0.0],
-            ),
-            Vertex::new(
-                [0.5, -0.5, 0.0],
-                [0.0, 1.0, 0.0],
-                [0.0, 0.0],
-            ),
-            Vertex::new(
-                [0.5, 0.5, 0.0],
-                [0.0, 0.0, 1.0],
-                [0.0, 1.0],
-            ),
-            Vertex::new(
-                [-0.5, 0.5, 0.0],
-                [1.0, 1.0, 1.0],
-                [1.0, 1.0],
-            ),
-            Vertex::new(
-                [-0.5, -0.5, -0.5],
-                [1.0, 0.0, 0.0],
-                [1.0, 0.0],
-            ),
-            Vertex::new(
-                [0.5, -0.5, -0.5],
-                [0.0, 1.0, 0.0],
-                [0.0, 0.0],
-            ),
-            Vertex::new(
-                [0.5, 0.5, -0.5],
-                [0.0, 0.0, 1.0],
-                [0.0, 1.0],
-            ),
-            Vertex::new(
-                [-0.5, 0.5, -0.5],
-                [1.0, 1.0, 1.0],
-                [1.0, 1.0],
-            )
-        ];
-
-        let indices: Vec<u32> = vec![0, 1, 2, 2, 3, 0, 4, 5, 6, 6, 7, 4];
-
-        return (vertices, indices);
-    }
-
-    */
-
     fn debug_obj(models: &[tobj::Model], materials: &[tobj::Material]) {
         for (i, m) in models.iter().enumerate() {
             let mesh = &m.mesh;
@@ -476,15 +424,21 @@ impl App {
                 log::debug!("material[{}].name = \'{}\'", i, m.name);
                 log::debug!(
                     "    material.Ka = ({}, {}, {})",
-                    m.ambient[0], m.ambient[1], m.ambient[2]
+                    m.ambient[0],
+                    m.ambient[1],
+                    m.ambient[2]
                 );
                 log::debug!(
                     "    material.Kd = ({}, {}, {})",
-                    m.diffuse[0], m.diffuse[1], m.diffuse[2]
+                    m.diffuse[0],
+                    m.diffuse[1],
+                    m.diffuse[2]
                 );
                 log::debug!(
                     "    material.Ks = ({}, {}, {})",
-                    m.specular[0], m.specular[1], m.specular[2]
+                    m.specular[0],
+                    m.specular[1],
+                    m.specular[2]
                 );
                 log::debug!("    material.Ns = {}", m.shininess);
                 log::debug!("    material.d = {}", m.dissolve);
@@ -506,7 +460,11 @@ impl App {
         // vertices, we should re-use old ones if they are identical.
 
         let (models, materials) = tobj::load_obj(&Path::new(path)).unwrap();
-        info!("Found {} models and {} materials", models.len(), materials.len());
+        info!(
+            "Found {} models and {} materials",
+            models.len(),
+            materials.len()
+        );
         warn!("Ignoring materials and models other than model[0]");
         Self::debug_obj(models.as_slice(), materials.as_slice());
 
@@ -532,11 +490,12 @@ impl App {
 
     fn load_image(path: &str) -> image::RgbaImage {
         info!("Trying to load image from {}", path);
-        let image = image::open(path)
-        .expect("Unable to load image")
-        .to_rgba();
+        let image = image::open(path).expect("Unable to load image").to_rgba();
 
-        info!("Loaded RGBA image with dimensions: {:?}", image.dimensions());
+        info!(
+            "Loaded RGBA image with dimensions: {:?}",
+            image.dimensions()
+        );
 
         return image;
     }
@@ -588,7 +547,7 @@ impl App {
         let height = image.height();
         let (buf, fut) = ImmutableImage::from_iter(
             image.into_raw().into_iter(),
-            Dimensions::Dim2d {width, height},
+            Dimensions::Dim2d { width, height },
             Format::R8G8B8A8Srgb,
             Arc::clone(queue),
         )
@@ -598,28 +557,37 @@ impl App {
     }
     fn create_render_pass(
         device: &Arc<Device>,
-        format: Format,
+        color_format: Format,
+        depth_format: Format,
+        multisample_count: u32,
     ) -> Arc<RenderPassAbstract + Send + Sync> {
+        // TODO: Choose this based on availability
         Arc::new(
             single_pass_renderpass!(Arc::clone(device),
             attachments: {
-                color: {
+                msaa_color: {
                     load: Clear,
+                    store: DontCare,
+                    format: color_format,
+                    samples: multisample_count,
+                },
+                color: {
+                    load: DontCare,
                     store: Store,
-                    format: format,
+                    format: color_format,
                     samples: 1,
                 },
                 depth: {
                     load: Clear,
                     store: DontCare,
-                    // TODO: Choose this based on availability
-                    format: Format::D32Sfloat,
-                    samples: 1,
+                    format: depth_format,
+                    samples: multisample_count,
                 }
             },
             pass: {
-                color: [color],
-                depth_stencil: {depth}
+                color: [msaa_color],
+                depth_stencil: {depth},
+                resolve: [color],
             })
             .unwrap(),
         )
@@ -673,19 +641,33 @@ impl App {
         device: &Arc<Device>,
         render_pass: &Arc<RenderPassAbstract + Send + Sync>,
         sc_images: &[Arc<SwapchainImage<Window>>],
+        multisample_count: u32,
+        color_format: Format,
+        depth_format: Format,
     ) -> Vec<Arc<FramebufferAbstract + Send + Sync>> {
         sc_images
             .iter()
             .map(|image| {
-                let depth_buffer = AttachmentImage::transient(
+                let dims = SwapchainImage::dimensions(&image);
+                let depth_buffer = AttachmentImage::transient_multisampled(
                     Arc::clone(device),
-                    SwapchainImage::dimensions(&image),
-                    //TODO: This is hacky
-                    render_pass.attachment_desc(1).unwrap().format, // Depth format
+                    dims,
+                    multisample_count,
+                    depth_format,
                 )
                 .unwrap();
+                let multisample_image = AttachmentImage::transient_multisampled(
+                    Arc::clone(device),
+                    dims,
+                    multisample_count,
+                    color_format,
+                )
+                .unwrap();
+
                 Arc::new(
                     Framebuffer::start(Arc::clone(&render_pass))
+                        .add(multisample_image)
+                        .unwrap()
                         .add(Arc::clone(image))
                         .unwrap()
                         .add(depth_buffer)
@@ -771,7 +753,11 @@ impl App {
             .iter()
             .enumerate()
             .map(|(i, fb)| {
-                let clear_color = vec![[0.0, 0.0, 0.0, 1.0].into(), 1.0f32.into()];
+                let clear_color = vec![
+                    [0.0, 0.0, 0.0, 1.0].into(),
+                    vulkano::format::ClearValue::None,
+                    1.0f32.into(),
+                ];
 
                 Arc::new(
                     AutoCommandBufferBuilder::primary_simultaneous_use(
@@ -809,16 +795,28 @@ impl App {
         image: &Arc<ImageViewAccess + Send + Sync>,
         sampler: &Arc<Sampler>,
         graphics_queue_family: QueueFamily,
+        multisample_count: u32,
     ) -> (
         Arc<RenderPassAbstract + Send + Sync>,
         Arc<GraphicsPipelineAbstract + Send + Sync>,
         Vec<Arc<FramebufferAbstract + Send + Sync>>,
         Vec<Arc<AutoCommandBuffer>>,
     ) {
-        let render_pass = Self::create_render_pass(device, swapchain.format());
+        let color_format = swapchain.format();
+        // TODO: Query for support for this
+        let depth_format = Format::D32Sfloat;
+        let render_pass =
+            Self::create_render_pass(device, color_format, depth_format, multisample_count);
         let g_pipeline =
             Self::create_graphics_pipeline(device, &render_pass, swapchain.dimensions());
-        let framebuffers = Self::create_framebuffers(device, &render_pass, images);
+        let framebuffers = Self::create_framebuffers(
+            device,
+            &render_pass,
+            images,
+            multisample_count,
+            color_format,
+            depth_format,
+        );
 
         let dsets = Self::create_dsets(&g_pipeline, mvp_bufs, image, sampler);
 
@@ -864,6 +862,7 @@ impl App {
                 &self.image_buffer,
                 &self.sampler,
                 self.graphics_queue.family(),
+                self.multisample_count,
             );
 
         self.render_pass = render_pass;
@@ -876,23 +875,30 @@ impl App {
         let color_samples = physical_device.limits().framebuffer_color_sample_counts();
         let depth_samples = physical_device.limits().framebuffer_depth_sample_counts();
 
-        info!("Physical device, framebuffer_color_sample_counts: {}", color_samples);
-        info!("Physical device, framebuffer_depth_sample_counts: {}", depth_samples);
+        info!(
+            "Physical device, framebuffer_color_sample_counts: {}",
+            color_samples
+        );
+        info!(
+            "Physical device, framebuffer_depth_sample_counts: {}",
+            depth_samples
+        );
 
         // TODO: Clean this up (port to vulkano?)
-        let bits = vec![vk_sys::SAMPLE_COUNT_1_BIT,
-                        vk_sys::SAMPLE_COUNT_2_BIT,
-                        vk_sys::SAMPLE_COUNT_4_BIT,
-                        vk_sys::SAMPLE_COUNT_8_BIT,
-                        vk_sys::SAMPLE_COUNT_16_BIT,
-                        vk_sys::SAMPLE_COUNT_32_BIT,
-                        vk_sys::SAMPLE_COUNT_64_BIT,
+        let bits = vec![
+            vk_sys::SAMPLE_COUNT_1_BIT,
+            vk_sys::SAMPLE_COUNT_2_BIT,
+            vk_sys::SAMPLE_COUNT_4_BIT,
+            vk_sys::SAMPLE_COUNT_8_BIT,
+            vk_sys::SAMPLE_COUNT_16_BIT,
+            vk_sys::SAMPLE_COUNT_32_BIT,
+            vk_sys::SAMPLE_COUNT_64_BIT,
         ];
 
         for (idx, bit) in bits.iter().enumerate().rev() {
             if (color_samples & bit != 0) && (depth_samples & bit != 0) {
                 info!("Max combined color + depth sample count: {}", 1 << idx);
-                return 1 << idx;
+                return *bit;
             }
         }
 
@@ -969,6 +975,7 @@ impl App {
                 &image_buffer,
                 &sampler,
                 graphics_queue.family(),
+                multisample_count,
             );
 
         let frame_completions = init_frame_completions(&vk_device, n_frames);
@@ -999,6 +1006,7 @@ impl App {
             command_buffers: cmd_bufs,
             frame_completions,
             camera,
+            multisample_count,
         };
     }
 }

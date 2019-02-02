@@ -1,6 +1,6 @@
+use log::{debug, info};
 use std::collections::HashMap;
 use winit::{Event, VirtualKeyCode, WindowEvent};
-use log::{debug, info};
 // Based primarily on https://www.gamedev.net/articles/programming/general-and-gameplay-programming/designing-a-robust-input-handling-system-for-games-r2975
 //
 // Basic idea:
