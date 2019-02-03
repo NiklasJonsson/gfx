@@ -1,4 +1,6 @@
+use crate::WindowEvents;
 use log::{debug, info};
+use specs::prelude::*;
 use std::collections::HashMap;
 use winit::{Event, VirtualKeyCode, WindowEvent};
 // Based primarily on https://www.gamedev.net/articles/programming/general-and-gameplay-programming/designing-a-robust-input-handling-system-for-games-r2975
@@ -6,112 +8,86 @@ use winit::{Event, VirtualKeyCode, WindowEvent};
 // Basic idea:
 // InputContext acts as a filter for inputs (key press/release, mouse click etc...). There are several InputContexts that consume input and if it's not interested in some input, it passes it on.
 
-pub type InputContextId = u32;
 pub type ActionId = u32;
-pub type Action = (InputContextId, ActionId);
 pub type ActionMap = HashMap<VirtualKeyCode, ActionId>;
 
 /// A context that may consume some input and map it to an ActionId
 // TODO: State, Range
+#[derive(Component)]
+#[storage(HashMapStorage)]
 pub struct InputContext {
     name: String,
     description: String,
-    actions: ActionMap,
+    action_map: ActionMap,
 }
 
 impl InputContext {
-    pub fn new(name: String, description: String, actions: ActionMap) -> Self {
+    pub fn new(name: &str, description: &str, action_map: ActionMap) -> Self {
         InputContext {
-            name,
-            description,
-            actions,
+            name: name.to_string(),
+            description: description.to_string(),
+            action_map,
         }
     }
-
-    fn use_input(&self, input: &VirtualKeyCode) -> Option<&ActionId> {
-        self.actions.get(input)
-    }
 }
 
-impl std::fmt::Display for InputContext {
-    fn fmt(&self, formatter: &mut std::fmt::Formatter) -> std::fmt::Result {
-        write!(formatter, "{}: {}", self.name, self.description)
-    }
-}
-
+#[derive(Default, Component)]
+#[storage(HashMapStorage)]
 pub struct MappedInput {
-    pub actions: Vec<Action>,
+    pub actions: Vec<ActionId>,
 }
 
 impl MappedInput {
-    fn new() -> Self {
+    pub fn new() -> Self {
         MappedInput {
             actions: Vec::new(),
         }
     }
 }
 
-pub struct InputManager {
-    contexts: Vec<(InputContextId, InputContext)>,
-    callbacks: Vec<Box<FnMut(&MappedInput)>>,
-    next_context_id: InputContextId,
-    current_mapped_input: MappedInput,
-}
+struct InputManager;
 
-impl InputManager {
-    fn get_next_context_id(&mut self) -> InputContextId {
-        let id = self.next_context_id;
-        self.next_context_id += 1;
-        debug!("InputManager: Generated new InputContextId {}", id);
-        return id;
-    }
+impl<'a> System<'a> for InputManager {
+    type SystemData = (
+        ReadStorage<'a, InputContext>,
+        Read<'a, WindowEvents>,
+        WriteStorage<'a, MappedInput>,
+    );
 
-    pub fn add_callback<CB: FnMut(&MappedInput) + 'static>(&mut self, callback: CB) {
-        debug!("InputManager: Added new callback");
-        self.callbacks.push(Box::new(callback));
-    }
+    fn run(&mut self, (contexts, events, mut mapped): Self::SystemData) {
+        let mut event_used: Vec<bool> = events.0.iter().map(|_| false).collect::<Vec<_>>();
 
-    pub fn register_input_context(&mut self, input_ctx: InputContext) -> InputContextId {
-        debug!("InputManager: Registered new InputContext: {}", input_ctx);
-        let id = self.get_next_context_id();
-        self.contexts.push((id, input_ctx));
-        return id;
-    }
+        // TODO: Sort on prio first
+        for (ctx, mi) in (&contexts, &mut mapped).join() {
+            mi.actions = Vec::new();
+            for (idx, event) in events.0.iter().enumerate() {
+                if event_used[idx] {
+                    continue;
+                }
 
-    pub fn remove_input_context(&mut self, id: InputContextId) {
-        assert!(
-            self.contexts
-                .iter()
-                .filter(|(ctx_id, _)| *ctx_id == id)
-                .count()
-                == 1
-        );
-        self.contexts.retain(|(ctx_id, _)| *ctx_id != id);
-    }
-
-    pub fn dispatch(&mut self) {
-        for callback in &mut self.callbacks {
-            (*callback)(&self.current_mapped_input);
-        }
-
-        self.current_mapped_input = MappedInput::new();
-    }
-
-    pub fn handle_button_input(&mut self, input: VirtualKeyCode) {
-        for (ctx_id, ctx) in self.contexts.iter() {
-            if let Some(&action_id) = ctx.use_input(&input) {
-                self.current_mapped_input.actions.push((*ctx_id, action_id));
-                return;
+                match event {
+                    WindowEvent::KeyboardInput { device_id, input } => {
+                        log::debug!(
+                            "InputManager: Handling {:?} from device {:?}",
+                            input,
+                            device_id
+                        );
+                        input.virtual_keycode.map(|key| {
+                            if let Some(&action_id) = ctx.action_map.get(&key) {
+                                mi.actions.push(action_id);
+                                event_used[idx] = true;
+                            }
+                        });
+                    }
+                    e => log::trace!("InputManager: Ignoring {:?}", e),
+                }
             }
         }
     }
+}
 
-    pub fn new() -> InputManager {
-        InputManager {
-            contexts: Vec::new(),
-            callbacks: Vec::new(),
-            next_context_id: 0,
-            current_mapped_input: MappedInput::new(),
-        }
-    }
+pub const INPUT_MANAGER_SYSTEM_ID: &str = "input_manager_sys";
+
+pub fn register_systems<'a, 'b>(builder: DispatcherBuilder<'a, 'b>) -> DispatcherBuilder<'a, 'b> {
+    builder.with(InputManager, INPUT_MANAGER_SYSTEM_ID, &[])
 }

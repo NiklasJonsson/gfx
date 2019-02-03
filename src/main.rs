@@ -9,12 +9,15 @@ extern crate log;
 
 extern crate image;
 extern crate nalgebra_glm as glm;
+extern crate specs;
+#[macro_use]
+extern crate specs_derive;
 extern crate tobj;
 extern crate vulkano_shaders;
 extern crate vulkano_win;
 extern crate winit;
 
-use image::{jpeg::JPEGDecoder, ImageDecoder, RgbaImage};
+use image::RgbaImage;
 
 use log::{info, warn};
 
@@ -49,10 +52,10 @@ use vulkano_win::VkSurfaceBuild;
 
 use winit::{Event, EventsLoop, VirtualKeyCode, Window, WindowBuilder, WindowEvent};
 
+use specs::prelude::*;
+
 use std::collections::HashSet;
 
-use std::fs::File;
-use std::io::BufReader;
 use std::path::Path;
 use std::prelude::*;
 
@@ -62,9 +65,11 @@ use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 mod camera;
+mod common;
 mod input;
-use self::camera::{Camera, CameraController};
-use self::input::InputManager;
+
+use self::camera::*;
+use self::common::*;
 
 #[derive(Copy, Clone)]
 struct Vertex {
@@ -100,7 +105,13 @@ impl<F: GpuFuture> WaitableFuture for FenceSignalFuture<F> {
     }
 }
 
+// World resources
+#[derive(Default, Debug)]
+struct WindowEvents(Vec<WindowEvent>);
+struct ActiveCamera(Option<Entity>);
+
 struct App {
+    world: World,
     events_loop: EventsLoop,
     vk_instance: Arc<Instance>,
     vk_surface: Arc<Surface<Window>>,
@@ -119,106 +130,171 @@ struct App {
     g_pipeline: Arc<GraphicsPipelineAbstract + Send + Sync>,
     command_buffers: Vec<Arc<AutoCommandBuffer>>,
     frame_completions: Vec<Box<WaitableFuture>>,
-    camera: Rc<RefCell<Camera>>,
     multisample_count: u32,
+}
+
+enum AppAction {
+    Quit,
+    HandleEvents(Vec<WindowEvent>),
+}
+
+struct EventManager {
+    window_events: Vec<WindowEvent>,
+    quit: bool,
+}
+
+impl EventManager {
+    fn new() -> Self {
+        Self {
+            window_events: Vec::new(),
+            quit: false,
+        }
+    }
+
+    fn collect_event(&mut self, event: Event) {
+        match event {
+            Event::WindowEvent {
+                event: inner_event, ..
+            } => match inner_event {
+                WindowEvent::CloseRequested => {
+                    log::info!("EventManager: Received CloseRequested window event");
+                    self.quit = true;
+                }
+                _ => {
+                    log::debug!(
+                        "EventManager: Saving event {:?} for input management",
+                        inner_event
+                    );
+                    self.window_events.push(inner_event);
+                }
+            },
+            _ => (),
+        };
+    }
+
+    fn resolve(&mut self) -> AppAction {
+        let events = std::mem::replace(&mut self.window_events, Vec::new());
+        let result = match self.quit {
+            true => AppAction::Quit,
+            false => AppAction::HandleEvents(events),
+        };
+
+        self.quit = false;
+
+        return result;
+    }
 }
 
 impl App {
     fn update_mvp(&mut self, idx: usize) {
         let mut content = self.mvp_ubo_buffers[idx].write().unwrap();
+        let active_cam_entity = (*self.world.read_resource::<ActiveCamera>()).0.unwrap();
+        let pos_storage = self.world.read_storage::<Position>();
+        let cam_pos = pos_storage.get(active_cam_entity).unwrap().to_vec3();
+
         content.view = glm::look_at(
-            self.camera.borrow().get_pos(),
+            &cam_pos,
             &glm::vec3(0.0, 0.0, 0.0),
-            &glm::vec3(0.0, 0.0, 1.0),
+            &glm::vec3(0.0, 1.0, 0.0),
         )
         .into();
     }
 
-    fn draw_frame(&mut self) {
-        let (img_idx, swapchain_img_acquired) =
-            match swapchain::acquire_next_image(Arc::clone(&self.swapchain), None) {
-                Ok(r) => r,
-                Err(AcquireError::OutOfDate) => {
-                    self.recreate_swap_chain();
-                    return;
-                }
-                Err(e) => panic!("Can't acquire next image from swapchain: \t{}", e),
-            };
+    // FIXME: This lives here only because the lifetime parameters are a pain.
+    // The whole App struct would need to be templated if this was included.
+    // Maybe this can be solved in another way...
+    fn init_dispatcher<'a, 'b>() -> Dispatcher<'a, 'b> {
+        let builder = DispatcherBuilder::new();
+        // Input needs to go before as camera depends on it
+        let builder = input::register_systems(builder);
 
-        // tmp_future is only used as an intermediary while we submit this frame
-        let tmp_future = Box::new(vulkano::sync::now(Arc::clone(&self.vk_device)));
-        let prev_frame_completed =
-            std::mem::replace(&mut self.frame_completions[img_idx], tmp_future);
+        let builder = camera::register_systems(builder);
 
-        // Wait for previous frame before we update MVP buffer
-        prev_frame_completed.wait_for(None).unwrap();
+        let dispatcher = builder.build();
 
-        // This writes to the uniform buffer for the comming frame
-        self.update_mvp(img_idx);
+        return dispatcher;
+    }
 
-        let drawn_and_presented = swapchain_img_acquired
-            .then_execute(
-                Arc::clone(&self.graphics_queue),
-                Arc::clone(&self.command_buffers[img_idx]),
-            )
-            .expect("Unable to execute command buffer")
-            // Use presentation queue + semaphore when vulkano supports it
-            .then_swapchain_present(
-                Arc::clone(&self.graphics_queue),
-                Arc::clone(&self.swapchain),
-                img_idx,
-            )
-            .then_signal_fence_and_flush();
-        let drawn_and_presented = match drawn_and_presented {
-            Ok(r) => r,
-            Err(FlushError::OutOfDate) => {
-                self.recreate_swap_chain();
-                return;
-            }
-            Err(e) => panic!(
-                "Can't write to the swapchain image (idx: {}):\n\t{}",
-                img_idx, e
-            ),
-        };
-
-        self.frame_completions[img_idx] = Box::new(drawn_and_presented);
+    fn populate_world(&mut self) {
+        let cam_entity = camera::init_camera(&mut self.world);
+        let mut active_camera = self.world.write_resource::<ActiveCamera>();
+        *active_camera = ActiveCamera(Some(cam_entity));
     }
 
     fn main_loop(&mut self) {
-        // TODO: EventManager handling all events, passing appropriate ones down to InputManager
-        let mut input_manager = InputManager::new();
-        let camera_controller = CameraController::new(&mut input_manager, &self.camera);
-        loop {
-            let mut quit = false;
-            self.events_loop.poll_events(|event| {
-                // event is either WindowEvent or DeviceEvent, ignore the latter
-                if let Event::WindowEvent {
-                    event: window_event,
-                    ..
-                } = event
-                {
-                    match window_event {
-                        WindowEvent::CloseRequested => quit = true,
-                        WindowEvent::KeyboardInput {
-                            device_id: _device_id,
-                            input,
-                        } => {
-                            if let Some(key) = input.virtual_keycode {
-                                input_manager.handle_button_input(key);
-                            }
-                        }
-                        _ => (),
-                    }
-                }
-            });
+        let mut dispatcher = Self::init_dispatcher();
 
-            if quit {
-                break;
+        // Register all component types etc.
+        dispatcher.setup(&mut self.world.res);
+
+        // Setup camera etc.
+        self.populate_world();
+
+        let mut event_manager = EventManager::new();
+
+        loop {
+            self.events_loop
+                .poll_events(|event| event_manager.collect_event(event));
+
+            match event_manager.resolve() {
+                AppAction::Quit => {
+                    return;
+                }
+                AppAction::HandleEvents(window_events) => {
+                    let mut events = self.world.write_resource::<WindowEvents>();
+                    *events = WindowEvents(window_events);
+                }
             }
 
-            input_manager.dispatch();
+            let (img_idx, swapchain_img_acquired) =
+                match swapchain::acquire_next_image(Arc::clone(&self.swapchain), None) {
+                    Ok(r) => r,
+                    Err(AcquireError::OutOfDate) => {
+                        self.recreate_swap_chain();
+                        return;
+                    }
+                    Err(e) => panic!("Can't acquire next image from swapchain: \t{}", e),
+                };
 
-            self.draw_frame();
+            // tmp_future is only used as an intermediary while we submit this frame
+            let tmp_future = Box::new(vulkano::sync::now(Arc::clone(&self.vk_device)));
+            let prev_frame_completed =
+                std::mem::replace(&mut self.frame_completions[img_idx], tmp_future);
+
+            // Wait for previous frame for this image before we update MVP buffer
+            prev_frame_completed.wait_for(None).unwrap();
+
+            dispatcher.dispatch(&mut self.world.res);
+
+            // This writes to the uniform buffer for the upcoming frame
+            self.update_mvp(img_idx);
+
+            let drawn_and_presented = swapchain_img_acquired
+                .then_execute(
+                    Arc::clone(&self.graphics_queue),
+                    Arc::clone(&self.command_buffers[img_idx]),
+                )
+                .expect("Unable to execute command buffer")
+                // TODO: Use presentation queue + semaphore when vulkano supports it
+                .then_swapchain_present(
+                    Arc::clone(&self.graphics_queue),
+                    Arc::clone(&self.swapchain),
+                    img_idx,
+                )
+                .then_signal_fence_and_flush();
+            let drawn_and_presented = match drawn_and_presented {
+                Ok(r) => r,
+                Err(FlushError::OutOfDate) => {
+                    self.recreate_swap_chain();
+                    return;
+                }
+                Err(e) => panic!(
+                    "Can't write to the swapchain image (idx: {}):\n\t{}",
+                    img_idx, e
+                ),
+            };
+
+            self.frame_completions[img_idx] = Box::new(drawn_and_presented);
         }
     }
 
@@ -472,12 +548,7 @@ impl App {
             .positions
             .chunks_exact(3)
             .zip(tex_coords)
-            .map(|(pos, tx_cs)| {
-                Vertex::new(
-                    [pos[0], pos[1], pos[2]],
-                    [tx_cs[0], 1.0 - tx_cs[1]],
-                )
-            })
+            .map(|(pos, tx_cs)| Vertex::new([pos[0], pos[1], pos[2]], [tx_cs[0], 1.0 - tx_cs[1]]))
             .collect::<Vec<_>>();
 
         let indices = models[0].mesh.indices.to_owned();
@@ -682,13 +753,17 @@ impl App {
         // inverted (right-handed upside-down).
         proj[(1, 1)] *= -1.0;
 
+        // FIXME: This is due to the orientation of the chalet model from the vulkan tutorial
+        let model = glm::rotate_x(&glm::Mat4::identity(), -std::f32::consts::FRAC_PI_2);
+        let model = glm::rotate_y(&model, std::f32::consts::FRAC_1_PI);
+
         let mvp_ubo = vs::ty::MVPUniformBufferObject {
-            model: glm::Mat4::identity().into(),
+            model: model.into(),
             view: glm::look_at(
                 &glm::vec3(2.0, 2.0, 2.0),
                 &glm::vec3(0.0, 0.0, 0.0),
                 // FIXME: Z-axis is up since tutorial example has edited the chalet model
-                &glm::vec3(0.0, 0.0, 1.0),
+                &glm::vec3(0.0, 1.0, 0.0),
             )
             .into(),
             proj: proj.into(),
@@ -901,6 +976,15 @@ impl App {
         return 1;
     }
 
+    fn init_world() -> World {
+        let mut world = World::new();
+
+        world.add_resource(WindowEvents(Vec::new()));
+        world.add_resource(ActiveCamera(None));
+
+        return world;
+    }
+
     fn new() -> Self {
         let vk_instance = Self::setup_vk_instance();
         let (events_loop, vk_surface) = Self::setup_surface(&vk_instance);
@@ -915,9 +999,8 @@ impl App {
         let (vk_device, graphics_queue, presentation_queue) =
             Self::create_logical_device(physical_device, &vk_surface, &device_extensions);
 
-        /*
-        let (vertex_data, index_data) = Self::create_vertex_data();
-        */
+        let world = Self::init_world();
+
         let (vertex_data, index_data) = Self::load_obj("models/chalet.obj");
 
         // TODO: Use transfer queue here
@@ -980,9 +1063,8 @@ impl App {
             .wait(None)
             .expect("Transfer of application constant data failed");
 
-        let camera = Rc::new(RefCell::new(Camera::new([2.0, 2.0, 2.0], [0.0, 0.0, 0.0])));
-
         return App {
+            world,
             events_loop,
             vk_instance,
             vk_surface,
@@ -1001,7 +1083,6 @@ impl App {
             g_pipeline,
             command_buffers: cmd_bufs,
             frame_completions,
-            camera,
             multisample_count,
         };
     }

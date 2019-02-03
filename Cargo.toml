@@ -5,15 +5,25 @@ authors = ["Niklas Jonsson <niklasandersjonsson@gmail.com>"]
 edition = "2018"
 
 [dependencies]
+specs = "*"
+specs-derive = "*"
+
+# Rendering/Graphics
 vulkano = "*"
 winit = "*"
 vulkano-win = "*"
 vulkano-shaders = "*"
+vk-sys = "*"
+
+# Math/Physics
 nalgebra-glm = "*"
-image = "*"
 num-derive = "*"
 num-traits = "*"
+
+# Resources/Assets
+image = "*"
 tobj = "*"
+
+# Util
 log = "*"
 env_logger = "*"
-vk-sys = "*"
