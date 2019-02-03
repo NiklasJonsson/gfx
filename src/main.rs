@@ -69,21 +69,19 @@ use self::input::InputManager;
 #[derive(Copy, Clone)]
 struct Vertex {
     position: [f32; 3],
-    color: [f32; 3],
     tex_coords: [f32; 2],
 }
 
 impl Vertex {
-    fn new(position: [f32; 3], color: [f32; 3], tex_coords: [f32; 2]) -> Vertex {
+    fn new(position: [f32; 3], tex_coords: [f32; 2]) -> Vertex {
         Vertex {
             position,
-            color,
             tex_coords,
         }
     }
 }
 
-impl_vertex!(Vertex, position, color, tex_coords);
+impl_vertex!(Vertex, position, tex_coords);
 
 // Extra trait specialization for GpuFuture, intended for storing NowFuture or FenceSignalFuture
 trait WaitableFuture: GpuFuture {
@@ -477,7 +475,6 @@ impl App {
             .map(|(pos, tx_cs)| {
                 Vertex::new(
                     [pos[0], pos[1], pos[2]],
-                    [1.0, 1.0, 1.0],
                     [tx_cs[0], 1.0 - tx_cs[1]],
                 )
             })
@@ -561,7 +558,6 @@ impl App {
         depth_format: Format,
         multisample_count: u32,
     ) -> Arc<RenderPassAbstract + Send + Sync> {
-        // TODO: Choose this based on availability
         Arc::new(
             single_pass_renderpass!(Arc::clone(device),
             attachments: {
@@ -1047,15 +1043,12 @@ layout(binding = 0) uniform MVPUniformBufferObject {
 } ubo;
 
 layout(location = 0) in vec3 position;
-layout(location = 1) in vec3 color;
 layout(location = 2) in vec2 tex_coords;
 
-layout(location = 0) out vec3 frag_color;
 layout(location = 1) out vec2 frag_tex_coords;
 
 void main() {
     gl_Position = ubo.proj * ubo.view * ubo.model * vec4(position, 1.0);
-    frag_color = color;
     frag_tex_coords = tex_coords;
 }
 "
@@ -1071,7 +1064,6 @@ mod fs {
 
 layout(binding = 1) uniform sampler2D texSampler;
 
-layout(location = 0) in vec3 frag_color;
 layout(location = 1) in vec2 frag_tex_coords;
 
 layout(location = 0) out vec4 outColor;
