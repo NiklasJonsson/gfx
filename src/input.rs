@@ -9,7 +9,10 @@ use winit::{Event, VirtualKeyCode, WindowEvent};
 // InputContext acts as a filter for inputs (key press/release, mouse click etc...). There are several InputContexts that consume input and if it's not interested in some input, it passes it on.
 
 pub type ActionId = u32;
+pub type StateId = u32;
+pub type RawAxis = (f64, f64);
 pub type ActionMap = HashMap<VirtualKeyCode, ActionId>;
+pub type StateMap = HashMap<VirtualKeyCode, StateId>;
 
 /// A context that may consume some input and map it to an ActionId
 // TODO: State, Range

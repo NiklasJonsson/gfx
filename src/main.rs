@@ -160,13 +160,7 @@ impl EventManager {
                     log::info!("EventManager: Received CloseRequested window event");
                     self.quit = true;
                 }
-                _ => {
-                    log::debug!(
-                        "EventManager: Saving event {:?} for input management",
-                        inner_event
-                    );
-                    self.window_events.push(inner_event);
-                }
+                _ => self.window_events.push(inner_event),
             },
             _ => (),
         };
@@ -264,9 +258,11 @@ impl App {
             // Wait for previous frame for this image before we update MVP buffer
             prev_frame_completed.wait_for(None).unwrap();
 
+            // Run all ECS systems (blocking call)
             dispatcher.dispatch(&mut self.world.res);
 
             // This writes to the uniform buffer for the upcoming frame
+            // TODO: Merge this into ECS
             self.update_mvp(img_idx);
 
             let drawn_and_presented = swapchain_img_acquired
@@ -282,6 +278,7 @@ impl App {
                     img_idx,
                 )
                 .then_signal_fence_and_flush();
+
             let drawn_and_presented = match drawn_and_presented {
                 Ok(r) => r,
                 Err(FlushError::OutOfDate) => {
