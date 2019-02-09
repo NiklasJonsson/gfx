@@ -4,7 +4,7 @@ extern crate winit;
 
 use crate::common::*;
 use crate::input;
-use crate::input::{StateId, ActionId, InputContext, MappedInput};
+use crate::input::{ActionId, InputContext, MappedInput, StateId};
 
 use glm::Vec3;
 use winit::VirtualKeyCode;
@@ -74,8 +74,7 @@ impl<'a> System<'a> for FreeFlyCameraController {
         for (mi, pos, _ori) in (&mut mapped_inputs, &mut positions, &mut camera_orientations).join()
         {
             for id in &mi.states {
-                let mov_vec: glm::Vec3 =
-                    MOVEMENT_SPEED * CameraAction::dir_from_state_id(id);
+                let mov_vec: glm::Vec3 = MOVEMENT_SPEED * CameraAction::dir_from_state_id(id);
                 *pos += &mov_vec;
             }
 

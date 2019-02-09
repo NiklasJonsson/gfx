@@ -108,15 +108,8 @@ impl<F: GpuFuture> WaitableFuture for FenceSignalFuture<F> {
 // World resources
 #[derive(Default, Debug)]
 struct CurrentFrameWindowEvents(Vec<WindowEvent>);
-#[derive(Default, Debug)]
-struct PreviousFrameWindowEvents(Vec<WindowEvent>);
-struct ActiveCamera(Option<Entity>);
 
-impl Into<PreviousFrameWindowEvents> for CurrentFrameWindowEvents {
-    fn into(self) -> PreviousFrameWindowEvents {
-        PreviousFrameWindowEvents(self.0)
-    }
-}
+struct ActiveCamera(Option<Entity>);
 
 struct App {
     world: World,
@@ -211,7 +204,6 @@ impl App {
         let builder = DispatcherBuilder::new();
         // Input needs to go before as camera depends on it
         let builder = input::register_systems(builder);
-
         let builder = camera::register_systems(builder);
 
         let dispatcher = builder.build();
@@ -991,8 +983,9 @@ impl App {
         let mut world = World::new();
 
         world.add_resource(CurrentFrameWindowEvents(Vec::new()));
-        world.add_resource(PreviousFrameWindowEvents(Vec::new()));
         world.add_resource(ActiveCamera(None));
+
+        input::add_resources(&mut world);
 
         return world;
     }
