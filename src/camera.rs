@@ -4,7 +4,7 @@ extern crate winit;
 
 use crate::common::*;
 use crate::input;
-use crate::input::{ActionId, ActionMap, InputContext, MappedInput};
+use crate::input::{StateId, ActionId, InputContext, MappedInput};
 
 use glm::Vec3;
 use winit::VirtualKeyCode;
@@ -46,7 +46,7 @@ enum CameraAction {
 
 impl CameraAction {
     // TODO: Can we avoid knowing that ActionId is u32?
-    fn dir_from_action_id(id: &ActionId) -> Vec3 {
+    fn dir_from_state_id(id: &StateId) -> Vec3 {
         use crate::camera::CameraAction::*;
         match CameraAction::from_u32(*id).expect("Invalid action id, not a CameraAction") {
             MoveForward => glm::vec3(0.0, 0.0, 1.0),
@@ -73,9 +73,9 @@ impl<'a> System<'a> for FreeFlyCameraController {
         // TODO: Handle orientation
         for (mi, pos, _ori) in (&mut mapped_inputs, &mut positions, &mut camera_orientations).join()
         {
-            for action_id in &mi.actions {
+            for id in &mi.states {
                 let mov_vec: glm::Vec3 =
-                    MOVEMENT_SPEED * CameraAction::dir_from_action_id(action_id);
+                    MOVEMENT_SPEED * CameraAction::dir_from_state_id(id);
                 *pos += &mov_vec;
             }
 
@@ -86,21 +86,17 @@ impl<'a> System<'a> for FreeFlyCameraController {
 
 fn get_input_context() -> InputContext {
     use crate::camera::CameraAction::*;
-    // TODO: Can we generate this in a better way? A builder maybe?
-    let mut mappings = ActionMap::new();
-    mappings.insert(VirtualKeyCode::W, MoveForward as ActionId);
-    mappings.insert(VirtualKeyCode::S, MoveBackward as ActionId);
-    mappings.insert(VirtualKeyCode::A, MoveLeft as ActionId);
-    mappings.insert(VirtualKeyCode::D, MoveRight as ActionId);
-    mappings.insert(VirtualKeyCode::E, MoveUp as ActionId);
-    mappings.insert(VirtualKeyCode::Q, MoveDown as ActionId);
-    let context = InputContext::new(
-        "CameraInputContext",
-        "Input mapping for Untethered, 3D camera",
-        mappings,
-    );
+    let ctx = InputContext::start("CameraInputContext")
+        .with_description("Input mapping for Untethered, 3D camera")
+        .with_state(VirtualKeyCode::W, MoveForward as ActionId)
+        .with_state(VirtualKeyCode::S, MoveBackward as ActionId)
+        .with_state(VirtualKeyCode::A, MoveLeft as ActionId)
+        .with_state(VirtualKeyCode::D, MoveRight as ActionId)
+        .with_state(VirtualKeyCode::E, MoveUp as ActionId)
+        .with_state(VirtualKeyCode::Q, MoveDown as ActionId)
+        .build();
 
-    return context;
+    return ctx;
 }
 
 pub fn init_camera(world: &mut World) -> Entity {

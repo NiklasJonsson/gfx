@@ -50,7 +50,7 @@ use vulkano::sync::{FenceSignalFuture, FlushError, GpuFuture, NowFuture, Sharing
 
 use vulkano_win::VkSurfaceBuild;
 
-use winit::{Event, EventsLoop, VirtualKeyCode, Window, WindowBuilder, WindowEvent};
+use winit::{Event, EventsLoop, Window, WindowBuilder, WindowEvent};
 
 use specs::prelude::*;
 
@@ -107,8 +107,16 @@ impl<F: GpuFuture> WaitableFuture for FenceSignalFuture<F> {
 
 // World resources
 #[derive(Default, Debug)]
-struct WindowEvents(Vec<WindowEvent>);
+struct CurrentFrameWindowEvents(Vec<WindowEvent>);
+#[derive(Default, Debug)]
+struct PreviousFrameWindowEvents(Vec<WindowEvent>);
 struct ActiveCamera(Option<Entity>);
+
+impl Into<PreviousFrameWindowEvents> for CurrentFrameWindowEvents {
+    fn into(self) -> PreviousFrameWindowEvents {
+        PreviousFrameWindowEvents(self.0)
+    }
+}
 
 struct App {
     world: World,
@@ -133,6 +141,7 @@ struct App {
     multisample_count: u32,
 }
 
+// TODO: Handle resized here as well
 enum AppAction {
     Quit,
     HandleEvents(Vec<WindowEvent>),
@@ -167,6 +176,7 @@ impl EventManager {
     }
 
     fn resolve(&mut self) -> AppAction {
+        log::trace!("EventManager: Resolving events");
         let events = std::mem::replace(&mut self.window_events, Vec::new());
         let result = match self.quit {
             true => AppAction::Quit,
@@ -227,6 +237,7 @@ impl App {
         let mut event_manager = EventManager::new();
 
         loop {
+            log::trace!("Polling events");
             self.events_loop
                 .poll_events(|event| event_manager.collect_event(event));
 
@@ -235,11 +246,12 @@ impl App {
                     return;
                 }
                 AppAction::HandleEvents(window_events) => {
-                    let mut events = self.world.write_resource::<WindowEvents>();
-                    *events = WindowEvents(window_events);
+                    let mut cur_events = self.world.write_resource::<CurrentFrameWindowEvents>();
+                    *cur_events = CurrentFrameWindowEvents(window_events);
                 }
             }
 
+            log::trace!("Acquiring swapchain");
             let (img_idx, swapchain_img_acquired) =
                 match swapchain::acquire_next_image(Arc::clone(&self.swapchain), None) {
                     Ok(r) => r,
@@ -258,11 +270,13 @@ impl App {
             // Wait for previous frame for this image before we update MVP buffer
             prev_frame_completed.wait_for(None).unwrap();
 
+            log::trace!("Dispatching");
             // Run all ECS systems (blocking call)
             dispatcher.dispatch(&mut self.world.res);
 
             // This writes to the uniform buffer for the upcoming frame
             // TODO: Merge this into ECS
+            log::trace!("Update MVP");
             self.update_mvp(img_idx);
 
             let drawn_and_presented = swapchain_img_acquired
@@ -976,7 +990,8 @@ impl App {
     fn init_world() -> World {
         let mut world = World::new();
 
-        world.add_resource(WindowEvents(Vec::new()));
+        world.add_resource(CurrentFrameWindowEvents(Vec::new()));
+        world.add_resource(PreviousFrameWindowEvents(Vec::new()));
         world.add_resource(ActiveCamera(None));
 
         return world;
