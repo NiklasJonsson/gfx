@@ -12,8 +12,6 @@ use winit::VirtualKeyCode;
 use specs::prelude::*;
 
 use num_traits::cast::FromPrimitive;
-use std::cell::RefCell;
-use std::rc::Rc;
 
 #[derive(Debug, Component)]
 #[storage(HashMapStorage)]
@@ -44,9 +42,9 @@ enum CameraAction {
 }
 
 impl CameraAction {
-    fn dir_from_state_id(id: &StateId) -> Vec3 {
+    fn dir_from_state_id(id: StateId) -> Vec3 {
         use crate::camera::CameraAction::*;
-        match CameraAction::from_u32(*id).expect("Invalid action id, not a CameraAction") {
+        match CameraAction::from_u32(id).expect("Invalid action id, not a CameraAction") {
             MoveForward => glm::vec3(0.0, 0.0, 1.0),
             MoveBackward => glm::vec3(0.0, 0.0, -1.0),
             MoveLeft => glm::vec3(-1.0, 0.0, 0.0),
@@ -72,7 +70,7 @@ impl<'a> System<'a> for FreeFlyCameraController {
         for (mi, pos, _ori) in (&mut mapped_inputs, &mut positions, &mut camera_orientations).join()
         {
             for id in &mi.states {
-                let mov_vec: glm::Vec3 = MOVEMENT_SPEED * CameraAction::dir_from_state_id(id);
+                let mov_vec: glm::Vec3 = MOVEMENT_SPEED * CameraAction::dir_from_state_id(*id);
                 *pos += &mov_vec;
             }
 
@@ -83,7 +81,7 @@ impl<'a> System<'a> for FreeFlyCameraController {
 
 fn get_input_context() -> InputContext {
     use crate::camera::CameraAction::*;
-    let ctx = InputContext::start("CameraInputContext")
+    InputContext::start("CameraInputContext")
         .with_description("Input mapping for Untethered, 3D camera")
         .with_state(VirtualKeyCode::W, MoveForward as ActionId)
         .with_state(VirtualKeyCode::S, MoveBackward as ActionId)
@@ -91,9 +89,7 @@ fn get_input_context() -> InputContext {
         .with_state(VirtualKeyCode::D, MoveRight as ActionId)
         .with_state(VirtualKeyCode::E, MoveUp as ActionId)
         .with_state(VirtualKeyCode::Q, MoveDown as ActionId)
-        .build();
-
-    return ctx;
+        .build()
 }
 
 pub fn init_camera(world: &mut World) -> Entity {
@@ -104,15 +100,13 @@ pub fn init_camera(world: &mut World) -> Entity {
 
     let mapped_input = MappedInput::new();
 
-    let entity = world
+    world
         .create_entity()
         .with(start_pos)
         .with(orientation)
         .with(input_context)
         .with(mapped_input)
-        .build();
-
-    return entity;
+        .build()
 }
 
 pub fn register_systems<'a, 'b>(builder: DispatcherBuilder<'a, 'b>) -> DispatcherBuilder<'a, 'b> {

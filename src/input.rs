@@ -1,7 +1,7 @@
 use crate::CurrentFrameWindowEvents;
 use specs::prelude::*;
 use std::collections::{HashMap, HashSet};
-use winit::{AxisId, DeviceId, ElementState, Event, KeyboardInput, VirtualKeyCode};
+use winit::{AxisId, DeviceId, ElementState, KeyboardInput, VirtualKeyCode};
 // Based primarily on https://www.gamedev.net/articles/programming/general-and-gameplay-programming/designing-a-robust-input-handling-system-for-games-r2975
 //
 // Basic idea:
@@ -45,12 +45,12 @@ impl InputContext {
             .map(|(range_id, sensitivity)| (*range_id, sensitivity * value))
     }
 
-    fn get_action_for(&self, key: &VirtualKeyCode) -> Option<&ActionId> {
-        self.action_map.get(key)
+    fn get_action_for(&self, key: VirtualKeyCode) -> Option<&ActionId> {
+        self.action_map.get(&key)
     }
 
-    fn get_state_for(&self, key: &VirtualKeyCode) -> Option<&StateId> {
-        self.state_map.get(key)
+    fn get_state_for(&self, key: VirtualKeyCode) -> Option<&StateId> {
+        self.state_map.get(&key)
     }
 }
 
@@ -92,13 +92,13 @@ impl InputContextBuilder {
 
         action_map.insert(key, id);
 
-        return InputContextBuilder {
+        InputContextBuilder {
             name: self.name,
             description: self.description,
             action_map: Some(action_map),
             state_map: self.state_map,
             axis_converter: self.axis_converter,
-        };
+        }
     }
 
     pub fn with_state(self, key: VirtualKeyCode, id: StateId) -> Self {
@@ -110,13 +110,13 @@ impl InputContextBuilder {
 
         state_map.insert(key, id);
 
-        return InputContextBuilder {
+        InputContextBuilder {
             name: self.name,
             description: self.description,
             action_map: self.action_map,
             state_map: Some(state_map),
             axis_converter: self.axis_converter,
-        };
+        }
     }
 
     pub fn with_range(
@@ -133,13 +133,13 @@ impl InputContextBuilder {
         };
 
         axis_converter.insert((device, axis), (range, sensitivity));
-        return InputContextBuilder {
+        InputContextBuilder {
             name: self.name,
             description: self.description,
             action_map: self.action_map,
             state_map: self.state_map,
             axis_converter: Some(axis_converter),
-        };
+        }
     }
 
     pub fn build(self) -> InputContext {
@@ -260,13 +260,14 @@ impl InputManagerState {
             );
         }
 
-        return (is_pressed, prev_pressed);
+        (is_pressed, prev_pressed)
     }
 
     /// Return delta compared to previous axis value (0 if this is the first time)
     fn register_axis(&mut self, device: DeviceId, axis: AxisId, value: AxisValue) -> AxisValue {
-        let possible_old_val = self.axis_movement.insert((device, axis), value);
-        return possible_old_val.map_or(0.0, |old| value - old);
+        self.axis_movement
+            .insert((device, axis), value)
+            .map_or(0.0, |old| value - old)
     }
 }
 
@@ -314,25 +315,25 @@ impl<'a> System<'a> for InputManager {
 
                         if is_action {
                             log::trace!("It's an action!");
-                            input.virtual_keycode.map(|key| {
-                                if let Some(&action_id) = ctx.get_action_for(&key) {
+                            if let Some(key) = input.virtual_keycode {
+                                if let Some(&action_id) = ctx.get_action_for(key) {
                                     mi.add_action(action_id);
                                     event_used[idx] = true;
                                 } else {
                                     log::trace!("But it was not mapped");
                                 }
-                            });
+                            }
                         }
 
                         log::trace!("Setting state!");
-                        input.virtual_keycode.map(|key| {
-                            if let Some(&id) = ctx.get_state_for(&key) {
+                        if let Some(key) = input.virtual_keycode {
+                            if let Some(&id) = ctx.get_state_for(key) {
                                 mi.set_state(id, is_pressed);
                                 event_used[idx] = true;
                             } else {
                                 log::trace!("But it was not mapped");
                             }
-                        });
+                        }
                     }
                     AxisMotion {
                         device_id,

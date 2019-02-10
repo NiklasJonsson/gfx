@@ -28,14 +28,12 @@ use vulkano::command_buffer::{
     AutoCommandBuffer, AutoCommandBufferBuilder, CommandBufferExecFuture, DynamicState,
 };
 use vulkano::descriptor::{
-    descriptor_set::PersistentDescriptorSet, DescriptorSet, PipelineLayoutAbstract,
-};
+    descriptor_set::PersistentDescriptorSet, DescriptorSet};
 use vulkano::device::{Device, DeviceExtensions, Features, Queue};
 use vulkano::format::Format;
 use vulkano::framebuffer::{Framebuffer, FramebufferAbstract, RenderPassAbstract, Subpass};
 use vulkano::image::{
-    attachment::AttachmentImage, immutable::ImmutableImage, swapchain::SwapchainImage, Dimensions,
-    ImageAccess, ImageUsage, ImageViewAccess,
+    attachment::AttachmentImage, immutable::ImmutableImage, swapchain::SwapchainImage, Dimensions, ImageUsage, ImageViewAccess,
 };
 use vulkano::instance;
 use vulkano::instance::{Instance, InstanceExtensions, PhysicalDevice, QueueFamily};
@@ -57,10 +55,9 @@ use specs::prelude::*;
 use std::collections::HashSet;
 
 use std::path::Path;
-use std::prelude::*;
 
 use std::sync::Arc;
-use std::time::{Duration, Instant};
+use std::time::{Duration};
 
 mod camera;
 mod common;
@@ -151,31 +148,27 @@ impl EventManager {
     }
 
     fn collect_event(&mut self, event: Event) {
-        match event {
-            Event::WindowEvent {
-                event: inner_event, ..
-            } => match inner_event {
+        if let Event::WindowEvent { event: inner_event, .. } = event {
+            match inner_event {
                 WindowEvent::CloseRequested => {
                     log::info!("EventManager: Received CloseRequested window event");
                     self.quit = true;
                 }
                 _ => self.window_events.push(inner_event),
-            },
-            _ => (),
-        };
+            }
+        }
     }
 
     fn resolve(&mut self) -> AppAction {
         log::trace!("EventManager: Resolving events");
         let events = std::mem::replace(&mut self.window_events, Vec::new());
-        let result = match self.quit {
-            true => AppAction::Quit,
-            false => AppAction::HandleEvents(events),
-        };
+        let quit = std::mem::replace(&mut self.quit, false);
 
-        self.quit = false;
-
-        return result;
+        if quit {
+            AppAction::Quit
+        } else {
+            AppAction::HandleEvents(events)
+        }
     }
 }
 
@@ -203,9 +196,7 @@ impl App {
         let builder = input::register_systems(builder);
         let builder = camera::register_systems(builder);
 
-        let dispatcher = builder.build();
-
-        return dispatcher;
+        builder.build()
     }
 
     fn populate_world(&mut self) {
@@ -261,7 +252,7 @@ impl App {
 
             log::trace!("Dispatching");
             // Run all ECS systems (blocking call)
-            dispatcher.dispatch(&mut self.world.res);
+            dispatcher.dispatch(& self.world.res);
 
             // This writes to the uniform buffer for the upcoming frame
             // TODO: Merge this into ECS
@@ -321,10 +312,8 @@ impl App {
 
         Self::print_validation_layers();
 
-        let vk_instance = Instance::new(None, &required_extensions, None)
-            .expect("Could not create vulkan instance");
-
-        return vk_instance;
+        Instance::new(None, &required_extensions, None)
+            .expect("Could not create vulkan instance")
     }
 
     fn setup_surface(vk_instance: &Arc<Instance>) -> (EventsLoop, Arc<Surface<Window>>) {
@@ -333,34 +322,30 @@ impl App {
             .build_vk_surface(&events_loop, Arc::clone(vk_instance))
             .expect("Unable to create window/surface");
 
-        return (events_loop, surface);
+        (events_loop, surface)
     }
 
     fn pick_physical_device<'a>(
         vk_instance: &'a Arc<Instance>,
-        required_extensions: &DeviceExtensions,
+        required_extensions: DeviceExtensions,
     ) -> PhysicalDevice<'a> {
         // TODO: For proper device selection, this should also be done:
         //  - the available queues should be checked as well
         //  - swap chain support/adequacy
-        let ph_dev = PhysicalDevice::enumerate(vk_instance)
+        PhysicalDevice::enumerate(vk_instance)
             .find(|&ph_dev| {
+                // TODO: Subset instead
                 let supported_extensions = DeviceExtensions::supported_by_device(ph_dev);
 
-                let required_supported =
-                    required_extensions.intersection(&supported_extensions) == *required_extensions;
-
-                return required_supported;
+                required_extensions.intersection(&supported_extensions) == required_extensions
             })
-            .expect("No suitable device available");
-
-        return ph_dev;
+            .expect("No suitable device available")
     }
 
     fn create_logical_device(
         physical_device: PhysicalDevice,
         surface: &Arc<Surface<Window>>,
-        device_extensions: &DeviceExtensions,
+        device_extensions: DeviceExtensions,
     ) -> (Arc<Device>, Arc<Queue>, Arc<Queue>) {
         let graphics_queue_family = physical_device
             .queue_families()
@@ -389,21 +374,21 @@ impl App {
         let (device, mut queues) = Device::new(
             physical_device,
             /* features */ &Features::none(),
-            /* extensions */ device_extensions,
+            /* extensions */ &device_extensions,
             q_families,
         )
         .expect("Failed to create device");
 
         let graphics_queue = queues.next().expect("Device queues not created");
-        let presentation_queue = queues.next().unwrap_or(Arc::clone(&graphics_queue));
+        let presentation_queue = queues.next().unwrap_or_else(|| Arc::clone(&graphics_queue));
 
-        return (device, graphics_queue, presentation_queue);
+        (device, graphics_queue, presentation_queue)
     }
 
     fn create_swap_chain(
         device: &Arc<Device>,
         surface: &Arc<Surface<Window>>,
-        queue_family_ids: &[u32; 2],
+        queue_family_ids: [u32; 2],
     ) -> (Arc<Swapchain<Window>>, Vec<Arc<SwapchainImage<Window>>>) {
         let physical_device = device.physical_device();
         let capabilities = surface
@@ -445,14 +430,15 @@ impl App {
         };
 
         let sharing_mode: SharingMode =
-            match queue_family_ids.iter().all(|&x| x == queue_family_ids[0]) {
-                true => SharingMode::Exclusive(queue_family_ids[0]),
-                false => SharingMode::Concurrent(queue_family_ids.to_vec()),
+            if queue_family_ids.iter().all(|&x| x == queue_family_ids[0]) {
+                SharingMode::Exclusive(queue_family_ids[0])
+            } else {
+                SharingMode::Concurrent(queue_family_ids.to_vec())
             };
 
         let alpha = CompositeAlpha::Opaque;
 
-        return Swapchain::new(
+        Swapchain::new(
             Arc::clone(device),
             Arc::clone(surface),
             img_count,
@@ -467,7 +453,7 @@ impl App {
             /* clipped */ true,
             None,
         )
-        .expect("Failed to create swap chain");
+        .expect("Failed to create swap chain")
     }
 
     fn debug_obj(models: &[tobj::Model], materials: &[tobj::Material]) {
@@ -553,7 +539,7 @@ impl App {
 
         let indices = models[0].mesh.indices.to_owned();
 
-        return (vertices, indices);
+        (vertices, indices)
     }
 
     fn load_image(path: &str) -> image::RgbaImage {
@@ -565,7 +551,7 @@ impl App {
             image.dimensions()
         );
 
-        return image;
+        image
     }
 
     // TODO: Try to refactor here
@@ -583,7 +569,7 @@ impl App {
         )
         .expect("Could not create vertex buffer");
 
-        return (buf, fut);
+        (buf, fut)
     }
 
     fn create_and_submit_index_buffer(
@@ -600,7 +586,7 @@ impl App {
         )
         .expect("Could not create index buffer");
 
-        return (buf, fut);
+        (buf, fut)
     }
 
     fn create_and_submit_texture_image(
@@ -621,7 +607,7 @@ impl App {
         )
         .expect("Unable to create vertex buffer");
 
-        return (buf, fut);
+        (buf, fut)
     }
     fn create_render_pass(
         device: &Arc<Device>,
@@ -679,7 +665,7 @@ impl App {
             depth_range: 0.0..1.0,
         };
 
-        let pipeline = Arc::new(
+        Arc::new(
             GraphicsPipeline::start()
                 .vertex_input_single_buffer::<Vertex>()
                 // How to interpret the vertex input
@@ -699,9 +685,7 @@ impl App {
                 .render_pass(Subpass::from(Arc::clone(render_pass), 0).unwrap())
                 .build(Arc::clone(device))
                 .expect("Could not create graphics pipeline"),
-        );
-
-        return pipeline;
+        )
     }
 
     fn create_framebuffers(
@@ -757,7 +741,7 @@ impl App {
         let model = glm::rotate_x(&glm::Mat4::identity(), -std::f32::consts::FRAC_PI_2);
         let model = glm::rotate_y(&model, std::f32::consts::FRAC_1_PI);
 
-        let mvp_ubo = vs::ty::MVPUniformBufferObject {
+        vs::ty::MVPUniformBufferObject {
             model: model.into(),
             view: glm::look_at(
                 &glm::vec3(2.0, 2.0, 2.0),
@@ -767,9 +751,7 @@ impl App {
             )
             .into(),
             proj: proj.into(),
-        };
-
-        return mvp_ubo;
+        }
     }
 
     fn create_mvp_ubo_buffers(
@@ -901,7 +883,7 @@ impl App {
             &framebuffers,
         );
 
-        return (render_pass, g_pipeline, framebuffers, cmd_bufs);
+        (render_pass, g_pipeline, framebuffers, cmd_bufs)
     }
 
     fn recreate_swap_chain(&mut self) {
@@ -966,14 +948,12 @@ impl App {
             vk_sys::SAMPLE_COUNT_64_BIT,
         ];
 
-        for (idx, bit) in bits.iter().enumerate().rev() {
-            if (color_samples & bit != 0) && (depth_samples & bit != 0) {
-                info!("Max combined color + depth sample count: {}", 1 << idx);
-                return *bit;
-            }
-        }
-
-        return 1;
+        bits
+            .iter()
+            .rev()
+            .find(|&&bit| (color_samples & bit != 0) && (depth_samples & bit != 0))
+            .cloned()
+            .unwrap_or(bits[0])
     }
 
     fn init_world() -> World {
@@ -984,7 +964,7 @@ impl App {
 
         input::add_resources(&mut world);
 
-        return world;
+        world
     }
 
     fn new() -> Self {
@@ -995,11 +975,11 @@ impl App {
             ..DeviceExtensions::none()
         };
 
-        let physical_device = Self::pick_physical_device(&vk_instance, &device_extensions);
+        let physical_device = Self::pick_physical_device(&vk_instance, device_extensions);
 
         let multisample_count = Self::query_max_sample_count(&physical_device);
         let (vk_device, graphics_queue, presentation_queue) =
-            Self::create_logical_device(physical_device, &vk_surface, &device_extensions);
+            Self::create_logical_device(physical_device, &vk_surface, device_extensions);
 
         let world = Self::init_world();
 
@@ -1029,7 +1009,7 @@ impl App {
         let (swapchain, images) = Self::create_swap_chain(
             &vk_device,
             &vk_surface,
-            &[
+            [
                 graphics_queue.family().id(),
                 presentation_queue.family().id(),
             ],
@@ -1065,7 +1045,7 @@ impl App {
             .wait(None)
             .expect("Transfer of application constant data failed");
 
-        return App {
+        App {
             world,
             events_loop,
             vk_instance,
@@ -1086,7 +1066,7 @@ impl App {
             command_buffers: cmd_bufs,
             frame_completions,
             multisample_count,
-        };
+        }
     }
 }
 
@@ -1107,7 +1087,7 @@ fn get_physical_window_dims(window: &Window) -> [u32; 2] {
         .get_inner_size()
         .map(|dims| {
             let dims: (u32, u32) = dims.to_physical(window.get_hidpi_factor()).into();
-            return [dims.0, dims.1];
+            [dims.0, dims.1]
         })
         .expect("Was not able to read window dimensions, is it open?")
 }
