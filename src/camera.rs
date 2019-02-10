@@ -15,7 +15,6 @@ use num_traits::cast::FromPrimitive;
 use std::cell::RefCell;
 use std::rc::Rc;
 
-// TODO: Use specs-derive instead of manual implementation
 #[derive(Debug, Component)]
 #[storage(HashMapStorage)]
 struct CameraOrientation {
@@ -45,7 +44,6 @@ enum CameraAction {
 }
 
 impl CameraAction {
-    // TODO: Can we avoid knowing that ActionId is u32?
     fn dir_from_state_id(id: &StateId) -> Vec3 {
         use crate::camera::CameraAction::*;
         match CameraAction::from_u32(*id).expect("Invalid action id, not a CameraAction") {
@@ -78,7 +76,7 @@ impl<'a> System<'a> for FreeFlyCameraController {
                 *pos += &mov_vec;
             }
 
-            mi.actions = Vec::new();
+            mi.clear();
         }
     }
 }

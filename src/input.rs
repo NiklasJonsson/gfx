@@ -174,17 +174,16 @@ impl InputContextBuilder {
 #[derive(Default, Component)]
 #[storage(HashMapStorage)]
 pub struct MappedInput {
-    pub actions: Vec<ActionId>,
-    pub states: Vec<StateId>,
+    pub actions: HashSet<ActionId>,
+    pub states: HashSet<StateId>,
     pub ranges: HashMap<RangeId, RangeValue>,
 }
 
 impl MappedInput {
-    // TODO: Use some kind of integer set here. so that we don't have to care about duplicates
     pub fn new() -> Self {
         MappedInput {
-            actions: Vec::new(),
-            states: Vec::new(),
+            actions: HashSet::new(),
+            states: HashSet::new(),
             ranges: HashMap::new(),
         }
     }
@@ -194,21 +193,16 @@ impl MappedInput {
     }
 
     fn add_action(&mut self, id: ActionId) {
-        if !self.actions.iter().any(|&other| other == id) {
-            self.actions.push(id);
-        }
+        self.actions.insert(id);
     }
 
-    fn set_state(&mut self, id: StateId, state: bool) {
-        let idx_opt = self.states.iter().position(|&other| other == id);
-
-        if let Some(idx) = idx_opt {
-            if !state {
-                self.states.remove(idx);
-            }
+    fn set_state(&mut self, id: StateId, val: bool) {
+        if val {
+            self.states.insert(id);
         } else {
-            if state {
-                self.states.push(id);
+            let existed = self.states.remove(&id);
+            if !existed {
+                log::warn!("Called state remove for {}, but it did not exist", id);
             }
         }
     }
@@ -281,12 +275,12 @@ struct InputManager;
 impl<'a> System<'a> for InputManager {
     type SystemData = (
         ReadStorage<'a, InputContext>,
-        Write<'a, CurrentFrameWindowEvents>,
+        Read<'a, CurrentFrameWindowEvents>,
         Write<'a, InputManagerState>,
         WriteStorage<'a, MappedInput>,
     );
 
-    fn run(&mut self, (contexts, mut cur_events, mut state, mut mapped): Self::SystemData) {
+    fn run(&mut self, (contexts, cur_events, mut state, mut mapped): Self::SystemData) {
         // TODO: Accessing inner type of WindowEvents is not very nice
         log::trace!("InputMapper: Running!");
         let mut event_used: Vec<bool> = cur_events.0.iter().map(|_| false).collect::<Vec<_>>();
@@ -301,7 +295,7 @@ impl<'a> System<'a> for InputManager {
                     continue;
                 }
 
-                use winit::WindowEvent::{AxisMotion, CursorMoved, KeyboardInput};
+                use winit::WindowEvent::{AxisMotion, KeyboardInput};
 
                 match event {
                     KeyboardInput { device_id, input } => {

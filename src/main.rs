@@ -59,8 +59,6 @@ use std::collections::HashSet;
 use std::path::Path;
 use std::prelude::*;
 
-use std::cell::RefCell;
-use std::rc::Rc;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
@@ -68,7 +66,6 @@ mod camera;
 mod common;
 mod input;
 
-use self::camera::*;
 use self::common::*;
 
 #[derive(Copy, Clone)]
