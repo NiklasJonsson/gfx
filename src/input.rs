@@ -11,12 +11,19 @@ use winit::{AxisId, DeviceId, ElementState, KeyboardInput, VirtualKeyCode};
 pub type ActionId = u32;
 pub type StateId = u32;
 pub type RangeId = u32;
+
 pub type RangeValue = f64;
 pub type Sensitivity = f64;
 
+#[derive(Debug, Clone, Copy, Hash, PartialEq, Eq)]
+pub enum DeviceAxis {
+    MouseX,
+    MouseY,
+}
+
 type ActionMap = HashMap<VirtualKeyCode, ActionId>;
 type StateMap = HashMap<VirtualKeyCode, StateId>;
-type AxisConvMap = HashMap<(DeviceId, AxisId), (RangeId, Sensitivity)>;
+type AxisConvMap = HashMap<DeviceAxis, (RangeId, Sensitivity)>;
 
 /// A context that may consume some input and map it to an ActionId
 #[derive(Component)]
@@ -36,12 +43,11 @@ impl InputContext {
 
     fn register_axis_delta(
         &self,
-        device: DeviceId,
-        axis: AxisId,
+        device_axis: DeviceAxis,
         value: AxisValue,
     ) -> Option<(RangeId, RangeValue)> {
         self.axis_converter
-            .get(&(device, axis))
+            .get(&device_axis)
             .map(|(range_id, sensitivity)| (*range_id, sensitivity * value))
     }
 
@@ -121,8 +127,7 @@ impl InputContextBuilder {
 
     pub fn with_range(
         self,
-        device: DeviceId,
-        axis: AxisId,
+        device_axis: DeviceAxis,
         range: RangeId,
         sensitivity: Sensitivity,
     ) -> Self {
@@ -132,7 +137,7 @@ impl InputContextBuilder {
             Some(map) => map,
         };
 
-        axis_converter.insert((device, axis), (range, sensitivity));
+        axis_converter.insert(device_axis, (range, sensitivity));
         InputContextBuilder {
             name: self.name,
             description: self.description,
@@ -176,6 +181,7 @@ impl InputContextBuilder {
 pub struct MappedInput {
     pub actions: HashSet<ActionId>,
     pub states: HashSet<StateId>,
+    // TODO: HashSet of tuples
     pub ranges: HashMap<RangeId, RangeValue>,
 }
 
@@ -335,14 +341,23 @@ impl<'a> System<'a> for InputManager {
                             }
                         }
                     }
+                    // TODO: Use DeviceEvent instead for this?
                     AxisMotion {
                         device_id,
                         axis,
                         value,
                     } => {
                         log::debug!("Captured axis motion {:?}", event);
+                        let device_axis =
+                            if *axis == 0 as AxisId {
+                                DeviceAxis::MouseX
+                            } else {
+                                DeviceAxis::MouseY
+                            };
+
                         let delta = state.register_axis(*device_id, *axis, *value);
-                        if let Some((id, val)) = ctx.register_axis_delta(*device_id, *axis, delta) {
+                        if let Some((id, val)) = ctx.register_axis_delta(device_axis, delta) {
+                            log::trace!("set_range_delta");
                             mi.set_range_delta(id, val);
                             event_used[idx] = true;
                         } else {

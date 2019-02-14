@@ -179,12 +179,36 @@ impl App {
         let pos_storage = self.world.read_storage::<Position>();
         let cam_pos = pos_storage.get(active_cam_entity).unwrap().to_vec3();
 
-        content.view = glm::look_at(
-            &cam_pos,
-            &glm::vec3(0.0, 0.0, 0.0),
-            &glm::vec3(0.0, 1.0, 0.0),
-        )
-        .into();
+        let ori_storage = self.world.read_storage::<crate::camera::CameraOrientation>();
+        let cam_ori = ori_storage.get(active_cam_entity).unwrap();
+
+        let dir = cam_ori.direction;
+        let up = cam_ori.up;
+
+        // Based on https://learnopengl.com/Getting-started/Camera
+        // Which is based on Gram-Schmidt process:
+        // https://en.wikipedia.org/wiki/Gram%E2%80%93Schmidt_process
+
+        // Reverse direction here as the camera will look in negative z
+        let cam_dir = glm::normalize(&-dir);
+
+        // We need a right vector
+        let cam_right = glm::normalize(&glm::cross::<f32, glm::U3>(&up, &cam_dir));
+
+        // The up vector is guaranteed to be be perpendicular to both direction and right
+        // => create a new one
+        let cam_up = glm::normalize(&glm::cross::<f32, glm::U3>(&cam_dir, &cam_right));
+
+        let trns = glm::translate(&glm::identity(), &-(cam_pos));
+
+        let view = glm::mat4(cam_right[0], cam_right.y, cam_right.z, 0.0,
+                             cam_up.x, cam_up.y, cam_up.z, 0.0,
+                             cam_dir.x, cam_dir.y, cam_dir.z, 0.0,
+                             0.0, 0.0, 0.0, 1.0);
+
+        let view = view * trns;
+
+        content.view = view.into();
     }
 
     // FIXME: This lives here only because the lifetime parameters are a pain.
