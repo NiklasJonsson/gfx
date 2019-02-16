@@ -24,4 +24,3 @@ impl AddAssign<&glm::Vec3> for Position {
         self.0 += other;
     }
 }
-

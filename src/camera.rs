@@ -4,7 +4,9 @@ extern crate winit;
 
 use crate::common::*;
 use crate::input;
-use crate::input::{ActionId, InputContext, MappedInput, RangeId, StateId, Sensitivity, DeviceAxis};
+use crate::input::{DeviceAxis, InputContext, MappedInput, RangeId, Sensitivity, StateId};
+
+use crate::GameState;
 
 use glm::Vec3;
 use winit::VirtualKeyCode;
@@ -13,6 +15,7 @@ use specs::prelude::*;
 
 use num_traits::cast::FromPrimitive;
 
+// TODO: Can we reduce this to only one internal presentation?
 #[derive(Debug, Component)]
 #[storage(HashMapStorage)]
 pub struct CameraOrientation {
@@ -29,43 +32,26 @@ struct CameraRotationState {
 
 impl CameraOrientation {
     fn new(up: Vec3, direction: Vec3) -> CameraOrientation {
-        CameraOrientation {
-            up,
-            direction,
-        }
+        CameraOrientation { up, direction }
     }
 }
 
 const MOVEMENT_SPEED: f32 = 0.02;
 
 #[derive(Debug, Copy, Clone, FromPrimitive)]
-enum CameraAction {
-    MoveForward,
-    MoveBackward,
-    MoveLeft,
-    MoveRight,
-    MoveUp,
-    MoveDown,
+enum CameraMovement {
+    Forward,
+    Backward,
+    Left,
+    Right,
+    Up,
+    Down,
 }
 
 #[derive(Debug, Copy, Clone, FromPrimitive, PartialEq, Eq)]
 enum CameraRotation {
     YawDelta,
     PitchDelta,
-}
-
-impl CameraAction {
-    fn dir_from_state_id(id: StateId) -> Vec3 {
-        use crate::camera::CameraAction::*;
-        match CameraAction::from_u32(id).expect("Invalid action id, not a CameraAction") {
-            MoveForward => glm::vec3(0.0, 0.0, 1.0),
-            MoveBackward => glm::vec3(0.0, 0.0, -1.0),
-            MoveLeft => glm::vec3(-1.0, 0.0, 0.0),
-            MoveRight => glm::vec3(1.0, 0.0, 0.0),
-            MoveUp => glm::vec3(0.0, 1.0, 0.0),
-            MoveDown => glm::vec3(0.0, -1.0, 0.0),
-        }
-    }
 }
 
 struct FreeFlyCameraController;
@@ -76,12 +62,31 @@ impl<'a> System<'a> for FreeFlyCameraController {
         WriteStorage<'a, Position>,
         WriteStorage<'a, CameraOrientation>,
         WriteStorage<'a, CameraRotationState>,
+        Read<'a, GameState>,
     );
 
     fn run(&mut self, data: Self::SystemData) {
         log::trace!("FreeFlyCameraController: run");
-        let (mut mapped_inputs, mut positions, mut camera_orientations, mut cam_rot_state) = data;
-        for (mi, pos, ori, crs) in (&mut mapped_inputs, &mut positions, &mut camera_orientations, &mut cam_rot_state).join()
+        let (
+            mut mapped_inputs,
+            mut positions,
+            mut camera_orientations,
+            mut cam_rot_state,
+            game_state,
+        ) = data;
+
+        if *game_state == GameState::Paused {
+            log::trace!("Game is paused, camera won't be moved");
+            return;
+        }
+
+        for (mi, pos, ori, crs) in (
+            &mut mapped_inputs,
+            &mut positions,
+            &mut camera_orientations,
+            &mut cam_rot_state,
+        )
+            .join()
         {
             // TODO:
             //  - Create a transform class with utlities for this
@@ -89,15 +94,20 @@ impl<'a> System<'a> for FreeFlyCameraController {
             //  - Take delta time into account.
             //  - The handling of states/ranges/actions should be in chronological order
             for id in &mi.states {
-                use CameraAction::*;
-                let dir = MOVEMENT_SPEED * match CameraAction::from_u32(*id).unwrap() {
-                    MoveForward => ori.direction,
-                    MoveBackward => -ori.direction,
-                    MoveLeft => glm::normalize(&glm::cross::<f32, glm::U3>(&ori.up, &ori.direction)),
-                    MoveRight => -glm::normalize(&glm::cross::<f32, glm::U3>(&ori.up, &ori.direction)),
-                    MoveUp => ori.up,
-                    MoveDown => -ori.up,
-                };
+                use CameraMovement::*;
+                let dir = MOVEMENT_SPEED
+                    * match CameraMovement::from_u32(*id).unwrap() {
+                        Forward => ori.direction,
+                        Backward => -ori.direction,
+                        Left => {
+                            glm::normalize(&glm::cross::<f32, glm::U3>(&ori.up, &ori.direction))
+                        }
+                        Right => {
+                            -glm::normalize(&glm::cross::<f32, glm::U3>(&ori.up, &ori.direction))
+                        }
+                        Up => ori.up,
+                        Down => -ori.up,
+                    };
 
                 *pos += &dir;
             }
@@ -112,9 +122,11 @@ impl<'a> System<'a> for FreeFlyCameraController {
                 }
             }
 
-            let dir: glm::Vec3 = glm::vec3(crs.yaw.cos() * crs.pitch.cos(),
-                                           crs.pitch.sin(),
-                                           crs.yaw.sin() * crs.pitch.cos());
+            let dir: glm::Vec3 = glm::vec3(
+                crs.yaw.cos() * crs.pitch.cos(),
+                crs.pitch.sin(),
+                crs.yaw.sin() * crs.pitch.cos(),
+            );
 
             ori.direction = glm::normalize(&dir);
 
@@ -125,17 +137,25 @@ impl<'a> System<'a> for FreeFlyCameraController {
 
 fn get_input_context() -> InputContext {
     let sens = 0.0005 as Sensitivity;
-    use crate::camera::CameraAction::*;
+    use crate::camera::CameraMovement::*;
     InputContext::start("CameraInputContext")
         .with_description("Input mapping for Untethered, 3D camera")
-        .with_state(VirtualKeyCode::W, MoveForward as ActionId)
-        .with_state(VirtualKeyCode::S, MoveBackward as ActionId)
-        .with_state(VirtualKeyCode::A, MoveLeft as ActionId)
-        .with_state(VirtualKeyCode::D, MoveRight as ActionId)
-        .with_state(VirtualKeyCode::E, MoveUp as ActionId)
-        .with_state(VirtualKeyCode::Q, MoveDown as ActionId)
-        .with_range(DeviceAxis::MouseX, CameraRotation::YawDelta as RangeId, sens)
-        .with_range(DeviceAxis::MouseY, CameraRotation::PitchDelta as RangeId, sens)
+        .with_state(VirtualKeyCode::W, Forward as StateId)
+        .with_state(VirtualKeyCode::S, Backward as StateId)
+        .with_state(VirtualKeyCode::A, Left as StateId)
+        .with_state(VirtualKeyCode::D, Right as StateId)
+        .with_state(VirtualKeyCode::E, Up as StateId)
+        .with_state(VirtualKeyCode::Q, Down as StateId)
+        .with_range(
+            DeviceAxis::MouseX,
+            CameraRotation::YawDelta as RangeId,
+            sens,
+        )
+        .with_range(
+            DeviceAxis::MouseY,
+            CameraRotation::PitchDelta as RangeId,
+            sens,
+        )
         .build()
 }
 
@@ -144,7 +164,10 @@ pub fn init_camera(world: &mut World) -> Entity {
     let direction = glm::normalize(&(glm::vec3(0.0, 0.0, 0.0) - start_pos));
     let up = glm::vec3(0.0, 1.0, 0.0);
     let orientation = CameraOrientation::new(up, direction);
-    let rot_state = CameraRotationState{yaw: 0.0, pitch: 0.0};
+    let rot_state = CameraRotationState {
+        yaw: 0.0,
+        pitch: 0.0,
+    };
 
     let input_context = get_input_context();
 

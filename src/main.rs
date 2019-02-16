@@ -27,13 +27,13 @@ use vulkano::buffer::{
 use vulkano::command_buffer::{
     AutoCommandBuffer, AutoCommandBufferBuilder, CommandBufferExecFuture, DynamicState,
 };
-use vulkano::descriptor::{
-    descriptor_set::PersistentDescriptorSet, DescriptorSet};
+use vulkano::descriptor::{descriptor_set::PersistentDescriptorSet, DescriptorSet};
 use vulkano::device::{Device, DeviceExtensions, Features, Queue};
 use vulkano::format::Format;
 use vulkano::framebuffer::{Framebuffer, FramebufferAbstract, RenderPassAbstract, Subpass};
 use vulkano::image::{
-    attachment::AttachmentImage, immutable::ImmutableImage, swapchain::SwapchainImage, Dimensions, ImageUsage, ImageViewAccess,
+    attachment::AttachmentImage, immutable::ImmutableImage, swapchain::SwapchainImage, Dimensions,
+    ImageUsage, ImageViewAccess,
 };
 use vulkano::instance;
 use vulkano::instance::{Instance, InstanceExtensions, PhysicalDevice, QueueFamily};
@@ -57,13 +57,16 @@ use std::collections::HashSet;
 use std::path::Path;
 
 use std::sync::Arc;
-use std::time::{Duration};
+use std::time::Duration;
 
 mod camera;
 mod common;
 mod input;
 
 use self::common::*;
+use self::input::{ActionId, InputContext, InputContextPriority, MappedInput};
+
+// REFACTOR: The vulkan/rendering specific parts of this should go into its own module
 
 #[derive(Copy, Clone)]
 struct Vertex {
@@ -99,9 +102,55 @@ impl<F: GpuFuture> WaitableFuture for FenceSignalFuture<F> {
     }
 }
 
+type AppEvents = Vec<Event>;
+
 // World resources
 #[derive(Default, Debug)]
-struct CurrentFrameWindowEvents(Vec<WindowEvent>);
+struct CurrentFrameWindowEvents(AppEvents);
+
+#[derive(Debug, Copy, Clone, PartialEq, Eq)]
+enum GameState {
+    Paused,
+    Running,
+}
+
+impl Default for GameState {
+    fn default() -> Self {
+        GameState::Running
+    }
+}
+
+const GAME_STATE_SWITCH: ActionId = 0;
+
+#[derive(Default, Component)]
+#[storage(NullStorage)]
+struct GameStateSwitcher;
+
+impl<'a> System<'a> for GameStateSwitcher {
+    type SystemData = (
+        Write<'a, GameState>,
+        WriteStorage<'a, InputContext>,
+        ReadStorage<'a, MappedInput>,
+        ReadStorage<'a, Self>,
+    );
+
+    fn run(&mut self, (mut state, mut contexts, inputs, _unique_id): Self::SystemData) {
+        log::trace!("GameStateSwitcher: run");
+        // TODO: Verify that we only get one mapped input? (and one context)
+
+        for (inp, ctx) in (&inputs, &mut contexts).join() {
+            use crate::GameState::*;
+            if inp.actions.contains(&GAME_STATE_SWITCH) {
+                *state = match *state {
+                    Paused => Running,
+                    Running => Paused,
+                }
+            }
+
+            ctx.set_consume_all(*state == Paused);
+        }
+    }
+}
 
 struct ActiveCamera(Option<Entity>);
 
@@ -129,46 +178,100 @@ struct App {
 }
 
 // TODO: Handle resized here as well
+#[derive(Debug)]
 enum AppAction {
     Quit,
-    HandleEvents(Vec<WindowEvent>),
+    IgnoreInput,
+    AcceptInput(AppEvents),
+    HandleEvents(AppEvents),
+}
+
+impl AppAction {
+    fn update_with(self, new: Self) -> Self {
+        use AppAction::*;
+        match (new, self) {
+            (_, Quit) => Quit,
+            (_, IgnoreInput) => IgnoreInput,
+            (Quit, _) => Quit,
+            (IgnoreInput, _) => IgnoreInput,
+            (AcceptInput(_), _) => AcceptInput(Vec::new()),
+            (HandleEvents(mut new_events), AcceptInput(mut old_events)) => {
+                old_events.append(&mut new_events);
+                AcceptInput(old_events)
+            }
+            (HandleEvents(mut new_events), HandleEvents(mut old_events)) => {
+                old_events.append(&mut new_events);
+                HandleEvents(old_events)
+            }
+        }
+    }
 }
 
 struct EventManager {
-    window_events: Vec<WindowEvent>,
-    quit: bool,
+    action: AppAction,
 }
 
 impl EventManager {
     fn new() -> Self {
         Self {
-            window_events: Vec::new(),
-            quit: false,
+            action: AppAction::HandleEvents(Vec::new()),
         }
     }
 
+    fn update_action(&mut self, action: AppAction) {
+        let cur = std::mem::replace(&mut self.action, AppAction::Quit);
+        self.action = cur.update_with(action);
+    }
+
     fn collect_event(&mut self, event: Event) {
-        if let Event::WindowEvent { event: inner_event, .. } = event {
-            match inner_event {
+        let action: Option<AppAction> = match &event {
+            Event::WindowEvent {
+                event: inner_event, ..
+            } => match inner_event {
                 WindowEvent::CloseRequested => {
                     log::info!("EventManager: Received CloseRequested window event");
-                    self.quit = true;
+                    Some(AppAction::Quit)
                 }
-                _ => self.window_events.push(inner_event),
+                WindowEvent::Focused(focused) => Some(if !focused {
+                    log::trace!("Window lost focus, ignoring input");
+                    AppAction::IgnoreInput
+                } else {
+                    log::trace!("Window gained focus, accepting input");
+                    AppAction::AcceptInput(Vec::new())
+                }),
+                _ => Some(AppAction::HandleEvents(Vec::new())),
+            },
+            Event::DeviceEvent {
+                event: inner_event, ..
+            } => {
+                if let winit::DeviceEvent::MouseMotion { .. } = inner_event {
+                    Some(AppAction::HandleEvents(Vec::new()))
+                } else {
+                    None
+                }
             }
+            _ => None,
+        };
+
+        if let Some(action) = action {
+            let action = match action {
+                AppAction::AcceptInput(mut empty_vec) => {
+                    empty_vec.push(event);
+                    AppAction::AcceptInput(empty_vec)
+                }
+                AppAction::HandleEvents(mut empty_vec) => {
+                    empty_vec.push(event);
+                    AppAction::HandleEvents(empty_vec)
+                }
+                action => action,
+            };
+            self.update_action(action);
         }
     }
 
     fn resolve(&mut self) -> AppAction {
         log::trace!("EventManager: Resolving events");
-        let events = std::mem::replace(&mut self.window_events, Vec::new());
-        let quit = std::mem::replace(&mut self.quit, false);
-
-        if quit {
-            AppAction::Quit
-        } else {
-            AppAction::HandleEvents(events)
-        }
+        std::mem::replace(&mut self.action, AppAction::HandleEvents(Vec::new()))
     }
 }
 
@@ -179,7 +282,9 @@ impl App {
         let pos_storage = self.world.read_storage::<Position>();
         let cam_pos = pos_storage.get(active_cam_entity).unwrap().to_vec3();
 
-        let ori_storage = self.world.read_storage::<crate::camera::CameraOrientation>();
+        let ori_storage = self
+            .world
+            .read_storage::<crate::camera::CameraOrientation>();
         let cam_ori = ori_storage.get(active_cam_entity).unwrap();
 
         let dir = cam_ori.direction;
@@ -201,10 +306,24 @@ impl App {
 
         let trns = glm::translate(&glm::identity(), &-(cam_pos));
 
-        let view = glm::mat4(cam_right[0], cam_right.y, cam_right.z, 0.0,
-                             cam_up.x, cam_up.y, cam_up.z, 0.0,
-                             cam_dir.x, cam_dir.y, cam_dir.z, 0.0,
-                             0.0, 0.0, 0.0, 1.0);
+        let view = glm::mat4(
+            cam_right[0],
+            cam_right.y,
+            cam_right.z,
+            0.0,
+            cam_up.x,
+            cam_up.y,
+            cam_up.z,
+            0.0,
+            cam_dir.x,
+            cam_dir.y,
+            cam_dir.z,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            1.0,
+        );
 
         let view = view * trns;
 
@@ -220,34 +339,74 @@ impl App {
         let builder = input::register_systems(builder);
         let builder = camera::register_systems(builder);
 
-        builder.build()
+        builder
+            .with(
+                GameStateSwitcher,
+                "game_state_switcher",
+                &[input::INPUT_MANAGER_SYSTEM_ID],
+            )
+            .build()
     }
 
     fn populate_world(&mut self) {
         let cam_entity = camera::init_camera(&mut self.world);
-        let mut active_camera = self.world.write_resource::<ActiveCamera>();
-        *active_camera = ActiveCamera(Some(cam_entity));
+        {
+            let mut active_camera = self.world.write_resource::<ActiveCamera>();
+            *active_camera = ActiveCamera(Some(cam_entity));
+        }
+
+        // TODO: Clean up
+        let escape_catcher = InputContext::start("EscapeCatcher")
+            .with_description("Global top-level escape catcher for game state switcher")
+            .with_action(winit::VirtualKeyCode::Escape, GAME_STATE_SWITCH)
+            .with_priority(InputContextPriority::First)
+            .build();
+        let mapped_input = MappedInput::new();
+        self.world
+            .create_entity()
+            .with(escape_catcher)
+            .with(mapped_input)
+            .with(GameStateSwitcher {})
+            .build();
     }
 
     fn main_loop(&mut self) {
         let mut dispatcher = Self::init_dispatcher();
 
-        // Register all component types etc.
+        // Register all component types
         dispatcher.setup(&mut self.world.res);
 
-        // Setup camera etc.
+        // Setup camera
         self.populate_world();
 
         let mut event_manager = EventManager::new();
 
         loop {
             log::trace!("Polling events");
+
+            let free_cursor = *self.world.read_resource::<GameState>() == GameState::Paused;
+
+            self.vk_surface.window()
+                .grab_cursor(!free_cursor)
+                .expect("Unable to grab cursor");
+            self.vk_surface.window()
+                .hide_cursor(!free_cursor);
+
             self.events_loop
                 .poll_events(|event| event_manager.collect_event(event));
 
             match event_manager.resolve() {
                 AppAction::Quit => {
                     return;
+                }
+                AppAction::IgnoreInput => {
+                    continue;
+                }
+                // TODO: Can we merge these? AcceptEvents
+                // TODO: Atleast we can use the | "or" pattern here
+                AppAction::AcceptInput(events) => {
+                    let mut cur_events = self.world.write_resource::<CurrentFrameWindowEvents>();
+                    *cur_events = CurrentFrameWindowEvents(events);
                 }
                 AppAction::HandleEvents(window_events) => {
                     let mut cur_events = self.world.write_resource::<CurrentFrameWindowEvents>();
@@ -276,7 +435,7 @@ impl App {
 
             log::trace!("Dispatching");
             // Run all ECS systems (blocking call)
-            dispatcher.dispatch(& self.world.res);
+            dispatcher.dispatch(&self.world.res);
 
             // This writes to the uniform buffer for the upcoming frame
             // TODO: Merge this into ECS
@@ -336,13 +495,14 @@ impl App {
 
         Self::print_validation_layers();
 
-        Instance::new(None, &required_extensions, None)
-            .expect("Could not create vulkan instance")
+        Instance::new(None, &required_extensions, None).expect("Could not create vulkan instance")
     }
 
     fn setup_surface(vk_instance: &Arc<Instance>) -> (EventsLoop, Arc<Surface<Window>>) {
         let events_loop = EventsLoop::new();
         let surface = WindowBuilder::new()
+            .with_fullscreen(None)
+            .with_maximized(true)
             .build_vk_surface(&events_loop, Arc::clone(vk_instance))
             .expect("Unable to create window/surface");
 
@@ -770,7 +930,6 @@ impl App {
             view: glm::look_at(
                 &glm::vec3(2.0, 2.0, 2.0),
                 &glm::vec3(0.0, 0.0, 0.0),
-                // FIXME: Z-axis is up since tutorial example has edited the chalet model
                 &glm::vec3(0.0, 1.0, 0.0),
             )
             .into(),
@@ -972,8 +1131,7 @@ impl App {
             vk_sys::SAMPLE_COUNT_64_BIT,
         ];
 
-        bits
-            .iter()
+        bits.iter()
             .rev()
             .find(|&&bit| (color_samples & bit != 0) && (depth_samples & bit != 0))
             .cloned()
@@ -985,6 +1143,7 @@ impl App {
 
         world.add_resource(CurrentFrameWindowEvents(Vec::new()));
         world.add_resource(ActiveCamera(None));
+        world.add_resource(GameState::Running);
 
         input::add_resources(&mut world);
 
