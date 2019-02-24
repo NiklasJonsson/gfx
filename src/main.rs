@@ -130,24 +130,25 @@ impl<'a> System<'a> for GameStateSwitcher {
     type SystemData = (
         Write<'a, GameState>,
         WriteStorage<'a, InputContext>,
-        ReadStorage<'a, MappedInput>,
+        WriteStorage<'a, MappedInput>,
         ReadStorage<'a, Self>,
     );
 
-    fn run(&mut self, (mut state, mut contexts, inputs, _unique_id): Self::SystemData) {
+    fn run(&mut self, (mut state, mut contexts, mut inputs, _unique_id): Self::SystemData) {
         log::trace!("GameStateSwitcher: run");
         // TODO: Verify that we only get one mapped input? (and one context)
 
-        for (inp, ctx) in (&inputs, &mut contexts).join() {
+        for (inp, ctx) in (&mut inputs, &mut contexts).join() {
             use crate::GameState::*;
             if inp.actions.contains(&GAME_STATE_SWITCH) {
                 *state = match *state {
                     Paused => Running,
                     Running => Paused,
-                }
-            }
+                };
 
-            ctx.set_consume_all(*state == Paused);
+                ctx.set_consume_all(*state == Paused);
+            }
+            inp.clear();
         }
     }
 }
@@ -210,6 +211,10 @@ impl AppAction {
 struct EventManager {
     action: AppAction,
 }
+
+// TODO: We should not have "ignore-code" in both event manager and input manager
+// Only stuff that is relevant to input manager should be forwarded.
+// Create enum to represent what we want the input manager to receive
 
 impl EventManager {
     fn new() -> Self {
@@ -386,11 +391,11 @@ impl App {
 
             let free_cursor = *self.world.read_resource::<GameState>() == GameState::Paused;
 
-            self.vk_surface.window()
+            self.vk_surface
+                .window()
                 .grab_cursor(!free_cursor)
                 .expect("Unable to grab cursor");
-            self.vk_surface.window()
-                .hide_cursor(!free_cursor);
+            self.vk_surface.window().hide_cursor(!free_cursor);
 
             self.events_loop
                 .poll_events(|event| event_manager.collect_event(event));
@@ -501,8 +506,6 @@ impl App {
     fn setup_surface(vk_instance: &Arc<Instance>) -> (EventsLoop, Arc<Surface<Window>>) {
         let events_loop = EventsLoop::new();
         let surface = WindowBuilder::new()
-            .with_fullscreen(None)
-            .with_maximized(true)
             .build_vk_surface(&events_loop, Arc::clone(vk_instance))
             .expect("Unable to create window/surface");
 

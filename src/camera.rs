@@ -54,6 +54,7 @@ enum CameraRotation {
     PitchDelta,
 }
 
+// TODO: Nullstorage here?
 struct FreeFlyCameraController;
 
 impl<'a> System<'a> for FreeFlyCameraController {

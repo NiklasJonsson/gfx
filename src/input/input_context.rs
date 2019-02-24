@@ -22,7 +22,7 @@ pub enum InputContextPriority {
     DontCare,
 }
 
-#[derive(Component)]
+#[derive(Component, Debug)]
 #[storage(HashMapStorage)]
 pub struct InputContext {
     name: String,

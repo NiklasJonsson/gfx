@@ -22,7 +22,7 @@ pub enum DeviceAxis {
     MouseY,
 }
 
-#[derive(Default, Component)]
+#[derive(Default, Component, Debug)]
 #[storage(HashMapStorage)]
 pub struct MappedInput {
     pub actions: HashSet<ActionId>,
@@ -69,7 +69,8 @@ impl MappedInput {
 }
 
 // TODO: Put this inside InputManager?
-// After all this is not a globally avaiable singleton, but rather internal to the input manager
+// After all this is not a globally avaiable singleton, but rather internal to the input manager.
+// But how to init this struct and where?
 type AxisValue = f64;
 type IsPressed = bool;
 type PreviousPressed = bool;
@@ -138,18 +139,13 @@ impl<'a> System<'a> for InputManager {
 
     fn run(&mut self, (contexts, cur_events, mut state, mut mapped): Self::SystemData) {
         // TODO: Accessing inner type of WindowEvents is not very nice
-        log::trace!("InputMapper: Running!");
 
         let mut event_used: Vec<bool> = cur_events.0.iter().map(|_| false).collect::<Vec<_>>();
 
-        // TODO: Sort on prio first
         let mut joined = (&contexts, &mut mapped).join().collect::<Vec<_>>();
         joined.sort_by(|(ctx_a, _), (ctx_b, _)| ctx_a.cmp(ctx_b));
         for (ctx, mi) in joined {
-            // TODO: Should we clear here?
-            // TODO: Use a builder here and replace instead? (it would be nice to have mapped input
-            // be immutable
-            mi.clear();
+            log::debug!("Mapping for inputcontext: {:?}", ctx);
 
             for (idx, event) in cur_events.0.iter().enumerate() {
                 if event_used[idx] {
@@ -202,7 +198,7 @@ impl<'a> System<'a> for InputManager {
                                 }
                             }
                         }
-                        e => log::trace!("InputManager: Ignoring {:?}", e),
+                        e => log::debug!("InputManager: Ignoring {:?}", e),
                     }
                 } else if let DeviceEvent {
                     event: inner_event, ..
@@ -220,7 +216,7 @@ impl<'a> System<'a> for InputManager {
                                 mi.set_range_delta(range_id, range_delta);
                                 event_used[idx] = true;
                             } else {
-                                log::trace!("But x was not registered");
+                                log::debug!("But x was not registered");
                             }
                         }
                     }
@@ -230,6 +226,8 @@ impl<'a> System<'a> for InputManager {
                     event_used[idx] = true;
                 }
             }
+
+            log::debug!("Mapped the following input: {:?}", mi);
         }
     }
 }
