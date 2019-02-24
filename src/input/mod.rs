@@ -72,11 +72,9 @@ impl MappedInput {
 // After all this is not a globally avaiable singleton, but rather internal to the input manager.
 // But how to init this struct and where?
 type AxisValue = f64;
-type IsPressed = bool;
-type PreviousPressed = bool;
 #[derive(Debug, Default)]
 struct InputManagerState {
-    pressed_buttons: HashSet<(DeviceId, VirtualKeyCode)>,
+    pressed_buttons: HashSet<VirtualKeyCode>,
     axis_movement: HashMap<(DeviceId, AxisId), AxisValue>,
 }
 
@@ -90,20 +88,18 @@ impl InputManagerState {
 
     fn register_key(
         &mut self,
-        device: DeviceId,
         input: KeyboardInput,
-    ) -> (IsPressed, PreviousPressed) {
+    ) -> bool {
         let is_pressed = input.state == ElementState::Pressed;
         let prev_pressed = input
             .virtual_keycode
-            .map_or(false, |key| self.pressed_buttons.contains(&(device, key)));
+            .map_or(false, |key| self.pressed_buttons.contains(&key));
 
         if let Some(key) = input.virtual_keycode {
-            let map_key = (device, key);
             if is_pressed {
-                self.pressed_buttons.insert(map_key);
+                self.pressed_buttons.insert(key);
             } else {
-                let existed = self.pressed_buttons.remove(&map_key);
+                let existed = self.pressed_buttons.remove(&key);
                 if !existed {
                     log::warn!("Button was released, but was not registered as pressed.");
                 }
@@ -115,7 +111,7 @@ impl InputManagerState {
             );
         }
 
-        (is_pressed, prev_pressed)
+        is_pressed && !prev_pressed
     }
 
     /// Return delta compared to previous axis value (0 if this is the first time)
@@ -129,6 +125,10 @@ impl InputManagerState {
 struct InputManager;
 
 // TODO: Use activeCamera here?
+// TODO: Clean this up
+// Requirements:
+//  - A new "pressed" event for a button should generate both an action and set a state
+//  - A new "release" should only update input manager state
 impl<'a> System<'a> for InputManager {
     type SystemData = (
         ReadStorage<'a, InputContext>,
@@ -142,9 +142,11 @@ impl<'a> System<'a> for InputManager {
 
         let mut event_used: Vec<bool> = cur_events.0.iter().map(|_| false).collect::<Vec<_>>();
 
+        // Currently we are first handling action + axis->range and then states. This can probably
+        // be refactored
         let mut joined = (&contexts, &mut mapped).join().collect::<Vec<_>>();
         joined.sort_by(|(ctx_a, _), (ctx_b, _)| ctx_a.cmp(ctx_b));
-        for (ctx, mi) in joined {
+        for (ctx, mi) in &mut joined {
             log::debug!("Mapping for inputcontext: {:?}", ctx);
 
             for (idx, event) in cur_events.0.iter().enumerate() {
@@ -169,15 +171,10 @@ impl<'a> System<'a> for InputManager {
                                 device_id
                             );
 
-                            let (is_pressed, prev_pressed) = state.register_key(*device_id, *input);
-                            let is_action = is_pressed && !prev_pressed;
+                            let is_new_press = state.register_key(*input);
 
-                            // Both a state and an action is triggered when a button is pressed for the
-                            // first time. It is up to the InputContext to not map the same key to an
-                            // action and a state at the same time.
-
-                            if is_action {
-                                log::trace!("It's an action!");
+                            if is_new_press {
+                                log::trace!("It's a new key press!");
                                 if let Some(key) = input.virtual_keycode {
                                     if let Some(&action_id) = ctx.get_action_for(key) {
                                         mi.add_action(action_id);
@@ -185,16 +182,6 @@ impl<'a> System<'a> for InputManager {
                                     } else {
                                         log::trace!("But it was not mapped");
                                     }
-                                }
-                            }
-
-                            log::trace!("Setting state!");
-                            if let Some(key) = input.virtual_keycode {
-                                if let Some(&id) = ctx.get_state_for(key) {
-                                    mi.set_state(id, is_pressed);
-                                    event_used[idx] = true;
-                                } else {
-                                    log::trace!("But it was not mapped");
                                 }
                             }
                         }
@@ -227,7 +214,24 @@ impl<'a> System<'a> for InputManager {
                 }
             }
 
-            log::debug!("Mapped the following input: {:?}", mi);
+        }
+
+        // Send out states as well
+
+        let mut state_used: Vec<bool> = state.pressed_buttons
+            .iter().map(|_| false).collect::<Vec<_>>();
+
+        for (ctx, mi) in joined {
+            for (idx, btn) in state.pressed_buttons.iter().enumerate() {
+                if state_used[idx] {
+                    continue;
+                }
+
+                if let Some(&id) = ctx.get_state_for(*btn) {
+                    mi.set_state(id, true);
+                    state_used[idx] = true;
+                }
+            }
         }
     }
 }

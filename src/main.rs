@@ -215,6 +215,7 @@ struct EventManager {
 // TODO: We should not have "ignore-code" in both event manager and input manager
 // Only stuff that is relevant to input manager should be forwarded.
 // Create enum to represent what we want the input manager to receive
+// But should this really be done here? Separate window/input handling?
 
 impl EventManager {
     fn new() -> Self {
@@ -275,7 +276,6 @@ impl EventManager {
     }
 
     fn resolve(&mut self) -> AppAction {
-        log::trace!("EventManager: Resolving events");
         std::mem::replace(&mut self.action, AppAction::HandleEvents(Vec::new()))
     }
 }
@@ -389,6 +389,9 @@ impl App {
         loop {
             log::trace!("Polling events");
 
+            self.events_loop
+                .poll_events(|event| event_manager.collect_event(event));
+
             let free_cursor = *self.world.read_resource::<GameState>() == GameState::Paused;
 
             self.vk_surface
@@ -396,9 +399,6 @@ impl App {
                 .grab_cursor(!free_cursor)
                 .expect("Unable to grab cursor");
             self.vk_surface.window().hide_cursor(!free_cursor);
-
-            self.events_loop
-                .poll_events(|event| event_manager.collect_event(event));
 
             match event_manager.resolve() {
                 AppAction::Quit => {
