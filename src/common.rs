@@ -1,6 +1,21 @@
 use specs::prelude::*;
 use std::ops::AddAssign;
 
+#[derive(Copy, Clone)]
+pub struct Vertex {
+    pub position: [f32; 3],
+    pub tex_coords: [f32; 2],
+}
+
+impl Vertex {
+    pub fn new(position: [f32; 3], tex_coords: [f32; 2]) -> Vertex {
+        Vertex {
+            position,
+            tex_coords,
+        }
+    }
+}
+
 // TODO: Auto derive inner type traits
 
 #[derive(Debug, Component)]

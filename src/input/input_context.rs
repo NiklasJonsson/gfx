@@ -95,8 +95,6 @@ pub struct InputContextBuilder {
     consume_all: bool,
 }
 
-// The syntax used for creating the new builder structs bellow is called "Struct Update Syntax" in
-// the rust book
 // TODO: Error handling
 impl InputContextBuilder {
     fn start(name: &str) -> Self {

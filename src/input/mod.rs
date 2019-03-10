@@ -70,7 +70,7 @@ impl MappedInput {
 
 // TODO: Put this inside InputManager?
 // After all this is not a globally avaiable singleton, but rather internal to the input manager.
-// But how to init this struct and where?
+// This would be initialized during reigster_systems()
 type AxisValue = f64;
 #[derive(Debug, Default)]
 struct InputManagerState {
@@ -86,10 +86,7 @@ impl InputManagerState {
         }
     }
 
-    fn register_key(
-        &mut self,
-        input: KeyboardInput,
-    ) -> bool {
+    fn register_key(&mut self, input: KeyboardInput) -> bool {
         let is_pressed = input.state == ElementState::Pressed;
         let prev_pressed = input
             .virtual_keycode
@@ -213,13 +210,15 @@ impl<'a> System<'a> for InputManager {
                     event_used[idx] = true;
                 }
             }
-
         }
 
         // Send out states as well
 
-        let mut state_used: Vec<bool> = state.pressed_buttons
-            .iter().map(|_| false).collect::<Vec<_>>();
+        let mut state_used: Vec<bool> = state
+            .pressed_buttons
+            .iter()
+            .map(|_| false)
+            .collect::<Vec<_>>();
 
         for (ctx, mi) in joined {
             for (idx, btn) in state.pressed_buttons.iter().enumerate() {
