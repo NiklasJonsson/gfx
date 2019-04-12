@@ -767,23 +767,6 @@ fn create_command_buffer_with_push_constants(
 
 impl_vertex!(Vertex, position, tex_coords);
 
-// Extra trait specialization for GpuFuture, intended for storing NowFuture or FenceSignalFuture
-trait WaitableFuture: GpuFuture {
-    fn wait_for(&self, timeout: Option<Duration>) -> Result<(), FlushError>;
-}
-
-impl WaitableFuture for NowFuture {
-    fn wait_for(&self, _timeout: Option<Duration>) -> Result<(), FlushError> {
-        Ok(())
-    }
-}
-
-impl<F: GpuFuture> WaitableFuture for FenceSignalFuture<F> {
-    fn wait_for(&self, timeout: Option<Duration>) -> Result<(), FlushError> {
-        self.wait(timeout)
-    }
-}
-
 fn get_view_matrix(pos: &Position, ori: &CameraOrientation) -> glm::Mat4 {
     let dir = ori.direction;
     let up = ori.up;
