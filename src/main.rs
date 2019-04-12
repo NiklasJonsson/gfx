@@ -244,10 +244,7 @@ impl App {
         let chalet_asset = asset::load_asset(desc);
         let chalet_renderable = self.vk_manager.prepare_asset_for_rendering(chalet_asset);
 
-        self.world
-            .create_entity()
-            .with(chalet_renderable)
-            .build();
+        self.world.create_entity().with(chalet_renderable).build();
     }
 
     fn main_loop(&mut self) {

@@ -1,6 +1,7 @@
 use image::RgbaImage;
 use vulkano::buffer::{
-    BufferAccess, BufferUsage, CpuBufferPool, ImmutableBuffer, TypedBufferAccess, cpu_pool::CpuBufferPoolSubbuffer,
+    cpu_pool::CpuBufferPoolSubbuffer, BufferAccess, BufferUsage, CpuBufferPool, ImmutableBuffer,
+    TypedBufferAccess,
 };
 use vulkano::command_buffer::{
     AutoCommandBuffer, AutoCommandBufferBuilder, CommandBufferExecFuture, DynamicState,
@@ -66,7 +67,6 @@ pub struct VKManager {
     frame_completions: Vec<Option<Box<GpuFuture>>>,
     multisample_count: u32,
     current_sc_index: usize,
-
 }
 
 impl VKManager {
@@ -254,7 +254,8 @@ impl VKManager {
             proj: proj.into(),
         };
 
-        let this_frame_buf = self.view_proj_buf
+        let this_frame_buf = self
+            .view_proj_buf
             .next(vp_buf)
             .expect("Could not get next ring buffer sub buffer for view proj");
 
@@ -263,22 +264,21 @@ impl VKManager {
         // Render all the renderables as a chain of command buffers
         let presented = renderables
             .join()
-            .fold(
-                prev_frame,
-                |prev_render_done, renderable| {
-                    Box::new(prev_render_done
+            .fold(prev_frame, |prev_render_done, renderable| {
+                Box::new(
+                    prev_render_done
                         .then_execute(
                             Arc::clone(&self.graphics_queue),
-                            Arc::clone(&renderable
-                                       .get_command_buffer(
-                                        &self.vk_device,
-                                        self.graphics_queue.family(),
-                                        &self.framebuffers[frame_idx],
-                                        &this_frame_buf,
-                                        )),
-                        ).unwrap())
-                }
+                            Arc::clone(&renderable.get_command_buffer(
+                                &self.vk_device,
+                                self.graphics_queue.family(),
+                                &self.framebuffers[frame_idx],
+                                &this_frame_buf,
+                            )),
+                        )
+                        .unwrap(),
                 )
+            })
             .then_swapchain_present(
                 Arc::clone(&self.graphics_queue),
                 Arc::clone(&self.swapchain),
@@ -557,7 +557,7 @@ fn create_logical_device(
     let q_families = [graphics_queue_family, presentation_queue_family];
     use std::iter::FromIterator;
     let unique_queue_families: HashSet<u32> =
-        HashSet::from_iter(q_families.iter().map(|qf| qf.id()));
+        HashSet::from_iter(q_families.iter().map(QueueFamily::id));
 
     let queue_priority = 1.0;
     let q_families = unique_queue_families.iter().map(|&i| {
@@ -745,26 +745,23 @@ fn create_command_buffer_with_push_constants(
     };
 
     Arc::new(
-        AutoCommandBufferBuilder::primary_simultaneous_use(
-            Arc::clone(device),
-            queue_family,
-        )
-        .expect("Failed to create command buffer builder")
-        .begin_render_pass(Arc::clone(framebuffer), false, clear_color)
-        .expect("Failed after begin render pass")
-        .draw_indexed(
-            Arc::clone(pipeline),
-            &DynamicState::none(),
-            vec![Arc::clone(vertex_buffer)],
-            Arc::clone(index_buffer),
-            Arc::clone(&descriptor_set),
-            push_constant_model_matrix,
-        )
-        .expect("Failed after draw_indexed")
-        .end_render_pass()
-        .unwrap()
-        .build()
-        .unwrap(),
+        AutoCommandBufferBuilder::primary_simultaneous_use(Arc::clone(device), queue_family)
+            .expect("Failed to create command buffer builder")
+            .begin_render_pass(Arc::clone(framebuffer), false, clear_color)
+            .expect("Failed after begin render pass")
+            .draw_indexed(
+                Arc::clone(pipeline),
+                &DynamicState::none(),
+                vec![Arc::clone(vertex_buffer)],
+                Arc::clone(index_buffer),
+                Arc::clone(&descriptor_set),
+                push_constant_model_matrix,
+            )
+            .expect("Failed after draw_indexed")
+            .end_render_pass()
+            .unwrap()
+            .build()
+            .unwrap(),
     )
 }
 
@@ -855,25 +852,25 @@ pub struct Renderable {
 }
 
 impl Renderable {
-    fn get_command_buffer(&self,
-                          vk_device: &Arc<Device>,
-                          queue_family: QueueFamily,
-                          framebuffer: &Arc<FramebufferAbstract + Send + Sync>,
-                          vp_buf: &CpuBufferPoolSubbuffer<vs_static::ty::VPUniformBufferObject, Arc<vulkano::memory::pool::StdMemoryPool>>,
-
-    )
- -> Arc<AutoCommandBuffer> {
-
-     let descriptor_set = Arc::new(
-         PersistentDescriptorSet::start(Arc::clone(&self.g_pipeline), 0)
-         .add_buffer(vp_buf.clone())
-         .unwrap()
-         .add_sampled_image(Arc::clone(&self.image_buffer), Arc::clone(&self.sampler))
-         .unwrap()
-         .build()
-         .expect("Failed to create persistent descriptor set for mvp ubo")
-         )
-         as Arc<DescriptorSet + Send + Sync>;
+    fn get_command_buffer(
+        &self,
+        vk_device: &Arc<Device>,
+        queue_family: QueueFamily,
+        framebuffer: &Arc<FramebufferAbstract + Send + Sync>,
+        vp_buf: &CpuBufferPoolSubbuffer<
+            vs_static::ty::VPUniformBufferObject,
+            Arc<vulkano::memory::pool::StdMemoryPool>,
+        >,
+    ) -> Arc<AutoCommandBuffer> {
+        let descriptor_set = Arc::new(
+            PersistentDescriptorSet::start(Arc::clone(&self.g_pipeline), 0)
+                .add_buffer(vp_buf.clone())
+                .unwrap()
+                .add_sampled_image(Arc::clone(&self.image_buffer), Arc::clone(&self.sampler))
+                .unwrap()
+                .build()
+                .expect("Failed to create persistent descriptor set for mvp ubo"),
+        ) as Arc<DescriptorSet + Send + Sync>;
 
         create_command_buffer_with_push_constants(
             vk_device,
