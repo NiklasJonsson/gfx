@@ -262,6 +262,7 @@ impl VKManager {
         let prev_frame = std::mem::replace(&mut self.frame_completions[frame_idx], None).unwrap();
 
         // Render all the renderables as a chain of command buffers
+        // TODO: Use several draw commands within a command buffer instead
         let presented = renderables
             .join()
             .fold(prev_frame, |prev_render_done, renderable| {

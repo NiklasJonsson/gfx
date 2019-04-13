@@ -166,8 +166,8 @@ pub fn init_camera(world: &mut World) -> Entity {
     let up = glm::vec3(0.0, 1.0, 0.0);
     let orientation = CameraOrientation::new(up, direction);
     let rot_state = CameraRotationState {
-        yaw: 0.0,
-        pitch: 0.0,
+        yaw: 0.80,
+        pitch: 3.78,
     };
 
     let input_context = get_input_context();
