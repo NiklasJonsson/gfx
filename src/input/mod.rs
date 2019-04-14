@@ -123,9 +123,10 @@ struct InputManager;
 
 // TODO: Use activeCamera here?
 // TODO: Clean this up
+// TODO: Can we move resource to internal data for a system
 // Requirements:
 //  - A new "pressed" event for a button should generate both an action and set a state
-//  - A new "release" should only update input manager state
+//  - A new "release" should only update input manager internal state
 impl<'a> System<'a> for InputManager {
     type SystemData = (
         ReadStorage<'a, InputContext>,

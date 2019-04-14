@@ -228,7 +228,7 @@ impl VKManager {
     pub fn draw_next_frame(&mut self, world: &mut World) {
         let active_camera = world.read_resource::<ActiveCamera>();
         let positions = world.read_storage::<Position>();
-        let orientations = world.read_storage::<CameraOrientation>();
+        let cam_rots = world.read_storage::<CameraRotationState>();
         let renderables = world.read_storage::<Renderable>();
 
         let camera_entity = active_camera.0.unwrap();
@@ -239,11 +239,14 @@ impl VKManager {
             .get(camera_entity)
             .expect("Could not get position component for camera");
 
-        let cam_ori = orientations
+        let cam_rotation_state = cam_rots
             .get(camera_entity)
-            .expect("Could not get orientation component for camera");
+            .expect("Could not get rotation state for camera");
 
-        let view = get_view_matrix(cam_pos, cam_ori);
+        // TODO: Camera system should write to ViewMatrixResource at the end of system
+        // and we should read it here.
+        let cam_ori = FreeFlyCameraController::get_orientation_from(cam_rotation_state);
+        let view = get_view_matrix(cam_pos, &cam_ori);
 
         let dims = get_physical_window_dims(self.vk_surface.window());
         let aspect_ratio = dims[0] as f32 / dims[1] as f32;

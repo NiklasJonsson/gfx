@@ -32,7 +32,7 @@ type AppEvents = Vec<Event>;
 struct CurrentFrameWindowEvents(AppEvents);
 
 #[derive(Debug, Copy, Clone, PartialEq, Eq)]
-enum GameState {
+pub enum GameState {
     Paused,
     Running,
 }
