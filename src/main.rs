@@ -13,6 +13,7 @@ use winit::{Event, EventsLoop, WindowBuilder, WindowEvent};
 use specs::prelude::*;
 
 use std::sync::Arc;
+use std::time::{Duration, Instant};
 
 mod asset;
 mod camera;
@@ -30,6 +31,42 @@ type AppEvents = Vec<Event>;
 // World resources
 #[derive(Default, Debug)]
 struct CurrentFrameWindowEvents(AppEvents);
+
+#[derive(Default, Debug, Copy, Clone)]
+pub struct DeltaTime(Duration);
+
+impl DeltaTime {
+    pub fn zero() -> DeltaTime {
+        DeltaTime(Duration::new(0, 0))
+    }
+
+    pub fn to_f32(self) -> f32 {
+        (self.0.as_secs() as f64 + self.0.subsec_nanos() as f64 / 1000000000.0) as f32
+    }
+
+    pub fn as_fps(self) -> f32 {
+        1.0 / self.to_f32()
+    }
+}
+
+impl Into<Duration> for DeltaTime {
+    fn into(self) -> Duration {
+        self.0
+    }
+}
+
+impl From<Duration> for DeltaTime {
+    fn from(dur: Duration) -> Self {
+        DeltaTime(dur)
+    }
+}
+
+impl std::ops::Mul<f32> for DeltaTime {
+    type Output = f32;
+    fn mul(self, other: f32) -> Self::Output {
+        self.to_f32() * other
+    }
+}
 
 #[derive(Debug, Copy, Clone, PartialEq, Eq)]
 pub enum GameState {
@@ -260,6 +297,9 @@ impl App {
         // Collects events and resolves to AppAction
         let mut event_manager = EventManager::new();
 
+        let start_time = Instant::now();
+        let mut prev_frame = Instant::now();
+
         // Main loop is structured like:
         // 1. Poll events
         // 2. Resolve events
@@ -269,6 +309,14 @@ impl App {
         // 6. Run logic systems
         // 7. Render
         loop {
+
+            // Update global delta time
+            let now = Instant::now();
+            let diff = now - prev_frame;
+            prev_frame = now;
+
+            *self.world.write_resource::<DeltaTime>() = diff.into();
+
             self.events_loop
                 .poll_events(|event| event_manager.collect_event(event));
 
@@ -290,7 +338,6 @@ impl App {
             self.vk_manager.grab_cursor(grab_cursor);
 
             // Acquires next swapchain frame and waits for previous work to the upcoming framebuffer to be finished.
-
             self.vk_manager.prepare_frame();
 
             // Run all ECS systems (blocking call)
@@ -318,6 +365,7 @@ impl App {
         world.add_resource(CurrentFrameWindowEvents(Vec::new()));
         world.add_resource(ActiveCamera::empty());
         world.add_resource(GameState::Running);
+        world.add_resource(DeltaTime::zero());
 
         input::add_resources(&mut world);
 

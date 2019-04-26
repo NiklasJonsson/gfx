@@ -7,6 +7,7 @@ use crate::input;
 use crate::input::{DeviceAxis, InputContext, MappedInput, RangeId, Sensitivity, StateId};
 
 use crate::GameState;
+use crate::DeltaTime;
 
 use glm::Vec3;
 use winit::VirtualKeyCode;
@@ -14,6 +15,8 @@ use winit::VirtualKeyCode;
 use specs::prelude::*;
 
 use num_traits::cast::FromPrimitive;
+
+use std::time::Duration;
 
 #[derive(Debug)]
 pub struct CameraOrientation {
@@ -28,7 +31,7 @@ pub struct CameraRotationState {
     pitch: f32,
 }
 
-const MOVEMENT_SPEED: f32 = 0.02;
+const MOVEMENT_SPEED: f32 = 2.0;
 
 #[derive(Debug, Copy, Clone, FromPrimitive)]
 enum CameraMovement {
@@ -73,6 +76,7 @@ impl<'a> System<'a> for FreeFlyCameraController {
         WriteStorage<'a, Position>,
         WriteStorage<'a, CameraRotationState>,
         Read<'a, GameState>,
+        Read<'a, DeltaTime>,
     );
 
     fn run(&mut self, data: Self::SystemData) {
@@ -82,6 +86,7 @@ impl<'a> System<'a> for FreeFlyCameraController {
             mut positions,
             mut cam_rot_state,
             game_state,
+            delta_time,
         ) = data;
 
         if *game_state == GameState::Paused {
@@ -115,8 +120,7 @@ impl<'a> System<'a> for FreeFlyCameraController {
 
             for id in &mi.states {
                 use CameraMovement::*;
-                // TODO: Delta time
-                let dir = MOVEMENT_SPEED
+                let dir = *delta_time * MOVEMENT_SPEED
                     * match CameraMovement::from_u32(*id).unwrap() {
                         Forward => direction,
                         Backward => -direction,
