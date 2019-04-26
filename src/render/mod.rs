@@ -34,11 +34,14 @@ use specs::prelude::*;
 use std::collections::HashSet;
 use std::sync::Arc;
 
-use crate::asset::{Asset, AssetType};
+use crate::asset::*;
+use crate::asset;
 use crate::camera::*;
 use crate::common::*;
 
 use std::time::Duration;
+
+mod shader;
 
 #[derive(Debug, Default)]
 pub struct ActiveCamera(Option<Entity>);
@@ -61,7 +64,7 @@ pub struct VKManager {
     presentation_queue: Arc<Queue>,
     swapchain: Arc<Swapchain<Window>>,
     swapchain_images: Vec<Arc<SwapchainImage<Window>>>,
-    view_proj_buf: CpuBufferPool<vs_static::ty::VPUniformBufferObject>,
+    view_proj_buf: CpuBufferPool<shader::vs_pbr_static::ty::VPUniformBufferObject>,
     framebuffers: Vec<Arc<FramebufferAbstract + Send + Sync>>,
     render_pass: Arc<RenderPassAbstract + Send + Sync>,
     frame_completions: Vec<Option<Box<GpuFuture>>>,
@@ -144,51 +147,62 @@ impl VKManager {
         }
     }
 
-    pub fn prepare_asset_for_rendering(&self, asset: Asset) -> Renderable {
-        let Asset {
-            index_data,
-            vertex_data,
-            texture_data,
-            ty,
-        } = asset;
-        assert!(ty == AssetType::Static, "Unsupported");
+    fn send_data_to_gpu(&self, primitive: &Primitive) -> Renderable {
 
         // TODO: Use transfer queue here
         let (vertex_buffer, vertex_data_copied) =
-            create_and_submit_vertex_buffer(&self.graphics_queue, vertex_data);
+            create_and_submit_vertex_buffer(&self.graphics_queue, primitive.vertex_data.to_owned());
         let (index_buffer, index_data_copied) =
-            create_and_submit_index_buffer(&self.graphics_queue, index_data);
-        let (image_buffer, texture_data_copied) =
-            create_and_submit_texture_image(&self.graphics_queue, texture_data);
+            create_and_submit_index_buffer(&self.graphics_queue, primitive.index_data.to_owned());
 
-        let data_copied = vertex_data_copied
-            .join(index_data_copied)
-            .join(texture_data_copied)
+        let data_copied = vertex_data_copied.join(index_data_copied);
+
+        assert!(primitive.texture_data.is_none());
+
+        /* TODO: Re-enable textures
+        let image_buffer = texture_data_opt.map(|texture_data| {
+            let (image_buffer, texture_data_copied) =
+                create_and_submit_texture_image(&self.graphics_queue, texture_data);
+            data_copied = data_copied.join(texture_data_copied);
+            image_buffer
+        });
+        */
+
+        data_copied
             .then_signal_fence_and_flush()
-            .expect("Unable to signal fence and flush for prepare for rendering data copy command");
+            .expect("Unable to signal fence and flush for prepare for rendering data copy command")
+            .wait(None).unwrap();
+        let tex_access = None;
 
-        data_copied.wait(None).unwrap();
+        /*
+        let tex_access = image_buffer.map(|buf| {
+                let sampler = Sampler::simple_repeat_linear(Arc::clone(&self.vk_device));
+                TextureAccess{buf, sampler}});
+        */
 
-        // FIXME: This is due to the orientation of the chalet model from the vulkan tutorial
-        let model = glm::rotate_x(&glm::Mat4::identity(), -std::f32::consts::FRAC_PI_2);
-        let model = glm::rotate_y(&model, std::f32::consts::FRAC_1_PI);
-
-        let sampler = Sampler::simple_repeat_linear(Arc::clone(&self.vk_device));
-
+        // TODO: Choose shader based on model_opt/texture availability etc
         let g_pipeline = create_graphics_pipeline(
             &self.vk_device,
             &self.render_pass,
             self.swapchain.dimensions(),
         );
 
+        let model = primitive.transform.unwrap_or_else(|| glm::identity());
+
         Renderable {
             vertex_buffer,
             index_buffer,
-            image_buffer,
-            sampler,
+            tex_access,
             g_pipeline,
             model,
+            material: PBRMaterial::ColorOnly{color: primitive.color.unwrap().into()},
         }
+    }
+
+    pub fn prepare_static_asset_for_rendering(&self, asset: Asset) -> Vec<Renderable> {
+        asset.primitives.iter().map(|primitive| {
+            self.send_data_to_gpu(primitive)
+        }).collect::<Vec<_>>()
     }
 
     pub fn grab_cursor(&mut self, grab_cursor: bool) {
@@ -252,7 +266,7 @@ impl VKManager {
         let aspect_ratio = dims[0] as f32 / dims[1] as f32;
         let proj = get_proj_matrix(aspect_ratio);
 
-        let vp_buf = vs_static::ty::VPUniformBufferObject {
+        let vp_buf = shader::vs_pbr_static::ty::VPUniformBufferObject {
             view: view.into(),
             proj: proj.into(),
         };
@@ -283,8 +297,13 @@ impl VKManager {
         )
         .expect("Failed after begin render pass");
 
+        // TODO: Think about sending the uniform data to the GPU for each renderable.
+        // 1. We want to have it per primtive/renderable.
+        // 2. It might or might not be constant for a primitive
+        let mut pbr_material_buf = CpuBufferPool::uniform_buffer(Arc::clone(&self.vk_device));
+
         let builder = renderables.join().fold(builder, |builder, renderable| {
-            renderable.draw_unto(builder, &this_frame_buf)
+            renderable.render_unto(builder, &this_frame_buf, &pbr_material_buf)
         });
 
         let cmd_buf = builder
@@ -659,8 +678,8 @@ fn create_graphics_pipeline(
     render_pass: &Arc<RenderPassAbstract + Send + Sync>,
     swapchain_dimensions: [u32; 2],
 ) -> Arc<GraphicsPipelineAbstract + Send + Sync> {
-    let vs = vs_static::Shader::load(Arc::clone(device)).expect("Vertex shader compilation failed");
-    let fs = fs::Shader::load(Arc::clone(device)).expect("Fragment shader compilation failed");
+    let vs = shader::vs_pbr_static::Shader::load(Arc::clone(device)).expect("Vertex shader compilation failed");
+    let fs = shader::fs_pbr::Shader::load(Arc::clone(device)).expect("Fragment shader compilation failed");
 
     let dims = [
         swapchain_dimensions[0] as f32,
@@ -759,7 +778,7 @@ fn create_command_buffer_with_push_constants(
         1.0f32.into(),
     ];
 
-    let push_constant_model_matrix = vs_static::ty::ModelMatrix {
+    let push_constant_model_matrix = shader::vs_pbr_static::ty::ModelMatrix {
         matrix: model_matrix.into(),
     };
 
@@ -785,7 +804,7 @@ fn create_command_buffer_with_push_constants(
 }
 */
 
-impl_vertex!(Vertex, position, tex_coords);
+impl_vertex!(Vertex, position);
 
 fn get_view_matrix(pos: &Position, ori: &CameraOrientation) -> glm::Mat4 {
     let dir = ori.direction;
@@ -843,37 +862,70 @@ fn create_dsets<T, A: vulkano::mem::MemoryPool>(
 }
 */
 
+struct TextureAccess {
+    image_buffer: Arc<ImageViewAccess + Send + Sync>,
+    sampler: Arc<Sampler>
+}
+
+enum PBRMaterial {
+    ColorOnly {color: [f32; 4]},
+    NotPBR,
+}
+
 #[derive(Component)]
 #[storage(VecStorage)]
 pub struct Renderable {
     vertex_buffer: Arc<BufferAccess + Send + Sync>,
     index_buffer: Arc<TypedBufferAccess<Content = [u32]> + Send + Sync>,
-    image_buffer: Arc<ImageViewAccess + Send + Sync>,
-    sampler: Arc<Sampler>,
+    tex_access: Option<TextureAccess>,
     g_pipeline: Arc<GraphicsPipelineAbstract + Send + Sync>,
     model: glm::Mat4,
+    material: PBRMaterial,
 }
 
 impl Renderable {
-    fn draw_unto(
+    fn render_unto(
         &self,
         cmd_buf: AutoCommandBufferBuilder,
         vp_buf: &CpuBufferPoolSubbuffer<
-            vs_static::ty::VPUniformBufferObject,
+            shader::vs_pbr_static::ty::VPUniformBufferObject,
             Arc<vulkano::memory::pool::StdMemoryPool>,
         >,
+        uniform_buf: &CpuBufferPool<shader::fs_pbr::ty::PBRMaterialData>,
     ) -> AutoCommandBufferBuilder {
+
+        let color = match self.material {
+            PBRMaterial::ColorOnly {color: col} => col,
+            PBRMaterial::NotPBR => panic!("Not implemented"),
+        };
+
+        let pbr_material = shader::fs_pbr::ty::PBRMaterialData {
+             BaseColorFactor: color.into(),
+        };
+
+        let uni_buf = uniform_buf.next(pbr_material).expect("Could not allocate sub uni buf");
+
         let descriptor_set = Arc::new(
             PersistentDescriptorSet::start(Arc::clone(&self.g_pipeline), 0)
                 .add_buffer(vp_buf.clone())
-                .unwrap()
-                .add_sampled_image(Arc::clone(&self.image_buffer), Arc::clone(&self.sampler))
-                .unwrap()
+                .expect("Could not add vp buf")
+                .add_buffer(uni_buf.clone())
+                .expect("Could not add uni buf")
                 .build()
                 .expect("Failed to create persistent descriptor set for mvp ubo"),
         ) as Arc<DescriptorSet + Send + Sync>;
 
-        let push_constant_model_matrix = vs_static::ty::ModelMatrix {
+        /*
+        let fs_descriptor_set = Arc::new(
+            PersistentDescriptorSet::start(Arc::clone(&self.g_pipeline), 0)
+                //.add_sampled_image(Arc::clone(&self.image_buffer), Arc::clone(&self.sampler))
+                //.unwrap()
+                .build()
+                .expect("Failed to create persistent descriptor set for mvp ubo"),
+        ) as Arc<DescriptorSet + Send + Sync>;
+        */
+
+        let push_constant_model_matrix = shader::vs_pbr_static::ty::ModelMatrix {
             matrix: self.model.into(),
         };
 
@@ -921,83 +973,4 @@ fn get_physical_window_dims(window: &Window) -> [u32; 2] {
             [dims.0, dims.1]
         })
         .expect("Was not able to read window dimensions, is it open?")
-}
-
-mod vs_static {
-    vulkano_shaders::shader! {
-    ty: "vertex",
-        src: "
-#version 450
-#extension GL_ARB_separate_shader_objects : enable
-
-layout(binding = 0) uniform VPUniformBufferObject {
-    mat4 view;
-    mat4 proj;
-} ubo;
-
-layout(push_constant) uniform ModelMatrix {
-    mat4 matrix;
-} model;
-
-layout(location = 0) in vec3 position;
-layout(location = 2) in vec2 tex_coords;
-
-layout(location = 1) out vec2 frag_tex_coords;
-
-void main() {
-    gl_Position = ubo.proj * ubo.view * model.matrix * vec4(position, 1.0);
-    frag_tex_coords = tex_coords;
-}
-"
-    }
-}
-
-/*
-mod vs {
-    vulkano_shaders::shader! {
-        ty: "vertex",
-        src: "
-#version 450
-#extension GL_ARB_separate_shader_objects : enable
-
-layout(binding = 0) uniform VPUniformBufferObject {
-    mat4 view;
-    mat4 proj;
-} ubo;
-
-uniform mat4 model;
-
-layout(location = 0) in vec3 position;
-layout(location = 2) in vec2 tex_coords;
-
-layout(location = 1) out vec2 frag_tex_coords;
-
-void main() {
-    gl_Position = ubo.proj * ubo.view * ubo.model * vec4(position, 1.0);
-    frag_tex_coords = tex_coords;
-}
-"
-}
-}
-
-*/
-
-mod fs {
-    vulkano_shaders::shader! {
-    ty: "fragment",
-        src: "
-#version 450
-#extension GL_ARB_separate_shader_objects : enable
-
-layout(binding = 1) uniform sampler2D texSampler;
-
-layout(location = 1) in vec2 frag_tex_coords;
-
-layout(location = 0) out vec4 outColor;
-
-void main() {
-    outColor = texture(texSampler, frag_tex_coords);
-}
-"
-    }
 }

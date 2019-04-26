@@ -1,0 +1,16 @@
+Vulkan tutorial: https://vulkan-tutorial.com/
+Vulkano: https://github.com/vulkano-rs/vulkano
+
+Vulkan coordinate system: https://matthewwellings.com/blog/the-new-vulkan-coordinate-system/
+
+Opengl modern: http://in2gpu.com/opengl-3/, http://in2gpu.com/2016/02/26/opengl-fps-camera/
+
+PBR:
+https://github.com/moneimne/glTF-Tutorials/tree/master/PBR
+https://academy.substance3d.com/courses/the-pbr-guide-part-1
+https://academy.substance3d.com/courses/the-pbr-guide-part-2
+
+gltf:
+https://github.com/KhronosGroup/glTF-Tutorials/blob/master/gltfTutorial/README.md
+
+

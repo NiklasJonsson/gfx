@@ -1,35 +1,119 @@
 use crate::common::*;
 use std::path::Path;
 
-#[derive(PartialEq, Debug)]
-pub enum AssetType {
-    Static,
-    Movable,
-}
 
-pub struct Asset {
+// One ore more vertices with associated data
+// One transform per primitive.
+pub struct Primitive {
     pub index_data: Vec<u32>,
     pub vertex_data: Vec<Vertex>,
-    pub texture_data: image::RgbaImage,
-    pub ty: AssetType,
+    pub texture_data: Option<image::RgbaImage>,
+    pub transform: Option<glm::Mat4>,
+    pub color: Option<glm::Vec4>,
 }
 
-pub struct AssetDescriptor {
-    pub data_file: String,
-    pub texture_file: String,
+// Describes an asset.
+// TODO: Support hierarchy
+pub struct Asset {
+    pub primitives: Vec<Primitive>
+}
+
+// Per asset type description, generally all the files needed to load an asset
+pub enum AssetDescriptor {
+    Obj{data_file: String, texture_file: String},
+    Gltf{path: String},
 }
 
 pub fn load_asset(descr: AssetDescriptor) -> Asset {
-    let (vertex_data, index_data) = load_obj(&descr.data_file);
-    let image = load_image(&descr.texture_file);
-
-    Asset {
-        index_data,
-        vertex_data,
-        texture_data: image,
-        ty: AssetType::Static,
+    match descr {
+        AssetDescriptor::Obj{data_file, texture_file} => {
+            load_obj_asset(&data_file, &texture_file)
+        },
+        AssetDescriptor::Gltf{path} => {
+            load_glTF_asset(&path)
+        }
     }
 }
+
+pub fn load_glTF_asset(path: &str) -> Asset {
+    log::trace!("load gltf asset {}", path);
+    let (gltf_doc, buffers, images) = gltf::import(path).expect("Unable to import gltf");
+    assert_eq!(gltf_doc.scenes().len(), 1);
+    let mut primitives = Vec::new();
+    for node in gltf_doc.nodes() {
+        log::trace!("Prepping node {}", node.name().unwrap_or("node_no_name"));
+        log::trace!("#children {}", node.children().len());
+        let model = node.transform().matrix();
+
+        for child_node in node.children() {
+            let mesh = child_node.mesh().unwrap();
+            log::trace!("Prepping mesh: {}", mesh.name().unwrap_or("mesh_no_name"));
+
+            for primitive in mesh.primitives() {
+                let reader = primitive.reader(|buffer| Some(&buffers[buffer.index()]));
+                let positions = reader.read_positions().expect("Found no positions");
+                /*
+                // TODO: Don't convert all tex_coords to f32
+                let tex_coords = reader
+                    .read_tex_coords(0)
+                    .expect("Found no tex coords")
+                    .into_f32();
+                */
+
+                let index_data = reader
+                    .read_indices()
+                    .expect("Found no indices")
+                    .into_u32()
+                    .collect::<Vec<_>>();
+
+                let vertex_data = positions
+                    .map(|p| Vertex {position: p, tex_coords: None})
+                    .collect::<Vec<_>>();
+
+                let pbr_mr = primitive.material().pbr_metallic_roughness();
+                let color = pbr_mr.base_color_factor();
+
+                primitives.push(
+                    Primitive {
+                        index_data,
+                        vertex_data,
+                        texture_data: None,
+                        transform: Some(model.into()),
+                        color: Some(color.into())
+                    }
+                );
+            }
+        }
+    }
+    Asset{ primitives }
+}
+
+fn debug_gltf(file: gltf::Document) {
+    for scene in file.scenes() {
+        log::trace!("Scenes[{}]: {}", scene.index(), scene.name().unwrap_or_else(|| ""));
+        for node in scene.nodes() {
+            dbg!(node.mesh());
+        }
+    }
+}
+
+fn load_obj_asset(data_file: &str, texture_file: &str) -> Asset {
+    let (vertex_data, index_data) = load_obj(data_file);
+    let image = load_image(texture_file);
+
+    Asset {
+        primitives: vec![
+            Primitive {
+                index_data,
+                vertex_data,
+                texture_data: Some(image),
+                transform: None,
+                color: None,
+            },
+        ]
+    }
+}
+
 
 fn debug_obj(models: &[tobj::Model], materials: &[tobj::Material]) {
     for (i, m) in models.iter().enumerate() {
@@ -109,7 +193,7 @@ fn load_obj(path: &str) -> (Vec<Vertex>, Vec<u32>) {
         .positions
         .chunks_exact(3)
         .zip(tex_coords)
-        .map(|(pos, tx_cs)| Vertex::new([pos[0], pos[1], pos[2]], [tx_cs[0], 1.0 - tx_cs[1]]))
+        .map(|(pos, tx_cs)| Vertex::new([pos[0], pos[1], pos[2]], Some([tx_cs[0], 1.0 - tx_cs[1]])))
         .collect::<Vec<_>>();
 
     let indices = models[0].mesh.indices.to_owned();
@@ -117,7 +201,7 @@ fn load_obj(path: &str) -> (Vec<Vertex>, Vec<u32>) {
     (vertices, indices)
 }
 
-fn load_image(path: &str) -> image::RgbaImage {
+pub fn load_image(path: &str) -> image::RgbaImage {
     log::info!("Trying to load image from {}", path);
     let image = image::open(path).expect("Unable to load image").to_rgba();
 

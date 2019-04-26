@@ -23,6 +23,7 @@ num-traits = "*"
 # Resources/Assets
 image = "*"
 tobj = "*"
+gltf = "*"
 
 # Util
 log = "*"

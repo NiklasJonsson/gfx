@@ -165,6 +165,7 @@ struct EventManager {
 // Only stuff that is relevant to input manager should be forwarded.
 // Create enum to represent what we want the input manager to receive
 // But should this really be done here? Separate window/input handling?
+// Move this to input? IOManager?
 
 impl EventManager {
     fn new() -> Self {
@@ -274,15 +275,15 @@ impl App {
             .with(GameStateSwitcher {})
             .build();
 
-        let desc = AssetDescriptor {
-            data_file: "models/chalet.obj".to_string(),
-            texture_file: "textures/chalet.jpg".to_string(),
-        };
+        // TODO: How to parameterize this? Dialog box?
+        let desc = AssetDescriptor::Gltf{path: "/home/niklas/src_repos/glTF-Sample-Models/2.0/Box/glTF/Box.gltf".to_owned()};
 
-        let chalet_asset = asset::load_asset(desc);
-        let chalet_renderable = self.vk_manager.prepare_asset_for_rendering(chalet_asset);
+        let asset = asset::load_asset(desc);
+        let renderables = self.vk_manager.prepare_static_asset_for_rendering(asset);
 
-        self.world.create_entity().with(chalet_renderable).build();
+        for renderable in renderables {
+            self.world.create_entity().with(renderable).build();
+        }
     }
 
     fn main_loop(&mut self) {
