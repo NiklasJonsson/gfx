@@ -264,25 +264,38 @@ impl VKManager {
 
         let prev_frame = std::mem::replace(&mut self.frame_completions[frame_idx], None).unwrap();
 
-        // Render all the renderables as a chain of command buffers
-        // TODO: Use several draw commands within a command buffer instead
-        let presented = renderables
-            .join()
-            .fold(prev_frame, |prev_render_done, renderable| {
-                Box::new(
-                    prev_render_done
-                        .then_execute(
-                            Arc::clone(&self.graphics_queue),
-                            Arc::clone(&renderable.get_command_buffer(
-                                &self.vk_device,
-                                self.graphics_queue.family(),
-                                &self.framebuffers[frame_idx],
-                                &this_frame_buf,
-                            )),
-                        )
-                        .unwrap(),
-                )
-            })
+        let clear_color = vec![
+            [0.0, 0.0, 0.0, 1.0].into(),
+            vulkano::format::ClearValue::None,
+            1.0f32.into(),
+        ];
+
+        // Render all the renderables as one render pass
+        let builder = AutoCommandBufferBuilder::primary_one_time_submit(
+            Arc::clone(&self.vk_device),
+            self.graphics_queue.family(),
+        )
+        .expect("Failed to create command buffer builder")
+        .begin_render_pass(
+            Arc::clone(&self.framebuffers[frame_idx]),
+            false,
+            clear_color,
+        )
+        .expect("Failed after begin render pass");
+
+        let builder = renderables.join().fold(builder, |builder, renderable| {
+            renderable.draw_unto(builder, &this_frame_buf)
+        });
+
+        let cmd_buf = builder
+            .end_render_pass()
+            .expect("Unable to end render pass")
+            .build()
+            .expect("Unable to build render pass");
+
+        let presented = prev_frame
+            .then_execute(Arc::clone(&self.graphics_queue), cmd_buf)
+            .expect("unable to execute render cmd buf")
             .then_swapchain_present(
                 Arc::clone(&self.graphics_queue),
                 Arc::clone(&self.swapchain),
@@ -683,6 +696,7 @@ fn create_graphics_pipeline(
     )
 }
 
+/*
 fn create_command_buffers(
     device: &Arc<Device>,
     queue_family: QueueFamily,
@@ -727,7 +741,8 @@ fn create_command_buffers(
         })
         .collect::<Vec<_>>()
 }
-
+*/
+/*
 fn create_command_buffer_with_push_constants(
     device: &Arc<Device>,
     queue_family: QueueFamily,
@@ -749,7 +764,7 @@ fn create_command_buffer_with_push_constants(
     };
 
     Arc::new(
-        AutoCommandBufferBuilder::primary_simultaneous_use(Arc::clone(device), queue_family)
+        AutoCommandBufferBuilder::primary_one_time_submit(Arc::clone(device), queue_family)
             .expect("Failed to create command buffer builder")
             .begin_render_pass(Arc::clone(framebuffer), false, clear_color)
             .expect("Failed after begin render pass")
@@ -763,11 +778,12 @@ fn create_command_buffer_with_push_constants(
             )
             .expect("Failed after draw_indexed")
             .end_render_pass()
-            .unwrap()
+            .expect("Failed after end_render_pass")
             .build()
-            .unwrap(),
+            .expect("Failed to build command buffer"),
     )
 }
+*/
 
 impl_vertex!(Vertex, position, tex_coords);
 
@@ -839,16 +855,14 @@ pub struct Renderable {
 }
 
 impl Renderable {
-    fn get_command_buffer(
+    fn draw_unto(
         &self,
-        vk_device: &Arc<Device>,
-        queue_family: QueueFamily,
-        framebuffer: &Arc<FramebufferAbstract + Send + Sync>,
+        cmd_buf: AutoCommandBufferBuilder,
         vp_buf: &CpuBufferPoolSubbuffer<
             vs_static::ty::VPUniformBufferObject,
             Arc<vulkano::memory::pool::StdMemoryPool>,
         >,
-    ) -> Arc<AutoCommandBuffer> {
+    ) -> AutoCommandBufferBuilder {
         let descriptor_set = Arc::new(
             PersistentDescriptorSet::start(Arc::clone(&self.g_pipeline), 0)
                 .add_buffer(vp_buf.clone())
@@ -859,16 +873,20 @@ impl Renderable {
                 .expect("Failed to create persistent descriptor set for mvp ubo"),
         ) as Arc<DescriptorSet + Send + Sync>;
 
-        create_command_buffer_with_push_constants(
-            vk_device,
-            queue_family,
-            &self.vertex_buffer,
-            &self.index_buffer,
-            &descriptor_set,
-            &self.g_pipeline,
-            framebuffer,
-            self.model,
-        )
+        let push_constant_model_matrix = vs_static::ty::ModelMatrix {
+            matrix: self.model.into(),
+        };
+
+        cmd_buf
+            .draw_indexed(
+                Arc::clone(&self.g_pipeline),
+                &DynamicState::none(),
+                vec![Arc::clone(&self.vertex_buffer)],
+                Arc::clone(&self.index_buffer),
+                Arc::clone(&descriptor_set),
+                push_constant_model_matrix,
+            )
+            .expect("Failed after draw_indexed")
     }
 }
 

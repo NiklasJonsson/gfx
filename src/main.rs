@@ -309,7 +309,6 @@ impl App {
         // 6. Run logic systems
         // 7. Render
         loop {
-
             // Update global delta time
             let now = Instant::now();
             let diff = now - prev_frame;

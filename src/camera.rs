@@ -6,8 +6,8 @@ use crate::common::*;
 use crate::input;
 use crate::input::{DeviceAxis, InputContext, MappedInput, RangeId, Sensitivity, StateId};
 
-use crate::GameState;
 use crate::DeltaTime;
+use crate::GameState;
 
 use glm::Vec3;
 use winit::VirtualKeyCode;
@@ -53,8 +53,7 @@ enum CameraRotation {
 pub struct FreeFlyCameraController;
 
 impl FreeFlyCameraController {
-    pub fn get_orientation_from(rotation_state: &CameraRotationState)
-        -> CameraOrientation {
+    pub fn get_orientation_from(rotation_state: &CameraRotationState) -> CameraOrientation {
         // Disallow roll => y will only be a function of pitch
         let direction: glm::Vec3 = glm::normalize(&glm::vec3(
             rotation_state.yaw.cos() * rotation_state.pitch.cos(),
@@ -66,7 +65,7 @@ impl FreeFlyCameraController {
         // Is this ok? Not 100 % of they best way to fix though.
         let up = glm::vec3(0.0, 1.0, 0.0);
 
-        CameraOrientation{ direction, up }
+        CameraOrientation { direction, up }
     }
 }
 
@@ -81,25 +80,15 @@ impl<'a> System<'a> for FreeFlyCameraController {
 
     fn run(&mut self, data: Self::SystemData) {
         log::trace!("FreeFlyCameraController: run");
-        let (
-            mut mapped_inputs,
-            mut positions,
-            mut cam_rot_state,
-            game_state,
-            delta_time,
-        ) = data;
+        let (mut mapped_inputs, mut positions, mut cam_rot_state, game_state, delta_time) = data;
 
         if *game_state == GameState::Paused {
             log::trace!("Game is paused, camera won't be moved");
             return;
         }
 
-        for (mi, pos, rotation_state) in (
-            &mut mapped_inputs,
-            &mut positions,
-            &mut cam_rot_state,
-        )
-            .join()
+        for (mi, pos, rotation_state) in
+            (&mut mapped_inputs, &mut positions, &mut cam_rot_state).join()
         {
             // REFACTOR:
             //  - When states/actions/ranges are an enum, move into one loop
@@ -115,21 +104,18 @@ impl<'a> System<'a> for FreeFlyCameraController {
                 }
             }
 
-            let CameraOrientation{direction, up} =
+            let CameraOrientation { direction, up } =
                 FreeFlyCameraController::get_orientation_from(&rotation_state);
 
             for id in &mi.states {
                 use CameraMovement::*;
-                let dir = *delta_time * MOVEMENT_SPEED
+                let dir = *delta_time
+                    * MOVEMENT_SPEED
                     * match CameraMovement::from_u32(*id).unwrap() {
                         Forward => direction,
                         Backward => -direction,
-                        Left => {
-                            glm::normalize(&glm::cross::<f32, glm::U3>(&up, &direction))
-                        }
-                        Right => {
-                            -glm::normalize(&glm::cross::<f32, glm::U3>(&up, &direction))
-                        }
+                        Left => glm::normalize(&glm::cross::<f32, glm::U3>(&up, &direction)),
+                        Right => -glm::normalize(&glm::cross::<f32, glm::U3>(&up, &direction)),
                         Up => up,
                         Down => -up,
                     };
