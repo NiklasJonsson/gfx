@@ -1,5 +1,6 @@
 use specs::prelude::*;
 use std::cmp::Ordering;
+use std::collections::hash_map::Entry::*;
 use std::collections::HashMap;
 use winit::VirtualKeyCode;
 // Based primarily on https://www.gamedev.net/articles/programming/general-and-gameplay-programming/designing-a-robust-input-handling-system-for-games-r2975
@@ -95,7 +96,13 @@ pub struct InputContextBuilder {
     consume_all: bool,
 }
 
-// TODO: Error handling
+#[derive(PartialEq, Debug)]
+pub enum InputContextError {
+    DuplicateActionForKey(ActionId),
+    DuplicateStateForKey(StateId),
+    DuplicateRangeForKey(RangeId, Sensitivity),
+}
+
 impl InputContextBuilder {
     fn start(name: &str) -> Self {
         InputContextBuilder {
@@ -123,18 +130,32 @@ impl InputContextBuilder {
         }
     }
 
-    pub fn with_action(mut self, key: VirtualKeyCode, id: ActionId) -> Self {
-        // TODO: Error on already inserted
-        self.action_map.insert(key, id);
-
-        self
+    pub fn with_action(
+        mut self,
+        key: VirtualKeyCode,
+        id: ActionId,
+    ) -> Result<Self, InputContextError> {
+        match self.action_map.entry(key) {
+            Vacant(entry) => {
+                entry.insert(id);
+                Ok(self)
+            }
+            Occupied(entry) => Err(InputContextError::DuplicateActionForKey(*entry.get())),
+        }
     }
 
-    pub fn with_state(mut self, key: VirtualKeyCode, id: StateId) -> Self {
-        // TODO: Error on already inserted
-        self.state_map.insert(key, id);
-
-        self
+    pub fn with_state(
+        mut self,
+        key: VirtualKeyCode,
+        id: StateId,
+    ) -> Result<Self, InputContextError> {
+        match self.state_map.entry(key) {
+            Vacant(entry) => {
+                entry.insert(id);
+                Ok(self)
+            }
+            Occupied(entry) => Err(InputContextError::DuplicateStateForKey(*entry.get())),
+        }
     }
 
     pub fn with_range(
@@ -142,11 +163,17 @@ impl InputContextBuilder {
         device_axis: DeviceAxis,
         range: RangeId,
         sensitivity: Sensitivity,
-    ) -> Self {
-        self.axis_converter
-            .insert(device_axis, (range, sensitivity));
-
-        self
+    ) -> Result<Self, InputContextError> {
+        match self.axis_converter.entry(device_axis) {
+            Vacant(entry) => {
+                entry.insert((range, sensitivity));
+                Ok(self)
+            }
+            Occupied(entry) => {
+                let (range, sensi) = entry.get();
+                Err(InputContextError::DuplicateRangeForKey(*range, *sensi))
+            }
+        }
     }
 
     pub fn build(self) -> InputContext {

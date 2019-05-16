@@ -4,7 +4,9 @@ extern crate winit;
 
 use crate::common::*;
 use crate::input;
-use crate::input::{DeviceAxis, InputContext, MappedInput, RangeId, Sensitivity, StateId};
+use crate::input::{
+    DeviceAxis, InputContext, InputContextError, MappedInput, RangeId, Sensitivity, StateId,
+};
 
 use crate::DeltaTime;
 use crate::GameState;
@@ -128,28 +130,28 @@ impl<'a> System<'a> for FreeFlyCameraController {
     }
 }
 
-fn get_input_context() -> InputContext {
+fn get_input_context() -> Result<InputContext, InputContextError> {
     let sens = 0.0005 as Sensitivity;
     use crate::camera::CameraMovement::*;
-    InputContext::start("CameraInputContext")
+    Ok(InputContext::start("CameraInputContext")
         .with_description("Input mapping for Untethered, 3D camera")
-        .with_state(VirtualKeyCode::W, Forward as StateId)
-        .with_state(VirtualKeyCode::S, Backward as StateId)
-        .with_state(VirtualKeyCode::A, Left as StateId)
-        .with_state(VirtualKeyCode::D, Right as StateId)
-        .with_state(VirtualKeyCode::E, Up as StateId)
-        .with_state(VirtualKeyCode::Q, Down as StateId)
+        .with_state(VirtualKeyCode::W, Forward as StateId)?
+        .with_state(VirtualKeyCode::S, Backward as StateId)?
+        .with_state(VirtualKeyCode::A, Left as StateId)?
+        .with_state(VirtualKeyCode::D, Right as StateId)?
+        .with_state(VirtualKeyCode::E, Up as StateId)?
+        .with_state(VirtualKeyCode::Q, Down as StateId)?
         .with_range(
             DeviceAxis::MouseX,
             CameraRotation::YawDelta as RangeId,
             sens,
-        )
+        )?
         .with_range(
             DeviceAxis::MouseY,
             CameraRotation::PitchDelta as RangeId,
             sens,
-        )
-        .build()
+        )?
+        .build())
 }
 
 pub fn init_camera(world: &mut World) -> Entity {
@@ -159,7 +161,7 @@ pub fn init_camera(world: &mut World) -> Entity {
         pitch: 3.78,
     };
 
-    let input_context = get_input_context();
+    let input_context = get_input_context().expect("Unable to create input context");
 
     let mapped_input = MappedInput::new();
 

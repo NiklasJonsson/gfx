@@ -263,6 +263,7 @@ impl App {
         let escape_catcher = InputContext::start("EscapeCatcher")
             .with_description("Global top-level escape catcher for game state switcher")
             .with_action(winit::VirtualKeyCode::Escape, GAME_STATE_SWITCH)
+            .expect("Could not insert Escape action for GameStateSwitcher")
             .with_priority(InputContextPriority::First)
             .build();
         let mapped_input = MappedInput::new();

@@ -6,6 +6,7 @@ use winit::{AxisId, DeviceId, ElementState, KeyboardInput, VirtualKeyCode};
 
 mod input_context;
 pub use crate::input::input_context::InputContext;
+pub use crate::input::input_context::InputContextError;
 pub use crate::input::input_context::InputContextPriority;
 
 // TODO: Use enum here instead
