@@ -5,17 +5,15 @@ use std::ops::AddAssign;
 pub struct Vertex {
     pub position: [f32; 3],
     pub tex_coords: Option<[f32; 2]>,
+    pub normal: [f32; 3],
 }
 
 impl Vertex {
-    pub fn from_pos(position: [f32; 3]) -> Vertex {
-        Vertex { position, tex_coords: None }
-    }
-
     pub fn new(position: [f32; 3], tex_coords: Option<[f32; 2]>) -> Vertex {
         Vertex {
             position,
             tex_coords,
+            normal: [0.0f32, 0.0f32, 0.0f32],
         }
     }
 }

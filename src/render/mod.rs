@@ -64,7 +64,8 @@ pub struct VKManager {
     presentation_queue: Arc<Queue>,
     swapchain: Arc<Swapchain<Window>>,
     swapchain_images: Vec<Arc<SwapchainImage<Window>>>,
-    view_proj_buf: CpuBufferPool<shader::vs_pbr_static::ty::VPUniformBufferObject>,
+    transforms_buf: CpuBufferPool<shader::vs_pbr::ty::Transforms>,
+    lighting_data_buf: CpuBufferPool<shader::fs_pbr::ty::LightingData>,
     framebuffers: Vec<Arc<FramebufferAbstract + Send + Sync>>,
     render_pass: Arc<RenderPassAbstract + Send + Sync>,
     frame_completions: Vec<Option<Box<GpuFuture>>>,
@@ -128,7 +129,8 @@ impl VKManager {
 
         let frame_completions = vec![None, None, None];
 
-        let view_proj_buf = CpuBufferPool::uniform_buffer(Arc::clone(&vk_device));
+        let transforms_buf = CpuBufferPool::uniform_buffer(Arc::clone(&vk_device));
+        let lighting_data_buf = CpuBufferPool::uniform_buffer(Arc::clone(&vk_device));
 
         VKManager {
             vk_instance,
@@ -143,7 +145,8 @@ impl VKManager {
             multisample_count,
             current_sc_index: 0,
             frame_completions,
-            view_proj_buf,
+            transforms_buf,
+            lighting_data_buf,
         }
     }
 
@@ -266,14 +269,26 @@ impl VKManager {
         let aspect_ratio = dims[0] as f32 / dims[1] as f32;
         let proj = get_proj_matrix(aspect_ratio);
 
-        let vp_buf = shader::vs_pbr_static::ty::VPUniformBufferObject {
+        let vp_buf = shader::vs_pbr::ty::Transforms {
             view: view.into(),
             proj: proj.into(),
         };
 
-        let this_frame_buf = self
-            .view_proj_buf
+        let transforms_sub_buf = self
+            .transforms_buf
             .next(vp_buf)
+            .expect("Could not get next ring buffer sub buffer for view proj");
+
+
+        let lighting_data = shader::fs_pbr::ty::LightingData {
+            _dummy0: [0; 4], // Magic Vulkano alignment
+            light_pos: [10.0f32, 10.0f32, 10.0f32].into(),
+            view_pos: cam_pos.to_vec3().into(),
+        };
+
+        let lighting_sub_buf = self
+            .lighting_data_buf
+            .next(lighting_data)
             .expect("Could not get next ring buffer sub buffer for view proj");
 
         let prev_frame = std::mem::replace(&mut self.frame_completions[frame_idx], None).unwrap();
@@ -301,9 +316,12 @@ impl VKManager {
         // 1. We want to have it per primtive/renderable.
         // 2. It might or might not be constant for a primitive
         let mut pbr_material_buf = CpuBufferPool::uniform_buffer(Arc::clone(&self.vk_device));
+        let mut model_ubo_buf = CpuBufferPool::uniform_buffer(Arc::clone(&self.vk_device));
 
         let builder = renderables.join().fold(builder, |builder, renderable| {
-            renderable.render_unto(builder, &this_frame_buf, &pbr_material_buf)
+            renderable.render_unto(builder, &transforms_sub_buf,
+                                   &lighting_sub_buf, &pbr_material_buf,
+                                   &model_ubo_buf)
         });
 
         let cmd_buf = builder
@@ -678,7 +696,7 @@ fn create_graphics_pipeline(
     render_pass: &Arc<RenderPassAbstract + Send + Sync>,
     swapchain_dimensions: [u32; 2],
 ) -> Arc<GraphicsPipelineAbstract + Send + Sync> {
-    let vs = shader::vs_pbr_static::Shader::load(Arc::clone(device)).expect("Vertex shader compilation failed");
+    let vs = shader::vs_pbr::Shader::load(Arc::clone(device)).expect("Vertex shader compilation failed");
     let fs = shader::fs_pbr::Shader::load(Arc::clone(device)).expect("Fragment shader compilation failed");
 
     let dims = [
@@ -804,7 +822,7 @@ fn create_command_buffer_with_push_constants(
 }
 */
 
-impl_vertex!(Vertex, position);
+impl_vertex!(Vertex, position, normal);
 
 fn get_view_matrix(pos: &Position, ori: &CameraOrientation) -> glm::Mat4 {
     let dir = ori.direction;
@@ -888,10 +906,15 @@ impl Renderable {
         &self,
         cmd_buf: AutoCommandBufferBuilder,
         vp_buf: &CpuBufferPoolSubbuffer<
-            shader::vs_pbr_static::ty::VPUniformBufferObject,
+            shader::vs_pbr::ty::Transforms,
             Arc<vulkano::memory::pool::StdMemoryPool>,
         >,
-        uniform_buf: &CpuBufferPool<shader::fs_pbr::ty::PBRMaterialData>,
+        light_buf: &CpuBufferPoolSubbuffer<
+            shader::fs_pbr::ty::LightingData,
+            Arc<vulkano::memory::pool::StdMemoryPool>,
+        >,
+        pbr_buf_pol: &CpuBufferPool<shader::fs_pbr::ty::PBRMaterialData>,
+        model_ubo_buf: &CpuBufferPool<shader::vs_pbr::ty::Model>,
     ) -> AutoCommandBufferBuilder {
 
         let color = match self.material {
@@ -900,17 +923,31 @@ impl Renderable {
         };
 
         let pbr_material = shader::fs_pbr::ty::PBRMaterialData {
-             BaseColorFactor: color.into(),
+             base_color_factor: color.into(),
+             metallic_factor: 0.0f32,
+             roughness_factor: 1.0f32,
         };
 
-        let uni_buf = uniform_buf.next(pbr_material).expect("Could not allocate sub uni buf");
+        let pbr_buf = pbr_buf_pol.next(pbr_material).expect("Could not allocate sub uni buf");
+
+        let model_data = shader::vs_pbr::ty::Model {
+            model: self.model.into(),
+            model_it: glm::inverse_transpose(self.model).into(),
+        };
+
+        let model_buf = model_ubo_buf.next(model_data).expect("Could not allocated usub model buf");
+
 
         let descriptor_set = Arc::new(
             PersistentDescriptorSet::start(Arc::clone(&self.g_pipeline), 0)
                 .add_buffer(vp_buf.clone())
                 .expect("Could not add vp buf")
-                .add_buffer(uni_buf.clone())
-                .expect("Could not add uni buf")
+                .add_buffer(model_buf)
+                .expect("Could not add model buf")
+                .add_buffer(pbr_buf.clone())
+                .expect("Could not add pbr buf")
+                .add_buffer(light_buf.clone())
+                .expect("Could not add light buf")
                 .build()
                 .expect("Failed to create persistent descriptor set for mvp ubo"),
         ) as Arc<DescriptorSet + Send + Sync>;
@@ -923,12 +960,12 @@ impl Renderable {
                 .build()
                 .expect("Failed to create persistent descriptor set for mvp ubo"),
         ) as Arc<DescriptorSet + Send + Sync>;
-        */
 
         let push_constant_model_matrix = shader::vs_pbr_static::ty::ModelMatrix {
             matrix: self.model.into(),
         };
 
+        */
         cmd_buf
             .draw_indexed(
                 Arc::clone(&self.g_pipeline),
@@ -936,7 +973,7 @@ impl Renderable {
                 vec![Arc::clone(&self.vertex_buffer)],
                 Arc::clone(&self.index_buffer),
                 Arc::clone(&descriptor_set),
-                push_constant_model_matrix,
+                (),
             )
             .expect("Failed after draw_indexed")
     }

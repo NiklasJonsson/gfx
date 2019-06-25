@@ -5,8 +5,18 @@ Vulkan coordinate system: https://matthewwellings.com/blog/the-new-vulkan-coordi
 
 Opengl modern: http://in2gpu.com/opengl-3/, http://in2gpu.com/2016/02/26/opengl-fps-camera/
 
+Derivation of matrix for normals:
+http://www.lighthouse3d.com/tutorials/glsl-12-tutorial/the-normal-matrix/
+
 PBR:
 https://github.com/moneimne/glTF-Tutorials/tree/master/PBR
+https://github.com/KhronosGroup/glTF/blob/master/specification/2.0/README.md#appendix-b-brdf-implementation
+
+gltf sample viewer:
+https://github.com/KhronosGroup/glTF-Sample-Viewer/
+Includes shader sources and some explanation
+
+Good explanation, mostly from an artists point of view
 https://academy.substance3d.com/courses/the-pbr-guide-part-1
 https://academy.substance3d.com/courses/the-pbr-guide-part-2
 

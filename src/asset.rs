@@ -52,6 +52,7 @@ pub fn load_glTF_asset(path: &str) -> Asset {
             for primitive in mesh.primitives() {
                 let reader = primitive.reader(|buffer| Some(&buffers[buffer.index()]));
                 let positions = reader.read_positions().expect("Found no positions");
+                let normals = reader.read_normals().expect("Found no normals");
                 /*
                 // TODO: Don't convert all tex_coords to f32
                 let tex_coords = reader
@@ -67,7 +68,8 @@ pub fn load_glTF_asset(path: &str) -> Asset {
                     .collect::<Vec<_>>();
 
                 let vertex_data = positions
-                    .map(|p| Vertex {position: p, tex_coords: None})
+                    .zip(normals)
+                    .map(|(p, n)| Vertex {position: p, tex_coords: None, normal: n})
                     .collect::<Vec<_>>();
 
                 let pbr_mr = primitive.material().pbr_metallic_roughness();
