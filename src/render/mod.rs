@@ -152,11 +152,19 @@ impl VKManager {
 
     fn send_data_to_gpu(&self, primitive: &Primitive) -> Renderable {
 
+        use vulkano::pipeline::input_assembly::PrimitiveTopology;
+        let mode = PrimitiveTopology::TriangleList;
+
+        let indices = match mode {
+            PrimitiveTopology::LineList => &primitive.line_indices.data,
+            _ => &primitive.triangle_indices.data,
+        };
+
         // TODO: Use transfer queue here
         let (vertex_buffer, vertex_data_copied) =
             create_and_submit_vertex_buffer(&self.graphics_queue, primitive.vertex_data.to_owned());
         let (index_buffer, index_data_copied) =
-            create_and_submit_index_buffer(&self.graphics_queue, primitive.index_data.to_owned());
+            create_and_submit_index_buffer(&self.graphics_queue, indices.to_owned());
 
         let data_copied = vertex_data_copied.join(index_data_copied);
 
@@ -188,6 +196,7 @@ impl VKManager {
             &self.vk_device,
             &self.render_pass,
             self.swapchain.dimensions(),
+            mode,
         );
 
         let model = primitive.transform.unwrap_or_else(|| glm::identity());
@@ -281,9 +290,9 @@ impl VKManager {
 
 
         let lighting_data = shader::fs_pbr::ty::LightingData {
-            _dummy0: [0; 4], // Magic Vulkano alignment
-            light_pos: [10.0f32, 10.0f32, 10.0f32].into(),
+            light_pos: [0.0f32, 10.0f32, 10.0f32].into(),
             view_pos: cam_pos.to_vec3().into(),
+            _dummy0: [0; 4], // Magic Vulkano alignment
         };
 
         let lighting_sub_buf = self
@@ -315,11 +324,11 @@ impl VKManager {
         // TODO: Think about sending the uniform data to the GPU for each renderable.
         // 1. We want to have it per primtive/renderable.
         // 2. It might or might not be constant for a primitive
-        let mut pbr_material_buf = CpuBufferPool::uniform_buffer(Arc::clone(&self.vk_device));
-        let mut model_ubo_buf = CpuBufferPool::uniform_buffer(Arc::clone(&self.vk_device));
+        let pbr_material_buf = CpuBufferPool::uniform_buffer(Arc::clone(&self.vk_device));
+        let model_ubo_buf = CpuBufferPool::uniform_buffer(Arc::clone(&self.vk_device));
 
         let builder = renderables.join().fold(builder, |builder, renderable| {
-            renderable.render_unto(builder, &transforms_sub_buf,
+            renderable.record_draw_commands(builder, &transforms_sub_buf,
                                    &lighting_sub_buf, &pbr_material_buf,
                                    &model_ubo_buf)
         });
@@ -695,6 +704,7 @@ fn create_graphics_pipeline(
     device: &Arc<Device>,
     render_pass: &Arc<RenderPassAbstract + Send + Sync>,
     swapchain_dimensions: [u32; 2],
+    rendering_mode: vulkano::pipeline::input_assembly::PrimitiveTopology,
 ) -> Arc<GraphicsPipelineAbstract + Send + Sync> {
     let vs = shader::vs_pbr::Shader::load(Arc::clone(device)).expect("Vertex shader compilation failed");
     let fs = shader::fs_pbr::Shader::load(Arc::clone(device)).expect("Fragment shader compilation failed");
@@ -714,7 +724,7 @@ fn create_graphics_pipeline(
         GraphicsPipeline::start()
             .vertex_input_single_buffer::<Vertex>()
             // How to interpret the vertex input
-            .triangle_list()
+            .primitive_topology(rendering_mode)
             .vertex_shader(vs.main_entry_point(), ())
             // Whether to support special indices in in the vertex buffer to split triangles
             .primitive_restart(false)
@@ -902,7 +912,7 @@ pub struct Renderable {
 }
 
 impl Renderable {
-    fn render_unto(
+    fn record_draw_commands(
         &self,
         cmd_buf: AutoCommandBufferBuilder,
         vp_buf: &CpuBufferPoolSubbuffer<
@@ -952,20 +962,6 @@ impl Renderable {
                 .expect("Failed to create persistent descriptor set for mvp ubo"),
         ) as Arc<DescriptorSet + Send + Sync>;
 
-        /*
-        let fs_descriptor_set = Arc::new(
-            PersistentDescriptorSet::start(Arc::clone(&self.g_pipeline), 0)
-                //.add_sampled_image(Arc::clone(&self.image_buffer), Arc::clone(&self.sampler))
-                //.unwrap()
-                .build()
-                .expect("Failed to create persistent descriptor set for mvp ubo"),
-        ) as Arc<DescriptorSet + Send + Sync>;
-
-        let push_constant_model_matrix = shader::vs_pbr_static::ty::ModelMatrix {
-            matrix: self.model.into(),
-        };
-
-        */
         cmd_buf
             .draw_indexed(
                 Arc::clone(&self.g_pipeline),

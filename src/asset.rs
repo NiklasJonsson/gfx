@@ -1,11 +1,27 @@
 use crate::common::*;
 use std::path::Path;
+use vulkano::pipeline::input_assembly::PrimitiveTopology;
 
+pub struct IndexData {
+    pub rendering_mode: PrimitiveTopology,
+    pub data: Vec<u32>,
+}
+
+impl IndexData {
+    pub fn line_list(data: Vec<u32>) -> Self {
+        IndexData { rendering_mode: PrimitiveTopology::LineList, data }
+    }
+
+    pub fn triangle_list(data: Vec<u32>) -> Self {
+        IndexData { rendering_mode: PrimitiveTopology::TriangleList, data }
+    }
+}
 
 // One ore more vertices with associated data
 // One transform per primitive.
 pub struct Primitive {
-    pub index_data: Vec<u32>,
+    pub triangle_indices: IndexData,
+    pub line_indices: IndexData,
     pub vertex_data: Vec<Vertex>,
     pub texture_data: Option<image::RgbaImage>,
     pub transform: Option<glm::Mat4>,
@@ -35,6 +51,52 @@ pub fn load_asset(descr: AssetDescriptor) -> Asset {
     }
 }
 
+fn generate_line_list_from(index_data: &IndexData) -> IndexData {
+    let IndexData { rendering_mode, data: indices } = index_data;
+    let mut ret = Vec::new();
+    assert_eq!(*rendering_mode, PrimitiveTopology::TriangleList);
+    assert_eq!(indices.len() % 3, 0);
+    for triangle in indices.chunks(3) {
+        ret.push(triangle[0]);
+        ret.push(triangle[1]);
+        ret.push(triangle[1]);
+        ret.push(triangle[2]);
+        ret.push(triangle[2]);
+        ret.push(triangle[0]);
+    }
+
+    IndexData::line_list(ret)
+}
+
+fn gltf_to_vulkano_topology(mode: gltf::mesh::Mode) -> PrimitiveTopology {
+
+    use gltf::mesh::Mode;
+
+    match mode {
+        Mode::Points => PrimitiveTopology::PointList,
+	Mode::Lines => PrimitiveTopology::LineList,
+	Mode::LineLoop => panic!("Not supported!?"),
+	Mode::LineStrip => PrimitiveTopology::LineStrip,
+	Mode::Triangles => PrimitiveTopology::TriangleList,
+	Mode::TriangleStrip => PrimitiveTopology::TriangleStrip,
+	Mode::TriangleFan => PrimitiveTopology::TriangleFan,
+    }
+}
+
+// This assumes column major
+fn arr4x4_to_mat4(arr: &[[f32; 4]; 4]) -> glm::Mat4 {
+    let mut tmp = [0.0f32; 16];
+
+    let mut i = 0;
+    for col in arr {
+        for v in col {
+            tmp[i] = *v;
+            i += 1;
+        }
+    }
+    glm::make_mat4(&tmp)
+}
+
 pub fn load_glTF_asset(path: &str) -> Asset {
     log::trace!("load gltf asset {}", path);
     let (gltf_doc, buffers, images) = gltf::import(path).expect("Unable to import gltf");
@@ -53,6 +115,7 @@ pub fn load_glTF_asset(path: &str) -> Asset {
                 let reader = primitive.reader(|buffer| Some(&buffers[buffer.index()]));
                 let positions = reader.read_positions().expect("Found no positions");
                 let normals = reader.read_normals().expect("Found no normals");
+                assert!(primitive.mode() == gltf::mesh::Mode::Triangles);
                 /*
                 // TODO: Don't convert all tex_coords to f32
                 let tex_coords = reader
@@ -61,7 +124,7 @@ pub fn load_glTF_asset(path: &str) -> Asset {
                     .into_f32();
                 */
 
-                let index_data = reader
+                let triangle_index_data = reader
                     .read_indices()
                     .expect("Found no indices")
                     .into_u32()
@@ -69,15 +132,22 @@ pub fn load_glTF_asset(path: &str) -> Asset {
 
                 let vertex_data = positions
                     .zip(normals)
-                    .map(|(p, n)| Vertex {position: p, tex_coords: None, normal: n})
+                    .map(|(p, n)| Vertex {position: p, normal: n})
                     .collect::<Vec<_>>();
 
                 let pbr_mr = primitive.material().pbr_metallic_roughness();
                 let color = pbr_mr.base_color_factor();
 
+                let model: glm::Mat4x4 = glm::identity();
+
+                let triangle_indices = IndexData::triangle_list(triangle_index_data);
+
+                let line_indices = generate_line_list_from(&triangle_indices);
+
                 primitives.push(
                     Primitive {
-                        index_data,
+                        triangle_indices,
+                        line_indices,
                         vertex_data,
                         texture_data: None,
                         transform: Some(model.into()),
@@ -103,10 +173,14 @@ fn load_obj_asset(data_file: &str, texture_file: &str) -> Asset {
     let (vertex_data, index_data) = load_obj(data_file);
     let image = load_image(texture_file);
 
+    let triangle_indices = IndexData::triangle_list(index_data);
+
+    let line_indices = generate_line_list_from(&triangle_indices);
     Asset {
         primitives: vec![
             Primitive {
-                index_data,
+                triangle_indices,
+                line_indices,
                 vertex_data,
                 texture_data: Some(image),
                 transform: None,
@@ -194,8 +268,7 @@ fn load_obj(path: &str) -> (Vec<Vertex>, Vec<u32>) {
         .mesh
         .positions
         .chunks_exact(3)
-        .zip(tex_coords)
-        .map(|(pos, tx_cs)| Vertex::new([pos[0], pos[1], pos[2]], Some([tx_cs[0], 1.0 - tx_cs[1]])))
+        .map(|p| Vertex {position: [p[0],p[1],p[2]], normal: [0.0f32; 3]})
         .collect::<Vec<_>>();
 
     let indices = models[0].mesh.indices.to_owned();

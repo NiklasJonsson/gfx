@@ -83,8 +83,6 @@ pub mod vs_pbr {
 #version 450
 #extension GL_ARB_separate_shader_objects : enable
 
-// TODO: Different sets for these, as some will be drawcall constant
-// and others change per primitive
 layout(binding = 0) uniform Transforms {
     mat4 view;
     mat4 proj;
