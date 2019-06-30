@@ -290,7 +290,7 @@ impl VKManager {
 
 
         let lighting_data = shader::fs_pbr::ty::LightingData {
-            light_pos: [0.0f32, 10.0f32, 10.0f32].into(),
+            light_pos: [5.0f32, 5.0f32, 5.0f32].into(),
             view_pos: cam_pos.to_vec3().into(),
             _dummy0: [0; 4], // Magic Vulkano alignment
         };

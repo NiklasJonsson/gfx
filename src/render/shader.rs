@@ -1,4 +1,4 @@
-// TODO: Move pipeline creation here
+// TODO: Move pipeline creation here?
 
 pub mod vs_static {
     vulkano_shaders::shader! {
@@ -141,19 +141,17 @@ layout(location = 1) in vec3 world_pos;
 
 layout(location = 0) out vec4 out_color;
 
-vec3 fresnel(vec3 fresnel_0, vec3 view_dir, vec3 bisect_light_view) {
-    vec3 base = vec3(1.0) - max(dot(view_dir, bisect_light_view), 0.0);
+vec3 fresnel(vec3 fresnel_0, float VdotH) {
+    vec3 base = vec3(1.0) - VdotH;
     return fresnel_0 + (1.0 - fresnel_0) * pow(base, vec3(5.0));
 }
 
 // GGX / Trowbridge-Reitz
-float normal_distribution_function(vec3 normal, float alpha_roughness, vec3 bisect_light_view) {
-    float NdotH = dot(normal, bisect_light_view);
+float normal_distribution_function(float NdotH, float alpha_roughness) {
+    float a2 = pow(alpha_roughness, 2.0);
+    float bottom = M_PI * pow(1.0 + pow(NdotH, 2.0) * (a2 - 1.0), 2.0);
 
-    float top = int(NdotH > 0.0) * pow(alpha_roughness, 2.0);
-    float bottom = M_PI * pow(1.0 + pow(NdotH, 2.0) * (pow(alpha_roughness, 2.0) - 1.0), 2.0);
-
-    return top / bottom;
+    return a2 / bottom;
 }
 
 void main() {
@@ -162,6 +160,12 @@ void main() {
     vec3 light_dir = normalize(lighting_data.light_pos - world_pos);
     vec3 view_dir = normalize(lighting_data.view_pos - world_pos);
     vec3 bisect_light_view = normalize(view_dir + light_dir);
+
+    // NdotL is frequently used to determine if light can directly hit this point
+    float NdotL = clamp(dot(normal, light_dir), 0.0, 1.0);
+    float NdotV = clamp(dot(normal, view_dir), 0.0, 1.0);
+    float NdotH = clamp(dot(normal, bisect_light_view), 0.0, 1.0);
+    float VdotH = clamp(dot(view_dir, bisect_light_view), 0.0, 1.0);
 
     // Metallic-roughness/glTF PBR
     // Initial inputs come from textures and/or factors (uniforms)
@@ -203,11 +207,11 @@ void main() {
 
     // Up until now, specific to gltf. From here on, wild west brdf
     // Define output as diffuse term + specular term
-    vec3 fresnel = fresnel(fresnel_0, view_dir, bisect_light_view);
+    vec3 fresnel = NdotL > 0.0 ? fresnel(fresnel_0, VdotH) : black;
 
     // diffuse term is the result of subsurface scattering, model as lambertian
-    // term modified by the amount of light refracted
-    vec3 diffuse = (1.0 - fresnel) * diffuse_color / M_PI;
+    // term modified by the amount of light refracted (later in mix())
+    vec3 diffuse = diffuse_color / M_PI;
 
     // specular term is microfacet based, assuming each micro-facet is fresnel mirror
     // *Very* unoptimized version: (F * G * D) / ( 4 * dot(n,l) * dot(n,v))
@@ -215,20 +219,22 @@ void main() {
     // the Smith height-corelated masking-shadowing function for G, we can rewrite it
     // (see Real-time rendering 4th ed. for details)
 
-    float NdotV = max(dot(normal, view_dir), 0.0);
-    float NdotL = max(dot(normal, light_dir), 0.0);
-    float divisor_0 = NdotV * sqrt(pow(alpha_roughness, 2.0) + pow(NdotL, 2.0) - pow(alpha_roughness * NdotL, 2.0));
-    float divisor_1 = NdotL * sqrt(pow(alpha_roughness, 2.0) + pow(NdotV, 2.0) - pow(alpha_roughness * NdotV, 2.0));
-    float OptTerm = 0.5/(divisor_0 + divisor_1);
-    vec3 D = vec3(normal_distribution_function(normal, alpha_roughness, bisect_light_view));
-    vec3 specular = fresnel * OptTerm * D;
+    vec3 specular = vec3(0.0);
+    // Only do this if the Light can hit the point
+    if (NdotL > 0.0) {
+        float divisor_0 = NdotV * sqrt(pow(alpha_roughness, 2.0) + pow(NdotL, 2.0) - pow(alpha_roughness * NdotL, 2.0));
+        float divisor_1 = NdotL * sqrt(pow(alpha_roughness, 2.0) + pow(NdotV, 2.0) - pow(alpha_roughness * NdotV, 2.0));
+        float OptTerm = 0.5/(divisor_0 + divisor_1);
+        vec3 D = vec3(normal_distribution_function(NdotH, alpha_roughness));
+
+        specular = OptTerm * D;
+    }
+
+    vec3 color = mix(diffuse, specular, fresnel);
 
     // TODO:
-    // - mix between specular and diffuse with fresnel
     // - More variations on BRDF
     // - lighting
-
-    vec3 color = diffuse + specular;
 
     out_color = vec4(color, 1.0);
 }
