@@ -39,8 +39,6 @@ use crate::asset;
 use crate::camera::*;
 use crate::common::*;
 
-use std::time::Duration;
-
 mod shader;
 
 #[derive(Debug, Default)]
@@ -160,9 +158,35 @@ impl VKManager {
             _ => &primitive.triangle_indices.data,
         };
 
-        // TODO: Use transfer queue here
-        let (vertex_buffer, vertex_data_copied) =
-            create_and_submit_vertex_buffer(&self.graphics_queue, primitive.vertex_data.to_owned());
+        let g_pipeline = match primitive.vertex_data {
+            VertexBuf::Base(_) => {
+                create_graphics_pipeline::<VertexBase>(
+                &self.vk_device,
+                &self.render_pass,
+                self.swapchain.dimensions(),
+                mode,
+            )
+            },
+            VertexBuf::UV(_) => {
+                create_graphics_pipeline::<VertexUV>(
+                &self.vk_device,
+                &self.render_pass,
+                self.swapchain.dimensions(),
+                mode,
+            )
+            }
+        };
+
+        // TODO: Use transfer queue for sending to gpu
+        let (vertex_buffer, vertex_data_copied) = match &primitive.vertex_data {
+            VertexBuf::Base(vertices) => {
+                create_and_submit_vertex_buffer(&self.graphics_queue, vertices.to_owned())
+            },
+            VertexBuf::UV(vertices) => {
+                create_and_submit_vertex_buffer(&self.graphics_queue, vertices.to_owned())
+            }
+        };
+
         let (index_buffer, index_data_copied) =
             create_and_submit_index_buffer(&self.graphics_queue, indices.to_owned());
 
@@ -190,14 +214,6 @@ impl VKManager {
                 let sampler = Sampler::simple_repeat_linear(Arc::clone(&self.vk_device));
                 TextureAccess{buf, sampler}});
         */
-
-        // TODO: Choose shader based on model_opt/texture availability etc
-        let g_pipeline = create_graphics_pipeline(
-            &self.vk_device,
-            &self.render_pass,
-            self.swapchain.dimensions(),
-            mode,
-        );
 
         let model = primitive.transform.unwrap_or_else(|| glm::identity());
 
@@ -645,13 +661,17 @@ fn create_logical_device(
 }
 
 // TODO: Try to refactor here
-fn create_and_submit_vertex_buffer(
+fn create_and_submit_vertex_buffer<T>(
     queue: &Arc<Queue>,
-    vertex_data: Vec<Vertex>,
+    vertex_data: Vec<T>,
 ) -> (
     Arc<BufferAccess + Send + Sync>,
     CommandBufferExecFuture<NowFuture, AutoCommandBuffer>,
-) {
+)
+    where T: vulkano::pipeline::vertex::Vertex + std::clone::Clone
+
+{
+
     let (buf, fut) = ImmutableBuffer::from_iter(
         vertex_data.iter().cloned(),
         BufferUsage::vertex_buffer(),
@@ -700,12 +720,15 @@ fn create_and_submit_texture_image(
     (buf, fut)
 }
 
-fn create_graphics_pipeline(
+fn create_graphics_pipeline<T>(
     device: &Arc<Device>,
     render_pass: &Arc<RenderPassAbstract + Send + Sync>,
     swapchain_dimensions: [u32; 2],
     rendering_mode: vulkano::pipeline::input_assembly::PrimitiveTopology,
-) -> Arc<GraphicsPipelineAbstract + Send + Sync> {
+) -> Arc<GraphicsPipelineAbstract + Send + Sync>
+    where T: vulkano::pipeline::vertex::Vertex
+
+{
     let vs = shader::vs_pbr::Shader::load(Arc::clone(device)).expect("Vertex shader compilation failed");
     let fs = shader::fs_pbr::Shader::load(Arc::clone(device)).expect("Fragment shader compilation failed");
 
@@ -722,7 +745,7 @@ fn create_graphics_pipeline(
 
     Arc::new(
         GraphicsPipeline::start()
-            .vertex_input_single_buffer::<Vertex>()
+            .vertex_input_single_buffer::<T>()
             // How to interpret the vertex input
             .primitive_topology(rendering_mode)
             .vertex_shader(vs.main_entry_point(), ())
@@ -832,8 +855,6 @@ fn create_command_buffer_with_push_constants(
 }
 */
 
-impl_vertex!(Vertex, position, normal);
-
 fn get_view_matrix(pos: &Position, ori: &CameraOrientation) -> glm::Mat4 {
     let dir = ori.direction;
     let up = ori.up;
@@ -895,6 +916,7 @@ struct TextureAccess {
     sampler: Arc<Sampler>
 }
 
+// Uniform data that will be passed to the shader
 enum PBRMaterial {
     ColorOnly {color: [f32; 4]},
     NotPBR,

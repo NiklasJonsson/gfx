@@ -103,6 +103,7 @@ pub enum InputContextError {
     DuplicateRangeForKey(RangeId, Sensitivity),
 }
 
+// Struct update syntax
 impl InputContextBuilder {
     fn start(name: &str) -> Self {
         InputContextBuilder {

@@ -22,7 +22,7 @@ impl IndexData {
 pub struct Primitive {
     pub triangle_indices: IndexData,
     pub line_indices: IndexData,
-    pub vertex_data: Vec<Vertex>,
+    pub vertex_data: VertexBuf,
     pub texture_data: Option<image::RgbaImage>,
     pub transform: Option<glm::Mat4>,
     pub color: Option<glm::Vec4>,
@@ -116,13 +116,6 @@ pub fn load_glTF_asset(path: &str) -> Asset {
                 let positions = reader.read_positions().expect("Found no positions");
                 let normals = reader.read_normals().expect("Found no normals");
                 assert!(primitive.mode() == gltf::mesh::Mode::Triangles);
-                /*
-                // TODO: Don't convert all tex_coords to f32
-                let tex_coords = reader
-                    .read_tex_coords(0)
-                    .expect("Found no tex coords")
-                    .into_f32();
-                */
 
                 let triangle_index_data = reader
                     .read_indices()
@@ -130,10 +123,22 @@ pub fn load_glTF_asset(path: &str) -> Asset {
                     .into_u32()
                     .collect::<Vec<_>>();
 
-                let vertex_data = positions
-                    .zip(normals)
-                    .map(|(p, n)| Vertex {position: p, normal: n})
-                    .collect::<Vec<_>>();
+                // TODO: Don't convert all tex_coords to f32
+                let tex_coords = reader.read_tex_coords(0);
+                let it = positions.zip(normals);
+
+                let vertex_data = match tex_coords {
+                   Some(tex_coords) => VertexBuf::UV(
+                       it
+                       .zip(tex_coords.into_f32())
+                       // TODO: Create from tuple function
+                       .map(|((position, normal), tex_coords)| VertexUV{position, normal, tex_coords }).
+                       collect::<Vec<_>>()),
+                   None => VertexBuf::Base(
+                       it
+                        .map(|(position, normal)| VertexBase {position, normal})
+                        .collect::<Vec<_>>())
+                };
 
                 let pbr_mr = primitive.material().pbr_metallic_roughness();
                 let color = pbr_mr.base_color_factor();
@@ -176,6 +181,7 @@ fn load_obj_asset(data_file: &str, texture_file: &str) -> Asset {
     let triangle_indices = IndexData::triangle_list(index_data);
 
     let line_indices = generate_line_list_from(&triangle_indices);
+
     Asset {
         primitives: vec![
             Primitive {
@@ -249,7 +255,7 @@ fn debug_obj(models: &[tobj::Model], materials: &[tobj::Material]) {
     }
 }
 
-fn load_obj(path: &str) -> (Vec<Vertex>, Vec<u32>) {
+fn load_obj(path: &str) -> (VertexBuf, Vec<u32>) {
     log::info!("Loading models from {}", path);
     // TODO: "Vertex dedup" instead of storing duplicates of
     // vertices, we should re-use old ones if they are identical.
@@ -268,12 +274,14 @@ fn load_obj(path: &str) -> (Vec<Vertex>, Vec<u32>) {
         .mesh
         .positions
         .chunks_exact(3)
-        .map(|p| Vertex {position: [p[0],p[1],p[2]], normal: [0.0f32; 3]})
+        .map(|p| VertexBase {position: [p[0],p[1],p[2]], normal: [0.0f32; 3]})
         .collect::<Vec<_>>();
 
     let indices = models[0].mesh.indices.to_owned();
 
-    (vertices, indices)
+    let vbuf = VertexBuf::Base(vertices);
+
+    (vbuf, indices)
 }
 
 pub fn load_image(path: &str) -> image::RgbaImage {
