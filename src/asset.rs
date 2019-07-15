@@ -1,5 +1,5 @@
 use crate::common::*;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use vulkano::pipeline::input_assembly::PrimitiveTopology;
 
 pub struct IndexData {
@@ -17,15 +17,33 @@ impl IndexData {
     }
 }
 
+#[derive(Clone, Debug)]
+pub struct Texture {
+    pub image: image::RgbaImage,
+    pub coord_set: u32,
+}
+
+#[derive(Clone, Debug)]
+pub enum Material {
+    Color {color: [f32; 4]},
+    ColorTexture (Texture),
+    GlTFPBRMaterial{
+        base_color_factor: [f32; 4],
+        metallic_factor: f32,
+        roughness_factor: f32,
+        base_color_texture: Option<Texture>,
+    },
+    None,
+}
+
 // One ore more vertices with associated data
 // One transform per primitive.
 pub struct Primitive {
     pub triangle_indices: IndexData,
     pub line_indices: IndexData,
     pub vertex_data: VertexBuf,
-    pub texture_data: Option<image::RgbaImage>,
     pub transform: Option<glm::Mat4>,
-    pub color: Option<glm::Vec4>,
+    pub material: Material,
 }
 
 // Describes an asset.
@@ -131,32 +149,55 @@ pub fn load_glTF_asset(path: &str) -> Asset {
                    Some(tex_coords) => VertexBuf::UV(
                        it
                        .zip(tex_coords.into_f32())
-                       // TODO: Create from tuple function
-                       .map(|((position, normal), tex_coords)| VertexUV{position, normal, tex_coords }).
-                       collect::<Vec<_>>()),
+                       .map(|((pos,nor), tex_coords)| (pos, nor, tex_coords).into()).
+                       collect::<Vec<VertexUV>>()),
                    None => VertexBuf::Base(
                        it
-                        .map(|(position, normal)| VertexBase {position, normal})
-                        .collect::<Vec<_>>())
+                        .map(|pos_nor| pos_nor.into())
+                        .collect::<Vec<VertexBase>>())
                 };
 
                 let pbr_mr = primitive.material().pbr_metallic_roughness();
-                let color = pbr_mr.base_color_factor();
 
-                let model: glm::Mat4x4 = glm::identity();
+                let tex = pbr_mr.base_color_texture().map(|texture_info| {
+                    assert_eq!(texture_info.tex_coord(), 0, "Not implemented!");
+                    assert_eq!(texture_info.texture().sampler().wrap_s(),
+                    gltf::texture::WrappingMode::Repeat);
+                    assert_eq!(texture_info.texture().sampler().wrap_t(),
+                    gltf::texture::WrappingMode::Repeat);
+
+                    let image_src = texture_info.texture().source().source();
+
+                    use gltf::image::Source;
+                    let image = match image_src {
+                        Source::Uri{uri, mime_type} => {
+                            load_image(uri)
+                        },
+                        _ => unimplemented!()
+                    };
+
+                    Texture{image, coord_set: texture_info.tex_coord()}
+                });
+
+                let material = Material::GlTFPBRMaterial {
+                    base_color_factor: pbr_mr.base_color_factor(),
+                    metallic_factor: pbr_mr.metallic_factor(),
+                    roughness_factor: pbr_mr.roughness_factor(),
+                    base_color_texture: tex,
+                };
 
                 let triangle_indices = IndexData::triangle_list(triangle_index_data);
 
                 let line_indices = generate_line_list_from(&triangle_indices);
+
 
                 primitives.push(
                     Primitive {
                         triangle_indices,
                         line_indices,
                         vertex_data,
-                        texture_data: None,
                         transform: Some(model.into()),
-                        color: Some(color.into())
+                        material,
                     }
                 );
             }
@@ -182,15 +223,18 @@ fn load_obj_asset(data_file: &str, texture_file: &str) -> Asset {
 
     let line_indices = generate_line_list_from(&triangle_indices);
 
+    let tex = Texture {image, coord_set: 0};
+
+    let material = Material::ColorTexture(tex);
+
     Asset {
         primitives: vec![
             Primitive {
                 triangle_indices,
                 line_indices,
                 vertex_data,
-                texture_data: Some(image),
                 transform: None,
-                color: None,
+                material,
             },
         ]
     }

@@ -1,0 +1,33 @@
+#version 450
+#extension GL_ARB_separate_shader_objects : enable
+
+layout(set = 0, binding = 0) uniform Transforms {
+    mat4 view;
+    mat4 proj;
+} ubo;
+
+layout(set = 0, binding = 1) uniform Model {
+    mat4 model;
+    mat4 model_it; // inverse transpose of model matrix
+} model_ubo;
+
+layout(location = 0) in vec3 position;
+layout(location = 1) in vec3 normal;
+#if HAS_TEX_COORDS
+layout(location = 2) in vec2 tex_coords;
+#endif
+
+layout(location = 0) out vec3 world_normal;
+layout(location = 1) out vec3 world_pos;
+#if HAS_TEX_COORDS
+layout(location = 2) out vec2 tex_coords_0;
+#endif
+
+void main() {
+    world_normal = normalize((model_ubo.model_it * vec4(normal, 0.0)).xyz);
+    world_pos = (model_ubo.model * vec4(position, 1.0)).xyz;
+#if HAS_TEX_COORDS
+	tex_coords_0 = tex_coords;
+#endif
+    gl_Position = ubo.proj * ubo.view * model_ubo.model * vec4(position, 1.0);
+}
