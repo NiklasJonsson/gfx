@@ -41,7 +41,7 @@ impl DeltaTime {
     }
 
     pub fn to_f32(self) -> f32 {
-        (self.0.as_secs() as f64 + self.0.subsec_nanos() as f64 / 1000000000.0) as f32
+        (self.0.as_secs() as f64 + self.0.subsec_nanos() as f64 / 1_000_000_000.0) as f32
     }
 
     pub fn as_fps(self) -> f32 {
@@ -97,7 +97,7 @@ impl<'a> System<'a> for GameStateSwitcher {
         ReadStorage<'a, Self>,
     );
 
-    fn run(&mut self, (mut state, mut contexts, mut inputs, unique_id): Self::SystemData) {
+    fn run(&mut self, (mut state, mut contexts, mut inputs, _unique_id): Self::SystemData) {
         log::trace!("GameStateSwitcher: run");
         // TODO: Verify that we only get one mapped input? (and one context)
         // We don't need to join!!!
@@ -276,7 +276,9 @@ impl App {
             .build();
 
         // TODO: How to parameterize this? Dialog box?
-        let desc = AssetDescriptor::Gltf{path: "/home/niklas/src_repos/glTF-Sample-Models/2.0/Box/glTF/Box.gltf".to_owned()};
+        let desc = AssetDescriptor::Gltf {
+            path: "/home/niklas/src_repos/glTF-Sample-Models/2.0/Box/glTF/Box.gltf".to_owned(),
+        };
 
         let asset = asset::load_asset(desc);
         let renderables = self.vk_manager.prepare_static_asset_for_rendering(asset);
@@ -299,7 +301,7 @@ impl App {
         // Collects events and resolves to AppAction
         let mut event_manager = EventManager::new();
 
-        let start_time = Instant::now();
+        let _start_time = Instant::now();
         let mut prev_frame = Instant::now();
 
         // Main loop is structured like:

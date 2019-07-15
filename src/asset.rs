@@ -1,5 +1,5 @@
 use crate::common::*;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use vulkano::pipeline::input_assembly::PrimitiveTopology;
 
 pub struct IndexData {
@@ -9,12 +9,39 @@ pub struct IndexData {
 
 impl IndexData {
     pub fn line_list(data: Vec<u32>) -> Self {
-        IndexData { rendering_mode: PrimitiveTopology::LineList, data }
+        IndexData {
+            rendering_mode: PrimitiveTopology::LineList,
+            data,
+        }
     }
 
     pub fn triangle_list(data: Vec<u32>) -> Self {
-        IndexData { rendering_mode: PrimitiveTopology::TriangleList, data }
+        IndexData {
+            rendering_mode: PrimitiveTopology::TriangleList,
+            data,
+        }
     }
+}
+
+#[derive(Clone, Debug)]
+pub struct Texture {
+    pub image: image::RgbaImage,
+    pub coord_set: u32,
+}
+
+#[derive(Clone, Debug)]
+pub enum Material {
+    Color {
+        color: [f32; 4],
+    },
+    ColorTexture(Texture),
+    GlTFPBRMaterial {
+        base_color_factor: [f32; 4],
+        metallic_factor: f32,
+        roughness_factor: f32,
+        base_color_texture: Option<Texture>,
+    },
+    None,
 }
 
 // One ore more vertices with associated data
@@ -23,36 +50,42 @@ pub struct Primitive {
     pub triangle_indices: IndexData,
     pub line_indices: IndexData,
     pub vertex_data: VertexBuf,
-    pub texture_data: Option<image::RgbaImage>,
     pub transform: Option<glm::Mat4>,
-    pub color: Option<glm::Vec4>,
+    pub material: Material,
 }
 
 // Describes an asset.
 // TODO: Support hierarchy
 pub struct Asset {
-    pub primitives: Vec<Primitive>
+    pub primitives: Vec<Primitive>,
 }
 
 // Per asset type description, generally all the files needed to load an asset
 pub enum AssetDescriptor {
-    Obj{data_file: String, texture_file: String},
-    Gltf{path: String},
+    Obj {
+        data_file: String,
+        texture_file: String,
+    },
+    Gltf {
+        path: String,
+    },
 }
 
 pub fn load_asset(descr: AssetDescriptor) -> Asset {
     match descr {
-        AssetDescriptor::Obj{data_file, texture_file} => {
-            load_obj_asset(&data_file, &texture_file)
-        },
-        AssetDescriptor::Gltf{path} => {
-            load_glTF_asset(&path)
-        }
+        AssetDescriptor::Obj {
+            data_file,
+            texture_file,
+        } => load_obj_asset(&data_file, &texture_file),
+        AssetDescriptor::Gltf { path } => load_gltf_asset(&path),
     }
 }
 
 fn generate_line_list_from(index_data: &IndexData) -> IndexData {
-    let IndexData { rendering_mode, data: indices } = index_data;
+    let IndexData {
+        rendering_mode,
+        data: indices,
+    } = index_data;
     let mut ret = Vec::new();
     assert_eq!(*rendering_mode, PrimitiveTopology::TriangleList);
     assert_eq!(indices.len() % 3, 0);
@@ -69,17 +102,16 @@ fn generate_line_list_from(index_data: &IndexData) -> IndexData {
 }
 
 fn gltf_to_vulkano_topology(mode: gltf::mesh::Mode) -> PrimitiveTopology {
-
     use gltf::mesh::Mode;
 
     match mode {
         Mode::Points => PrimitiveTopology::PointList,
-	Mode::Lines => PrimitiveTopology::LineList,
-	Mode::LineLoop => panic!("Not supported!?"),
-	Mode::LineStrip => PrimitiveTopology::LineStrip,
-	Mode::Triangles => PrimitiveTopology::TriangleList,
-	Mode::TriangleStrip => PrimitiveTopology::TriangleStrip,
-	Mode::TriangleFan => PrimitiveTopology::TriangleFan,
+        Mode::Lines => PrimitiveTopology::LineList,
+        Mode::LineLoop => panic!("Not supported!?"),
+        Mode::LineStrip => PrimitiveTopology::LineStrip,
+        Mode::Triangles => PrimitiveTopology::TriangleList,
+        Mode::TriangleStrip => PrimitiveTopology::TriangleStrip,
+        Mode::TriangleFan => PrimitiveTopology::TriangleFan,
     }
 }
 
@@ -97,7 +129,7 @@ fn arr4x4_to_mat4(arr: &[[f32; 4]; 4]) -> glm::Mat4 {
     glm::make_mat4(&tmp)
 }
 
-pub fn load_glTF_asset(path: &str) -> Asset {
+pub fn load_gltf_asset(path: &str) -> Asset {
     log::trace!("load gltf asset {}", path);
     let (gltf_doc, buffers, images) = gltf::import(path).expect("Unable to import gltf");
     assert_eq!(gltf_doc.scenes().len(), 1);
@@ -128,46 +160,84 @@ pub fn load_glTF_asset(path: &str) -> Asset {
                 let it = positions.zip(normals);
 
                 let vertex_data = match tex_coords {
-                   Some(tex_coords) => VertexBuf::UV(
-                       it
-                       .zip(tex_coords.into_f32())
-                       // TODO: Create from tuple function
-                       .map(|((position, normal), tex_coords)| VertexUV{position, normal, tex_coords }).
-                       collect::<Vec<_>>()),
-                   None => VertexBuf::Base(
-                       it
-                        .map(|(position, normal)| VertexBase {position, normal})
-                        .collect::<Vec<_>>())
+                    Some(tex_coords) => VertexBuf::UV(
+                        it.zip(tex_coords.into_f32())
+                            .map(|((pos, nor), tex_coords)| (pos, nor, tex_coords).into())
+                            .collect::<Vec<VertexUV>>(),
+                    ),
+                    None => VertexBuf::Base(
+                        it.map(|pos_nor| pos_nor.into())
+                            .collect::<Vec<VertexBase>>(),
+                    ),
                 };
 
                 let pbr_mr = primitive.material().pbr_metallic_roughness();
-                let color = pbr_mr.base_color_factor();
 
-                let model: glm::Mat4x4 = glm::identity();
+                let tex = pbr_mr.base_color_texture().map(|texture_info| {
+                    assert_eq!(texture_info.tex_coord(), 0, "Not implemented!");
+                    assert_eq!(
+                        texture_info.texture().sampler().wrap_s(),
+                        gltf::texture::WrappingMode::Repeat
+                    );
+                    assert_eq!(
+                        texture_info.texture().sampler().wrap_t(),
+                        gltf::texture::WrappingMode::Repeat
+                    );
+
+                    let image_src = texture_info.texture().source().source();
+
+                    use gltf::image::Source;
+                    let image = match image_src {
+                        Source::Uri { uri, mime_type: _ } => {
+                            let parent_path = Path::new(path).parent().expect("Invalid path");
+                            assert!(parent_path.has_root());
+                            println!("{}", path);
+                            println!("{}", uri);
+                            let mut image_path = parent_path.to_path_buf();
+                            println!("{}", image_path.to_str().unwrap());
+                            image_path.push(uri);
+                            load_image(image_path.to_str().expect("Could not create image path!"))
+                        }
+                        _ => unimplemented!(),
+                    };
+
+                    Texture {
+                        image,
+                        coord_set: texture_info.tex_coord(),
+                    }
+                });
+
+                let material = Material::GlTFPBRMaterial {
+                    base_color_factor: pbr_mr.base_color_factor(),
+                    metallic_factor: pbr_mr.metallic_factor(),
+                    roughness_factor: pbr_mr.roughness_factor(),
+                    base_color_texture: tex,
+                };
 
                 let triangle_indices = IndexData::triangle_list(triangle_index_data);
 
                 let line_indices = generate_line_list_from(&triangle_indices);
 
-                primitives.push(
-                    Primitive {
-                        triangle_indices,
-                        line_indices,
-                        vertex_data,
-                        texture_data: None,
-                        transform: Some(model.into()),
-                        color: Some(color.into())
-                    }
-                );
+                primitives.push(Primitive {
+                    triangle_indices,
+                    line_indices,
+                    vertex_data,
+                    transform: Some(model.into()),
+                    material,
+                });
             }
         }
     }
-    Asset{ primitives }
+    Asset { primitives }
 }
 
 fn debug_gltf(file: gltf::Document) {
     for scene in file.scenes() {
-        log::trace!("Scenes[{}]: {}", scene.index(), scene.name().unwrap_or_else(|| ""));
+        log::trace!(
+            "Scenes[{}]: {}",
+            scene.index(),
+            scene.name().unwrap_or_else(|| "")
+        );
         for node in scene.nodes() {
             dbg!(node.mesh());
         }
@@ -182,20 +252,23 @@ fn load_obj_asset(data_file: &str, texture_file: &str) -> Asset {
 
     let line_indices = generate_line_list_from(&triangle_indices);
 
+    let tex = Texture {
+        image,
+        coord_set: 0,
+    };
+
+    let material = Material::ColorTexture(tex);
+
     Asset {
-        primitives: vec![
-            Primitive {
-                triangle_indices,
-                line_indices,
-                vertex_data,
-                texture_data: Some(image),
-                transform: None,
-                color: None,
-            },
-        ]
+        primitives: vec![Primitive {
+            triangle_indices,
+            line_indices,
+            vertex_data,
+            transform: None,
+            material,
+        }],
     }
 }
-
 
 fn debug_obj(models: &[tobj::Model], materials: &[tobj::Material]) {
     for (i, m) in models.iter().enumerate() {
@@ -269,12 +342,16 @@ fn load_obj(path: &str) -> (VertexBuf, Vec<u32>) {
     log::warn!("Ignoring materials and models other than model[0]");
     debug_obj(models.as_slice(), materials.as_slice());
 
+    // TODO: Use these
     let tex_coords = models[0].mesh.texcoords.chunks_exact(2);
     let vertices = models[0]
         .mesh
         .positions
         .chunks_exact(3)
-        .map(|p| VertexBase {position: [p[0],p[1],p[2]], normal: [0.0f32; 3]})
+        .map(|p| VertexBase {
+            position: [p[0], p[1], p[2]],
+            normal: [0.0f32; 3],
+        })
         .collect::<Vec<_>>();
 
     let indices = models[0].mesh.indices.to_owned();
@@ -286,7 +363,9 @@ fn load_obj(path: &str) -> (VertexBuf, Vec<u32>) {
 
 pub fn load_image(path: &str) -> image::RgbaImage {
     log::info!("Trying to load image from {}", path);
-    let image = image::open(path).expect("Unable to load image").to_rgba();
+    let image = image::open(path)
+        .expect(format!("Unable to load image from {}", path).as_str())
+        .to_rgba();
 
     log::info!(
         "Loaded RGBA image with dimensions: {:?}",

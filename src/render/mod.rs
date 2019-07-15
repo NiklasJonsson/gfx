@@ -9,21 +9,22 @@ use vulkano::command_buffer::{
 use vulkano::descriptor::{descriptor_set::PersistentDescriptorSet, DescriptorSet};
 use vulkano::device::{Device, DeviceExtensions, Features, Queue};
 use vulkano::format::Format;
-use vulkano::framebuffer::{Framebuffer, FramebufferAbstract, RenderPassAbstract, Subpass};
+use vulkano::framebuffer::{Framebuffer, FramebufferAbstract, RenderPassAbstract};
 use vulkano::image::{
     attachment::AttachmentImage, immutable::ImmutableImage, swapchain::SwapchainImage, Dimensions,
     ImageUsage, ImageViewAccess,
 };
 use vulkano::instance;
 use vulkano::instance::{Instance, InstanceExtensions, PhysicalDevice, QueueFamily};
-use vulkano::pipeline::{viewport::Viewport, GraphicsPipeline, GraphicsPipelineAbstract};
+use vulkano::pipeline::GraphicsPipelineAbstract;
 use vulkano::swapchain;
+use vulkano::swapchain::Surface;
 use vulkano::swapchain::{
-    AcquireError, ColorSpace, CompositeAlpha, PresentMode, Surface, SurfaceTransform, Swapchain,
+    AcquireError, ColorSpace, CompositeAlpha, PresentMode, SurfaceTransform, Swapchain,
 };
 
 use vulkano::sampler::Sampler;
-use vulkano::sync::{FenceSignalFuture, FlushError, GpuFuture, NowFuture, SharingMode};
+use vulkano::sync::{FlushError, GpuFuture, NowFuture, SharingMode};
 
 use winit::Window;
 
@@ -34,12 +35,12 @@ use specs::prelude::*;
 use std::collections::HashSet;
 use std::sync::Arc;
 
-use crate::asset::*;
 use crate::asset;
+use crate::asset::*;
 use crate::camera::*;
 use crate::common::*;
 
-mod shader;
+mod pipeline;
 
 #[derive(Debug, Default)]
 pub struct ActiveCamera(Option<Entity>);
@@ -54,6 +55,7 @@ impl ActiveCamera {
     }
 }
 
+// TODO: Move all vs_pbr::* uniform types to its own file
 pub struct VKManager {
     vk_instance: Arc<Instance>,
     vk_surface: Arc<Surface<Window>>,
@@ -62,8 +64,8 @@ pub struct VKManager {
     presentation_queue: Arc<Queue>,
     swapchain: Arc<Swapchain<Window>>,
     swapchain_images: Vec<Arc<SwapchainImage<Window>>>,
-    transforms_buf: CpuBufferPool<shader::vs_pbr::ty::Transforms>,
-    lighting_data_buf: CpuBufferPool<shader::fs_pbr::ty::LightingData>,
+    transforms_buf: CpuBufferPool<pipeline::vs_pbr::ty::Transforms>,
+    lighting_data_buf: CpuBufferPool<pipeline::fs_pbr::ty::LightingData>,
     framebuffers: Vec<Arc<FramebufferAbstract + Send + Sync>>,
     render_pass: Arc<RenderPassAbstract + Send + Sync>,
     frame_completions: Vec<Option<Box<GpuFuture>>>,
@@ -149,7 +151,6 @@ impl VKManager {
     }
 
     fn send_data_to_gpu(&self, primitive: &Primitive) -> Renderable {
-
         use vulkano::pipeline::input_assembly::PrimitiveTopology;
         let mode = PrimitiveTopology::TriangleList;
 
@@ -158,30 +159,29 @@ impl VKManager {
             _ => &primitive.triangle_indices.data,
         };
 
+        // TODO: Can we move this to pipeline.rs?
         let g_pipeline = match primitive.vertex_data {
-            VertexBuf::Base(_) => {
-                create_graphics_pipeline::<VertexBase>(
+            VertexBuf::Base(_) => pipeline::create_graphics_pipeline::<VertexBase>(
                 &self.vk_device,
                 &self.render_pass,
                 self.swapchain.dimensions(),
                 mode,
-            )
-            },
-            VertexBuf::UV(_) => {
-                create_graphics_pipeline::<VertexUV>(
+                false,
+            ),
+            VertexBuf::UV(_) => pipeline::create_graphics_pipeline::<VertexUV>(
                 &self.vk_device,
                 &self.render_pass,
                 self.swapchain.dimensions(),
                 mode,
-            )
-            }
+                true,
+            ),
         };
 
         // TODO: Use transfer queue for sending to gpu
         let (vertex_buffer, vertex_data_copied) = match &primitive.vertex_data {
             VertexBuf::Base(vertices) => {
                 create_and_submit_vertex_buffer(&self.graphics_queue, vertices.to_owned())
-            },
+            }
             VertexBuf::UV(vertices) => {
                 create_and_submit_vertex_buffer(&self.graphics_queue, vertices.to_owned())
             }
@@ -192,45 +192,38 @@ impl VKManager {
 
         let data_copied = vertex_data_copied.join(index_data_copied);
 
-        assert!(primitive.texture_data.is_none());
+        let model = primitive.transform.unwrap_or_else(glm::identity);
 
-        /* TODO: Re-enable textures
-        let image_buffer = texture_data_opt.map(|texture_data| {
-            let (image_buffer, texture_data_copied) =
-                create_and_submit_texture_image(&self.graphics_queue, texture_data);
-            data_copied = data_copied.join(texture_data_copied);
-            image_buffer
-        });
-        */
+        let (material_data_buf, base_color_tex, material_data_copied) =
+            submit_material_uniform_data(
+                &self.vk_device,
+                &self.graphics_queue,
+                &primitive.material,
+            );
 
         data_copied
+            .join(material_data_copied)
             .then_signal_fence_and_flush()
             .expect("Unable to signal fence and flush for prepare for rendering data copy command")
-            .wait(None).unwrap();
-        let tex_access = None;
-
-        /*
-        let tex_access = image_buffer.map(|buf| {
-                let sampler = Sampler::simple_repeat_linear(Arc::clone(&self.vk_device));
-                TextureAccess{buf, sampler}});
-        */
-
-        let model = primitive.transform.unwrap_or_else(|| glm::identity());
+            .wait(None)
+            .unwrap();
 
         Renderable {
             vertex_buffer,
             index_buffer,
-            tex_access,
             g_pipeline,
             model,
-            material: PBRMaterial::ColorOnly{color: primitive.color.unwrap().into()},
+            material_data_buf,
+            base_color_tex,
         }
     }
 
     pub fn prepare_static_asset_for_rendering(&self, asset: Asset) -> Vec<Renderable> {
-        asset.primitives.iter().map(|primitive| {
-            self.send_data_to_gpu(primitive)
-        }).collect::<Vec<_>>()
+        asset
+            .primitives
+            .iter()
+            .map(|primitive| self.send_data_to_gpu(primitive))
+            .collect::<Vec<_>>()
     }
 
     pub fn grab_cursor(&mut self, grab_cursor: bool) {
@@ -294,7 +287,7 @@ impl VKManager {
         let aspect_ratio = dims[0] as f32 / dims[1] as f32;
         let proj = get_proj_matrix(aspect_ratio);
 
-        let vp_buf = shader::vs_pbr::ty::Transforms {
+        let vp_buf = pipeline::vs_pbr::ty::Transforms {
             view: view.into(),
             proj: proj.into(),
         };
@@ -304,9 +297,8 @@ impl VKManager {
             .next(vp_buf)
             .expect("Could not get next ring buffer sub buffer for view proj");
 
-
-        let lighting_data = shader::fs_pbr::ty::LightingData {
-            light_pos: [5.0f32, 5.0f32, 5.0f32].into(),
+        let lighting_data = pipeline::fs_pbr::ty::LightingData {
+            light_pos: [5.0f32, 5.0f32, 5.0f32],
             view_pos: cam_pos.to_vec3().into(),
             _dummy0: [0; 4], // Magic Vulkano alignment
         };
@@ -337,16 +329,15 @@ impl VKManager {
         )
         .expect("Failed after begin render pass");
 
-        // TODO: Think about sending the uniform data to the GPU for each renderable.
-        // 1. We want to have it per primtive/renderable.
-        // 2. It might or might not be constant for a primitive
-        let pbr_material_buf = CpuBufferPool::uniform_buffer(Arc::clone(&self.vk_device));
         let model_ubo_buf = CpuBufferPool::uniform_buffer(Arc::clone(&self.vk_device));
 
         let builder = renderables.join().fold(builder, |builder, renderable| {
-            renderable.record_draw_commands(builder, &transforms_sub_buf,
-                                   &lighting_sub_buf, &pbr_material_buf,
-                                   &model_ubo_buf)
+            renderable.record_draw_commands(
+                builder,
+                &transforms_sub_buf,
+                &lighting_sub_buf,
+                &model_ubo_buf,
+            )
         });
 
         let cmd_buf = builder
@@ -668,10 +659,9 @@ fn create_and_submit_vertex_buffer<T>(
     Arc<BufferAccess + Send + Sync>,
     CommandBufferExecFuture<NowFuture, AutoCommandBuffer>,
 )
-    where T: vulkano::pipeline::vertex::Vertex + std::clone::Clone
-
+where
+    T: vulkano::pipeline::vertex::Vertex + std::clone::Clone,
 {
-
     let (buf, fut) = ImmutableBuffer::from_iter(
         vertex_data.iter().cloned(),
         BufferUsage::vertex_buffer(),
@@ -720,50 +710,58 @@ fn create_and_submit_texture_image(
     (buf, fut)
 }
 
-fn create_graphics_pipeline<T>(
-    device: &Arc<Device>,
-    render_pass: &Arc<RenderPassAbstract + Send + Sync>,
-    swapchain_dimensions: [u32; 2],
-    rendering_mode: vulkano::pipeline::input_assembly::PrimitiveTopology,
-) -> Arc<GraphicsPipelineAbstract + Send + Sync>
-    where T: vulkano::pipeline::vertex::Vertex
+fn submit_material_uniform_data(
+    vk_device: &Arc<Device>,
+    queue: &Arc<Queue>,
+    material: &asset::Material,
+) -> (
+    Arc<BufferAccess + Send + Sync>,
+    Option<TextureAccess>,
+    // TODO: This is boxed since we want to return different types of GPUFuture,
+    // can we solve this another way?
+    Box<GpuFuture>,
+) {
+    if let Material::GlTFPBRMaterial {
+        base_color_factor,
+        metallic_factor,
+        roughness_factor,
+        base_color_texture,
+    } = material
+    {
+        let data = pipeline::fs_pbr_base_color_texture::ty::PBRMaterialData {
+            base_color_factor: *base_color_factor,
+            metallic_factor: *metallic_factor,
+            roughness_factor: *roughness_factor,
+        };
+        let (buf, mat_copied) =
+            ImmutableBuffer::from_data(data, BufferUsage::uniform_buffer(), Arc::clone(queue))
+                .expect("Could not create vertex buffer");
 
-{
-    let vs = shader::vs_pbr::Shader::load(Arc::clone(device)).expect("Vertex shader compilation failed");
-    let fs = shader::fs_pbr::Shader::load(Arc::clone(device)).expect("Fragment shader compilation failed");
+        let (tex_access, fut) = match base_color_texture {
+            Some(texture) => {
+                assert_eq!(texture.coord_set, 0, "Not implemented!");
 
-    let dims = [
-        swapchain_dimensions[0] as f32,
-        swapchain_dimensions[1] as f32,
-    ];
+                let (image_buffer, texture_data_copied) =
+                    create_and_submit_texture_image(queue, texture.image.clone());
 
-    let viewport = Viewport {
-        origin: [0.0, 0.0],
-        dimensions: dims,
-        depth_range: 0.0..1.0,
-    };
+                let sampler = Sampler::simple_repeat_linear(Arc::clone(vk_device));
 
-    Arc::new(
-        GraphicsPipeline::start()
-            .vertex_input_single_buffer::<T>()
-            // How to interpret the vertex input
-            .primitive_topology(rendering_mode)
-            .vertex_shader(vs.main_entry_point(), ())
-            // Whether to support special indices in in the vertex buffer to split triangles
-            .primitive_restart(false)
-            .viewports([viewport].iter().cloned())
-            .depth_clamp(false)
-            .polygon_mode_fill()
-            .line_width(1.0)
-            .cull_mode_back()
-            .depth_stencil_simple_depth()
-            .fragment_shader(fs.main_entry_point(), ())
-            .blend_pass_through()
-            .front_face_counter_clockwise()
-            .render_pass(Subpass::from(Arc::clone(render_pass), 0).unwrap())
-            .build(Arc::clone(device))
-            .expect("Could not create graphics pipeline"),
-    )
+                (
+                    Some(TextureAccess {
+                        image_buffer,
+                        sampler,
+                    }),
+                    Box::new(mat_copied.join(texture_data_copied)) as Box<GpuFuture>,
+                )
+            }
+            None => (None, Box::new(mat_copied) as Box<GpuFuture>),
+        };
+
+        (buf, tex_access, fut)
+    } else {
+        // TODO: Support more material types
+        unimplemented!()
+    }
 }
 
 /*
@@ -829,7 +827,7 @@ fn create_command_buffer_with_push_constants(
         1.0f32.into(),
     ];
 
-    let push_constant_model_matrix = shader::vs_pbr_static::ty::ModelMatrix {
+    let push_constant_model_matrix = pipeline::vs_pbr_static::ty::ModelMatrix {
         matrix: model_matrix.into(),
     };
 
@@ -897,40 +895,38 @@ fn get_view_matrix(pos: &Position, ori: &CameraOrientation) -> glm::Mat4 {
     view * trns
 }
 
-/*
-fn create_dsets<T, A: vulkano::mem::MemoryPool>(
-    pipeline: &Arc<GraphicsPipelineAbstract + Send + Sync>,
-    buffers: &[Arc<BufTy>],
-    image: &Arc<ImageViewAccess + Send + Sync>,
-    sampler: &Arc<Sampler>,
-) -> Vec<Arc<DescriptorSet + Send + Sync>> {
-    buffers
-        .iter()
-        .map(|buffer| create_descriptor_set(pipeline, buffer, image, sampler))
-        .collect::<Vec<_>>()
-}
-*/
-
 struct TextureAccess {
-    image_buffer: Arc<ImageViewAccess + Send + Sync>,
-    sampler: Arc<Sampler>
+    pub image_buffer: Arc<ImageViewAccess + Send + Sync>,
+    pub sampler: Arc<Sampler>,
 }
 
-// Uniform data that will be passed to the shader
-enum PBRMaterial {
-    ColorOnly {color: [f32; 4]},
-    NotPBR,
-}
+// Renderable needs to have the sampler and the material data buf bound into
+// its descriptor set. The descriptor set is created here because it needs to
+// be recreated each time we pass in new data to the CpuBufferPool, which is done
+// each draw call.
+//
+// Descriptor set organisation:
+// 0: Draw call variant data,
+//    0: Transforms (view/proj)
+//    1: Model matrix
+//    2: Lighting Data (light_pos, view_pos)
+// 1: Constant/Material data
+//    0: MaterialData
+//    1: BaseColorTexture
+// TODO:
+// - Should Model matrix have its own set?
+// -
+//
 
 #[derive(Component)]
 #[storage(VecStorage)]
 pub struct Renderable {
     vertex_buffer: Arc<BufferAccess + Send + Sync>,
     index_buffer: Arc<TypedBufferAccess<Content = [u32]> + Send + Sync>,
-    tex_access: Option<TextureAccess>,
     g_pipeline: Arc<GraphicsPipelineAbstract + Send + Sync>,
     model: glm::Mat4,
-    material: PBRMaterial,
+    material_data_buf: Arc<BufferAccess + Send + Sync>,
+    base_color_tex: Option<TextureAccess>,
 }
 
 impl Renderable {
@@ -938,51 +934,55 @@ impl Renderable {
         &self,
         cmd_buf: AutoCommandBufferBuilder,
         vp_buf: &CpuBufferPoolSubbuffer<
-            shader::vs_pbr::ty::Transforms,
+            pipeline::vs_pbr::ty::Transforms,
             Arc<vulkano::memory::pool::StdMemoryPool>,
         >,
         light_buf: &CpuBufferPoolSubbuffer<
-            shader::fs_pbr::ty::LightingData,
+            pipeline::fs_pbr::ty::LightingData,
             Arc<vulkano::memory::pool::StdMemoryPool>,
         >,
-        pbr_buf_pol: &CpuBufferPool<shader::fs_pbr::ty::PBRMaterialData>,
-        model_ubo_buf: &CpuBufferPool<shader::vs_pbr::ty::Model>,
+        model_ubo_buf: &CpuBufferPool<pipeline::vs_pbr::ty::Model>,
     ) -> AutoCommandBufferBuilder {
-
-        let color = match self.material {
-            PBRMaterial::ColorOnly {color: col} => col,
-            PBRMaterial::NotPBR => panic!("Not implemented"),
-        };
-
-        let pbr_material = shader::fs_pbr::ty::PBRMaterialData {
-             base_color_factor: color.into(),
-             metallic_factor: 0.0f32,
-             roughness_factor: 1.0f32,
-        };
-
-        let pbr_buf = pbr_buf_pol.next(pbr_material).expect("Could not allocate sub uni buf");
-
-        let model_data = shader::vs_pbr::ty::Model {
+        let model_data = pipeline::vs_pbr::ty::Model {
             model: self.model.into(),
             model_it: glm::inverse_transpose(self.model).into(),
         };
 
-        let model_buf = model_ubo_buf.next(model_data).expect("Could not allocated usub model buf");
+        let model_buf = model_ubo_buf
+            .next(model_data)
+            .expect("Could not allocated usub model buf");
 
-
-        let descriptor_set = Arc::new(
+        let descriptor_set_0 = Arc::new(
             PersistentDescriptorSet::start(Arc::clone(&self.g_pipeline), 0)
                 .add_buffer(vp_buf.clone())
                 .expect("Could not add vp buf")
                 .add_buffer(model_buf)
                 .expect("Could not add model buf")
-                .add_buffer(pbr_buf.clone())
-                .expect("Could not add pbr buf")
                 .add_buffer(light_buf.clone())
                 .expect("Could not add light buf")
                 .build()
                 .expect("Failed to create persistent descriptor set for mvp ubo"),
         ) as Arc<DescriptorSet + Send + Sync>;
+
+        // TODO: Create this earlier?
+        let descriptor_set_1 = Arc::new(match &self.base_color_tex {
+            Some(tex_access) => Arc::new(
+                PersistentDescriptorSet::start(Arc::clone(&self.g_pipeline), 1)
+                    .add_buffer(self.material_data_buf.clone())
+                    .expect("Could not add material data buf")
+                    .add_sampled_image(tex_access.image_buffer.clone(), tex_access.sampler.clone())
+                    .expect("Could not add texture access!")
+                    .build()
+                    .expect("Failed to build desc set 1 for material data"),
+            ) as Arc<DescriptorSet + Send + Sync>,
+            None => Arc::new(
+                PersistentDescriptorSet::start(Arc::clone(&self.g_pipeline), 1)
+                    .add_buffer(self.material_data_buf.clone())
+                    .expect("Could not add material data buf")
+                    .build()
+                    .expect("Failed to build desc set 1 for material data"),
+            ),
+        });
 
         cmd_buf
             .draw_indexed(
@@ -990,7 +990,7 @@ impl Renderable {
                 &DynamicState::none(),
                 vec![Arc::clone(&self.vertex_buffer)],
                 Arc::clone(&self.index_buffer),
-                Arc::clone(&descriptor_set),
+                (descriptor_set_0, descriptor_set_1),
                 (),
             )
             .expect("Failed after draw_indexed")
