@@ -9,11 +9,11 @@ specs = "*"
 specs-derive = "*"
 
 # Rendering/Graphics
-vulkano = "*"
-winit = "*"
-vulkano-win = "*"
-vulkano-shaders = "*"
-vk-sys = "*"
+vulkano = { git = "https://github.com/NiklasJonsson/vulkano" }
+winit = "0.19"
+vulkano-win = { git = "https://github.com/NiklasJonsson/vulkano" }
+vulkano-shaders = { git = "https://github.com/NiklasJonsson/vulkano" }
+vk-sys = { git = "https://github.com/NiklasJonsson/vulkano" }
 
 # Math/Physics
 nalgebra-glm = "*"

@@ -5,7 +5,7 @@ trait VertexVariant {
     fn get_defines() -> Vec<(String, String)>;
 }
 
-#[derive(Copy, Clone, Debug)]
+#[derive(Copy, Clone, Debug, Default)]
 pub struct VertexBase {
     pub position: [f32; 3],
     pub normal: [f32; 3],
@@ -24,7 +24,7 @@ impl From<([f32; 3], [f32; 3])> for VertexBase {
     }
 }
 
-#[derive(Copy, Clone, Debug)]
+#[derive(Copy, Clone, Debug, Default)]
 pub struct VertexUV {
     pub position: [f32; 3],
     pub normal: [f32; 3],
