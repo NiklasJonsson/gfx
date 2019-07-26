@@ -956,6 +956,7 @@ impl Renderable {
                 .expect("Failed to create persistent descriptor set for mvp ubo")
         ) as Arc<DescriptorSet + Send + Sync>;
 
+        // TODO: Create this earlier?
         let descriptor_set_1 = Arc::new(
             match &self.base_color_tex {
                 Some(tex_access) => {

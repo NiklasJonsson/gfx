@@ -171,7 +171,15 @@ pub fn load_glTF_asset(path: &str) -> Asset {
                     use gltf::image::Source;
                     let image = match image_src {
                         Source::Uri{uri, mime_type} => {
-                            load_image(uri)
+                            let parent_path = Path::new(path)
+                                .parent().expect("Invalid path");
+                            assert!(parent_path.has_root());
+                            println!("{}", path);
+                            println!("{}", uri);
+                            let mut image_path = parent_path.to_path_buf();
+                            println!("{}", image_path.to_str().unwrap());
+                            image_path.push(uri);
+                            load_image(image_path.to_str().expect("Could not create image path!"))
                         },
                         _ => unimplemented!()
                     };
@@ -330,7 +338,9 @@ fn load_obj(path: &str) -> (VertexBuf, Vec<u32>) {
 
 pub fn load_image(path: &str) -> image::RgbaImage {
     log::info!("Trying to load image from {}", path);
-    let image = image::open(path).expect("Unable to load image").to_rgba();
+    let image = image::open(path)
+        .expect(format!("Unable to load image from {}", path).as_str())
+                .to_rgba();
 
     log::info!(
         "Loaded RGBA image with dimensions: {:?}",

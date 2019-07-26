@@ -31,7 +31,7 @@ layout(set = 1, binding = 0) uniform PBRMaterialData {
 } material_data;
 
 #if HAS_BASE_COLOR_TEXTURE
-layout(set = 1, binding = 0) uniform sampler2D base_color_texture;
+layout(set = 1, binding = 1) uniform sampler2D base_color_texture;
 #endif
 
 vec3 fresnel(vec3 fresnel_0, float VdotH) {
