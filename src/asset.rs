@@ -134,6 +134,7 @@ pub fn load_gltf_asset(path: &str) -> Asset {
     let (gltf_doc, buffers, images) = gltf::import(path).expect("Unable to import gltf");
     assert_eq!(gltf_doc.scenes().len(), 1);
     let mut primitives = Vec::new();
+    log::trace!("# nodes: {}", gltf_doc.nodes().len());
     for node in gltf_doc.nodes() {
         log::trace!("Prepping node {}", node.name().unwrap_or("node_no_name"));
         log::trace!("#children {}", node.children().len());
@@ -157,18 +158,30 @@ pub fn load_gltf_asset(path: &str) -> Asset {
 
                 // TODO: Don't convert all tex_coords to f32
                 let tex_coords = reader.read_tex_coords(0);
+                let colors = reader.read_colors(0);
                 let it = positions.zip(normals);
 
-                let vertex_data = match tex_coords {
-                    Some(tex_coords) => VertexBuf::UV(
-                        it.zip(tex_coords.into_f32())
-                            .map(|((pos, nor), tex_coords)| (pos, nor, tex_coords).into())
+                let vertex_data = match (colors, tex_coords) {
+                    (Some(colors), Some(tex_coords)) => VertexBuf::UVCol(
+                        tex_coords
+                            .into_f32()
+                            .zip(colors.into_rgba_f32())
+                            .zip(it)
+                            .map(|((uv, col), (pos, nor))| (pos, nor, uv, col).into())
+                            .collect::<Vec<VertexUVCol>>(),
+                    ),
+                    (None, Some(tex_coords)) => VertexBuf::UV(
+                            tex_coords
+                            .into_f32()
+                            .zip(it)
+                            .map(|(uv, (pos, nor))| (pos, nor, uv).into())
                             .collect::<Vec<VertexUV>>(),
                     ),
-                    None => VertexBuf::Base(
+                    (None, None) => VertexBuf::Base(
                         it.map(|pos_nor| pos_nor.into())
                             .collect::<Vec<VertexBase>>(),
                     ),
+                    (Some(_), None) => unimplemented!()
                 };
 
                 let pbr_mr = primitive.material().pbr_metallic_roughness();
@@ -191,10 +204,7 @@ pub fn load_gltf_asset(path: &str) -> Asset {
                         Source::Uri { uri, mime_type: _ } => {
                             let parent_path = Path::new(path).parent().expect("Invalid path");
                             assert!(parent_path.has_root());
-                            println!("{}", path);
-                            println!("{}", uri);
                             let mut image_path = parent_path.to_path_buf();
-                            println!("{}", image_path.to_str().unwrap());
                             image_path.push(uri);
                             load_image(image_path.to_str().expect("Could not create image path!"))
                         }

@@ -277,7 +277,7 @@ impl App {
 
         // TODO: How to parameterize this? Dialog box?
         let desc = AssetDescriptor::Gltf {
-            path: "/home/niklas/src_repos/glTF-Sample-Models/2.0/Box/glTF/Box.gltf".to_owned(),
+            path: "/home/niklas/src_repos/glTF-Sample-Models/2.0/BoxVertexColors/glTF/BoxVertexColors.gltf".to_owned(),
         };
 
         let asset = asset::load_asset(desc);

@@ -150,7 +150,8 @@ impl VKManager {
         }
     }
 
-    fn send_data_to_gpu(&self, primitive: &Primitive) -> Renderable {
+    fn create_renderable(&self, primitive: &Primitive) -> Renderable {
+        // TODO: Move this
         use vulkano::pipeline::input_assembly::PrimitiveTopology;
         let mode = PrimitiveTopology::TriangleList;
 
@@ -159,23 +160,14 @@ impl VKManager {
             _ => &primitive.triangle_indices.data,
         };
 
-        // TODO: Can we move this to pipeline.rs?
-        let g_pipeline = match primitive.vertex_data {
-            VertexBuf::Base(_) => pipeline::create_graphics_pipeline::<VertexBase>(
+        let g_pipeline = pipeline::create_graphics_pipeline(
                 &self.vk_device,
                 &self.render_pass,
                 self.swapchain.dimensions(),
                 mode,
-                false,
-            ),
-            VertexBuf::UV(_) => pipeline::create_graphics_pipeline::<VertexUV>(
-                &self.vk_device,
-                &self.render_pass,
-                self.swapchain.dimensions(),
-                mode,
-                true,
-            ),
-        };
+                &primitive.vertex_data,
+                &primitive.material,
+            );
 
         // TODO: Use transfer queue for sending to gpu
         let (vertex_buffer, vertex_data_copied) = match &primitive.vertex_data {
@@ -183,6 +175,9 @@ impl VKManager {
                 create_and_submit_vertex_buffer(&self.graphics_queue, vertices.to_owned())
             }
             VertexBuf::UV(vertices) => {
+                create_and_submit_vertex_buffer(&self.graphics_queue, vertices.to_owned())
+            }
+            VertexBuf::UVCol(vertices) => {
                 create_and_submit_vertex_buffer(&self.graphics_queue, vertices.to_owned())
             }
         };
@@ -222,7 +217,7 @@ impl VKManager {
         asset
             .primitives
             .iter()
-            .map(|primitive| self.send_data_to_gpu(primitive))
+            .map(|primitive| self.create_renderable(primitive))
             .collect::<Vec<_>>()
     }
 

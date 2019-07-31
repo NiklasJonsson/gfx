@@ -1,22 +1,12 @@
 use specs::prelude::*;
 use std::ops::AddAssign;
 
-trait VertexVariant {
-    fn get_defines() -> Vec<(String, String)>;
-}
-
 #[derive(Copy, Clone, Debug, Default)]
 pub struct VertexBase {
     pub position: [f32; 3],
     pub normal: [f32; 3],
 }
 impl_vertex!(VertexBase, position, normal);
-
-impl VertexVariant for VertexBase {
-    fn get_defines() -> Vec<(String, String)> {
-        Vec::new()
-    }
-}
 
 impl From<([f32; 3], [f32; 3])> for VertexBase {
     fn from(tpl: ([f32; 3], [f32; 3])) -> Self {
@@ -36,12 +26,6 @@ pub struct VertexUV {
 
 impl_vertex!(VertexUV, position, normal, tex_coords);
 
-impl VertexVariant for VertexUV {
-    fn get_defines() -> Vec<(String, String)> {
-        vec![("HAS_TEX_COORDS".to_owned(), "1".to_owned())]
-    }
-}
-
 impl From<([f32; 3], [f32; 3], [f32; 2])> for VertexUV {
     fn from(tpl: ([f32; 3], [f32; 3], [f32; 2])) -> Self {
         Self {
@@ -52,16 +36,40 @@ impl From<([f32; 3], [f32; 3], [f32; 2])> for VertexUV {
     }
 }
 
+#[derive(Copy, Clone, Debug, Default)]
+pub struct VertexUVCol {
+    pub position: [f32; 3],
+    pub normal: [f32; 3],
+    pub tex_coords: [f32; 2],
+    pub color: [f32; 4],
+}
+
+impl_vertex!(VertexUVCol, position, normal, tex_coords, color);
+
+impl From<([f32; 3], [f32; 3], [f32; 2], [f32; 4])> for VertexUVCol {
+    fn from(tpl: ([f32; 3], [f32; 3], [f32; 2], [f32; 4])) -> Self {
+        Self {
+            position: tpl.0,
+            normal: tpl.1,
+            tex_coords: tpl.2,
+            color: tpl.3,
+        }
+    }
+}
+
+// TODO: Generate the other vertex defs from this
 #[derive(Copy, Clone, Debug)]
 pub struct Vertex {
     pub position: [f32; 3],
     pub normal: [f32; 3],
     pub tex_coords: Option<[f32; 2]>,
+    pub color: Option<[f32; 4]>,
 }
 
 pub enum VertexBuf {
     Base(Vec<VertexBase>),
     UV(Vec<VertexUV>),
+    UVCol(Vec<VertexUVCol>),
 }
 
 // TODO: Auto derive inner type traits
