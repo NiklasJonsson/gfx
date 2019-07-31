@@ -16,6 +16,10 @@ layout(location = 1) in vec3 world_pos;
 layout(location = 2) in vec2 tex_coords_0;
 #endif
 
+#if HAS_VERTEX_COLOR
+layout(location = 3) in vec3 color_0;
+#endif
+
 layout(location = 0) out vec4 out_color;
 
 // PBR uniforms
@@ -82,6 +86,10 @@ void main() {
 
 #if HAS_BASE_COLOR_TEXTURE
 	base_color *= texture(base_color_texture, tex_coords_0).rgb;
+#endif
+
+#if HAS_VERTEX_COLOR
+	base_color *= color_0.rgb;
 #endif
 
     // Diffuse reflection is the light that is refracted into the material and then emitted again.

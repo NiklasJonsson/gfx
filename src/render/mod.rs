@@ -25,6 +25,7 @@ use vulkano::swapchain::{
 
 use vulkano::sampler::Sampler;
 use vulkano::sync::{FlushError, GpuFuture, NowFuture, SharingMode};
+use specs::world::EntitiesRes;
 
 use winit::Window;
 
@@ -35,8 +36,6 @@ use specs::prelude::*;
 use std::collections::HashSet;
 use std::sync::Arc;
 
-use crate::asset;
-use crate::asset::*;
 use crate::camera::*;
 use crate::common::*;
 
@@ -150,7 +149,8 @@ impl VKManager {
         }
     }
 
-    fn send_data_to_gpu(&self, primitive: &Primitive) -> Renderable {
+    fn create_renderable(&self, primitive: &GraphicsPrimitive) -> Renderable {
+        // TODO: Move this
         use vulkano::pipeline::input_assembly::PrimitiveTopology;
         let mode = PrimitiveTopology::TriangleList;
 
@@ -159,23 +159,14 @@ impl VKManager {
             _ => &primitive.triangle_indices.data,
         };
 
-        // TODO: Can we move this to pipeline.rs?
-        let g_pipeline = match primitive.vertex_data {
-            VertexBuf::Base(_) => pipeline::create_graphics_pipeline::<VertexBase>(
+        let g_pipeline = pipeline::create_graphics_pipeline(
                 &self.vk_device,
                 &self.render_pass,
                 self.swapchain.dimensions(),
                 mode,
-                false,
-            ),
-            VertexBuf::UV(_) => pipeline::create_graphics_pipeline::<VertexUV>(
-                &self.vk_device,
-                &self.render_pass,
-                self.swapchain.dimensions(),
-                mode,
-                true,
-            ),
-        };
+                &primitive.vertex_data,
+                &primitive.material,
+            );
 
         // TODO: Use transfer queue for sending to gpu
         let (vertex_buffer, vertex_data_copied) = match &primitive.vertex_data {
@@ -185,14 +176,15 @@ impl VKManager {
             VertexBuf::UV(vertices) => {
                 create_and_submit_vertex_buffer(&self.graphics_queue, vertices.to_owned())
             }
+            VertexBuf::UVCol(vertices) => {
+                create_and_submit_vertex_buffer(&self.graphics_queue, vertices.to_owned())
+            }
         };
 
         let (index_buffer, index_data_copied) =
             create_and_submit_index_buffer(&self.graphics_queue, indices.to_owned());
 
         let data_copied = vertex_data_copied.join(index_data_copied);
-
-        let model = primitive.transform.unwrap_or_else(glm::identity);
 
         let (material_data_buf, base_color_tex, material_data_copied) =
             submit_material_uniform_data(
@@ -212,18 +204,19 @@ impl VKManager {
             vertex_buffer,
             index_buffer,
             g_pipeline,
-            model,
             material_data_buf,
             base_color_tex,
         }
     }
 
-    pub fn prepare_static_asset_for_rendering(&self, asset: Asset) -> Vec<Renderable> {
-        asset
-            .primitives
-            .iter()
-            .map(|primitive| self.send_data_to_gpu(primitive))
-            .collect::<Vec<_>>()
+    pub fn prepare_primitives_for_rendering(&self, world: &World) {
+        let primitives = world.read_storage::<GraphicsPrimitive>();
+        let mut renderables = world.write_storage::<Renderable>();
+        let entities = world.read_resource::<EntitiesRes>();
+        for (ent, prim) in (&entities, &primitives).join() {
+            let rend = self.create_renderable(prim);
+            renderables.entry(ent).unwrap().or_insert(rend);
+        }
     }
 
     pub fn grab_cursor(&mut self, grab_cursor: bool) {
@@ -265,6 +258,8 @@ impl VKManager {
         let positions = world.read_storage::<Position>();
         let cam_rots = world.read_storage::<CameraRotationState>();
         let renderables = world.read_storage::<Renderable>();
+        let model_matrices = world.read_storage::<ModelMatrix>();
+        let entities = world.read_resource::<EntitiesRes>();
 
         let camera_entity = active_camera.0.unwrap();
 
@@ -331,12 +326,13 @@ impl VKManager {
 
         let model_ubo_buf = CpuBufferPool::uniform_buffer(Arc::clone(&self.vk_device));
 
-        let builder = renderables.join().fold(builder, |builder, renderable| {
+        let builder = (&entities, &renderables).join().fold(builder, |builder, (ent, renderable)| {
             renderable.record_draw_commands(
                 builder,
                 &transforms_sub_buf,
                 &lighting_sub_buf,
                 &model_ubo_buf,
+                model_matrices.get(ent).map(|x| *x).unwrap_or_else(|| ModelMatrix::identity()),
             )
         });
 
@@ -713,7 +709,7 @@ fn create_and_submit_texture_image(
 fn submit_material_uniform_data(
     vk_device: &Arc<Device>,
     queue: &Arc<Queue>,
-    material: &asset::Material,
+    material: &Material,
 ) -> (
     Arc<BufferAccess + Send + Sync>,
     Option<TextureAccess>,
@@ -924,7 +920,6 @@ pub struct Renderable {
     vertex_buffer: Arc<BufferAccess + Send + Sync>,
     index_buffer: Arc<TypedBufferAccess<Content = [u32]> + Send + Sync>,
     g_pipeline: Arc<GraphicsPipelineAbstract + Send + Sync>,
-    model: glm::Mat4,
     material_data_buf: Arc<BufferAccess + Send + Sync>,
     base_color_tex: Option<TextureAccess>,
 }
@@ -942,10 +937,11 @@ impl Renderable {
             Arc<vulkano::memory::pool::StdMemoryPool>,
         >,
         model_ubo_buf: &CpuBufferPool<pipeline::vs_pbr::ty::Model>,
+        model_matrix: ModelMatrix,
     ) -> AutoCommandBufferBuilder {
         let model_data = pipeline::vs_pbr::ty::Model {
-            model: self.model.into(),
-            model_it: glm::inverse_transpose(self.model).into(),
+            model: model_matrix.into(),
+            model_it: glm::inverse_transpose(model_matrix.into()).into(),
         };
 
         let model_buf = model_ubo_buf

@@ -17,10 +17,18 @@ layout(location = 1) in vec3 normal;
 layout(location = 2) in vec2 tex_coords;
 #endif
 
+#if HAS_VERTEX_COLOR
+layout(location = 3) in vec4 color;
+#endif
+
 layout(location = 0) out vec3 world_normal;
 layout(location = 1) out vec3 world_pos;
 #if HAS_TEX_COORDS
 layout(location = 2) out vec2 tex_coords_0;
+#endif
+
+#if HAS_VERTEX_COLOR
+layout(location = 3) out vec3 color_0;
 #endif
 
 void main() {
@@ -29,5 +37,10 @@ void main() {
 #if HAS_TEX_COORDS
 	tex_coords_0 = tex_coords;
 #endif
+
+#if HAS_VERTEX_COLOR
+	color_0 = color.rgb;
+#endif
+
     gl_Position = ubo.proj * ubo.view * model_ubo.model * vec4(position, 1.0);
 }

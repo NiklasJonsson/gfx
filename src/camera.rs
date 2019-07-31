@@ -18,8 +18,6 @@ use specs::prelude::*;
 
 use num_traits::cast::FromPrimitive;
 
-use std::time::Duration;
-
 #[derive(Debug)]
 pub struct CameraOrientation {
     pub up: Vec3,

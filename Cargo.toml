@@ -5,8 +5,9 @@ authors = ["Niklas Jonsson <niklasandersjonsson@gmail.com>"]
 edition = "2018"
 
 [dependencies]
-specs = "*"
-specs-derive = "*"
+specs = "0.15.0"
+specs-hierarchy = "0.5.1"
+specs-derive = "0.4.0"
 
 # Rendering/Graphics
 vulkano = { git = "https://github.com/NiklasJonsson/vulkano" }
@@ -16,15 +17,15 @@ vulkano-shaders = { git = "https://github.com/NiklasJonsson/vulkano" }
 vk-sys = { git = "https://github.com/NiklasJonsson/vulkano" }
 
 # Math/Physics
-nalgebra-glm = "*"
-num-derive = "*"
-num-traits = "*"
+nalgebra-glm = "0.4.0"
+num-derive = "0.2.5"
+num-traits = "0.2.8"
 
 # Resources/Assets
-image = "*"
-tobj = "*"
-gltf = "*"
+image = "0.22.1"
+tobj = "0.1.10"
+gltf = "0.13.0"
 
 # Util
-log = "*"
-env_logger = "*"
+log = "0.4.8"
+env_logger = "0.6.2"

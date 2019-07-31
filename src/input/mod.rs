@@ -240,7 +240,7 @@ impl<'a> System<'a> for InputManager {
 pub const INPUT_MANAGER_SYSTEM_ID: &str = "input_manager_sys";
 
 pub fn add_resources(world: &mut World) {
-    world.add_resource(InputManagerState::new());
+    world.insert(InputManagerState::new());
 }
 
 pub fn register_systems<'a, 'b>(builder: DispatcherBuilder<'a, 'b>) -> DispatcherBuilder<'a, 'b> {

@@ -23,6 +23,7 @@ mod render;
 
 use self::asset::AssetDescriptor;
 use self::render::*;
+use self::common::*;
 
 use self::input::{ActionId, InputContext, InputContextPriority, MappedInput};
 
@@ -165,7 +166,7 @@ struct EventManager {
 // Only stuff that is relevant to input manager should be forwarded.
 // Create enum to represent what we want the input manager to receive
 // But should this really be done here? Separate window/input handling?
-// Move this to input? IOManager?
+// Move this to input? IOManager? Use Channels to propagate info instead of resource?
 
 impl EventManager {
     fn new() -> Self {
@@ -239,6 +240,8 @@ impl App {
     // The whole App struct would need to be templated if this was included.
     // Maybe this can be solved in another way...
     fn init_dispatcher<'a, 'b>() -> Dispatcher<'a, 'b> {
+        // TODO: Move all systems registration to here to get
+        // an overview
         let builder = DispatcherBuilder::new();
         // Input needs to go before as camera depends on it
         let builder = input::register_systems(builder);
@@ -250,6 +253,10 @@ impl App {
                 "game_state_switcher",
                 &[input::INPUT_MANAGER_SYSTEM_ID],
             )
+            .with_barrier()
+            .with(TransformPropagation,
+                  "transform_propagation",
+                  &[])
             .build()
     }
 
@@ -277,15 +284,11 @@ impl App {
 
         // TODO: How to parameterize this? Dialog box?
         let desc = AssetDescriptor::Gltf {
-            path: "/home/niklas/src_repos/glTF-Sample-Models/2.0/Box/glTF/Box.gltf".to_owned(),
+            path: "/home/niklas/src_repos/glTF-Sample-Models/2.0/BoxVertexColors/glTF/BoxVertexColors.gltf".to_owned(),
         };
 
-        let asset = asset::load_asset(desc);
-        let renderables = self.vk_manager.prepare_static_asset_for_rendering(asset);
+        asset::load_asset_into(&mut self.world, desc);
 
-        for renderable in renderables {
-            self.world.create_entity().with(renderable).build();
-        }
     }
 
     fn main_loop(&mut self) {
@@ -293,7 +296,10 @@ impl App {
 
         // Register all component types
         self.world.register::<Renderable>();
-        dispatcher.setup(&mut self.world.res);
+        self.world.register::<GraphicsPrimitive>();
+        self.world.register::<RenderGraphNode>();
+        self.world.register::<RenderGraphRoot>();
+        dispatcher.setup(&mut self.world);
 
         // Setup world objects, e.g. camera and chalet model
         self.populate_world();
@@ -344,7 +350,10 @@ impl App {
             self.vk_manager.prepare_frame();
 
             // Run all ECS systems (blocking call)
-            dispatcher.dispatch(&self.world.res);
+            dispatcher.dispatch(&self.world);
+
+            // Send data to GPU
+            self.vk_manager.prepare_primitives_for_rendering(&self.world);
 
             // Run render systems, this is done after the dispatch call to enforce serialization
             self.vk_manager.draw_next_frame(&mut self.world);
@@ -365,10 +374,10 @@ impl App {
 
         let mut world = World::new();
 
-        world.add_resource(CurrentFrameWindowEvents(Vec::new()));
-        world.add_resource(ActiveCamera::empty());
-        world.add_resource(GameState::Running);
-        world.add_resource(DeltaTime::zero());
+        world.insert(CurrentFrameWindowEvents(Vec::new()));
+        world.insert(ActiveCamera::empty());
+        world.insert(GameState::Running);
+        world.insert(DeltaTime::zero());
 
         input::add_resources(&mut world);
 
