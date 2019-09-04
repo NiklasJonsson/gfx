@@ -85,6 +85,17 @@ impl Position {
     pub fn to_vec3(&self) -> glm::Vec3 {
         self.0
     }
+    pub fn x(&self) -> f32 {
+        self.0.x
+    }
+
+    pub fn y(&self) -> f32 {
+        self.0.y
+    }
+
+    pub fn z(&self) -> f32 {
+        self.0.z
+    }
 }
 
 impl From<glm::Vec3> for Position {
@@ -254,9 +265,10 @@ impl TransformPropagation {
             .map(|x| *x)
             .unwrap_or(glm::identity::<f32, U4>().into())
             .into();
+        let transform = transform * stack.last().unwrap();
 
         stack.push(transform);
-        model_matrices.insert(ent, ModelMatrix(transform * stack[0]));
+        model_matrices.insert(ent, ModelMatrix(transform));
 
         // We got here because this entity is a child of another node
         // This means this have to a RenderGraphComponent

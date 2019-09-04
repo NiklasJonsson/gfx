@@ -21,6 +21,7 @@ mod common;
 mod input;
 mod render;
 
+
 use self::asset::AssetDescriptor;
 use self::render::*;
 use self::common::*;
@@ -284,11 +285,32 @@ impl App {
 
         // TODO: How to parameterize this? Dialog box?
         let desc = AssetDescriptor::Gltf {
-            path: "/home/niklas/src_repos/glTF-Sample-Models/2.0/BoxVertexColors/glTF/BoxVertexColors.gltf".to_owned(),
+            path: "/home/niklas/src_repos/glTF-Sample-Models/2.0/Box/glTF/Box.gltf".to_owned(),
         };
 
-        asset::load_asset_into(&mut self.world, desc);
+        let _box0s = asset::load_asset_into(&mut self.world, desc);
 
+        let desc = AssetDescriptor::Gltf {
+            path: "/home/niklas/src_repos/glTF-Sample-Models/2.0/Box/glTF/Box.gltf".to_owned(),
+        };
+        let box1s = asset::load_asset_into(&mut self.world, desc);
+        let box1 = box1s[0];
+        let mut transforms = self.world.write_storage::<Transform>();
+        let entry = transforms
+            .entry(box1)
+            .expect("Could not get box1 transform");
+
+        let new_transform = glm::translate(&glm::identity::<f32, glm::U4>(), &glm::vec3(2.0, 5.0, 0.0));
+
+        match entry {
+            specs::storage::StorageEntry::Occupied(mut entry) => {
+                let cur: glm::Mat4 = (*entry.get()).into();
+                std::mem::replace(entry.get_mut(), (new_transform * cur).into());
+            },
+            specs::storage::StorageEntry::Vacant(entry) => {
+                entry.insert(new_transform.into());
+            }
+        }
     }
 
     fn main_loop(&mut self) {

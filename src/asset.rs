@@ -20,7 +20,7 @@ pub enum AssetDescriptor {
     },
 }
 
-pub fn load_asset_into(world: &mut World, descr: AssetDescriptor) {
+pub fn load_asset_into(world: &mut World, descr: AssetDescriptor) -> Vec<Entity> {
     match descr {
         /*
         AssetDescriptor::Obj {
@@ -182,7 +182,7 @@ struct RecGltfCtx {
     pub path: PathBuf,
 }
 
-fn tmp<'a>(ctx: &RecGltfCtx, world: &'a mut World, src: &gltf::Node<'a>) -> (Entity, Vec<Entity>) {
+fn build_asset_graph_common<'a>(ctx: &RecGltfCtx, world: &'a mut World, src: &gltf::Node<'a>) -> (Entity, Vec<Entity>) {
     let node = world
         .create_entity()
         .with(Transform::from(src.transform().matrix()))
@@ -211,7 +211,7 @@ fn tmp<'a>(ctx: &RecGltfCtx, world: &'a mut World, src: &gltf::Node<'a>) -> (Ent
 
 fn build_asset_graph_rec<'a>(ctx: &RecGltfCtx, world: &mut World, src: &gltf::Node<'a>, parent: Entity) -> Entity {
 
-    let (node, children) = tmp(ctx, world, src);
+    let (node, children) = build_asset_graph_common(ctx, world, src);
 
     let mut nodes = world.write_storage::<RenderGraphNode>();
     nodes
@@ -220,16 +220,18 @@ fn build_asset_graph_rec<'a>(ctx: &RecGltfCtx, world: &mut World, src: &gltf::No
     node
 }
 
-fn build_asset_graph(ctx: &RecGltfCtx, world: &mut World, src_root: &gltf::Node) {
-    let (root, children) = tmp(ctx, world, src_root);
+fn build_asset_graph(ctx: &RecGltfCtx, world: &mut World, src_root: &gltf::Node) -> Entity {
+    let (root, children) = build_asset_graph_common(ctx, world, src_root);
 
     let mut roots = world.write_storage::<RenderGraphRoot>();
     roots
         .insert(root, RenderGraphRoot {children})
         .expect("Could not insert render graph root!");
+
+    root
 }
 
-pub fn load_gltf_asset(world: &mut World, path: &str) {
+pub fn load_gltf_asset(world: &mut World, path: &str) -> Vec<Entity> {
     log::trace!("load gltf asset {}", path);
     let (gltf_doc, buffers, _images) = gltf::import(path).expect("Unable to import gltf");
     assert_eq!(gltf_doc.scenes().len(), 1);
@@ -237,12 +239,15 @@ pub fn load_gltf_asset(world: &mut World, path: &str) {
 
     // A scene may have several root nodes
     let nodes = gltf_doc.scenes().nth(0).expect("No scenes!").nodes();
+    let mut roots: Vec<Entity> = Vec::new();
     for node in nodes {
         log::trace!("Root node {}", node.name().unwrap_or("node_no_name"));
         log::trace!("#children {}", node.children().len());
 
-        build_asset_graph(&rec_ctx, world, &node);
+        roots.push(build_asset_graph(&rec_ctx, world, &node));
     }
+
+    roots
 }
 
 /* TODO:

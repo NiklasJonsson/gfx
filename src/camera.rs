@@ -64,6 +64,13 @@ impl FreeFlyCameraController {
         // This means Q/E will always be up/down in WORLD coordinates
         // Is this ok? Not 100 % of they best way to fix though.
         let up = glm::vec3(0.0, 1.0, 0.0);
+        /* Re-enable if we want Q/E to align to upwards/downwards from
+         * camera view direction. This needs to be clamped when looking
+         * straight down/up though.
+        let minus_z = -direction;
+        let right: Vec3 = glm::cross::<f32, glm::U3>(&up, &minus_z);
+        let up: Vec3= glm::cross::<f32, glm::U3>(&minus_z, &right);
+        */
 
         CameraOrientation { direction, up }
     }
