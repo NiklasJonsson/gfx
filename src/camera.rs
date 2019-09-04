@@ -21,7 +21,7 @@ use num_traits::cast::FromPrimitive;
 #[derive(Debug)]
 pub struct CameraOrientation {
     pub up: Vec3,
-    pub direction: Vec3,
+    pub view_direction: Vec3,
 }
 
 #[derive(Debug, Component)]
@@ -55,15 +55,15 @@ pub struct FreeFlyCameraController;
 impl FreeFlyCameraController {
     pub fn get_orientation_from(rotation_state: &CameraRotationState) -> CameraOrientation {
         // Disallow roll => y will only be a function of pitch
-        let direction: glm::Vec3 = glm::normalize(&glm::vec3(
+        let view_direction: glm::Vec3 = glm::normalize(&glm::vec3(
             rotation_state.yaw.cos() * rotation_state.pitch.cos(),
             rotation_state.pitch.sin(),
             rotation_state.yaw.sin() * rotation_state.pitch.cos(),
         ));
 
         // This means Q/E will always be up/down in WORLD coordinates
-        // Is this ok? Not 100 % of they best way to fix though.
         let up = glm::vec3(0.0, 1.0, 0.0);
+        // TODO: Move the code below to its own struct
         /* Re-enable if we want Q/E to align to upwards/downwards from
          * camera view direction. This needs to be clamped when looking
          * straight down/up though.
@@ -72,7 +72,65 @@ impl FreeFlyCameraController {
         let up: Vec3= glm::cross::<f32, glm::U3>(&minus_z, &right);
         */
 
-        CameraOrientation { direction, up }
+        CameraOrientation { view_direction, up }
+    }
+
+    pub fn get_view_matrix_from(pos: &Position, rot_state: &CameraRotationState) -> glm::Mat4 {
+
+    let ori = FreeFlyCameraController::get_orientation_from(rot_state);
+    let view_dir = ori.view_direction;
+    let up = ori.up;
+
+    // Based on https://learnopengl.com/Getting-started/Camera
+    // Which is based on Gram-Schmidt process:
+    // https://en.wikipedia.org/wiki/Gram%E2%80%93Schmidt_process
+
+    // Reverse direction here as the camera is looking in negative z
+    let cam_forward = glm::normalize(&-view_dir);
+
+    // We need a right vector
+    let cam_right = glm::normalize(&glm::cross::<f32, glm::U3>(&up, &cam_forward));
+
+    // Create a new up vector for orthonormal basis
+    let cam_up = glm::normalize(&glm::cross::<f32, glm::U3>(&cam_forward, &cam_right));
+    // cam_transform = T * R, view = inverse(cam_transform) = inv(R) * inv(T)
+
+    /* We could also use the following code:
+     {
+        let cam_transform = glm::mat4(
+            cam_right.x, cam_up.x, cam_forward.x, pos.x(),
+            cam_right.y, cam_up.y, cam_forward.y, pos.y(),
+            cam_right.z, cam_up.z, cam_forward.z, pos.z(),
+            0.0, 0.0, 0.0, 1.0
+        );
+        glm::inverse(&cam_transform)
+     }
+     But I'm unsure which is faster and I have not benchmarked.
+    */
+
+    // This is the code from the opengl tutorial
+    let translation_inv = glm::translate(&glm::identity(), &-(pos.to_vec3()));
+
+    let rotation_inv = glm::mat4(
+        cam_right.x,
+        cam_right.y,
+        cam_right.z,
+        0.0,
+        cam_up.x,
+        cam_up.y,
+        cam_up.z,
+        0.0,
+        cam_forward.x,
+        cam_forward.y,
+        cam_forward.z,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        1.0,
+    );
+
+    rotation_inv * translation_inv
     }
 }
 
@@ -111,7 +169,7 @@ impl<'a> System<'a> for FreeFlyCameraController {
                 }
             }
 
-            let CameraOrientation { direction, up } =
+            let CameraOrientation { view_direction, up } =
                 FreeFlyCameraController::get_orientation_from(&rotation_state);
 
             for id in &mi.states {
@@ -119,10 +177,10 @@ impl<'a> System<'a> for FreeFlyCameraController {
                 let dir = *delta_time
                     * MOVEMENT_SPEED
                     * match CameraMovement::from_u32(*id).unwrap() {
-                        Forward => direction,
-                        Backward => -direction,
-                        Left => glm::normalize(&glm::cross::<f32, glm::U3>(&up, &direction)),
-                        Right => -glm::normalize(&glm::cross::<f32, glm::U3>(&up, &direction)),
+                        Forward => view_direction,
+                        Backward => -view_direction,
+                        Left => glm::normalize(&glm::cross::<f32, glm::U3>(&up, &view_direction)),
+                        Right => -glm::normalize(&glm::cross::<f32, glm::U3>(&up, &view_direction)),
                         Up => up,
                         Down => -up,
                     };

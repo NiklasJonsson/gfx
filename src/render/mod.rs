@@ -214,6 +214,7 @@ impl VKManager {
         let mut renderables = world.write_storage::<Renderable>();
         let entities = world.read_resource::<EntitiesRes>();
         for (ent, prim) in (&entities, &primitives).join() {
+            // TODO: Don't create unncessary renderable if it is not needed
             let rend = self.create_renderable(prim);
             renderables.entry(ent).unwrap().or_insert(rend);
         }
@@ -275,8 +276,7 @@ impl VKManager {
 
         // TODO: Camera system should write to ViewMatrixResource at the end of system
         // and we should read it here.
-        let cam_ori = FreeFlyCameraController::get_orientation_from(cam_rotation_state);
-        let view = get_view_matrix(cam_pos, &cam_ori);
+        let view = FreeFlyCameraController::get_view_matrix_from(cam_pos, cam_rotation_state);
 
         let dims = get_physical_window_dims(self.vk_surface.window());
         let aspect_ratio = dims[0] as f32 / dims[1] as f32;
@@ -848,48 +848,6 @@ fn create_command_buffer_with_push_constants(
     )
 }
 */
-
-fn get_view_matrix(pos: &Position, ori: &CameraOrientation) -> glm::Mat4 {
-    let dir = ori.direction;
-    let up = ori.up;
-
-    // Based on https://learnopengl.com/Getting-started/Camera
-    // Which is based on Gram-Schmidt process:
-    // https://en.wikipedia.org/wiki/Gram%E2%80%93Schmidt_process
-
-    // Reverse direction here as the camera will look in negative z
-    let cam_dir = glm::normalize(&-dir);
-
-    // We need a right vector
-    let cam_right = glm::normalize(&glm::cross::<f32, glm::U3>(&up, &cam_dir));
-
-    // The up vector is guaranteed to be be perpendicular to both direction and right
-    // => create a new one
-    let cam_up = glm::normalize(&glm::cross::<f32, glm::U3>(&cam_dir, &cam_right));
-
-    let trns = glm::translate(&glm::identity(), &-(pos.to_vec3()));
-
-    let view = glm::mat4(
-        cam_right.x,
-        cam_right.y,
-        cam_right.z,
-        0.0,
-        cam_up.x,
-        cam_up.y,
-        cam_up.z,
-        0.0,
-        cam_dir.x,
-        cam_dir.y,
-        cam_dir.z,
-        0.0,
-        0.0,
-        0.0,
-        0.0,
-        1.0,
-    );
-
-    view * trns
-}
 
 struct TextureAccess {
     pub image_buffer: Arc<ImageViewAccess + Send + Sync>,

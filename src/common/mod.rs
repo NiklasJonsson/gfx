@@ -265,7 +265,7 @@ impl TransformPropagation {
             .map(|x| *x)
             .unwrap_or(glm::identity::<f32, U4>().into())
             .into();
-        let transform = transform * stack.last().unwrap();
+        let transform = stack.last().unwrap() * transform;
 
         stack.push(transform);
         model_matrices.insert(ent, ModelMatrix(transform));
