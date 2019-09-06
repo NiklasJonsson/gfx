@@ -1,8 +1,8 @@
 use std::sync::Arc;
 use vulkano::device::Device;
 use vulkano::framebuffer::{RenderPassAbstract, Subpass};
-use vulkano::pipeline::{viewport::Viewport, GraphicsPipeline, GraphicsPipelineAbstract};
 use vulkano::pipeline::input_assembly::PrimitiveTopology;
+use vulkano::pipeline::{viewport::Viewport, GraphicsPipeline, GraphicsPipelineAbstract};
 
 use crate::common::*;
 
@@ -161,8 +161,7 @@ pub fn create_graphics_pipeline(
     rendering_mode: PrimitiveTopology,
     vertex_buf: &VertexBuf,
     material: &Material,
-) -> Arc<GraphicsPipelineAbstract + Send + Sync>
-{
+) -> Arc<GraphicsPipelineAbstract + Send + Sync> {
     let dims = [
         swapchain_dimensions[0] as f32,
         swapchain_dimensions[1] as f32,
@@ -175,7 +174,7 @@ pub fn create_graphics_pipeline(
     };
 
     let builder = GraphicsPipeline::start()
-         .primitive_topology(rendering_mode)
+        .primitive_topology(rendering_mode)
         // Whether to support special indices in in the vertex buffer to split triangles
         .primitive_restart(false)
         .viewports([viewport].iter().cloned())
@@ -190,8 +189,8 @@ pub fn create_graphics_pipeline(
 
     match (vertex_buf, material) {
         (VertexBuf::Base(_), _) => {
-            let vs = vs_pbr::Shader::load(Arc::clone(device))
-                .expect("Vertex shader compilation failed");
+            let vs =
+                vs_pbr::Shader::load(Arc::clone(device)).expect("Vertex shader compilation failed");
             let fs = fs_pbr::Shader::load(Arc::clone(device))
                 .expect("Fragment shader compilation failed");
 
@@ -202,10 +201,15 @@ pub fn create_graphics_pipeline(
                     .vertex_shader(vs.main_entry_point(), ())
                     .fragment_shader(fs.main_entry_point(), ())
                     .build(Arc::clone(device))
-                    .expect("Could not create graphics pipeline")
+                    .expect("Could not create graphics pipeline"),
             )
         }
-        (VertexBuf::UV(_), Material::GlTFPBRMaterial{base_color_texture, ..} ) => {
+        (
+            VertexBuf::UV(_),
+            Material::GlTFPBRMaterial {
+                base_color_texture, ..
+            },
+        ) => {
             if base_color_texture.is_some() {
                 let vs = vs_pbr_base_color_texture::Shader::load(Arc::clone(device))
                     .expect("Vertex shader compilation failed");
@@ -214,18 +218,23 @@ pub fn create_graphics_pipeline(
 
                 Arc::new(
                     builder
-                    .vertex_input_single_buffer::<VertexUV>()
-                    // How to interpret the vertex input
-                    .vertex_shader(vs.main_entry_point(), ())
-                    .fragment_shader(fs.main_entry_point(), ())
-                    .build(Arc::clone(device))
-                    .expect("Could not create graphics pipeline")
+                        .vertex_input_single_buffer::<VertexUV>()
+                        // How to interpret the vertex input
+                        .vertex_shader(vs.main_entry_point(), ())
+                        .fragment_shader(fs.main_entry_point(), ())
+                        .build(Arc::clone(device))
+                        .expect("Could not create graphics pipeline"),
                 )
             } else {
                 unimplemented!()
             }
         }
-        (VertexBuf::UVCol(_), Material::GlTFPBRMaterial{base_color_texture, ..} ) => {
+        (
+            VertexBuf::UVCol(_),
+            Material::GlTFPBRMaterial {
+                base_color_texture, ..
+            },
+        ) => {
             if base_color_texture.is_none() {
                 let vs = vs_pbr_uv_col::Shader::load(Arc::clone(device))
                     .expect("Vertex shader compilation failed");
@@ -234,17 +243,17 @@ pub fn create_graphics_pipeline(
 
                 Arc::new(
                     builder
-                    .vertex_input_single_buffer::<VertexUVCol>()
-                    // How to interpret the vertex input
-                    .vertex_shader(vs.main_entry_point(), ())
-                    .fragment_shader(fs.main_entry_point(), ())
-                    .build(Arc::clone(device))
-                    .expect("Could not create graphics pipeline")
+                        .vertex_input_single_buffer::<VertexUVCol>()
+                        // How to interpret the vertex input
+                        .vertex_shader(vs.main_entry_point(), ())
+                        .fragment_shader(fs.main_entry_point(), ())
+                        .build(Arc::clone(device))
+                        .expect("Could not create graphics pipeline"),
                 )
             } else {
                 unimplemented!()
             }
         }
-        (_, _) => unimplemented!()
+        (_, _) => unimplemented!(),
     }
 }

@@ -1,8 +1,8 @@
-use specs::prelude::*;
-use std::ops::AddAssign;
-use specs_hierarchy::{Parent as HParent};
-use vulkano::pipeline::input_assembly::PrimitiveTopology;
 use nalgebra_glm::{Mat4, U4};
+use specs::prelude::*;
+use specs_hierarchy::Parent as HParent;
+use std::ops::AddAssign;
+use vulkano::pipeline::input_assembly::PrimitiveTopology;
 
 #[derive(Copy, Clone, Debug, Default)]
 pub struct VertexBase {
@@ -231,7 +231,10 @@ pub struct RenderGraphNode {
 
 impl RenderGraphNode {
     pub fn leaf(parent: Entity) -> Self {
-        RenderGraphNode {parent, children: Vec::new()}
+        RenderGraphNode {
+            parent,
+            children: Vec::new(),
+        }
     }
 }
 
@@ -248,27 +251,29 @@ impl HParent for RenderGraphNode {
 /// Component for defining TODO
 #[derive(Debug, Clone, Eq, Ord, PartialEq, PartialOrd, Component)]
 #[storage(DenseVecStorage)]
-pub struct RenderGraphRoot{
+pub struct RenderGraphRoot {
     pub children: Vec<Entity>,
 }
 
 pub struct TransformPropagation;
 
 impl TransformPropagation {
-    fn propagate_transforms_rec<'a>(stack: &mut Vec<Mat4>, ent: Entity,
-                                    rgnodes: &ReadStorage<'a, RenderGraphNode>,
-                                    transforms: &ReadStorage<'a, Transform>,
-                                    model_matrices: &mut WriteStorage<'a, ModelMatrix>) {
-
+    fn propagate_transforms_rec<'a>(
+        stack: &mut Vec<Mat4>,
+        ent: Entity,
+        rgnodes: &ReadStorage<'a, RenderGraphNode>,
+        transforms: &ReadStorage<'a, Transform>,
+        model_matrices: &mut WriteStorage<'a, ModelMatrix>,
+    ) {
         let transform: Mat4 = transforms
             .get(ent)
-            .map(|x| *x)
+            .copied()
             .unwrap_or(glm::identity::<f32, U4>().into())
             .into();
         let transform = stack.last().unwrap() * transform;
 
         stack.push(transform);
-        model_matrices.insert(ent, ModelMatrix(transform));
+        model_matrices.insert(ent, ModelMatrix(transform)).unwrap();
 
         // We got here because this entity is a child of another node
         // This means this have to a RenderGraphComponent
@@ -278,8 +283,13 @@ impl TransformPropagation {
             .children
             .iter();
         for child in children {
-            TransformPropagation::propagate_transforms_rec(stack, *child, rgnodes,
-                                                           transforms, model_matrices);
+            TransformPropagation::propagate_transforms_rec(
+                stack,
+                *child,
+                rgnodes,
+                transforms,
+                model_matrices,
+            );
         }
         stack.pop();
     }
@@ -294,16 +304,19 @@ impl<'a> System<'a> for TransformPropagation {
         ReadStorage<'a, RenderGraphRoot>,
         ReadStorage<'a, RenderGraphNode>,
         ReadStorage<'a, Transform>,
-        WriteStorage<'a, ModelMatrix>);
+        WriteStorage<'a, ModelMatrix>,
+    );
 
-    fn run(&mut self, (entities, roots, rgnodes, transforms, mut model_matrices): Self::SystemData) {
+    fn run(
+        &mut self,
+        (entities, roots, rgnodes, transforms, mut model_matrices): Self::SystemData,
+    ) {
         for (ent, root) in (&entities, &roots).join() {
             let mut stack: Vec<Mat4> = Vec::new();
 
-
             let transform: Mat4 = transforms
                 .get(ent)
-                .map(|x| *x)
+                .copied()
                 .unwrap_or(glm::identity::<f32, U4>().into())
                 .into();
             stack.push(transform);
@@ -314,9 +327,14 @@ impl<'a> System<'a> for TransformPropagation {
             }
 
             for child in root.children.iter() {
-                TransformPropagation::propagate_transforms_rec(&mut stack, *child, &rgnodes, &transforms, &mut model_matrices);
+                TransformPropagation::propagate_transforms_rec(
+                    &mut stack,
+                    *child,
+                    &rgnodes,
+                    &transforms,
+                    &mut model_matrices,
+                );
             }
         }
     }
 }
-

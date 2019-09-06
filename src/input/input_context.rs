@@ -134,11 +134,11 @@ impl InputContextBuilder {
     pub fn with_action(
         mut self,
         key: VirtualKeyCode,
-        id: ActionId,
+        id: impl Into<ActionId>,
     ) -> Result<Self, InputContextError> {
         match self.action_map.entry(key) {
             Vacant(entry) => {
-                entry.insert(id);
+                entry.insert(id.into());
                 Ok(self)
             }
             Occupied(entry) => Err(InputContextError::DuplicateActionForKey(*entry.get())),
@@ -148,11 +148,11 @@ impl InputContextBuilder {
     pub fn with_state(
         mut self,
         key: VirtualKeyCode,
-        id: StateId,
+        id: impl Into<StateId>,
     ) -> Result<Self, InputContextError> {
         match self.state_map.entry(key) {
             Vacant(entry) => {
-                entry.insert(id);
+                entry.insert(id.into());
                 Ok(self)
             }
             Occupied(entry) => Err(InputContextError::DuplicateStateForKey(*entry.get())),
@@ -162,12 +162,12 @@ impl InputContextBuilder {
     pub fn with_range(
         mut self,
         device_axis: DeviceAxis,
-        range: RangeId,
+        range: impl Into<RangeId>,
         sensitivity: Sensitivity,
     ) -> Result<Self, InputContextError> {
         match self.axis_converter.entry(device_axis) {
             Vacant(entry) => {
-                entry.insert((range, sensitivity));
+                entry.insert((range.into(), sensitivity));
                 Ok(self)
             }
             Occupied(entry) => {

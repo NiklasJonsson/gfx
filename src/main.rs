@@ -21,10 +21,9 @@ mod common;
 mod input;
 mod render;
 
-
 use self::asset::AssetDescriptor;
-use self::render::*;
 use self::common::*;
+use self::render::*;
 
 use self::input::{ActionId, InputContext, InputContextPriority, MappedInput};
 
@@ -33,6 +32,12 @@ type AppEvents = Vec<Event>;
 // World resources
 #[derive(Default, Debug)]
 struct CurrentFrameWindowEvents(AppEvents);
+
+impl CurrentFrameWindowEvents {
+    fn iter(&self) -> impl Iterator<Item = &Event> {
+        self.0.iter()
+    }
+}
 
 #[derive(Default, Debug, Copy, Clone)]
 pub struct DeltaTime(Duration);
@@ -82,7 +87,7 @@ impl Default for GameState {
     }
 }
 
-const GAME_STATE_SWITCH: ActionId = 0;
+const GAME_STATE_SWITCH: ActionId = ActionId(0);
 
 #[derive(Default, Component)]
 #[storage(NullStorage)]
@@ -110,7 +115,7 @@ impl<'a> System<'a> for GameStateSwitcher {
 
         for (inp, ctx) in (&mut inputs, &mut contexts).join() {
             use crate::GameState::*;
-            if inp.actions.contains(&GAME_STATE_SWITCH) {
+            if inp.contains_action(GAME_STATE_SWITCH) {
                 *state = match *state {
                     Paused => Running,
                     Running => Paused,
@@ -255,9 +260,7 @@ impl App {
                 &[input::INPUT_MANAGER_SYSTEM_ID],
             )
             .with_barrier()
-            .with(TransformPropagation,
-                  "transform_propagation",
-                  &[])
+            .with(TransformPropagation, "transform_propagation", &[])
             .build()
     }
 
@@ -285,13 +288,13 @@ impl App {
 
         // TODO: How to parameterize this? Dialog box?
         let desc = AssetDescriptor::Gltf {
-            path: "/home/niklas/src_repos/glTF-Sample-Models/2.0/Box/glTF/Box.gltf".to_owned(),
+            path: "/home/niklas/src_repos/glTF-Sample-Models/2.0/Duck/glTF/Duck.gltf".to_owned(),
         };
 
         let _box0s = asset::load_asset_into(&mut self.world, desc);
 
         let desc = AssetDescriptor::Gltf {
-            path: "/home/niklas/src_repos/glTF-Sample-Models/2.0/Box/glTF/Box.gltf".to_owned(),
+            path: "/home/niklas/src_repos/glTF-Sample-Models/2.0/Duck/glTF/Duck.gltf".to_owned(),
         };
         let box1s = asset::load_asset_into(&mut self.world, desc);
         let box1 = box1s[0];
@@ -300,13 +303,14 @@ impl App {
             .entry(box1)
             .expect("Could not get box1 transform");
 
-        let new_transform = glm::translate(&glm::identity::<f32, glm::U4>(), &glm::vec3(2.0, 5.0, 0.0));
+        let new_transform =
+            glm::translate(&glm::identity::<f32, glm::U4>(), &glm::vec3(2.0, 5.0, 0.0));
 
         match entry {
             specs::storage::StorageEntry::Occupied(mut entry) => {
                 let cur: glm::Mat4 = (*entry.get()).into();
                 std::mem::replace(entry.get_mut(), (new_transform * cur).into());
-            },
+            }
             specs::storage::StorageEntry::Vacant(entry) => {
                 entry.insert(new_transform.into());
             }
@@ -375,7 +379,8 @@ impl App {
             dispatcher.dispatch(&self.world);
 
             // Send data to GPU
-            self.vk_manager.prepare_primitives_for_rendering(&self.world);
+            self.vk_manager
+                .prepare_primitives_for_rendering(&self.world);
 
             // Run render systems, this is done after the dispatch call to enforce serialization
             self.vk_manager.draw_next_frame(&mut self.world);
@@ -400,8 +405,6 @@ impl App {
         world.insert(ActiveCamera::empty());
         world.insert(GameState::Running);
         world.insert(DeltaTime::zero());
-
-        input::add_resources(&mut world);
 
         let vk_manager = VKManager::create(vk_instance, vk_surface);
 

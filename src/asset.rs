@@ -1,8 +1,8 @@
 use crate::common::*;
+use specs::prelude::*;
+use specs::{Entity, World};
 use std::path::{Path, PathBuf};
 use vulkano::pipeline::input_assembly::PrimitiveTopology;
-use specs::{World, Entity};
-use specs::prelude::*;
 
 use gltf::buffer::Data as GltfData;
 
@@ -29,7 +29,7 @@ pub fn load_asset_into(world: &mut World, descr: AssetDescriptor) -> Vec<Entity>
         } => load_obj_asset(&data_file, &texture_file),
         */
         AssetDescriptor::Gltf { path } => load_gltf_asset(world, &path),
-        _ => unimplemented!()
+        _ => unimplemented!(),
     }
 }
 
@@ -82,99 +82,99 @@ fn arr4x4_to_mat4(arr: &[[f32; 4]; 4]) -> glm::Mat4 {
 }
 
 fn get_primitives_from_mesh<'a>(ctx: &RecGltfCtx, mesh: gltf::Mesh<'a>) -> Vec<GraphicsPrimitive> {
-    mesh.primitives().map(|primitive| {
-        let reader = primitive.reader(|buffer| Some(&ctx.buffers[buffer.index()]));
-        let positions = reader.read_positions().expect("Found no positions");
-        let normals = reader.read_normals().expect("Found no normals");
-        assert!(primitive.mode() == gltf::mesh::Mode::Triangles);
+    mesh.primitives()
+        .map(|primitive| {
+            let reader = primitive.reader(|buffer| Some(&ctx.buffers[buffer.index()]));
+            let positions = reader.read_positions().expect("Found no positions");
+            let normals = reader.read_normals().expect("Found no normals");
+            assert!(primitive.mode() == gltf::mesh::Mode::Triangles);
 
-        let triangle_index_data = reader
-            .read_indices()
-            .expect("Found no indices")
-            .into_u32()
-            .collect::<Vec<_>>();
+            let triangle_index_data = reader
+                .read_indices()
+                .expect("Found no indices")
+                .into_u32()
+                .collect::<Vec<_>>();
 
-        // TODO: Don't convert all tex_coords to f32
-        let tex_coords = reader.read_tex_coords(0);
-        let colors = reader.read_colors(0);
-        let it = positions.zip(normals);
+            // TODO: Don't convert all tex_coords to f32
+            let tex_coords = reader.read_tex_coords(0);
+            let colors = reader.read_colors(0);
+            let it = positions.zip(normals);
 
-        let vertex_data = match (colors, tex_coords) {
-            (Some(colors), Some(tex_coords)) => VertexBuf::UVCol(
-                tex_coords
-                    .into_f32()
-                    .zip(colors.into_rgba_f32())
-                    .zip(it)
-                    .map(|((uv, col), (pos, nor))| (pos, nor, uv, col).into())
-                    .collect::<Vec<VertexUVCol>>(),
-            ),
-            (None, Some(tex_coords)) => VertexBuf::UV(
+            let vertex_data = match (colors, tex_coords) {
+                (Some(colors), Some(tex_coords)) => VertexBuf::UVCol(
                     tex_coords
-                    .into_f32()
-                    .zip(it)
-                    .map(|(uv, (pos, nor))| (pos, nor, uv).into())
-                    .collect::<Vec<VertexUV>>(),
-            ),
-            (None, None) => VertexBuf::Base(
-                it.map(|pos_nor| pos_nor.into())
-                    .collect::<Vec<VertexBase>>(),
-            ),
-            (Some(_), None) => unimplemented!()
-        };
-
-        let pbr_mr = primitive.material().pbr_metallic_roughness();
-
-        let tex = pbr_mr.base_color_texture().map(|texture_info| {
-            assert_eq!(texture_info.tex_coord(), 0, "Not implemented!");
-            assert_eq!(
-                texture_info.texture().sampler().wrap_s(),
-                gltf::texture::WrappingMode::Repeat
-            );
-            assert_eq!(
-                texture_info.texture().sampler().wrap_t(),
-                gltf::texture::WrappingMode::Repeat
-            );
-
-            let image_src = texture_info.texture().source().source();
-
-            use gltf::image::Source;
-            let image = match image_src {
-                Source::Uri { uri, mime_type: _ } => {
-                    let parent_path = Path::new(&ctx.path)
-                        .parent()
-                        .expect("Invalid path");
-                    assert!(parent_path.has_root());
-                    let mut image_path = parent_path.to_path_buf();
-                    image_path.push(uri);
-                    load_image(image_path.to_str().expect("Could not create image path!"))
-                }
-                _ => unimplemented!(),
+                        .into_f32()
+                        .zip(colors.into_rgba_f32())
+                        .zip(it)
+                        .map(|((uv, col), (pos, nor))| (pos, nor, uv, col).into())
+                        .collect::<Vec<VertexUVCol>>(),
+                ),
+                (None, Some(tex_coords)) => VertexBuf::UV(
+                    tex_coords
+                        .into_f32()
+                        .zip(it)
+                        .map(|(uv, (pos, nor))| (pos, nor, uv).into())
+                        .collect::<Vec<VertexUV>>(),
+                ),
+                (None, None) => VertexBuf::Base(
+                    it.map(|pos_nor| pos_nor.into())
+                        .collect::<Vec<VertexBase>>(),
+                ),
+                (Some(_), None) => unimplemented!(),
             };
 
-            Texture {
-                image,
-                coord_set: texture_info.tex_coord(),
+            let pbr_mr = primitive.material().pbr_metallic_roughness();
+
+            let tex = pbr_mr.base_color_texture().map(|texture_info| {
+                assert_eq!(texture_info.tex_coord(), 0, "Not implemented!");
+                assert_eq!(
+                    texture_info.texture().sampler().wrap_s(),
+                    gltf::texture::WrappingMode::Repeat
+                );
+                assert_eq!(
+                    texture_info.texture().sampler().wrap_t(),
+                    gltf::texture::WrappingMode::Repeat
+                );
+
+                let image_src = texture_info.texture().source().source();
+
+                use gltf::image::Source;
+                let image = match image_src {
+                    Source::Uri { uri, .. } => {
+                        let parent_path = Path::new(&ctx.path).parent().expect("Invalid path");
+                        assert!(parent_path.has_root());
+                        let mut image_path = parent_path.to_path_buf();
+                        image_path.push(uri);
+                        load_image(image_path.to_str().expect("Could not create image path!"))
+                    }
+                    _ => unimplemented!(),
+                };
+
+                Texture {
+                    image,
+                    coord_set: texture_info.tex_coord(),
+                }
+            });
+
+            let material = Material::GlTFPBRMaterial {
+                base_color_factor: pbr_mr.base_color_factor(),
+                metallic_factor: pbr_mr.metallic_factor(),
+                roughness_factor: pbr_mr.roughness_factor(),
+                base_color_texture: tex,
+            };
+
+            let triangle_indices = IndexData::triangle_list(triangle_index_data);
+
+            let line_indices = generate_line_list_from(&triangle_indices);
+
+            GraphicsPrimitive {
+                triangle_indices,
+                line_indices,
+                vertex_data,
+                material,
             }
-        });
-
-        let material = Material::GlTFPBRMaterial {
-            base_color_factor: pbr_mr.base_color_factor(),
-            metallic_factor: pbr_mr.metallic_factor(),
-            roughness_factor: pbr_mr.roughness_factor(),
-            base_color_texture: tex,
-        };
-
-        let triangle_indices = IndexData::triangle_list(triangle_index_data);
-
-        let line_indices = generate_line_list_from(&triangle_indices);
-
-        GraphicsPrimitive {
-            triangle_indices,
-            line_indices,
-            vertex_data,
-            material,
-        }
-    }).collect::<Vec<_>>()
+        })
+        .collect::<Vec<_>>()
 }
 
 struct RecGltfCtx {
@@ -182,7 +182,11 @@ struct RecGltfCtx {
     pub path: PathBuf,
 }
 
-fn build_asset_graph_common<'a>(ctx: &RecGltfCtx, world: &'a mut World, src: &gltf::Node<'a>) -> (Entity, Vec<Entity>) {
+fn build_asset_graph_common<'a>(
+    ctx: &RecGltfCtx,
+    world: &'a mut World,
+    src: &gltf::Node<'a>,
+) -> (Entity, Vec<Entity>) {
     let node = world
         .create_entity()
         .with(Transform::from(src.transform().matrix()))
@@ -199,23 +203,32 @@ fn build_asset_graph_common<'a>(ctx: &RecGltfCtx, world: &'a mut World, src: &gl
                         .with(graphics_primitive)
                         .with(RenderGraphNode::leaf(node))
                         .build()
-                }).collect::<Vec<_>>()
-        }).unwrap_or_else(|| Vec::new());
+                })
+                .collect::<Vec<_>>()
+        })
+        .unwrap_or_else(|| Vec::new());
 
-    children.append(&mut src.children().map(|child| {
-        build_asset_graph_rec(ctx, world, &child, node)
-    }).collect::<Vec<_>>());
+    children.append(
+        &mut src
+            .children()
+            .map(|child| build_asset_graph_rec(ctx, world, &child, node))
+            .collect::<Vec<_>>(),
+    );
 
     (node, children)
 }
 
-fn build_asset_graph_rec<'a>(ctx: &RecGltfCtx, world: &mut World, src: &gltf::Node<'a>, parent: Entity) -> Entity {
-
+fn build_asset_graph_rec<'a>(
+    ctx: &RecGltfCtx,
+    world: &mut World,
+    src: &gltf::Node<'a>,
+    parent: Entity,
+) -> Entity {
     let (node, children) = build_asset_graph_common(ctx, world, src);
 
     let mut nodes = world.write_storage::<RenderGraphNode>();
     nodes
-        .insert(node, RenderGraphNode {parent, children})
+        .insert(node, RenderGraphNode { parent, children })
         .expect("Could not insert render graph node!");
     node
 }
@@ -225,7 +238,7 @@ fn build_asset_graph(ctx: &RecGltfCtx, world: &mut World, src_root: &gltf::Node)
 
     let mut roots = world.write_storage::<RenderGraphRoot>();
     roots
-        .insert(root, RenderGraphRoot {children})
+        .insert(root, RenderGraphRoot { children })
         .expect("Could not insert render graph root!");
 
     root
@@ -235,7 +248,10 @@ pub fn load_gltf_asset(world: &mut World, path: &str) -> Vec<Entity> {
     log::trace!("load gltf asset {}", path);
     let (gltf_doc, buffers, _images) = gltf::import(path).expect("Unable to import gltf");
     assert_eq!(gltf_doc.scenes().len(), 1);
-    let rec_ctx = RecGltfCtx{buffers, path: path.into()};
+    let rec_ctx = RecGltfCtx {
+        buffers,
+        path: path.into(),
+    };
 
     // A scene may have several root nodes
     let nodes = gltf_doc.scenes().nth(0).expect("No scenes!").nodes();

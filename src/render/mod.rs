@@ -23,9 +23,9 @@ use vulkano::swapchain::{
     AcquireError, ColorSpace, CompositeAlpha, PresentMode, SurfaceTransform, Swapchain,
 };
 
+use specs::world::EntitiesRes;
 use vulkano::sampler::Sampler;
 use vulkano::sync::{FlushError, GpuFuture, NowFuture, SharingMode};
-use specs::world::EntitiesRes;
 
 use winit::Window;
 
@@ -160,13 +160,13 @@ impl VKManager {
         };
 
         let g_pipeline = pipeline::create_graphics_pipeline(
-                &self.vk_device,
-                &self.render_pass,
-                self.swapchain.dimensions(),
-                mode,
-                &primitive.vertex_data,
-                &primitive.material,
-            );
+            &self.vk_device,
+            &self.render_pass,
+            self.swapchain.dimensions(),
+            mode,
+            &primitive.vertex_data,
+            &primitive.material,
+        );
 
         // TODO: Use transfer queue for sending to gpu
         let (vertex_buffer, vertex_data_copied) = match &primitive.vertex_data {
@@ -326,15 +326,21 @@ impl VKManager {
 
         let model_ubo_buf = CpuBufferPool::uniform_buffer(Arc::clone(&self.vk_device));
 
-        let builder = (&entities, &renderables).join().fold(builder, |builder, (ent, renderable)| {
-            renderable.record_draw_commands(
-                builder,
-                &transforms_sub_buf,
-                &lighting_sub_buf,
-                &model_ubo_buf,
-                model_matrices.get(ent).map(|x| *x).unwrap_or_else(|| ModelMatrix::identity()),
-            )
-        });
+        let builder =
+            (&entities, &renderables)
+                .join()
+                .fold(builder, |builder, (ent, renderable)| {
+                    renderable.record_draw_commands(
+                        builder,
+                        &transforms_sub_buf,
+                        &lighting_sub_buf,
+                        &model_ubo_buf,
+                        model_matrices
+                            .get(ent)
+                            .copied()
+                            .unwrap_or_else(|| ModelMatrix::identity()),
+                    )
+                });
 
         let cmd_buf = builder
             .end_render_pass()
