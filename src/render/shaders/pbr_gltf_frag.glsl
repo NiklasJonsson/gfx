@@ -118,6 +118,12 @@ void main() {
     // term modified by the amount of light refracted (later in mix())
     vec3 diffuse = diffuse_color / M_PI;
 
+	// Diffuse and specular both depend on cos between the normal and light vectors.
+	// If the light is modeled as rays, the distance between the points where the light
+	// rays hit the surface decreases (=> light intensity increases) as the light vector
+	// approaches the normal.
+	diffuse *= NdotL;
+
     // specular term is microfacet based, assuming each micro-facet is fresnel mirror
     // *Very* unoptimized version: (F * G * D) / ( 4 * dot(n,l) * dot(n,v))
     // If we choose GGX/Trowbridge-Reitz for normal distribution function (D) and
@@ -140,7 +146,6 @@ void main() {
     // TODO:
     // - More variations on BRDF
     // - lighting
-	// - Should light only contribute with NdotL?
 
     out_color = vec4(color, 1.0);
 }
