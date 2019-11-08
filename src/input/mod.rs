@@ -182,6 +182,7 @@ impl<'a> System<'a> for InputManager {
     );
 
     fn run(&mut self, (contexts, cur_events, mut mapped): Self::SystemData) {
+        // TODO: Use a stack/queue/set instead and loop with while !empty?
         let mut event_used: Vec<bool> = cur_events.iter().map(|_| false).collect::<Vec<_>>();
 
         // First loop handles all events. Input contexts are sorted according to their priority.

@@ -20,6 +20,7 @@ mod camera;
 mod common;
 mod input;
 mod render;
+mod util;
 
 use self::asset::AssetDescriptor;
 use self::common::*;
@@ -288,13 +289,15 @@ impl App {
 
         // TODO: How to parameterize this? Dialog box?
         let desc = AssetDescriptor::Gltf {
-            path: "/home/niklas/src_repos/glTF-Sample-Models/2.0/Duck/glTF/Duck.gltf".to_owned(),
+            path: "/home/niklas/src_repos/glTF-Sample-Models/2.0/2CylinderEngine/glTF/2CylinderEngine.gltf".to_owned(),
         };
 
-        let _box0s = asset::load_asset_into(&mut self.world, desc);
+        let roots = asset::load_asset_into(&mut self.world, desc);
+        crate::util::print_graph_to_dot(&self.world, roots, std::fs::File::create("graph.dot").unwrap());
 
+        /*
         let desc = AssetDescriptor::Gltf {
-            path: "/home/niklas/src_repos/glTF-Sample-Models/2.0/Duck/glTF/Duck.gltf".to_owned(),
+            path: "/home/niklas/src_repos/glTF-Sample-Models/2.0/2CylinderEngine/glTF/2CylinderEngine.gltf".to_owned(),
         };
         let box1s = asset::load_asset_into(&mut self.world, desc);
         let box1 = box1s[0];
@@ -315,6 +318,7 @@ impl App {
                 entry.insert(new_transform.into());
             }
         }
+        */
     }
 
     fn main_loop(&mut self) {
@@ -329,6 +333,7 @@ impl App {
 
         // Setup world objects, e.g. camera and chalet model
         self.populate_world();
+        return;
 
         // Collects events and resolves to AppAction
         let mut event_manager = EventManager::new();

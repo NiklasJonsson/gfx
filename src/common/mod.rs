@@ -166,6 +166,12 @@ impl ModelMatrix {
     }
 }
 
+impl std::fmt::Display for ModelMatrix {
+    fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
+        write!(f, "{}", self.0)
+    }
+}
+
 #[derive(Clone, Debug)]
 pub struct Texture {
     pub image: image::RgbaImage,
