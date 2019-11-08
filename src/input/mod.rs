@@ -168,13 +168,6 @@ impl InputManager {
 
         is_pressed && !prev_pressed
     }
-
-    /// Return delta compared to previous axis value (0 if this is the first time)
-    fn register_axis(&mut self, device: DeviceId, axis: AxisId, value: AxisValue) -> AxisValue {
-        self.axis_movement
-            .insert((device, axis), value)
-            .map_or(0.0, |old| value - old)
-    }
 }
 
 // TODO: Use activeCamera here?

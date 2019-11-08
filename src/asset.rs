@@ -206,7 +206,7 @@ fn build_asset_graph_common<'a>(
                 })
                 .collect::<Vec<_>>()
         })
-        .unwrap_or_else(|| Vec::new());
+        .unwrap_or_else(Vec::new);
 
     children.append(
         &mut src

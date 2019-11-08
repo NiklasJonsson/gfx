@@ -65,9 +65,9 @@ pub struct VKManager {
     swapchain_images: Vec<Arc<SwapchainImage<Window>>>,
     transforms_buf: CpuBufferPool<pipeline::vs_pbr::ty::Transforms>,
     lighting_data_buf: CpuBufferPool<pipeline::fs_pbr::ty::LightingData>,
-    framebuffers: Vec<Arc<FramebufferAbstract + Send + Sync>>,
-    render_pass: Arc<RenderPassAbstract + Send + Sync>,
-    frame_completions: Vec<Option<Box<GpuFuture>>>,
+    framebuffers: Vec<Arc<dyn FramebufferAbstract + Send + Sync>>,
+    render_pass: Arc<dyn RenderPassAbstract + Send + Sync>,
+    frame_completions: Vec<Option<Box<dyn GpuFuture>>>,
     multisample_count: u32,
     current_sc_index: usize,
 }
@@ -338,7 +338,7 @@ impl VKManager {
                         model_matrices
                             .get(ent)
                             .copied()
-                            .unwrap_or_else(|| ModelMatrix::identity()),
+                            .unwrap_or_else(ModelMatrix::identity),
                     )
                 });
 
@@ -387,12 +387,12 @@ fn get_proj_matrix(aspect_ratio: f32) -> glm::Mat4 {
 
 fn create_framebuffers(
     device: &Arc<Device>,
-    render_pass: &Arc<RenderPassAbstract + Send + Sync>,
+    render_pass: &Arc<dyn RenderPassAbstract + Send + Sync>,
     sc_images: &[Arc<SwapchainImage<Window>>],
     multisample_count: u32,
     color_format: Format,
     depth_format: Format,
-) -> Vec<Arc<FramebufferAbstract + Send + Sync>> {
+) -> Vec<Arc<dyn FramebufferAbstract + Send + Sync>> {
     sc_images
         .iter()
         .map(|image| {
@@ -422,7 +422,7 @@ fn create_framebuffers(
                     .unwrap()
                     .build()
                     .unwrap(),
-            ) as Arc<FramebufferAbstract + Send + Sync>
+            ) as Arc<dyn FramebufferAbstract + Send + Sync>
         })
         .collect::<Vec<_>>()
 }
@@ -550,7 +550,7 @@ fn create_render_pass(
     color_format: Format,
     depth_format: Format,
     multisample_count: u32,
-) -> Arc<RenderPassAbstract + Send + Sync> {
+) -> Arc<dyn RenderPassAbstract + Send + Sync> {
     Arc::new(
         single_pass_renderpass!(Arc::clone(device),
         attachments: {
@@ -588,8 +588,8 @@ fn create_swapchain_dependent_objects(
     images: &[Arc<SwapchainImage<Window>>],
     multisample_count: u32,
 ) -> (
-    Arc<RenderPassAbstract + Send + Sync>,
-    Vec<Arc<FramebufferAbstract + Send + Sync>>,
+    Arc<dyn RenderPassAbstract + Send + Sync>,
+    Vec<Arc<dyn FramebufferAbstract + Send + Sync>>,
 ) {
     // TODO: If we can query the swapchain formats before creating it, we can decouple the
     // creation of render pass and swapchain.
@@ -658,7 +658,7 @@ fn create_and_submit_vertex_buffer<T>(
     queue: &Arc<Queue>,
     vertex_data: Vec<T>,
 ) -> (
-    Arc<BufferAccess + Send + Sync>,
+    Arc<dyn BufferAccess + Send + Sync>,
     CommandBufferExecFuture<NowFuture, AutoCommandBuffer>,
 )
 where
@@ -678,7 +678,7 @@ fn create_and_submit_index_buffer(
     queue: &Arc<Queue>,
     index_data: Vec<u32>,
 ) -> (
-    Arc<TypedBufferAccess<Content = [u32]> + Send + Sync>,
+    Arc<dyn TypedBufferAccess<Content = [u32]> + Send + Sync>,
     CommandBufferExecFuture<NowFuture, AutoCommandBuffer>,
 ) {
     let (buf, fut) = ImmutableBuffer::from_iter(
@@ -695,7 +695,7 @@ fn create_and_submit_texture_image(
     queue: &Arc<Queue>,
     image: RgbaImage,
 ) -> (
-    Arc<ImageViewAccess + Send + Sync>,
+    Arc<dyn ImageViewAccess + Send + Sync>,
     CommandBufferExecFuture<NowFuture, AutoCommandBuffer>,
 ) {
     // TODO: Support mip maps
@@ -717,11 +717,11 @@ fn submit_material_uniform_data(
     queue: &Arc<Queue>,
     material: &Material,
 ) -> (
-    Arc<BufferAccess + Send + Sync>,
+    Arc<dyn BufferAccess + Send + Sync>,
     Option<TextureAccess>,
     // TODO: This is boxed since we want to return different types of GPUFuture,
     // can we solve this another way?
-    Box<GpuFuture>,
+    Box<dyn GpuFuture>,
 ) {
     if let Material::GlTFPBRMaterial {
         base_color_factor,
@@ -753,10 +753,10 @@ fn submit_material_uniform_data(
                         image_buffer,
                         sampler,
                     }),
-                    Box::new(mat_copied.join(texture_data_copied)) as Box<GpuFuture>,
+                    Box::new(mat_copied.join(texture_data_copied)) as Box<dyn GpuFuture>,
                 )
             }
-            None => (None, Box::new(mat_copied) as Box<GpuFuture>),
+            None => (None, Box::new(mat_copied) as Box<dyn GpuFuture>),
         };
 
         (buf, tex_access, fut)
@@ -856,7 +856,7 @@ fn create_command_buffer_with_push_constants(
 */
 
 struct TextureAccess {
-    pub image_buffer: Arc<ImageViewAccess + Send + Sync>,
+    pub image_buffer: Arc<dyn ImageViewAccess + Send + Sync>,
     pub sampler: Arc<Sampler>,
 }
 
@@ -881,10 +881,10 @@ struct TextureAccess {
 #[derive(Component)]
 #[storage(VecStorage)]
 pub struct Renderable {
-    vertex_buffer: Arc<BufferAccess + Send + Sync>,
-    index_buffer: Arc<TypedBufferAccess<Content = [u32]> + Send + Sync>,
-    g_pipeline: Arc<GraphicsPipelineAbstract + Send + Sync>,
-    material_data_buf: Arc<BufferAccess + Send + Sync>,
+    vertex_buffer: Arc<dyn BufferAccess + Send + Sync>,
+    index_buffer: Arc<dyn TypedBufferAccess<Content = [u32]> + Send + Sync>,
+    g_pipeline: Arc<dyn GraphicsPipelineAbstract + Send + Sync>,
+    material_data_buf: Arc<dyn BufferAccess + Send + Sync>,
     base_color_tex: Option<TextureAccess>,
 }
 
@@ -922,7 +922,7 @@ impl Renderable {
                 .expect("Could not add light buf")
                 .build()
                 .expect("Failed to create persistent descriptor set for mvp ubo"),
-        ) as Arc<DescriptorSet + Send + Sync>;
+        ) as Arc<dyn DescriptorSet + Send + Sync>;
 
         // TODO: Create this earlier?
         let descriptor_set_1 = Arc::new(match &self.base_color_tex {
@@ -934,7 +934,7 @@ impl Renderable {
                     .expect("Could not add texture access!")
                     .build()
                     .expect("Failed to build desc set 1 for material data"),
-            ) as Arc<DescriptorSet + Send + Sync>,
+            ) as Arc<dyn DescriptorSet + Send + Sync>,
             None => Arc::new(
                 PersistentDescriptorSet::start(Arc::clone(&self.g_pipeline), 1)
                     .add_buffer(self.material_data_buf.clone())

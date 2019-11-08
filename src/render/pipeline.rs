@@ -156,12 +156,12 @@ pub mod fs_pbr_uv_col {
 
 pub fn create_graphics_pipeline(
     device: &Arc<Device>,
-    render_pass: &Arc<RenderPassAbstract + Send + Sync>,
+    render_pass: &Arc<dyn RenderPassAbstract + Send + Sync>,
     swapchain_dimensions: [u32; 2],
     rendering_mode: PrimitiveTopology,
     vertex_buf: &VertexBuf,
     material: &Material,
-) -> Arc<GraphicsPipelineAbstract + Send + Sync> {
+) -> Arc<dyn GraphicsPipelineAbstract + Send + Sync> {
     let dims = [
         swapchain_dimensions[0] as f32,
         swapchain_dimensions[1] as f32,
