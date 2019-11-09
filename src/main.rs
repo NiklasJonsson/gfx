@@ -333,7 +333,6 @@ impl App {
 
         // Setup world objects, e.g. camera and chalet model
         self.populate_world();
-        return;
 
         // Collects events and resolves to AppAction
         let mut event_manager = EventManager::new();
@@ -386,6 +385,11 @@ impl App {
             // Send data to GPU
             self.vk_manager
                 .prepare_primitives_for_rendering(&self.world);
+
+            /*
+            render_graph::print_graph(&self.world, std::fs::File::create("graph2.dot").unwrap());
+            return;
+            */
 
             // Run render systems, this is done after the dispatch call to enforce serialization
             self.vk_manager.draw_next_frame(&mut self.world);
