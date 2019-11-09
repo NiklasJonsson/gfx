@@ -234,7 +234,7 @@ fn build_asset_graph_rec<'a>(
 
     let mut nodes = world.write_storage::<render_graph::RenderGraphChild>();
     nodes
-        .insert(node, render_graph::child( parent ))
+        .insert(node, render_graph::child(parent))
         .expect("Could not insert render graph!");
     node
 }
@@ -247,7 +247,7 @@ fn build_asset_graph(ctx: &RecGltfCtx, world: &mut World, src_root: &gltf::Node)
         .insert(root, render_graph::root())
         .expect("Could not insert render graph root!");
 
-     root
+    root
 }
 
 pub fn load_gltf_asset(world: &mut World, path: &str) -> Vec<Entity> {

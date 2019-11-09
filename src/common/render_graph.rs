@@ -4,9 +4,8 @@ use specs_hierarchy::Parent as HParent;
 
 use super::*;
 
+use std::collections::VecDeque;
 use std::io::Write;
-use std::fmt::{Display, Formatter};
-use std::fmt;
 
 /// Components for defining a node in a render graph
 /// Useful when representing 3d models comprised of
@@ -43,11 +42,11 @@ pub struct RenderGraphNode {
 pub struct RenderGraphRoot {}
 
 pub fn leaf(parent: Entity) -> RenderGraphChild {
-    RenderGraphChild {parent}
+    RenderGraphChild { parent }
 }
 
 pub fn child(parent: Entity) -> RenderGraphChild {
-    RenderGraphChild {parent}
+    RenderGraphChild { parent }
 }
 
 pub fn root() -> RenderGraphRoot {
@@ -55,9 +54,8 @@ pub fn root() -> RenderGraphRoot {
 }
 
 pub fn node(children: Vec<Entity>) -> RenderGraphNode {
-    RenderGraphNode {children}
+    RenderGraphNode { children }
 }
-
 
 /// SPECS system to concatenate model matrices
 pub struct TransformPropagation;
@@ -110,7 +108,7 @@ impl<'a> System<'a> for TransformPropagation {
         &mut self,
         (entities, roots, rgnodes, transforms, mut model_matrices): Self::SystemData,
     ) {
-        for (ent, root) in (&entities, &roots).join() {
+        for (ent, _root) in (&entities, &roots).join() {
             let mut stack: Vec<Mat4> = Vec::new();
 
             let transform: Mat4 = transforms
@@ -140,29 +138,86 @@ impl<'a> System<'a> for TransformPropagation {
     }
 }
 
+pub fn breadth_first(world: &World, root: Entity, mut visit_node: impl FnMut(Entity)) {
+    let nodes_storage = world.read_storage::<RenderGraphNode>();
 
+    let mut queue = VecDeque::new();
+    queue.push_back(root);
+
+    while !queue.is_empty() {
+        let ent = queue.pop_front().unwrap();
+        visit_node(ent);
+
+        if let Some(node) = nodes_storage.get(ent) {
+            for c in node.children.iter() {
+                queue.push_back(*c);
+            }
+        }
+    }
+}
+
+pub fn depth_first(world: &World, root: Entity, mut visit_node: impl FnMut(Entity)) {
+    let nodes_storage = world.read_storage::<RenderGraphNode>();
+
+    let mut stack = Vec::new();
+    stack.push(root);
+
+    while !stack.is_empty() {
+        let ent = stack.pop().unwrap();
+        visit_node(ent);
+
+        if let Some(node) = nodes_storage.get(ent) {
+            for c in node.children.iter() {
+                stack.push(*c);
+            }
+        }
+    }
+}
 
 fn e2str(e: Entity) -> String {
-    format!("({}, {}, {})", e.id(), e.gen().id(), if e.gen().is_alive() { "Live" } else { "Dead "})
+    format!(
+        "({}, {}, {})",
+        e.id(),
+        e.gen().id(),
+        if e.gen().is_alive() { "Live" } else { "Dead " }
+    )
 }
 
 fn mat2str(m: impl Into<glm::Mat4>) -> String {
     let m: Mat4 = m.into();
-    format!("{} {} {} {}\\n{} {} {} {}\\n{} {} {} {}\\n{} {} {} {}\\n",
-            m.index((0,0)), m.index((0,1)), m.index((0,2)), m.index((0,3)),
-            m.index((1,0)), m.index((1,1)), m.index((1,2)), m.index((1,3)),
-            m.index((2,0)), m.index((2,1)), m.index((2,2)), m.index((2,3)),
-            m.index((3,0)), m.index((3,1)), m.index((3,2)), m.index((3,3)))
+    format!(
+        "{} {} {} {}\\n{} {} {} {}\\n{} {} {} {}\\n{} {} {} {}\\n",
+        m.index((0, 0)),
+        m.index((0, 1)),
+        m.index((0, 2)),
+        m.index((0, 3)),
+        m.index((1, 0)),
+        m.index((1, 1)),
+        m.index((1, 2)),
+        m.index((1, 3)),
+        m.index((2, 0)),
+        m.index((2, 1)),
+        m.index((2, 2)),
+        m.index((2, 3)),
+        m.index((3, 0)),
+        m.index((3, 1)),
+        m.index((3, 2)),
+        m.index((3, 3))
+    )
 }
 
 fn mat2pos(m: impl Into<glm::Mat4>) -> String {
     let m: Mat4 = m.into();
-    format!("{} {} {} {}\\n",
-            m.index((0,3)), m.index((1,3)), m.index((2,3)), m.index((3,3)))
+    format!(
+        "{} {} {} {}\\n",
+        m.index((0, 3)),
+        m.index((1, 3)),
+        m.index((2, 3)),
+        m.index((3, 3))
+    )
 }
 
-
-fn node_to_dot<W: Write>(world: &World, e: Entity, mut w: &mut W, prefix: &str) {
+fn node_to_dot<W: Write>(world: &World, e: Entity, w: &mut W, prefix: &str) {
     let nodes_storage = world.read_storage::<RenderGraphNode>();
     let node_name = format!("\"{} {}\"", prefix, e2str(e));
     let trns = world.read_storage::<Transform>();
@@ -175,7 +230,11 @@ fn node_to_dot<W: Write>(world: &World, e: Entity, mut w: &mut W, prefix: &str) 
         (Some(m), Some(n)) => (mat2pos(*m), mat2pos(*n)),
     };
 
-    write!(w, "  {} [label=\"{}\\n---------\\n{}\"]\n", node_name, trm_str, mat_str);
+    write!(
+        w,
+        "  {} [label=\"{}\\n---------\\n{}\"]\n",
+        node_name, trm_str, mat_str
+    );
 
     if let Some(node) = nodes_storage.get(e) {
         for child in node.children.iter() {
@@ -208,4 +267,82 @@ pub fn print_graph(world: &World, mut w: impl Write) {
         node_to_dot(world, root, &mut w, "root");
     }
     write!(w, "}}\n");
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[derive(Debug, Component)]
+    #[storage(DenseVecStorage)]
+    struct ID(usize);
+
+    fn setup_world() -> World {
+        let mut world = World::new();
+
+        world.register::<render_graph::RenderGraphNode>();
+        world.register::<render_graph::RenderGraphRoot>();
+        world.register::<render_graph::RenderGraphChild>();
+        world.register::<ID>();
+
+        world
+    }
+
+    fn leaf_with_id(w: &mut World, id: usize) -> Entity {
+        w.create_entity().with(ID(id)).build()
+    }
+
+    fn node_with_id(w: &mut World, children: Vec<Entity>, id: usize) -> Entity {
+        w.create_entity().with(node(children)).with(ID(id)).build()
+    }
+
+    fn setup_graph(mut w: &mut World) -> Entity {
+        let children = vec![leaf_with_id(&mut w, 5), leaf_with_id(&mut w, 6)];
+        let node2 = node_with_id(&mut w, children, 2);
+        let node3 = leaf_with_id(&mut w, 3);
+
+        let node7 = leaf_with_id(&mut w, 7);
+        let node4 = node_with_id(&mut w, vec![node7], 4);
+
+        let root = w
+            .create_entity()
+            .with(root())
+            .with(node(vec![node2, node3, node4]))
+            .with(ID(1))
+            .build();
+
+        root
+    }
+
+    #[test]
+    fn breadth_first_traversal() {
+        let mut w = setup_world();
+        let root = setup_graph(&mut w);
+
+        let mut order = Vec::new();
+
+        let visit_node = |x: Entity| {
+            let ids = w.read_storage::<ID>();
+            order.push(ids.get(x).expect("No id!").0);
+        };
+
+        render_graph::breadth_first(&w, root, visit_node);
+        assert_eq!(order, vec![1, 2, 3, 4, 5, 6, 7]);
+    }
+
+    #[test]
+    fn depth_first_traversal() {
+        let mut w = setup_world();
+        let root = setup_graph(&mut w);
+
+        let mut order = Vec::new();
+
+        let visit_node = |x: Entity| {
+            let ids = w.read_storage::<ID>();
+            order.push(ids.get(x).expect("No id!").0);
+        };
+
+        render_graph::depth_first(&w, root, visit_node);
+        assert_eq!(order, vec![1, 4, 7, 3, 2, 6, 5]);
+    }
 }
