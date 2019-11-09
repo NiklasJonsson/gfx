@@ -1,3 +1,4 @@
+use crate::common::render_graph;
 use crate::common::*;
 use specs::prelude::*;
 use specs::{Entity, World};
@@ -186,7 +187,7 @@ fn build_asset_graph_common<'a>(
     ctx: &RecGltfCtx,
     world: &'a mut World,
     src: &gltf::Node<'a>,
-) -> (Entity, Vec<Entity>) {
+) -> Entity {
     let node = world
         .create_entity()
         .with(Transform::from(src.transform().matrix()))
@@ -201,7 +202,7 @@ fn build_asset_graph_common<'a>(
                     world
                         .create_entity()
                         .with(graphics_primitive)
-                        .with(RenderGraphNode::leaf(node))
+                        .with(render_graph::leaf(node))
                         .build()
                 })
                 .collect::<Vec<_>>()
@@ -215,7 +216,12 @@ fn build_asset_graph_common<'a>(
             .collect::<Vec<_>>(),
     );
 
-    (node, children)
+    let mut nodes = world.write_storage::<render_graph::RenderGraphNode>();
+    nodes
+        .insert(node, render_graph::node(children))
+        .expect("Could not insert render graph node!");
+
+    node
 }
 
 fn build_asset_graph_rec<'a>(
@@ -224,24 +230,24 @@ fn build_asset_graph_rec<'a>(
     src: &gltf::Node<'a>,
     parent: Entity,
 ) -> Entity {
-    let (node, children) = build_asset_graph_common(ctx, world, src);
+    let node = build_asset_graph_common(ctx, world, src);
 
-    let mut nodes = world.write_storage::<RenderGraphNode>();
+    let mut nodes = world.write_storage::<render_graph::RenderGraphChild>();
     nodes
-        .insert(node, RenderGraphNode { parent, children })
-        .expect("Could not insert render graph node!");
+        .insert(node, render_graph::child( parent ))
+        .expect("Could not insert render graph!");
     node
 }
 
 fn build_asset_graph(ctx: &RecGltfCtx, world: &mut World, src_root: &gltf::Node) -> Entity {
-    let (root, children) = build_asset_graph_common(ctx, world, src_root);
+    let root = build_asset_graph_common(ctx, world, src_root);
 
-    let mut roots = world.write_storage::<RenderGraphRoot>();
+    let mut roots = world.write_storage::<render_graph::RenderGraphRoot>();
     roots
-        .insert(root, RenderGraphRoot { children })
+        .insert(root, render_graph::root())
         .expect("Could not insert render graph root!");
 
-    root
+     root
 }
 
 pub fn load_gltf_asset(world: &mut World, path: &str) -> Vec<Entity> {

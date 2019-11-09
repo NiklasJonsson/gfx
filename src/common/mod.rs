@@ -4,6 +4,8 @@ use specs_hierarchy::Parent as HParent;
 use std::ops::AddAssign;
 use vulkano::pipeline::input_assembly::PrimitiveTopology;
 
+pub mod render_graph;
+
 #[derive(Copy, Clone, Debug, Default)]
 pub struct VertexBase {
     pub position: [f32; 3],
@@ -223,124 +225,4 @@ pub struct GraphicsPrimitive {
     pub line_indices: IndexData,
     pub vertex_data: VertexBuf,
     pub material: Material,
-}
-
-/// Component for defining a node in a render graph
-/// Useful when representing 3d models comprised of
-/// several GraphicsPrimitive where we might have
-/// transforms on several levels that should be concatenated
-#[derive(Debug, Clone, Eq, Ord, PartialEq, PartialOrd)]
-pub struct RenderGraphNode {
-    pub parent: Entity,
-    pub children: Vec<Entity>,
-}
-
-impl RenderGraphNode {
-    pub fn leaf(parent: Entity) -> Self {
-        RenderGraphNode {
-            parent,
-            children: Vec::new(),
-        }
-    }
-}
-
-impl Component for RenderGraphNode {
-    type Storage = FlaggedStorage<Self, DenseVecStorage<Self>>;
-}
-
-impl HParent for RenderGraphNode {
-    fn parent_entity(&self) -> Entity {
-        self.parent
-    }
-}
-
-/// Component for defining TODO
-#[derive(Debug, Clone, Eq, Ord, PartialEq, PartialOrd, Component)]
-#[storage(DenseVecStorage)]
-pub struct RenderGraphRoot {
-    pub children: Vec<Entity>,
-}
-
-pub struct TransformPropagation;
-
-impl TransformPropagation {
-    fn propagate_transforms_rec<'a>(
-        stack: &mut Vec<Mat4>,
-        ent: Entity,
-        rgnodes: &ReadStorage<'a, RenderGraphNode>,
-        transforms: &ReadStorage<'a, Transform>,
-        model_matrices: &mut WriteStorage<'a, ModelMatrix>,
-    ) {
-        let transform: Mat4 = transforms
-            .get(ent)
-            .copied()
-            .unwrap_or(glm::identity::<f32, U4>().into())
-            .into();
-        let transform = stack.last().unwrap() * transform;
-
-        stack.push(transform);
-        model_matrices.insert(ent, ModelMatrix(transform)).unwrap();
-
-        // We got here because this entity is a child of another node
-        // This means this have to a RenderGraphComponent
-        let children = rgnodes
-            .get(ent)
-            .expect("Broken graph, child is not node!")
-            .children
-            .iter();
-        for child in children {
-            TransformPropagation::propagate_transforms_rec(
-                stack,
-                *child,
-                rgnodes,
-                transforms,
-                model_matrices,
-            );
-        }
-        stack.pop();
-    }
-}
-
-// TODO: Can we use a flagged storage for this?
-// E.g. only run propagation for any of the roots
-// for which it or children has been changed?
-impl<'a> System<'a> for TransformPropagation {
-    type SystemData = (
-        Entities<'a>,
-        ReadStorage<'a, RenderGraphRoot>,
-        ReadStorage<'a, RenderGraphNode>,
-        ReadStorage<'a, Transform>,
-        WriteStorage<'a, ModelMatrix>,
-    );
-
-    fn run(
-        &mut self,
-        (entities, roots, rgnodes, transforms, mut model_matrices): Self::SystemData,
-    ) {
-        for (ent, root) in (&entities, &roots).join() {
-            let mut stack: Vec<Mat4> = Vec::new();
-
-            let transform: Mat4 = transforms
-                .get(ent)
-                .copied()
-                .unwrap_or(glm::identity::<f32, U4>().into())
-                .into();
-            stack.push(transform);
-
-            if let Ok(entry) = model_matrices.entry(ent) {
-                // Root node, no need to multiply
-                entry.or_insert(ModelMatrix(stack[0]));
-            }
-
-            for child in root.children.iter() {
-                TransformPropagation::propagate_transforms_rec(
-                    &mut stack,
-                    *child,
-                    &rgnodes,
-                    &transforms,
-                    &mut model_matrices,
-                );
-            }
-        }
-    }
 }

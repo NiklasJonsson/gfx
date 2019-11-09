@@ -20,7 +20,6 @@ mod camera;
 mod common;
 mod input;
 mod render;
-mod util;
 
 use self::asset::AssetDescriptor;
 use self::common::*;
@@ -261,7 +260,7 @@ impl App {
                 &[input::INPUT_MANAGER_SYSTEM_ID],
             )
             .with_barrier()
-            .with(TransformPropagation, "transform_propagation", &[])
+            .with(render_graph::TransformPropagation, "transform_propagation", &[])
             .build()
     }
 
@@ -293,7 +292,7 @@ impl App {
         };
 
         let roots = asset::load_asset_into(&mut self.world, desc);
-        crate::util::print_graph_to_dot(&self.world, roots, std::fs::File::create("graph.dot").unwrap());
+        render_graph::print_graph_to_dot(&self.world, roots, std::fs::File::create("graph.dot").unwrap());
 
         /*
         let desc = AssetDescriptor::Gltf {
@@ -327,8 +326,9 @@ impl App {
         // Register all component types
         self.world.register::<Renderable>();
         self.world.register::<GraphicsPrimitive>();
-        self.world.register::<RenderGraphNode>();
-        self.world.register::<RenderGraphRoot>();
+        self.world.register::<render_graph::RenderGraphNode>();
+        self.world.register::<render_graph::RenderGraphRoot>();
+        self.world.register::<render_graph::RenderGraphChild>();
         dispatcher.setup(&mut self.world);
 
         // Setup world objects, e.g. camera and chalet model
