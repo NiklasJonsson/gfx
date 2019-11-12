@@ -168,6 +168,11 @@ fn get_primitives_from_mesh<'a>(ctx: &RecGltfCtx, mesh: gltf::Mesh<'a>) -> Vec<G
 
             let line_indices = generate_line_list_from(&triangle_indices);
 
+            let bounding_box = BoundingBox {
+                min: primitive.bounding_box().min.into(),
+                max: primitive.bounding_box().max.into(),
+            };
+
             GraphicsPrimitive {
                 triangle_indices,
                 line_indices,
@@ -235,7 +240,7 @@ fn build_asset_graph_rec<'a>(
     let mut nodes = world.write_storage::<render_graph::RenderGraphChild>();
     nodes
         .insert(node, render_graph::child(parent))
-        .expect("Could not insert render graph!");
+        .expect("Could not insert render graph node!");
     node
 }
 

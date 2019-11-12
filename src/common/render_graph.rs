@@ -138,6 +138,8 @@ impl<'a> System<'a> for TransformPropagation {
     }
 }
 
+// TODO: Rewrite graph traversal with bfs/dfs?
+
 pub fn breadth_first(world: &World, root: Entity, mut visit_node: impl FnMut(Entity)) {
     let nodes_storage = world.read_storage::<RenderGraphNode>();
 

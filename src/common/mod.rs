@@ -1,4 +1,4 @@
-use nalgebra_glm::{Mat4, U4};
+use nalgebra_glm::{Mat4, U4, Vec3};
 use specs::prelude::*;
 use specs_hierarchy::Parent as HParent;
 use std::ops::AddAssign;
@@ -215,6 +215,13 @@ impl IndexData {
             data,
         }
     }
+}
+
+#[derive(Debug, Component)]
+#[storage(DenseVecStorage)]
+pub struct BoundingBox {
+    pub min: Vec3,
+    pub max: Vec3
 }
 
 // One ore more vertices with associated data on how to render them
