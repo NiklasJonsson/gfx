@@ -1,4 +1,4 @@
-use crate::input::{InputContext, InputContextPriority, ActionId, MappedInput};
+use crate::input::{ActionId, InputContext, InputContextPriority, MappedInput};
 
 use specs::prelude::*;
 
@@ -49,11 +49,10 @@ impl<'a> System<'a> for GameStateSwitcher {
 }
 
 pub fn register_systems<'a, 'b>(builder: DispatcherBuilder<'a, 'b>) -> DispatcherBuilder<'a, 'b> {
-    builder
-        .with(
-            GameStateSwitcher,
-            "game_state_switcher",
-            &[crate::input::INPUT_MANAGER_SYSTEM_ID],
+    builder.with(
+        GameStateSwitcher,
+        "game_state_switcher",
+        &[crate::input::INPUT_MANAGER_SYSTEM_ID],
     )
 }
 

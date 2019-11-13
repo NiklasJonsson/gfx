@@ -18,10 +18,10 @@ use std::time::{Duration, Instant};
 mod asset;
 mod camera;
 mod common;
+mod game_state;
 mod input;
 mod render;
 mod settings;
-mod game_state;
 
 use self::asset::AssetDescriptor;
 use self::common::*;

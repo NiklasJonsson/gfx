@@ -1,4 +1,4 @@
-use crate::input::{InputContext, ActionId, MappedInput};
+use crate::input::{ActionId, InputContext, MappedInput};
 use winit::VirtualKeyCode;
 
 use specs::prelude::*;
@@ -6,7 +6,7 @@ use specs::prelude::*;
 #[derive(Debug, Copy, Clone, PartialEq, Eq, FromPrimitive)]
 enum RenderMode {
     Opaque,
-    Wireframe
+    Wireframe,
 }
 
 #[derive(Debug, Copy, Clone, PartialEq, Eq)]
@@ -17,7 +17,9 @@ struct RenderSettings {
 
 impl Default for RenderSettings {
     fn default() -> Self {
-        Self{ rendering_mode: RenderMode::Opaque }
+        Self {
+            rendering_mode: RenderMode::Opaque,
+        }
     }
 }
 
@@ -39,11 +41,10 @@ impl<'a> System<'a> for RenderSettingsSys {
     fn run(&mut self, (mut r_settings, mut inputs, unique_component): Self::SystemData) {
         log::trace!("RenderSettingsSys: run");
         for (inp, _) in (&mut inputs, &unique_component).join() {
-
             if inp.contains_action(RENDER_MODE_SWITCH) {
                 r_settings.rendering_mode = match r_settings.rendering_mode {
                     RenderMode::Opaque => RenderMode::Wireframe,
-                    RenderMode::Wireframe => RenderMode::Opaque ,
+                    RenderMode::Wireframe => RenderMode::Opaque,
                 };
             }
             inp.clear();
@@ -75,8 +76,6 @@ pub fn init(world: &mut World) {
         .create_entity()
         .with(ctx)
         .with(mi)
-        .with(RenderSettingsSys{})
+        .with(RenderSettingsSys {})
         .build();
 }
-
-
