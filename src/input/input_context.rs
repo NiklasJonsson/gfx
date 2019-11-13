@@ -7,7 +7,6 @@ use winit::VirtualKeyCode;
 //
 // Basic idea:
 // InputContext acts as a filter for inputs (key press/release, mouse click etc...). There are several InputContexts that consume input and if it's not interested in some input, it passes it on.
-// TODO: Maybe InputContext and MappedInput can be forced to always exist together?
 
 use crate::input::*;
 

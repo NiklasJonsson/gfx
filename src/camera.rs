@@ -223,7 +223,7 @@ impl<'a> System<'a> for FreeFlyCameraController {
 
 fn get_input_context() -> Result<InputContext, InputContextError> {
     let sens = 0.0005 as Sensitivity;
-    use crate::camera::CameraMovement::*;
+    use CameraMovement::*;
     Ok(InputContext::start("CameraInputContext")
         .with_description("Input mapping for untethered, 3D camera")
         .with_state(VirtualKeyCode::W, Forward)?
@@ -237,7 +237,7 @@ fn get_input_context() -> Result<InputContext, InputContextError> {
         .build())
 }
 
-pub fn init_camera(world: &mut World) -> Entity {
+pub fn init(world: &mut World) -> Entity {
     let start_pos = glm::vec3(2.0, 2.0, 2.0);
     let rot_state = CameraRotationState {
         yaw: 0.80,

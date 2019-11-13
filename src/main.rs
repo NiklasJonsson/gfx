@@ -20,12 +20,14 @@ mod camera;
 mod common;
 mod input;
 mod render;
+mod settings;
+mod game_state;
 
 use self::asset::AssetDescriptor;
 use self::common::*;
 use self::render::*;
 
-use self::input::{ActionId, InputContext, InputContextPriority, MappedInput};
+use self::game_state::GameState;
 
 type AppEvents = Vec<Event>;
 
@@ -75,59 +77,6 @@ impl std::ops::Mul<f32> for DeltaTime {
     }
 }
 
-#[derive(Debug, Copy, Clone, PartialEq, Eq)]
-pub enum GameState {
-    Paused,
-    Running,
-}
-
-impl Default for GameState {
-    fn default() -> Self {
-        GameState::Running
-    }
-}
-
-const GAME_STATE_SWITCH: ActionId = ActionId(0);
-
-#[derive(Default, Component)]
-#[storage(NullStorage)]
-struct GameStateSwitcher;
-
-// Use NullStorage and ReadStorage<'a, Self> to only access this system's MappedInput and
-// InputContext. Only one game object will have GameStateSwitcher as null storage, the one holding
-// the right mapped input and input context.
-impl<'a> System<'a> for GameStateSwitcher {
-    type SystemData = (
-        Write<'a, GameState>,
-        WriteStorage<'a, InputContext>,
-        WriteStorage<'a, MappedInput>,
-        ReadStorage<'a, Self>,
-    );
-
-    fn run(&mut self, (mut state, mut contexts, mut inputs, _unique_id): Self::SystemData) {
-        log::trace!("GameStateSwitcher: run");
-        // TODO: Verify that we only get one mapped input? (and one context)
-        // We don't need to join!!!
-        //
-        // use
-        // let camera = camera.get(active_cam.0).unwrap();
-        // let view_matrix = transform.get(active_cam.0).unwrap().invert();
-
-        for (inp, ctx) in (&mut inputs, &mut contexts).join() {
-            use crate::GameState::*;
-            if inp.contains_action(GAME_STATE_SWITCH) {
-                *state = match *state {
-                    Paused => Running,
-                    Running => Paused,
-                };
-
-                ctx.set_consume_all(*state == Paused);
-            }
-            inp.clear();
-        }
-    }
-}
-
 struct App {
     world: World,
     events_loop: EventsLoop,
@@ -173,7 +122,6 @@ struct EventManager {
 // Create enum to represent what we want the input manager to receive
 // But should this really be done here? Separate window/input handling?
 // Move this to input? IOManager? Use Channels to propagate info instead of resource?
-
 impl EventManager {
     fn new() -> Self {
         Self {
@@ -246,45 +194,41 @@ impl App {
     // The whole App struct would need to be templated if this was included.
     // Maybe this can be solved in another way...
     fn init_dispatcher<'a, 'b>() -> Dispatcher<'a, 'b> {
-        // TODO: Move all systems registration to here to get
-        // an overview
         let builder = DispatcherBuilder::new();
-        // Input needs to go before as camera depends on it
+        // Input needs to go before as most systems depends on it
         let builder = input::register_systems(builder);
+
         let builder = camera::register_systems(builder);
+        let builder = settings::register_systems(builder);
+        let builder = game_state::register_systems(builder);
 
         builder
-            .with(
-                GameStateSwitcher,
-                "game_state_switcher",
-                &[input::INPUT_MANAGER_SYSTEM_ID],
-            )
             .with_barrier()
-            .with(render_graph::TransformPropagation, "transform_propagation", &[])
+            .with(
+                render_graph::TransformPropagation,
+                "transform_propagation",
+                &[],
+            )
             .build()
     }
 
+    fn setup_resources(&mut self) {
+        self.world.insert(CurrentFrameWindowEvents(Vec::new()));
+        self.world.insert(ActiveCamera::empty());
+        self.world.insert(DeltaTime::zero());
+    }
+
     fn populate_world(&mut self) {
-        let cam_entity = camera::init_camera(&mut self.world);
+        self.setup_resources();
+
+        let cam_entity = camera::init(&mut self.world);
         {
             let mut active_camera = self.world.write_resource::<ActiveCamera>();
             *active_camera = ActiveCamera::with_entity(cam_entity);
         }
 
-        // TODO: Clean up
-        let escape_catcher = InputContext::start("EscapeCatcher")
-            .with_description("Global top-level escape catcher for game state switcher")
-            .with_action(winit::VirtualKeyCode::Escape, GAME_STATE_SWITCH)
-            .expect("Could not insert Escape action for GameStateSwitcher")
-            .with_priority(InputContextPriority::First)
-            .build();
-        let mapped_input = MappedInput::new();
-        self.world
-            .create_entity()
-            .with(escape_catcher)
-            .with(mapped_input)
-            .with(GameStateSwitcher {})
-            .build();
+        settings::init(&mut self.world);
+        game_state::init(&mut self.world);
 
         // TODO: How to parameterize this? Dialog box?
         let desc = AssetDescriptor::Gltf {
@@ -292,32 +236,11 @@ impl App {
         };
 
         let roots = asset::load_asset_into(&mut self.world, desc);
-        render_graph::print_graph_to_dot(&self.world, roots, std::fs::File::create("graph.dot").unwrap());
-
-        /*
-        let desc = AssetDescriptor::Gltf {
-            path: "/home/niklas/src_repos/glTF-Sample-Models/2.0/2CylinderEngine/glTF/2CylinderEngine.gltf".to_owned(),
-        };
-        let box1s = asset::load_asset_into(&mut self.world, desc);
-        let box1 = box1s[0];
-        let mut transforms = self.world.write_storage::<Transform>();
-        let entry = transforms
-            .entry(box1)
-            .expect("Could not get box1 transform");
-
-        let new_transform =
-            glm::translate(&glm::identity::<f32, glm::U4>(), &glm::vec3(2.0, 5.0, 0.0));
-
-        match entry {
-            specs::storage::StorageEntry::Occupied(mut entry) => {
-                let cur: glm::Mat4 = (*entry.get()).into();
-                std::mem::replace(entry.get_mut(), (new_transform * cur).into());
-            }
-            specs::storage::StorageEntry::Vacant(entry) => {
-                entry.insert(new_transform.into());
-            }
-        }
-        */
+        render_graph::print_graph_to_dot(
+            &self.world,
+            roots,
+            std::fs::File::create("graph.dot").unwrap(),
+        );
     }
 
     fn main_loop(&mut self) {
@@ -386,10 +309,7 @@ impl App {
             self.vk_manager
                 .prepare_primitives_for_rendering(&self.world);
 
-            /*
             render_graph::print_graph(&self.world, std::fs::File::create("graph2.dot").unwrap());
-            return;
-            */
 
             // Run render systems, this is done after the dispatch call to enforce serialization
             self.vk_manager.draw_next_frame(&mut self.world);
@@ -408,12 +328,7 @@ impl App {
             .build_vk_surface(&events_loop, Arc::clone(&vk_instance))
             .expect("Unable to create window/surface");
 
-        let mut world = World::new();
-
-        world.insert(CurrentFrameWindowEvents(Vec::new()));
-        world.insert(ActiveCamera::empty());
-        world.insert(GameState::Running);
-        world.insert(DeltaTime::zero());
+        let world = World::new();
 
         let vk_manager = VKManager::create(vk_instance, vk_surface);
 
