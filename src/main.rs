@@ -218,21 +218,34 @@ impl App {
         self.world.insert(DeltaTime::zero());
     }
 
+    fn get_entity_with_marker<C>(w: &World) -> Entity
+    where
+        C: specs::Component,
+    {
+        let markers = w.read_storage::<C>();
+        let entities = w.read_resource::<specs::world::EntitiesRes>();
+
+        let mut joined = (&entities, &markers).join();
+        let item = joined.next();
+        assert!(
+            joined.next().is_none(),
+            "Expected only one entity with marker component!"
+        );
+        let (ent, _) = item.expect("Expected an entity!");
+
+        ent
+    }
+
     fn populate_world(&mut self) {
         self.setup_resources();
 
-        let cam_entity = camera::init(&mut self.world);
-        {
-            let mut active_camera = self.world.write_resource::<ActiveCamera>();
-            *active_camera = ActiveCamera::with_entity(cam_entity);
-        }
+        let cam_entity = Self::get_entity_with_marker::<crate::camera::Camera>(&self.world);
+        *self.world.write_resource::<ActiveCamera>() = ActiveCamera::with_entity(cam_entity);
 
-        settings::init(&mut self.world);
-        game_state::init(&mut self.world);
-
-        // TODO: How to parameterize this? Dialog box?
+        // TODO: Add mode to read this from cmdline. If there is a camera, use that.
+        // "gltf-viewer" mode?
         let desc = AssetDescriptor::Gltf {
-            path: "/home/niklas/src_repos/glTF-Sample-Models/2.0/2CylinderEngine/glTF/2CylinderEngine.gltf".to_owned(),
+            path: "/home/niklas/src_repos/glTF-Sample-Models/2.0/Box/glTF/Box.gltf".to_owned(),
         };
 
         let roots = asset::load_asset_into(&mut self.world, desc);
@@ -252,6 +265,7 @@ impl App {
         self.world.register::<render_graph::RenderGraphNode>();
         self.world.register::<render_graph::RenderGraphRoot>();
         self.world.register::<render_graph::RenderGraphChild>();
+        self.world.register::<crate::camera::Camera>();
         dispatcher.setup(&mut self.world);
 
         // Setup world objects, e.g. camera and chalet model

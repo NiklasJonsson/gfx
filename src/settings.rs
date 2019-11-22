@@ -23,6 +23,14 @@ impl Default for RenderSettings {
     }
 }
 
+fn get_input_context() -> InputContext {
+    InputContext::start("RenderSettingsSys")
+        .with_description("Input for changing render settings")
+        .with_action(VirtualKeyCode::O, RENDER_MODE_SWITCH)
+        .expect("Should only be one action!")
+        .build()
+}
+
 const RENDER_MODE_SWITCH: ActionId = ActionId(0);
 
 #[derive(Default, Component)]
@@ -40,7 +48,7 @@ impl<'a> System<'a> for RenderSettingsSys {
 
     fn run(&mut self, (mut r_settings, mut inputs, unique_component): Self::SystemData) {
         log::trace!("RenderSettingsSys: run");
-        for (inp, _) in (&mut inputs, &unique_component).join() {
+        for (inp, _id) in (&mut inputs, &unique_component).join() {
             if inp.contains_action(RENDER_MODE_SWITCH) {
                 r_settings.rendering_mode = match r_settings.rendering_mode {
                     RenderMode::Opaque => RenderMode::Wireframe,
@@ -50,6 +58,19 @@ impl<'a> System<'a> for RenderSettingsSys {
             inp.clear();
         }
     }
+
+    fn setup(&mut self, world: &mut World) {
+        Self::SystemData::setup(world);
+        world.insert(RenderSettings::default());
+        let ctx = get_input_context();
+        let mi = MappedInput::new();
+        world
+            .create_entity()
+            .with(ctx)
+            .with(mi)
+            .with(RenderSettingsSys)
+            .build();
+    }
 }
 
 pub fn register_systems<'a, 'b>(builder: DispatcherBuilder<'a, 'b>) -> DispatcherBuilder<'a, 'b> {
@@ -58,24 +79,4 @@ pub fn register_systems<'a, 'b>(builder: DispatcherBuilder<'a, 'b>) -> Dispatche
         "rendering_settings_sys",
         &[crate::input::INPUT_MANAGER_SYSTEM_ID],
     )
-}
-
-fn get_input_context() -> InputContext {
-    InputContext::start("RenderSettingsSys")
-        .with_description("Input for changing render settings")
-        .with_action(VirtualKeyCode::O, RENDER_MODE_SWITCH)
-        .expect("Should only be one action!")
-        .build()
-}
-
-pub fn init(world: &mut World) {
-    world.insert(RenderSettings::default());
-    let ctx = get_input_context();
-    let mi = MappedInput::new();
-    world
-        .create_entity()
-        .with(ctx)
-        .with(mi)
-        .with(RenderSettingsSys {})
-        .build();
 }

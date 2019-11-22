@@ -73,7 +73,13 @@ impl Into<RangeId> for CameraRotation {
     }
 }
 
-// TODO: Nullstorage here?
+/// Generic marker component for any camera type
+#[derive(Default, Component)]
+#[storage(NullStorage)]
+pub struct Camera;
+
+#[derive(Default, Component)]
+#[storage(NullStorage)]
 pub struct FreeFlyCameraController;
 
 impl FreeFlyCameraController {
@@ -157,6 +163,23 @@ impl FreeFlyCameraController {
     }
 }
 
+// Default input mapping for camera
+fn get_input_context() -> Result<InputContext, InputContextError> {
+    let sens = 0.0005 as Sensitivity;
+    use CameraMovement::*;
+    Ok(InputContext::start("CameraInputContext")
+        .with_description("Input mapping for untethered, 3D camera")
+        .with_state(VirtualKeyCode::W, Forward)?
+        .with_state(VirtualKeyCode::S, Backward)?
+        .with_state(VirtualKeyCode::A, Left)?
+        .with_state(VirtualKeyCode::D, Right)?
+        .with_state(VirtualKeyCode::E, Up)?
+        .with_state(VirtualKeyCode::Q, Down)?
+        .with_range(DeviceAxis::MouseX, CameraRotation::YawDelta, sens)?
+        .with_range(DeviceAxis::MouseY, CameraRotation::PitchDelta, sens)?
+        .build())
+}
+
 impl<'a> System<'a> for FreeFlyCameraController {
     type SystemData = (
         WriteStorage<'a, MappedInput>,
@@ -164,19 +187,32 @@ impl<'a> System<'a> for FreeFlyCameraController {
         WriteStorage<'a, CameraRotationState>,
         Read<'a, GameState>,
         Read<'a, DeltaTime>,
+        ReadStorage<'a, Self>,
     );
 
     fn run(&mut self, data: Self::SystemData) {
         log::trace!("FreeFlyCameraController: run");
-        let (mut mapped_inputs, mut positions, mut cam_rot_state, game_state, delta_time) = data;
+        let (
+            mut mapped_inputs,
+            mut positions,
+            mut cam_rot_state,
+            game_state,
+            delta_time,
+            unique_id,
+        ) = data;
 
         if *game_state == GameState::Paused {
             log::trace!("Game is paused, camera won't be moved");
             return;
         }
 
-        for (mi, pos, rotation_state) in
-            (&mut mapped_inputs, &mut positions, &mut cam_rot_state).join()
+        for (mi, pos, rotation_state, _id) in (
+            &mut mapped_inputs,
+            &mut positions,
+            &mut cam_rot_state,
+            &unique_id,
+        )
+            .join()
         {
             for input in mi.iter() {
                 match input {
@@ -219,42 +255,31 @@ impl<'a> System<'a> for FreeFlyCameraController {
             mi.clear();
         }
     }
-}
 
-fn get_input_context() -> Result<InputContext, InputContextError> {
-    let sens = 0.0005 as Sensitivity;
-    use CameraMovement::*;
-    Ok(InputContext::start("CameraInputContext")
-        .with_description("Input mapping for untethered, 3D camera")
-        .with_state(VirtualKeyCode::W, Forward)?
-        .with_state(VirtualKeyCode::S, Backward)?
-        .with_state(VirtualKeyCode::A, Left)?
-        .with_state(VirtualKeyCode::D, Right)?
-        .with_state(VirtualKeyCode::E, Up)?
-        .with_state(VirtualKeyCode::Q, Down)?
-        .with_range(DeviceAxis::MouseX, CameraRotation::YawDelta, sens)?
-        .with_range(DeviceAxis::MouseY, CameraRotation::PitchDelta, sens)?
-        .build())
-}
+    fn setup(&mut self, world: &mut World) {
+        Self::SystemData::setup(world);
+        let start_pos = glm::vec3(2.0, 2.0, 2.0);
+        let rot_state = CameraRotationState {
+            yaw: 0.80,
+            pitch: 3.78,
+        };
 
-pub fn init(world: &mut World) -> Entity {
-    let start_pos = glm::vec3(2.0, 2.0, 2.0);
-    let rot_state = CameraRotationState {
-        yaw: 0.80,
-        pitch: 3.78,
-    };
+        let input_context = get_input_context().expect("Unable to create input context");
 
-    let input_context = get_input_context().expect("Unable to create input context");
+        let mapped_input = MappedInput::new();
 
-    let mapped_input = MappedInput::new();
-
-    world
-        .create_entity()
-        .with::<Position>(start_pos.into())
-        .with(input_context)
-        .with(mapped_input)
-        .with(rot_state)
-        .build()
+        world
+            .create_entity()
+            .with::<Position>(start_pos.into())
+            .with(input_context)
+            .with(mapped_input)
+            // Camera marker componenent means for the ActiveCamera resource
+            .with(Camera)
+            // To ensure we get the right mapped input
+            .with(FreeFlyCameraController)
+            .with(rot_state)
+            .build();
+    }
 }
 
 pub fn register_systems<'a, 'b>(builder: DispatcherBuilder<'a, 'b>) -> DispatcherBuilder<'a, 'b> {

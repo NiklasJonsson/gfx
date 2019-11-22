@@ -46,6 +46,24 @@ impl<'a> System<'a> for GameStateSwitcher {
             inp.clear();
         }
     }
+
+    fn setup(&mut self, world: &mut World) {
+        Self::SystemData::setup(world);
+        world.insert(GameState::default());
+        let escape_catcher = InputContext::start("EscapeCatcher")
+            .with_description("Global top-level escape catcher for game state switcher")
+            .with_action(winit::VirtualKeyCode::Escape, GAME_STATE_SWITCH)
+            .expect("Could not insert Escape action for GameStateSwitcher")
+            .with_priority(InputContextPriority::First)
+            .build();
+        let mi = MappedInput::new();
+        world
+            .create_entity()
+            .with(mi)
+            .with(escape_catcher)
+            .with(GameStateSwitcher {})
+            .build();
+    }
 }
 
 pub fn register_systems<'a, 'b>(builder: DispatcherBuilder<'a, 'b>) -> DispatcherBuilder<'a, 'b> {
@@ -54,21 +72,4 @@ pub fn register_systems<'a, 'b>(builder: DispatcherBuilder<'a, 'b>) -> Dispatche
         "game_state_switcher",
         &[crate::input::INPUT_MANAGER_SYSTEM_ID],
     )
-}
-
-pub fn init(world: &mut World) {
-    world.insert(GameState::default());
-    let escape_catcher = InputContext::start("EscapeCatcher")
-        .with_description("Global top-level escape catcher for game state switcher")
-        .with_action(winit::VirtualKeyCode::Escape, GAME_STATE_SWITCH)
-        .expect("Could not insert Escape action for GameStateSwitcher")
-        .with_priority(InputContextPriority::First)
-        .build();
-    let mi = MappedInput::new();
-    world
-        .create_entity()
-        .with(mi)
-        .with(escape_catcher)
-        .with(GameStateSwitcher {})
-        .build();
 }
