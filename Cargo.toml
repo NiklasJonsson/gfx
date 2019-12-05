@@ -29,3 +29,4 @@ gltf = "0.13.0"
 # Util
 log = "0.4.8"
 env_logger = "0.6.2"
+clap = "2.33.0"

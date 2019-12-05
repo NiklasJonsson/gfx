@@ -13,11 +13,11 @@ use gltf::buffer::Data as GltfData;
 // TODO: Change to path
 pub enum AssetDescriptor {
     Obj {
-        data_file: String,
-        texture_file: String,
+        data_file: PathBuf,
+        texture_file: PathBuf,
     },
     Gltf {
-        path: String,
+        path: PathBuf,
     },
 }
 
@@ -143,7 +143,6 @@ fn get_primitives_from_mesh<'a>(ctx: &RecGltfCtx, mesh: gltf::Mesh<'a>) -> Vec<G
                 let image = match image_src {
                     Source::Uri { uri, .. } => {
                         let parent_path = Path::new(&ctx.path).parent().expect("Invalid path");
-                        assert!(parent_path.has_root());
                         let mut image_path = parent_path.to_path_buf();
                         image_path.push(uri);
                         load_image(image_path.to_str().expect("Could not create image path!"))
@@ -255,8 +254,8 @@ fn build_asset_graph(ctx: &RecGltfCtx, world: &mut World, src_root: &gltf::Node)
     root
 }
 
-pub fn load_gltf_asset(world: &mut World, path: &str) -> Vec<Entity> {
-    log::trace!("load gltf asset {}", path);
+pub fn load_gltf_asset(world: &mut World, path: &Path) -> Vec<Entity> {
+    log::trace!("load gltf asset {}", path.display());
     let (gltf_doc, buffers, _images) = gltf::import(path).expect("Unable to import gltf");
     assert_eq!(gltf_doc.scenes().len(), 1);
     let rec_ctx = RecGltfCtx {

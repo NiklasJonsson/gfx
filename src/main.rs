@@ -4,6 +4,7 @@ extern crate vulkano;
 extern crate num_derive;
 #[macro_use]
 extern crate specs_derive;
+extern crate clap;
 extern crate nalgebra_glm as glm;
 
 use vulkano_win::VkSurfaceBuild;
@@ -14,6 +15,7 @@ use specs::prelude::*;
 
 use std::sync::Arc;
 use std::time::{Duration, Instant};
+use std::path::{Path, PathBuf};
 
 mod asset;
 mod camera;
@@ -236,16 +238,15 @@ impl App {
         ent
     }
 
-    fn populate_world(&mut self) {
+    fn populate_world(&mut self, gltf_path: &Path) {
         self.setup_resources();
 
         let cam_entity = Self::get_entity_with_marker::<crate::camera::Camera>(&self.world);
         *self.world.write_resource::<ActiveCamera>() = ActiveCamera::with_entity(cam_entity);
 
-        // TODO: Add mode to read this from cmdline. If there is a camera, use that.
-        // "gltf-viewer" mode?
+        // TODO: If there is a camera in this gltf, use it
         let desc = AssetDescriptor::Gltf {
-            path: "/home/niklas/src_repos/glTF-Sample-Models/2.0/Box/glTF/Box.gltf".to_owned(),
+            path: gltf_path.to_owned(),
         };
 
         let roots = asset::load_asset_into(&mut self.world, desc);
@@ -256,7 +257,7 @@ impl App {
         );
     }
 
-    fn main_loop(&mut self) {
+    fn run(&mut self, gltf_file: &Path) {
         let mut dispatcher = Self::init_dispatcher();
 
         // Register all component types
@@ -269,7 +270,7 @@ impl App {
         dispatcher.setup(&mut self.world);
 
         // Setup world objects, e.g. camera and chalet model
-        self.populate_world();
+        self.populate_world(gltf_file);
 
         // Collects events and resolves to AppAction
         let mut event_manager = EventManager::new();
@@ -330,10 +331,6 @@ impl App {
         }
     }
 
-    fn run(&mut self) {
-        self.main_loop();
-    }
-
     fn new() -> Self {
         let vk_instance = render::get_vk_instance();
 
@@ -356,6 +353,26 @@ impl App {
 
 fn main() {
     env_logger::init();
+    let matches = clap::App::new("Ramneryd")
+        .version("0.1.0")
+        .about("Vulkan renderer")
+        .arg(clap::Arg::with_name("view-gltf")
+             .short("-i")
+             .long("view-gltf")
+             .value_name("GLTF-FILE")
+             .help("Reads a gltf file and renders it.")
+             .takes_value(true)
+             .required(true))
+        .get_matches();
+
+    let path = matches.value_of("view-gltf").expect("This is required!");
+    let path_buf = PathBuf::from(path);
+    if !path_buf.exists() {
+        println!("No such path: {}!", path_buf.as_path().display());
+        return;
+    }
+
     let mut app = App::new();
-    app.run();
+
+    app.run(path_buf.as_path());
 }
