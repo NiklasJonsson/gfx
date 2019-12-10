@@ -138,8 +138,6 @@ impl<'a> System<'a> for TransformPropagation {
     }
 }
 
-// TODO: Rewrite graph traversal with bfs/dfs?
-
 pub fn breadth_first(world: &World, root: Entity, mut visit_node: impl FnMut(Entity)) {
     let nodes_storage = world.read_storage::<RenderGraphNode>();
 
@@ -174,6 +172,105 @@ pub fn depth_first(world: &World, root: Entity, mut visit_node: impl FnMut(Entit
             }
         }
     }
+}
+
+enum PathDirection {
+    RootToNode(usize),
+    NodeToRoot(usize),
+}
+
+impl PathDirection {
+    // TODO: Change to operator++
+    fn next(&mut self) {
+        use PathDirection::*;
+        *self = match *self {
+            RootToNode(idx) => RootToNode(idx+1),
+            NodeToRoot(idx) => NodeToRoot(idx-1),
+        }
+    }
+
+    fn done(&self, path_len: usize) -> bool {
+        use PathDirection::*;
+        match self {
+            RootToNode(idx) => *idx == path_len,
+            NodeToRoot(idx) => *idx == 0,
+        }
+    }
+
+    // TODO: Change to deref
+    fn idx(&self) -> usize {
+        use PathDirection::*;
+        match self {
+            RootToNode(idx) => *idx,
+            NodeToRoot(idx) => *idx,
+        }
+
+    }
+}
+
+struct PathWalker {
+    path: Vec<Entity>,
+    dir: PathDirection,
+}
+
+impl Iterator for PathWalker {
+    type Item = Entity;
+    fn next(&mut self) -> Option<Self::Item> {
+        if self.dir.done(self.path.len()) {
+            return None;
+        }
+
+        let ent = self.path[self.dir.idx()];
+        self.dir.next();
+
+        Some(ent)
+    }
+
+    fn size_hint(&self) -> (usize, Option<usize>) {
+        let l = self.path.len();
+        (l, Some(l))
+    }
+}
+
+impl ExactSizeIterator for PathWalker {
+    fn len(&self) -> usize {
+        self.size_hint().0
+    }
+}
+
+fn get_root_path(w: &World, node: Entity) -> Vec<Entity> {
+    let children = w.read_storage::<RenderGraphChild>();
+
+    let mut path = Vec::with_capacity(8);
+    let mut cur = node;
+    loop {
+        path.push(cur);
+        if let Some(child) = children.get(cur) {
+            cur = child.parent;
+        } else {
+            break;
+        }
+    }
+
+    assert!(w.read_storage::<RenderGraphRoot>().get(cur).is_some());
+    path.reverse();
+
+    path
+}
+
+
+
+/// Returns an iterator that walks the path from the root to the node
+pub fn root_to_node_path(world: &World, node: Entity) -> impl ExactSizeIterator<Item = Entity> {
+    let path = get_root_path(world, node);
+    PathWalker{path, dir: PathDirection::RootToNode(0)}
+}
+
+/// Returns an iterator that walks the path from the root to the node
+pub fn node_to_root_path(world: &World, node: Entity) -> impl ExactSizeIterator<Item = Entity> {
+    let path = get_root_path(world, node);
+    let len = path.len();
+    PathWalker{path, dir: PathDirection::NodeToRoot(len-1)}
 }
 
 fn e2str(e: Entity) -> String {
@@ -298,13 +395,27 @@ mod tests {
         w.create_entity().with(node(children)).with(ID(id)).build()
     }
 
-    fn setup_graph(mut w: &mut World) -> Entity {
-        let children = vec![leaf_with_id(&mut w, 5), leaf_with_id(&mut w, 6)];
-        let node2 = node_with_id(&mut w, children, 2);
-        let node3 = leaf_with_id(&mut w, 3);
+    fn add_parent_for(w: &mut World, child: Entity, parent: Entity) {
+        let mut children = w.write_storage::<RenderGraphChild>();
+        children
+            .insert(child, render_graph::child(parent))
+            .expect("Failed!");
+    }
 
-        let node7 = leaf_with_id(&mut w, 7);
-        let node4 = node_with_id(&mut w, vec![node7], 4);
+    //      1
+    //     /|\
+    //    2 3 4
+    //   /|   |
+    //  5 6   7
+    //
+    fn setup_graph(w: &mut World) -> Entity {
+        let node5 = leaf_with_id(w, 5);
+        let node6 = leaf_with_id(w, 6);
+        let node2 = node_with_id(w, vec![node5, node6], 2);
+        let node3 = leaf_with_id(w, 3);
+
+        let node7 = leaf_with_id(w, 7);
+        let node4 = node_with_id(w, vec![node7], 4);
 
         let root = w
             .create_entity()
@@ -312,6 +423,13 @@ mod tests {
             .with(node(vec![node2, node3, node4]))
             .with(ID(1))
             .build();
+
+        add_parent_for(w, node2, root);
+        add_parent_for(w, node3, root);
+        add_parent_for(w, node4, root);
+        add_parent_for(w, node5, node2);
+        add_parent_for(w, node6, node2);
+        add_parent_for(w, node7, node4);
 
         root
     }
@@ -346,5 +464,93 @@ mod tests {
 
         render_graph::depth_first(&w, root, visit_node);
         assert_eq!(order, vec![1, 4, 7, 3, 2, 6, 5]);
+    }
+
+    fn verify_it(id2ent: &Vec<Entity>,
+                 it: impl Iterator<Item = Entity>,
+                 order: Vec<usize>) -> bool {
+        let expected = order.into_iter().map(|i| id2ent[i]).collect::<Vec<_>>();
+        it.zip(expected.iter()).fold(true, |acc, (ent, &exp)| acc || (ent == exp))
+    }
+
+    #[test]
+    fn node_to_root_path() {
+        let mut w = setup_world();
+        let root = setup_graph(&mut w);
+
+        let ids = w.read_storage::<ID>();
+        let entities = w.read_resource::<specs::world::EntitiesRes>();
+
+        let joined = (&entities, &ids).join();
+        let mut id2ent: Vec<Entity> = Vec::new();
+        // init to something to be able to insert at pos
+        for _ in 0..9 {
+            id2ent.push(root);
+        }
+        for (ent, ID(id)) in joined {
+            id2ent[*id] = ent;
+        }
+
+        assert!(verify_it(&id2ent, render_graph::node_to_root_path(&w, id2ent[2]), vec![2, 1]));
+        assert!(verify_it(&id2ent, render_graph::node_to_root_path(&w, id2ent[5]), vec![5, 2, 1]));
+        assert!(verify_it(&id2ent, render_graph::node_to_root_path(&w, id2ent[3]), vec![3, 1]));
+        assert!(verify_it(&id2ent, render_graph::node_to_root_path(&w, id2ent[6]), vec![6, 2, 1]));
+        assert!(verify_it(&id2ent, render_graph::node_to_root_path(&w, id2ent[4]), vec![4, 1]));
+        assert!(verify_it(&id2ent, render_graph::node_to_root_path(&w, id2ent[7]), vec![7, 4, 1]));
+        assert!(verify_it(&id2ent, render_graph::node_to_root_path(&w, id2ent[1]), vec![1]));
+    }
+
+    #[test]
+    fn root_to_node_path() {
+        let mut w = setup_world();
+        let root = setup_graph(&mut w);
+
+        let ids = w.read_storage::<ID>();
+        let entities = w.read_resource::<specs::world::EntitiesRes>();
+
+        let joined = (&entities, &ids).join();
+        let mut id2ent: Vec<Entity> = Vec::new();
+        // init to something to be able to insert at pos
+        for _ in 0..9 {
+            id2ent.push(root);
+        }
+        for (ent, ID(id)) in joined {
+            id2ent[*id] = ent;
+        }
+
+        assert!(verify_it(&id2ent, render_graph::root_to_node_path(&w, id2ent[2]), vec![1, 2]));
+        assert!(verify_it(&id2ent, render_graph::root_to_node_path(&w, id2ent[5]), vec![1, 2, 5]));
+        assert!(verify_it(&id2ent, render_graph::root_to_node_path(&w, id2ent[3]), vec![1, 3]));
+        assert!(verify_it(&id2ent, render_graph::root_to_node_path(&w, id2ent[6]), vec![1, 2, 6]));
+        assert!(verify_it(&id2ent, render_graph::root_to_node_path(&w, id2ent[4]), vec![1, 4]));
+        assert!(verify_it(&id2ent, render_graph::root_to_node_path(&w, id2ent[7]), vec![1, 4, 7]));
+        assert!(verify_it(&id2ent, render_graph::root_to_node_path(&w, id2ent[1]), vec![1]));
+    }
+
+    #[test]
+    fn size_hint_len() {
+        let mut w = setup_world();
+        let root = setup_graph(&mut w);
+
+        let ids = w.read_storage::<ID>();
+        let entities = w.read_resource::<specs::world::EntitiesRes>();
+
+        let joined = (&entities, &ids).join();
+        let mut id2ent: Vec<Entity> = Vec::new();
+        // init to something to be able to insert at pos
+        for _ in 0..9 {
+            id2ent.push(root);
+        }
+
+        let expected = vec![0, 1, 2, 2, 2, 3, 3, 3];
+        for (ent, ID(id)) in joined {
+            let e = expected[*id];
+            assert_eq!(render_graph::root_to_node_path(&w, ent).len(), e);
+            assert_eq!(render_graph::root_to_node_path(&w, ent).size_hint().0, e);
+            assert_eq!(render_graph::root_to_node_path(&w, ent).size_hint().1, Some(e));
+            assert_eq!(render_graph::node_to_root_path(&w, ent).len(), e);
+            assert_eq!(render_graph::node_to_root_path(&w, ent).size_hint().0, e);
+            assert_eq!(render_graph::node_to_root_path(&w, ent).size_hint().1, Some(e));
+        }
     }
 }
