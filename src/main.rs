@@ -191,6 +191,11 @@ impl EventManager {
     }
 }
 
+struct Args {
+    gltf_path: PathBuf,
+    use_scene_camera: bool,
+}
+
 impl App {
     // FIXME: This lives here only because the lifetime parameters are a pain.
     // The whole App struct would need to be templated if this was included.
@@ -220,7 +225,7 @@ impl App {
         self.world.insert(DeltaTime::zero());
     }
 
-    fn get_entity_with_marker<C>(w: &World) -> Entity
+    pub fn get_entity_with_marker<C>(w: &World) -> Entity
     where
         C: specs::Component,
     {
@@ -238,26 +243,41 @@ impl App {
         ent
     }
 
-    fn populate_world(&mut self, gltf_path: &Path) {
-        self.setup_resources();
-
-        let cam_entity = Self::get_entity_with_marker::<crate::camera::Camera>(&self.world);
-        *self.world.write_resource::<ActiveCamera>() = ActiveCamera::with_entity(cam_entity);
-
-        // TODO: If there is a camera in this gltf, use it
-        let desc = AssetDescriptor::Gltf {
-            path: gltf_path.to_owned(),
-        };
-
-        let roots = asset::load_asset_into(&mut self.world, desc);
-        render_graph::print_graph_to_dot(
-            &self.world,
-            roots,
-            std::fs::File::create("graph.dot").unwrap(),
-        );
+    // TODO: Move this
+    pub fn entity_has_component<C>(w: &World, e: Entity) -> bool
+    where
+        C: specs::Component,
+    {
+        w.read_storage::<C>().get(e).is_some()
     }
 
-    fn run(&mut self, gltf_file: &Path) {
+    fn populate_world(&mut self, args: &Args) {
+        self.setup_resources();
+
+        let cam_entity = Self::get_entity_with_marker::<camera::Camera>(&self.world);
+        *self.world.write_resource::<ActiveCamera>() = ActiveCamera::with_entity(cam_entity);
+
+        let desc = AssetDescriptor::Gltf {
+            path: args.gltf_path.to_owned(),
+        };
+
+        let loaded_asset = asset::load_asset_into(&mut self.world, desc);
+        render_graph::print_graph_to_dot(
+            &self.world,
+            loaded_asset.scene_roots,
+            std::fs::File::create("graph.dot").unwrap(),
+        );
+
+        // REFACTOR: Flatten this when support for && and if-let is on stable
+        if args.use_scene_camera {
+            if let Some(transform) = loaded_asset.camera {
+                camera::Camera::set_camera_state(&mut self.world, cam_entity, &transform);
+            }
+        }
+
+    }
+
+    fn run(&mut self, args: Args) {
         let mut dispatcher = Self::init_dispatcher();
 
         // Register all component types
@@ -270,7 +290,7 @@ impl App {
         dispatcher.setup(&mut self.world);
 
         // Setup world objects, e.g. camera and chalet model
-        self.populate_world(gltf_file);
+        self.populate_world(&args);
 
         // Collects events and resolves to AppAction
         let mut event_manager = EventManager::new();
@@ -353,7 +373,7 @@ impl App {
 
 fn main() {
     env_logger::init();
-    let matches = clap::App::new("Ramneryd")
+    let matches = clap::App::new("ramneryd")
         .version("0.1.0")
         .about("Vulkan renderer")
         .arg(clap::Arg::with_name("view-gltf")
@@ -363,6 +383,10 @@ fn main() {
              .help("Reads a gltf file and renders it.")
              .takes_value(true)
              .required(true))
+        // TODO: This can only be used if we are passing a scene from the command line
+        .arg(clap::Arg::with_name("use-scene-camera")
+             .long("use-scene-camera")
+             .help("Use the camera encoded in e.g. a gltf scene"))
         .get_matches();
 
     let path = matches.value_of("view-gltf").expect("This is required!");
@@ -372,7 +396,11 @@ fn main() {
         return;
     }
 
+    let use_scene_camera = matches.is_present("use-scene-camera");
+
+    let args = Args {gltf_path: path_buf, use_scene_camera};
+
     let mut app = App::new();
 
-    app.run(path_buf.as_path());
+    app.run(args);
 }

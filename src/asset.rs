@@ -7,10 +7,7 @@ use vulkano::pipeline::input_assembly::PrimitiveTopology;
 
 use gltf::buffer::Data as GltfData;
 
-// TODO: Move from String/str to PathBuf/Path
-
 // Per asset type description, generally all the files needed to load an asset
-// TODO: Change to path
 pub enum AssetDescriptor {
     Obj {
         data_file: PathBuf,
@@ -21,8 +18,14 @@ pub enum AssetDescriptor {
     },
 }
 
-pub fn load_asset_into(world: &mut World, descr: AssetDescriptor) -> Vec<Entity> {
+pub struct LoadedAsset {
+    pub scene_roots: Vec<Entity>,
+    pub camera: Option<Transform>,
+}
+
+pub fn load_asset_into(world: &mut World, descr: AssetDescriptor) -> LoadedAsset {
     match descr {
+        // TODO: Re-enable support
         /*
         AssetDescriptor::Obj {
             data_file,
@@ -187,11 +190,18 @@ struct RecGltfCtx {
     pub path: PathBuf,
 }
 
+struct AssetGraphResult {
+    // The enitity that was created
+    node: Entity,
+    // An entity somewhere in the graph that has a camera
+    camera: Option<Entity>,
+}
+
 fn build_asset_graph_common<'a>(
     ctx: &RecGltfCtx,
     world: &'a mut World,
     src: &gltf::Node<'a>,
-) -> Entity {
+) -> AssetGraphResult {
     let node = world
         .create_entity()
         .with(Transform::from(src.transform().matrix()))
@@ -213,19 +223,32 @@ fn build_asset_graph_common<'a>(
         })
         .unwrap_or_else(Vec::new);
 
-    children.append(
-        &mut src
+    // For each child, we want its entity and if it has a camera
+    // attached to it.
+    let (mut nodes, cameras): (Vec<_>, Vec<Option<_>>) =
+        src
             .children()
-            .map(|child| build_asset_graph_rec(ctx, world, &child, node))
-            .collect::<Vec<_>>(),
-    );
+            .map(|child| {
+                let AssetGraphResult {node, camera} = build_asset_graph_rec(ctx, world, &child, node);
+                (node, camera)
+            })
+            .unzip();
+
+    children.append(&mut nodes);
+
+    // Use this nodes camera if it has one.
+    let this_node_cam = src.camera().map(|_| node);
+    // Folding with or ensures we will get exactly one camera index. This
+    // currently prefers the current node camera if there are several, but we don't expect
+    // more than 1 camera per scene.
+    let camera: Option<Entity> = cameras.iter().fold(this_node_cam, |acc, &x| acc.or(x));
 
     let mut nodes = world.write_storage::<render_graph::RenderGraphNode>();
     nodes
         .insert(node, render_graph::node(children))
         .expect("Could not insert render graph node!");
 
-    node
+    AssetGraphResult{ node, camera }
 }
 
 fn build_asset_graph_rec<'a>(
@@ -233,28 +256,29 @@ fn build_asset_graph_rec<'a>(
     world: &mut World,
     src: &gltf::Node<'a>,
     parent: Entity,
-) -> Entity {
-    let node = build_asset_graph_common(ctx, world, src);
+) -> AssetGraphResult {
+    let result = build_asset_graph_common(ctx, world, src);
 
     let mut nodes = world.write_storage::<render_graph::RenderGraphChild>();
     nodes
-        .insert(node, render_graph::child(parent))
+        .insert(result.node, render_graph::child(parent))
         .expect("Could not insert render graph node!");
-    node
+    result
 }
 
-fn build_asset_graph(ctx: &RecGltfCtx, world: &mut World, src_root: &gltf::Node) -> Entity {
-    let root = build_asset_graph_common(ctx, world, src_root);
+fn build_asset_graph(ctx: &RecGltfCtx, world: &mut World, src_root: &gltf::Node) -> AssetGraphResult {
+    let result = build_asset_graph_common(ctx, world, src_root);
 
     let mut roots = world.write_storage::<render_graph::RenderGraphRoot>();
     roots
-        .insert(root, render_graph::root())
+        .insert(result.node, render_graph::root())
         .expect("Could not insert render graph root!");
 
-    root
+    result
 }
 
-pub fn load_gltf_asset(world: &mut World, path: &Path) -> Vec<Entity> {
+
+pub fn load_gltf_asset(world: &mut World, path: &Path) -> LoadedAsset {
     log::trace!("load gltf asset {}", path.display());
     let (gltf_doc, buffers, _images) = gltf::import(path).expect("Unable to import gltf");
     assert_eq!(gltf_doc.scenes().len(), 1);
@@ -265,15 +289,60 @@ pub fn load_gltf_asset(world: &mut World, path: &Path) -> Vec<Entity> {
 
     // A scene may have several root nodes
     let nodes = gltf_doc.scenes().nth(0).expect("No scenes!").nodes();
+    if gltf_doc.scenes().len() > 1 {
+        log::warn!("More than one scene found, only displaying the first");
+        log::warn!("Number of scenes: {}", gltf_doc.scenes().len());
+    }
     let mut roots: Vec<Entity> = Vec::new();
+    let mut camera_ent: Option<Entity> = None;
     for node in nodes {
         log::trace!("Root node {}", node.name().unwrap_or("node_no_name"));
         log::trace!("#children {}", node.children().len());
 
-        roots.push(build_asset_graph(&rec_ctx, world, &node));
+        let AssetGraphResult {node, camera} = build_asset_graph(&rec_ctx, world, &node);
+        roots.push(node);
+        camera_ent = camera;
     }
 
-    roots
+    let mut cam_transform: Option<Transform> = None;
+    if gltf_doc.cameras().nth(0).is_some() {
+        log::info!("Using camera from gltf");
+        if gltf_doc.cameras().len() > 1 {
+            log::warn!("More than one camera found, only using the first");
+            log::warn!("Number of cameras: {}", gltf_doc.cameras().len());
+        }
+
+        if let Some(cam) = camera_ent {
+            log::info!("Found camera in scene graph.");
+            log::info!("Concatenating transforms.");
+            let path = render_graph::root_to_node_path(world, cam);
+            let mut transform: glm::Mat4 = glm::identity::<f32, glm::U4>();
+            for ent in path {
+                let transforms = world.read_storage::<Transform>();
+                if let Some(t) = transforms.get(ent) {
+                    let t: glm::Mat4 = (*t).into();
+                    transform = transform * t;
+                }
+            }
+            cam_transform = Some(transform.into());
+        } else {
+            log::info!("Did not find camera in scene graph");
+            log::info!("Scanning the nodes for one with a camera");
+            for node in gltf_doc.nodes() {
+                if node.camera().is_some() {
+                    log::info!("Found transform for camera!");
+                    cam_transform = Some(node.transform().matrix().into());
+                }
+            }
+        }
+
+        if let Some(t) = cam_transform {
+            log::info!("Using {:?} as camera transform", t);
+        }
+
+    };
+
+    LoadedAsset { scene_roots: roots, camera: cam_transform }
 }
 
 /* TODO:

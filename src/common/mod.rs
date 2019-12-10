@@ -112,6 +112,7 @@ impl AddAssign<&glm::Vec3> for Position {
     }
 }
 
+// TODO: Alias this?
 #[derive(Debug, Component, Copy, Clone)]
 #[storage(DenseVecStorage)]
 pub struct Transform(Mat4);
@@ -131,6 +132,12 @@ impl From<Mat4> for Transform {
 impl Into<Mat4> for Transform {
     fn into(self) -> Mat4 {
         self.0
+    }
+}
+
+impl Transform {
+    pub fn identity() -> Transform {
+        Self(glm::identity::<f32, glm::U4>())
     }
 }
 

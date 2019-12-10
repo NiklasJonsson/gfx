@@ -16,6 +16,8 @@ use winit::VirtualKeyCode;
 
 use specs::prelude::*;
 
+use crate::App;
+
 use num_traits::cast::FromPrimitive;
 
 #[derive(Debug)]
@@ -77,6 +79,13 @@ impl Into<RangeId> for CameraRotation {
 #[derive(Default, Component)]
 #[storage(NullStorage)]
 pub struct Camera;
+
+impl Camera {
+    pub fn set_camera_state(w: &mut World, e: Entity, t: &Transform) {
+        assert!(App::entity_has_component::<FreeFlyCameraController>(w, e));
+        FreeFlyCameraController::set_camera_state(w, e, t);
+    }
+}
 
 #[derive(Default, Component)]
 #[storage(NullStorage)]
@@ -160,6 +169,32 @@ impl FreeFlyCameraController {
         );
 
         rotation_inv * translation_inv
+    }
+
+    pub fn set_camera_state(w: &mut World, e: Entity, t: &Transform) {
+        log::trace!("Set camera state");
+        assert!(App::entity_has_component::<Self>(w, e));
+        assert!(App::entity_has_component::<Camera>(w, e));
+        let mat: glm::Mat4 = (*t).into();
+        let pos: Position = mat.column(3).xyz().into();
+        let view_dir: glm::Vec3 = mat.column(2).xyz();
+        let cam_up: glm::Vec3 = mat.column(1).xyz();
+
+        let mut positions = w.write_storage::<Position>();
+        positions
+            .insert(e, pos)
+            .expect("Could not set position for camera!");
+
+        let pitch = view_dir.y.asin();
+        let yaw = (view_dir.x / pitch.cos()).acos();
+
+        log::info!("yaw from view_dir.x: {}", yaw);
+        log::info!("yaw from view_dir.<: {}", (view_dir.z / pitch.cos().asin()));
+
+        let mut rot_states = w.write_storage::<CameraRotationState>();
+        rot_states
+            .insert(e, CameraRotationState{yaw, pitch})
+            .expect("Could not set rotation state for camera!");
     }
 }
 
@@ -276,7 +311,7 @@ impl<'a> System<'a> for FreeFlyCameraController {
             // Camera marker componenent means for the ActiveCamera resource
             .with(Camera)
             // To ensure we get the right mapped input
-            .with(FreeFlyCameraController)
+            .with(Self)
             .with(rot_state)
             .build();
     }

@@ -10,4 +10,5 @@ Renders:
 Box
 BoxTextured
 BoxVertexColors
+Cube
 from https://github.com/KhronosGroup/glTF-Sample-Models

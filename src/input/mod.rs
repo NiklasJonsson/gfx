@@ -170,7 +170,7 @@ impl InputManager {
     }
 }
 
-// TODO: Use activeCamera here?
+// TODO: Use unique_id here?
 // Requirements:
 //  - A new "pressed" event for a button should generate both an action and set a state
 //  - A new "release" should only update input manager internal state
