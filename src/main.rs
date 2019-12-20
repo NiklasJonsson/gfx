@@ -194,6 +194,7 @@ impl EventManager {
 struct Args {
     gltf_path: PathBuf,
     use_scene_camera: bool,
+    run_n_frames: Option<usize>,
 }
 
 impl App {
@@ -298,6 +299,8 @@ impl App {
         let _start_time = Instant::now();
         let mut prev_frame = Instant::now();
 
+        let mut frame_count = 0;
+
         // Main loop is structured like:
         // 1. Poll events
         // 2. Resolve events
@@ -348,6 +351,14 @@ impl App {
 
             // Run render systems, this is done after the dispatch call to enforce serialization
             self.vk_manager.draw_next_frame(&mut self.world);
+
+            frame_count += 1;
+            if let Some(n_frames) = args.run_n_frames {
+                assert!(frame_count <= n_frames);
+                if frame_count == n_frames {
+                    break;
+                }
+            }
         }
     }
 
@@ -387,6 +398,11 @@ fn main() {
         .arg(clap::Arg::with_name("use-scene-camera")
              .long("use-scene-camera")
              .help("Use the camera encoded in e.g. a gltf scene"))
+        .arg(clap::Arg::with_name("run-n-frames")
+             .long("run-n-frames")
+             .value_name("N")
+             .takes_value(true)
+             .help("Run only N frames"))
         .get_matches();
 
     let path = matches.value_of("view-gltf").expect("This is required!");
@@ -398,7 +414,22 @@ fn main() {
 
     let use_scene_camera = matches.is_present("use-scene-camera");
 
-    let args = Args {gltf_path: path_buf, use_scene_camera};
+    let run_n_frames =
+        if let Some(s) = matches.value_of("run-n-frames") {
+            match s.parse::<usize>() {
+                Ok(n) => Some(n),
+                Err(e) => {
+                    println!("Invalid value for run-n-frames: {}", e);
+                    return;
+                }
+            }
+        } else {
+            None
+        };
+
+
+
+    let args = Args{gltf_path: path_buf, use_scene_camera, run_n_frames};
 
     let mut app = App::new();
 
