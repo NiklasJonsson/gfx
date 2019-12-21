@@ -2,7 +2,6 @@ use specs::prelude::*;
 use std::cmp::Ordering;
 use std::collections::hash_map::Entry::*;
 use std::collections::HashMap;
-use winit::VirtualKeyCode;
 // Based primarily on https://www.gamedev.net/articles/programming/general-and-gameplay-programming/designing-a-robust-input-handling-system-for-games-r2975
 //
 // Basic idea:
@@ -10,8 +9,8 @@ use winit::VirtualKeyCode;
 
 use crate::input::*;
 
-type ActionMap = HashMap<VirtualKeyCode, ActionId>;
-type StateMap = HashMap<VirtualKeyCode, StateId>;
+type ActionMap = HashMap<winit::VirtualKeyCode, ActionId>;
+type StateMap = HashMap<winit::VirtualKeyCode, StateId>;
 type AxisConvMap = HashMap<DeviceAxis, (RangeId, Sensitivity)>;
 
 // Order is important! Declaration order determines sorting order since PartialOrd and Ord are
@@ -57,11 +56,11 @@ impl InputContext {
             .map(|(range_id, sensitivity)| (*range_id, sensitivity * value))
     }
 
-    pub fn get_action_for(&self, key: VirtualKeyCode) -> Option<&ActionId> {
+    pub fn get_action_for(&self, key: winit::VirtualKeyCode) -> Option<&ActionId> {
         self.action_map.get(&key)
     }
 
-    pub fn get_state_for(&self, key: VirtualKeyCode) -> Option<&StateId> {
+    pub fn get_state_for(&self, key: winit::VirtualKeyCode) -> Option<&StateId> {
         self.state_map.get(&key)
     }
 }
@@ -132,7 +131,7 @@ impl InputContextBuilder {
 
     pub fn with_action(
         mut self,
-        key: VirtualKeyCode,
+        key: winit::VirtualKeyCode,
         id: impl Into<ActionId>,
     ) -> Result<Self, InputContextError> {
         match self.action_map.entry(key) {
@@ -146,7 +145,7 @@ impl InputContextBuilder {
 
     pub fn with_state(
         mut self,
-        key: VirtualKeyCode,
+        key: winit::VirtualKeyCode,
         id: impl Into<StateId>,
     ) -> Result<Self, InputContextError> {
         match self.state_map.entry(key) {

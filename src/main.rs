@@ -31,18 +31,6 @@ use self::render::*;
 
 use self::game_state::GameState;
 
-type AppEvents = Vec<Event>;
-
-// World resources
-#[derive(Default, Debug)]
-struct CurrentFrameWindowEvents(AppEvents);
-
-impl CurrentFrameWindowEvents {
-    fn iter(&self) -> impl Iterator<Item = &Event> {
-        self.0.iter()
-    }
-}
-
 #[derive(Default, Debug, Copy, Clone)]
 pub struct DeltaTime(Duration);
 
@@ -90,8 +78,8 @@ struct App {
 enum AppAction {
     Quit,
     IgnoreInput,
-    AcceptInput(AppEvents),
-    HandleEvents(AppEvents),
+    AcceptInput(Vec<input::ExternalInput>),
+    HandleEvents(Vec<input::ExternalInput>),
 }
 
 impl AppAction {
@@ -137,53 +125,51 @@ impl EventManager {
     }
 
     fn collect_event(&mut self, event: Event) {
-        let action: Option<AppAction> = match &event {
+        use input::ExternalInput as ExtInp;
+        match event {
             Event::WindowEvent {
                 event: inner_event, ..
             } => match inner_event {
                 WindowEvent::CloseRequested => {
                     log::info!("EventManager: Received CloseRequested window event");
-                    Some(AppAction::Quit)
+                    self.update_action(AppAction::Quit);
                 }
-                WindowEvent::Focused(focused) => Some(if !focused {
+                WindowEvent::Focused(false) => {
                     log::trace!("Window lost focus, ignoring input");
-                    AppAction::IgnoreInput
-                } else {
+                    self.update_action(AppAction::IgnoreInput);
+                }
+                WindowEvent::Focused(true) => {
                     log::trace!("Window gained focus, accepting input");
-                    AppAction::AcceptInput(Vec::new())
-                }),
-                _ => Some(AppAction::HandleEvents(Vec::new())),
+                    self.update_action(AppAction::AcceptInput(Vec::new()));
+                }
+                WindowEvent::KeyboardInput { device_id, input } => {
+                    let is_pressed = input.state == winit::ElementState::Pressed;
+                    if let Some(key) = input.virtual_keycode {
+                        let ei = if is_pressed {
+                            input::ExternalInput::KeyPress(key)
+                        } else {
+                            input::ExternalInput::KeyRelease(key)
+                        };
+
+                        self.update_action(AppAction::HandleEvents(vec![ei]));
+                    } else {
+                        log::warn!("Key clicked but no virtual key mapped!");
+                    }
+                }
+                e => log::trace!("Igoring window event {:?}", e),
             },
             Event::DeviceEvent {
                 event: inner_event, ..
             } => {
-                if let winit::DeviceEvent::MouseMotion { .. } = inner_event {
-                    Some(AppAction::HandleEvents(Vec::new()))
+                if let winit::DeviceEvent::MouseMotion { delta: (x, y) } = inner_event {
+                    let ei = input::ExternalInput::MouseDelta { x, y };
+                    self.update_action(AppAction::HandleEvents(vec![ei]));
                 } else {
-                    None
+                    log::trace!("Igoring device event {:?}", inner_event);
                 }
             }
-            _ => None,
+            e => log::trace!("Igoring event {:?}", e),
         };
-
-        // This is needed since we unpack the event above and then want to store the complete event
-        // here. Instead, it might be better to define an enum of events that the input manager
-        // should react to.
-
-        if let Some(action) = action {
-            let action = match action {
-                AppAction::AcceptInput(mut empty_vec) => {
-                    empty_vec.push(event);
-                    AppAction::AcceptInput(empty_vec)
-                }
-                AppAction::HandleEvents(mut empty_vec) => {
-                    empty_vec.push(event);
-                    AppAction::HandleEvents(empty_vec)
-                }
-                action => action,
-            };
-            self.update_action(action);
-        }
     }
 
     fn resolve(&mut self) -> AppAction {
@@ -221,7 +207,8 @@ impl App {
     }
 
     fn setup_resources(&mut self) {
-        self.world.insert(CurrentFrameWindowEvents(Vec::new()));
+        self.world
+            .insert(input::CurrentFrameExternalInputs(Vec::new()));
         self.world.insert(ActiveCamera::empty());
         self.world.insert(DeltaTime::zero());
     }
@@ -263,12 +250,6 @@ impl App {
         };
 
         let loaded_asset = asset::load_asset_into(&mut self.world, desc);
-        render_graph::print_graph_to_dot(
-            &self.world,
-            loaded_asset.scene_roots,
-            std::fs::File::create("graph.dot").unwrap(),
-        );
-
         // REFACTOR: Flatten this when support for && and if-let is on stable
         if args.use_scene_camera {
             if let Some(transform) = loaded_asset.camera {
@@ -327,14 +308,20 @@ impl App {
                     continue;
                 }
                 AppAction::AcceptInput(events) | AppAction::HandleEvents(events) => {
-                    let mut cur_events = self.world.write_resource::<CurrentFrameWindowEvents>();
-                    *cur_events = CurrentFrameWindowEvents(events);
+                    let mut cur_events = self
+                        .world
+                        .write_resource::<input::CurrentFrameExternalInputs>();
+                    *cur_events = input::CurrentFrameExternalInputs(events);
                 }
             }
 
             let grab_cursor = *self.world.read_resource::<GameState>() == GameState::Running;
 
-            self.vk_manager.grab_cursor(grab_cursor);
+            if grab_cursor {
+                self.vk_manager.take_cursor();
+            } else {
+                self.vk_manager.release_cursor();
+            }
 
             // Acquires next swapchain frame and waits for previous work to the upcoming framebuffer to be finished.
             self.vk_manager.prepare_frame();
@@ -345,8 +332,6 @@ impl App {
             // Send data to GPU
             self.vk_manager
                 .prepare_primitives_for_rendering(&self.world);
-
-            render_graph::print_graph(&self.world, std::fs::File::create("graph2.dot").unwrap());
 
             // Run render systems, this is done after the dispatch call to enforce serialization
             self.vk_manager.draw_next_frame(&mut self.world);

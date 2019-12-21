@@ -220,7 +220,15 @@ impl VKManager {
         }
     }
 
-    pub fn grab_cursor(&mut self, grab_cursor: bool) {
+    pub fn take_cursor(&mut self) {
+        self.grab_cursor(true);
+    }
+
+    pub fn release_cursor(&mut self) {
+        self.grab_cursor(false);
+    }
+
+    fn grab_cursor(&mut self, grab_cursor: bool) {
         self.vk_surface
             .window()
             .grab_cursor(grab_cursor)

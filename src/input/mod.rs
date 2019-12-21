@@ -6,17 +6,25 @@
 //! 3. Create an entity in the specs World with *both* a InputContext and a MappedInput component.
 //! 4. When the InputMapper system has run, each entity will have it's mapped input available,
 //!    provided the event was not consumed by a InputContext with higher priority.
-use crate::CurrentFrameWindowEvents;
 use specs::prelude::*;
 use std::collections::{HashMap, HashSet};
 use std::hash::{Hash, Hasher};
-use winit::{AxisId, DeviceId, ElementState, KeyboardInput, VirtualKeyCode};
+use winit::{AxisId, DeviceId, ElementState, KeyboardInput};
 // Based primarily on https://www.gamedev.net/articles/programming/general-and-gameplay-programming/designing-a-robust-input-handling-system-for-games-r2975
 
 mod input_context;
 pub use crate::input::input_context::InputContext;
 pub use crate::input::input_context::InputContextError;
 pub use crate::input::input_context::InputContextPriority;
+
+#[derive(Default, Debug)]
+pub struct CurrentFrameExternalInputs(pub Vec<ExternalInput>);
+
+impl CurrentFrameExternalInputs {
+    fn iter(&self) -> impl Iterator<Item = &ExternalInput> {
+        self.0.iter()
+    }
+}
 
 #[derive(Debug, Clone, Copy, Hash, PartialEq)]
 pub struct ActionId(pub u32);
@@ -128,11 +136,18 @@ impl MappedInput {
     }
 }
 
-type AxisValue = f64;
+pub type AxisValue = f64;
+
+#[derive(Debug)]
+pub enum ExternalInput {
+    KeyPress(winit::VirtualKeyCode),
+    KeyRelease(winit::VirtualKeyCode),
+    MouseDelta { x: AxisValue, y: AxisValue },
+}
 
 #[derive(Debug)]
 struct InputManager {
-    pressed_buttons: HashSet<VirtualKeyCode>,
+    pressed_buttons: HashSet<winit::VirtualKeyCode>,
     axis_movement: HashMap<(DeviceId, AxisId), AxisValue>,
 }
 
@@ -144,29 +159,15 @@ impl InputManager {
         }
     }
 
-    fn register_key(&mut self, input: KeyboardInput) -> bool {
-        let is_pressed = input.state == ElementState::Pressed;
-        let prev_pressed = input
-            .virtual_keycode
-            .map_or(false, |key| self.pressed_buttons.contains(&key));
+    fn register_key_press(&mut self, key: winit::VirtualKeyCode) -> bool {
+        self.pressed_buttons.insert(key)
+    }
 
-        if let Some(key) = input.virtual_keycode {
-            if is_pressed {
-                self.pressed_buttons.insert(key);
-            } else {
-                let existed = self.pressed_buttons.remove(&key);
-                if !existed {
-                    log::warn!("Button was released, but was not registered as pressed.");
-                }
-            }
-        } else {
-            log::warn!(
-                "Captured button input, but did not have a virtual key: {:?}",
-                input
-            );
+    fn register_key_release(&mut self, key: winit::VirtualKeyCode) {
+        let existed = self.pressed_buttons.remove(&key);
+        if !existed {
+            log::warn!("Button was released, but was not registered as pressed.");
         }
-
-        is_pressed && !prev_pressed
     }
 }
 
@@ -177,13 +178,13 @@ impl InputManager {
 impl<'a> System<'a> for InputManager {
     type SystemData = (
         ReadStorage<'a, InputContext>,
-        Read<'a, CurrentFrameWindowEvents>,
+        Read<'a, CurrentFrameExternalInputs>,
         WriteStorage<'a, MappedInput>,
     );
 
-    fn run(&mut self, (contexts, cur_events, mut mapped): Self::SystemData) {
+    fn run(&mut self, (contexts, inputs, mut mapped): Self::SystemData) {
         // TODO: Use a stack/queue/set instead and loop with while !empty?
-        let mut event_used: Vec<bool> = cur_events.iter().map(|_| false).collect::<Vec<_>>();
+        let mut event_used: Vec<bool> = inputs.iter().map(|_| false).collect::<Vec<_>>();
 
         // First loop handles all events. Input contexts are sorted according to their priority.
         // New key presses are mapped to actions, axis change to range. Key presses are recorded
@@ -193,49 +194,27 @@ impl<'a> System<'a> for InputManager {
         for (ctx, mi) in &mut joined {
             log::trace!("Mapping for inputcontext: {:?}", ctx);
 
-            for (idx, event) in cur_events.0.iter().enumerate() {
+            for (idx, input) in inputs.iter().enumerate() {
                 if event_used[idx] {
                     continue;
                 }
 
-                use winit::DeviceEvent::MouseMotion;
-                use winit::Event::DeviceEvent;
-                use winit::Event::WindowEvent;
-                use winit::WindowEvent::KeyboardInput;
+                match input {
+                    ExternalInput::KeyPress(key) => {
+                        let is_new_press = self.register_key_press(*key);
 
-                if let WindowEvent {
-                    event: inner_event, ..
-                } = event
-                {
-                    match inner_event {
-                        KeyboardInput { device_id, input } => {
-                            log::trace!(
-                                "InputManager: Handling {:?} from device {:?}",
-                                input,
-                                device_id
-                            );
-
-                            let is_new_press = self.register_key(*input);
-
-                            if is_new_press {
-                                log::trace!("It's a new key press!");
-                                if let Some(key) = input.virtual_keycode {
-                                    if let Some(&action_id) = ctx.get_action_for(key) {
-                                        mi.add_mapped_action(action_id);
-                                        event_used[idx] = true;
-                                    } else {
-                                        log::trace!("But it was not mapped");
-                                    }
-                                }
+                        if is_new_press {
+                            log::trace!("It's a new key press!");
+                            if let Some(&action_id) = ctx.get_action_for(*key) {
+                                mi.add_mapped_action(action_id);
+                                event_used[idx] = true;
+                            } else {
+                                log::trace!("But it was not mapped to an action");
                             }
                         }
-                        e => log::trace!("InputManager: Ignoring {:?}", e),
                     }
-                } else if let DeviceEvent {
-                    event: inner_event, ..
-                } = event
-                {
-                    if let MouseMotion { delta: (x, y) } = inner_event {
+                    ExternalInput::KeyRelease(key) => self.register_key_release(*key),
+                    ExternalInput::MouseDelta { x, y } => {
                         log::trace!("Captured mouse motion ({}, {})", x, y);
 
                         let axis_deltas = vec![(DeviceAxis::MouseX, x), (DeviceAxis::MouseY, y)];
