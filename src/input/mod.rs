@@ -191,7 +191,7 @@ impl<'a> System<'a> for InputManager {
         let mut joined = (&contexts, &mut mapped).join().collect::<Vec<_>>();
         joined.sort_by(|(ctx_a, _), (ctx_b, _)| ctx_a.cmp(ctx_b));
         for (ctx, mi) in &mut joined {
-            log::debug!("Mapping for inputcontext: {:?}", ctx);
+            log::trace!("Mapping for inputcontext: {:?}", ctx);
 
             for (idx, event) in cur_events.0.iter().enumerate() {
                 if event_used[idx] {
@@ -209,7 +209,7 @@ impl<'a> System<'a> for InputManager {
                 {
                     match inner_event {
                         KeyboardInput { device_id, input } => {
-                            log::debug!(
+                            log::trace!(
                                 "InputManager: Handling {:?} from device {:?}",
                                 input,
                                 device_id
@@ -229,14 +229,14 @@ impl<'a> System<'a> for InputManager {
                                 }
                             }
                         }
-                        e => log::debug!("InputManager: Ignoring {:?}", e),
+                        e => log::trace!("InputManager: Ignoring {:?}", e),
                     }
                 } else if let DeviceEvent {
                     event: inner_event, ..
                 } = event
                 {
                     if let MouseMotion { delta: (x, y) } = inner_event {
-                        log::debug!("Captured mouse motion ({}, {})", x, y);
+                        log::trace!("Captured mouse motion ({}, {})", x, y);
 
                         let axis_deltas = vec![(DeviceAxis::MouseX, x), (DeviceAxis::MouseY, y)];
 
@@ -247,7 +247,7 @@ impl<'a> System<'a> for InputManager {
                                 mi.set_range_delta(range_id, range_delta);
                                 event_used[idx] = true;
                             } else {
-                                log::debug!("But x was not registered");
+                                log::trace!("But x was not registered");
                             }
                         }
                     }

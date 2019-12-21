@@ -306,7 +306,7 @@ pub fn load_gltf_asset(world: &mut World, path: &Path) -> LoadedAsset {
 
     let mut cam_transform: Option<Transform> = None;
     if gltf_doc.cameras().nth(0).is_some() {
-        log::info!("Using camera from gltf");
+        log::info!("Found camera in scene");
         if gltf_doc.cameras().len() > 1 {
             log::warn!("More than one camera found, only using the first");
             log::warn!("Number of cameras: {}", gltf_doc.cameras().len());
@@ -337,7 +337,7 @@ pub fn load_gltf_asset(world: &mut World, path: &Path) -> LoadedAsset {
         }
 
         if let Some(t) = cam_transform {
-            log::info!("Using {:?} as camera transform", t);
+            log::info!("Final camera transform: {:#?}", t);
         }
 
     };

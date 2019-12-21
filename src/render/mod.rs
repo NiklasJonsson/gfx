@@ -275,8 +275,11 @@ impl VKManager {
             .expect("Could not get rotation state for camera");
 
         // TODO: Camera system should write to ViewMatrixResource at the end of system
-        // and we should read it here.
+        // and we should read it here. Or there should be a resource 'ActiveCamera' that
+        // we read the values from.
         let view = FreeFlyCameraController::get_view_matrix_from(cam_pos, cam_rotation_state);
+
+        log::trace!("View matrix: {:#?}", view);
 
         let dims = get_physical_window_dims(self.vk_surface.window());
         let aspect_ratio = dims[0] as f32 / dims[1] as f32;
