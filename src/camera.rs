@@ -197,7 +197,6 @@ impl FreeFlyCameraController {
         // TODO: Move this to gltf-specific code. Take pos + view dir + up as args.
         // camera is looking in negative z according to the spec (gltf)
         let view_dir: glm::Vec3 = (mat * glm::vec4(0.0, 0.0, -1.0, 0.0)).xyz().normalize();
-        let cam_up: glm::Vec3 = mat.column(1).xyz().normalize();
 
         log::debug!("pos: {:?}", pos);
 
@@ -206,6 +205,7 @@ impl FreeFlyCameraController {
             .insert(e, pos)
             .expect("Could not set position for camera!");
 
+        // These are derived with the same formulas used in get_orientation_from() above
         let pitch = view_dir.y.asin();
         log::debug!("pitch: {}", pitch);
 
@@ -220,7 +220,7 @@ impl FreeFlyCameraController {
 
         let mut rot_states = w.write_storage::<CameraRotationState>();
         rot_states
-            .insert(e, CameraRotationState{yaw, pitch})
+            .insert(e, CameraRotationState { yaw, pitch })
             .expect("Could not set rotation state for camera!");
     }
 }

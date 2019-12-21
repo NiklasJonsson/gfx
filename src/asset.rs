@@ -225,14 +225,13 @@ fn build_asset_graph_common<'a>(
 
     // For each child, we want its entity and if it has a camera
     // attached to it.
-    let (mut nodes, cameras): (Vec<_>, Vec<Option<_>>) =
-        src
-            .children()
-            .map(|child| {
-                let AssetGraphResult {node, camera} = build_asset_graph_rec(ctx, world, &child, node);
-                (node, camera)
-            })
-            .unzip();
+    let (mut nodes, cameras): (Vec<_>, Vec<Option<_>>) = src
+        .children()
+        .map(|child| {
+            let AssetGraphResult { node, camera } = build_asset_graph_rec(ctx, world, &child, node);
+            (node, camera)
+        })
+        .unzip();
 
     children.append(&mut nodes);
 
@@ -248,7 +247,7 @@ fn build_asset_graph_common<'a>(
         .insert(node, render_graph::node(children))
         .expect("Could not insert render graph node!");
 
-    AssetGraphResult{ node, camera }
+    AssetGraphResult { node, camera }
 }
 
 fn build_asset_graph_rec<'a>(
@@ -266,7 +265,11 @@ fn build_asset_graph_rec<'a>(
     result
 }
 
-fn build_asset_graph(ctx: &RecGltfCtx, world: &mut World, src_root: &gltf::Node) -> AssetGraphResult {
+fn build_asset_graph(
+    ctx: &RecGltfCtx,
+    world: &mut World,
+    src_root: &gltf::Node,
+) -> AssetGraphResult {
     let result = build_asset_graph_common(ctx, world, src_root);
 
     let mut roots = world.write_storage::<render_graph::RenderGraphRoot>();
@@ -276,7 +279,6 @@ fn build_asset_graph(ctx: &RecGltfCtx, world: &mut World, src_root: &gltf::Node)
 
     result
 }
-
 
 pub fn load_gltf_asset(world: &mut World, path: &Path) -> LoadedAsset {
     log::trace!("load gltf asset {}", path.display());
@@ -299,7 +301,7 @@ pub fn load_gltf_asset(world: &mut World, path: &Path) -> LoadedAsset {
         log::trace!("Root node {}", node.name().unwrap_or("node_no_name"));
         log::trace!("#children {}", node.children().len());
 
-        let AssetGraphResult {node, camera} = build_asset_graph(&rec_ctx, world, &node);
+        let AssetGraphResult { node, camera } = build_asset_graph(&rec_ctx, world, &node);
         roots.push(node);
         camera_ent = camera;
     }
@@ -321,7 +323,7 @@ pub fn load_gltf_asset(world: &mut World, path: &Path) -> LoadedAsset {
                 let transforms = world.read_storage::<Transform>();
                 if let Some(t) = transforms.get(ent) {
                     let t: glm::Mat4 = (*t).into();
-                    transform = transform * t;
+                    transform *= t;
                 }
             }
             cam_transform = Some(transform.into());
@@ -339,10 +341,12 @@ pub fn load_gltf_asset(world: &mut World, path: &Path) -> LoadedAsset {
         if let Some(t) = cam_transform {
             log::info!("Final camera transform: {:#?}", t);
         }
-
     };
 
-    LoadedAsset { scene_roots: roots, camera: cam_transform }
+    LoadedAsset {
+        scene_roots: roots,
+        camera: cam_transform,
+    }
 }
 
 /* TODO:
@@ -467,7 +471,7 @@ fn load_obj(path: &str) -> (VertexBuf, Vec<u32>) {
 pub fn load_image(path: &str) -> image::RgbaImage {
     log::info!("Trying to load image from {}", path);
     let image = image::open(path)
-        .expect(format!("Unable to load image from {}", path).as_str())
+        .unwrap_or_else(|_| panic!("Unable to load image from {}", path))
         .to_rgba();
 
     log::info!(

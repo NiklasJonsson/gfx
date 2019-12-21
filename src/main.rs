@@ -13,9 +13,9 @@ use winit::{Event, EventsLoop, WindowBuilder, WindowEvent};
 
 use specs::prelude::*;
 
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
-use std::path::{Path, PathBuf};
 
 mod asset;
 mod camera;
@@ -275,7 +275,6 @@ impl App {
                 camera::Camera::set_camera_state(&mut self.world, cam_entity, &transform);
             }
         }
-
     }
 
     fn run(&mut self, args: Args) {
@@ -287,7 +286,7 @@ impl App {
         self.world.register::<render_graph::RenderGraphNode>();
         self.world.register::<render_graph::RenderGraphRoot>();
         self.world.register::<render_graph::RenderGraphChild>();
-        self.world.register::<crate::camera::Camera>();
+        self.world.register::<camera::Camera>();
         dispatcher.setup(&mut self.world);
 
         // Setup world objects, e.g. camera and chalet model
@@ -387,22 +386,28 @@ fn main() {
     let matches = clap::App::new("ramneryd")
         .version("0.1.0")
         .about("Vulkan renderer")
-        .arg(clap::Arg::with_name("view-gltf")
-             .short("-i")
-             .long("view-gltf")
-             .value_name("GLTF-FILE")
-             .help("Reads a gltf file and renders it.")
-             .takes_value(true)
-             .required(true))
+        .arg(
+            clap::Arg::with_name("view-gltf")
+                .short("-i")
+                .long("view-gltf")
+                .value_name("GLTF-FILE")
+                .help("Reads a gltf file and renders it.")
+                .takes_value(true)
+                .required(true),
+        )
         // TODO: This can only be used if we are passing a scene from the command line
-        .arg(clap::Arg::with_name("use-scene-camera")
-             .long("use-scene-camera")
-             .help("Use the camera encoded in e.g. a gltf scene"))
-        .arg(clap::Arg::with_name("run-n-frames")
-             .long("run-n-frames")
-             .value_name("N")
-             .takes_value(true)
-             .help("Run only N frames"))
+        .arg(
+            clap::Arg::with_name("use-scene-camera")
+                .long("use-scene-camera")
+                .help("Use the camera encoded in e.g. a gltf scene"),
+        )
+        .arg(
+            clap::Arg::with_name("run-n-frames")
+                .long("run-n-frames")
+                .value_name("N")
+                .takes_value(true)
+                .help("Run only N frames"),
+        )
         .get_matches();
 
     let path = matches.value_of("view-gltf").expect("This is required!");
@@ -414,22 +419,23 @@ fn main() {
 
     let use_scene_camera = matches.is_present("use-scene-camera");
 
-    let run_n_frames =
-        if let Some(s) = matches.value_of("run-n-frames") {
-            match s.parse::<usize>() {
-                Ok(n) => Some(n),
-                Err(e) => {
-                    println!("Invalid value for run-n-frames: {}", e);
-                    return;
-                }
+    let run_n_frames = if let Some(s) = matches.value_of("run-n-frames") {
+        match s.parse::<usize>() {
+            Ok(n) => Some(n),
+            Err(e) => {
+                println!("Invalid value for run-n-frames: {}", e);
+                return;
             }
-        } else {
-            None
-        };
+        }
+    } else {
+        None
+    };
 
-
-
-    let args = Args{gltf_path: path_buf, use_scene_camera, run_n_frames};
+    let args = Args {
+        gltf_path: path_buf,
+        use_scene_camera,
+        run_n_frames,
+    };
 
     let mut app = App::new();
 

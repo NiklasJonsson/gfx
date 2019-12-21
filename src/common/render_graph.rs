@@ -70,7 +70,7 @@ impl TransformPropagation {
         let transform: Mat4 = transforms
             .get(ent)
             .copied()
-            .unwrap_or(glm::identity::<f32, U4>().into())
+            .unwrap_or_else(|| glm::identity::<f32, U4>().into())
             .into();
         let transform = stack.last().unwrap() * transform;
 
@@ -184,8 +184,8 @@ impl PathDirection {
     fn next(&mut self) {
         use PathDirection::*;
         *self = match *self {
-            RootToNode(idx) => RootToNode(idx+1),
-            NodeToRoot(idx) => NodeToRoot(idx-1),
+            RootToNode(idx) => RootToNode(idx + 1),
+            NodeToRoot(idx) => NodeToRoot(idx - 1),
         }
     }
 
@@ -204,7 +204,6 @@ impl PathDirection {
             RootToNode(idx) => *idx,
             NodeToRoot(idx) => *idx,
         }
-
     }
 }
 
@@ -258,19 +257,23 @@ fn get_root_path(w: &World, node: Entity) -> Vec<Entity> {
     path
 }
 
-
-
 /// Returns an iterator that walks the path from the root to the node
 pub fn root_to_node_path(world: &World, node: Entity) -> impl ExactSizeIterator<Item = Entity> {
     let path = get_root_path(world, node);
-    PathWalker{path, dir: PathDirection::RootToNode(0)}
+    PathWalker {
+        path,
+        dir: PathDirection::RootToNode(0),
+    }
 }
 
 /// Returns an iterator that walks the path from the root to the node
 pub fn node_to_root_path(world: &World, node: Entity) -> impl ExactSizeIterator<Item = Entity> {
     let path = get_root_path(world, node);
     let len = path.len();
-    PathWalker{path, dir: PathDirection::NodeToRoot(len-1)}
+    PathWalker {
+        path,
+        dir: PathDirection::NodeToRoot(len - 1),
+    }
 }
 
 fn e2str(e: Entity) -> String {
@@ -466,11 +469,14 @@ mod tests {
         assert_eq!(order, vec![1, 4, 7, 3, 2, 6, 5]);
     }
 
-    fn verify_it(id2ent: &Vec<Entity>,
-                 it: impl Iterator<Item = Entity>,
-                 order: Vec<usize>) -> bool {
+    fn verify_it(
+        id2ent: &Vec<Entity>,
+        it: impl Iterator<Item = Entity>,
+        order: Vec<usize>,
+    ) -> bool {
         let expected = order.into_iter().map(|i| id2ent[i]).collect::<Vec<_>>();
-        it.zip(expected.iter()).fold(true, |acc, (ent, &exp)| acc || (ent == exp))
+        it.zip(expected.iter())
+            .fold(true, |acc, (ent, &exp)| acc || (ent == exp))
     }
 
     #[test]
@@ -491,13 +497,41 @@ mod tests {
             id2ent[*id] = ent;
         }
 
-        assert!(verify_it(&id2ent, render_graph::node_to_root_path(&w, id2ent[2]), vec![2, 1]));
-        assert!(verify_it(&id2ent, render_graph::node_to_root_path(&w, id2ent[5]), vec![5, 2, 1]));
-        assert!(verify_it(&id2ent, render_graph::node_to_root_path(&w, id2ent[3]), vec![3, 1]));
-        assert!(verify_it(&id2ent, render_graph::node_to_root_path(&w, id2ent[6]), vec![6, 2, 1]));
-        assert!(verify_it(&id2ent, render_graph::node_to_root_path(&w, id2ent[4]), vec![4, 1]));
-        assert!(verify_it(&id2ent, render_graph::node_to_root_path(&w, id2ent[7]), vec![7, 4, 1]));
-        assert!(verify_it(&id2ent, render_graph::node_to_root_path(&w, id2ent[1]), vec![1]));
+        assert!(verify_it(
+            &id2ent,
+            render_graph::node_to_root_path(&w, id2ent[2]),
+            vec![2, 1]
+        ));
+        assert!(verify_it(
+            &id2ent,
+            render_graph::node_to_root_path(&w, id2ent[5]),
+            vec![5, 2, 1]
+        ));
+        assert!(verify_it(
+            &id2ent,
+            render_graph::node_to_root_path(&w, id2ent[3]),
+            vec![3, 1]
+        ));
+        assert!(verify_it(
+            &id2ent,
+            render_graph::node_to_root_path(&w, id2ent[6]),
+            vec![6, 2, 1]
+        ));
+        assert!(verify_it(
+            &id2ent,
+            render_graph::node_to_root_path(&w, id2ent[4]),
+            vec![4, 1]
+        ));
+        assert!(verify_it(
+            &id2ent,
+            render_graph::node_to_root_path(&w, id2ent[7]),
+            vec![7, 4, 1]
+        ));
+        assert!(verify_it(
+            &id2ent,
+            render_graph::node_to_root_path(&w, id2ent[1]),
+            vec![1]
+        ));
     }
 
     #[test]
@@ -518,13 +552,41 @@ mod tests {
             id2ent[*id] = ent;
         }
 
-        assert!(verify_it(&id2ent, render_graph::root_to_node_path(&w, id2ent[2]), vec![1, 2]));
-        assert!(verify_it(&id2ent, render_graph::root_to_node_path(&w, id2ent[5]), vec![1, 2, 5]));
-        assert!(verify_it(&id2ent, render_graph::root_to_node_path(&w, id2ent[3]), vec![1, 3]));
-        assert!(verify_it(&id2ent, render_graph::root_to_node_path(&w, id2ent[6]), vec![1, 2, 6]));
-        assert!(verify_it(&id2ent, render_graph::root_to_node_path(&w, id2ent[4]), vec![1, 4]));
-        assert!(verify_it(&id2ent, render_graph::root_to_node_path(&w, id2ent[7]), vec![1, 4, 7]));
-        assert!(verify_it(&id2ent, render_graph::root_to_node_path(&w, id2ent[1]), vec![1]));
+        assert!(verify_it(
+            &id2ent,
+            render_graph::root_to_node_path(&w, id2ent[2]),
+            vec![1, 2]
+        ));
+        assert!(verify_it(
+            &id2ent,
+            render_graph::root_to_node_path(&w, id2ent[5]),
+            vec![1, 2, 5]
+        ));
+        assert!(verify_it(
+            &id2ent,
+            render_graph::root_to_node_path(&w, id2ent[3]),
+            vec![1, 3]
+        ));
+        assert!(verify_it(
+            &id2ent,
+            render_graph::root_to_node_path(&w, id2ent[6]),
+            vec![1, 2, 6]
+        ));
+        assert!(verify_it(
+            &id2ent,
+            render_graph::root_to_node_path(&w, id2ent[4]),
+            vec![1, 4]
+        ));
+        assert!(verify_it(
+            &id2ent,
+            render_graph::root_to_node_path(&w, id2ent[7]),
+            vec![1, 4, 7]
+        ));
+        assert!(verify_it(
+            &id2ent,
+            render_graph::root_to_node_path(&w, id2ent[1]),
+            vec![1]
+        ));
     }
 
     #[test]
@@ -547,10 +609,16 @@ mod tests {
             let e = expected[*id];
             assert_eq!(render_graph::root_to_node_path(&w, ent).len(), e);
             assert_eq!(render_graph::root_to_node_path(&w, ent).size_hint().0, e);
-            assert_eq!(render_graph::root_to_node_path(&w, ent).size_hint().1, Some(e));
+            assert_eq!(
+                render_graph::root_to_node_path(&w, ent).size_hint().1,
+                Some(e)
+            );
             assert_eq!(render_graph::node_to_root_path(&w, ent).len(), e);
             assert_eq!(render_graph::node_to_root_path(&w, ent).size_hint().0, e);
-            assert_eq!(render_graph::node_to_root_path(&w, ent).size_hint().1, Some(e));
+            assert_eq!(
+                render_graph::node_to_root_path(&w, ent).size_hint().1,
+                Some(e)
+            );
         }
     }
 }
