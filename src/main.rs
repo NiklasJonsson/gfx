@@ -13,7 +13,7 @@ use winit::{Event, EventsLoop, WindowBuilder, WindowEvent};
 
 use specs::prelude::*;
 
-use std::path::{Path, PathBuf};
+use std::path::{PathBuf};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
@@ -141,7 +141,6 @@ impl EventManager {
     }
 
     fn collect_event(&mut self, event: Event) {
-        use input::ExternalInput as ExtInp;
         log::trace!("Received event: {:?}", event);
         match event {
             Event::WindowEvent {

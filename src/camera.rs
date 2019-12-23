@@ -3,7 +3,6 @@ extern crate num_derive;
 extern crate winit;
 
 use crate::common::*;
-use crate::input;
 use crate::input::{
     DeviceAxis, Input, InputContext, InputContextError, MappedInput, RangeId, Sensitivity, StateId,
 };

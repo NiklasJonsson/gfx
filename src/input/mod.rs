@@ -9,7 +9,7 @@
 use specs::prelude::*;
 use std::collections::{HashMap, HashSet};
 use std::hash::{Hash, Hasher};
-use winit::{AxisId, DeviceId, ElementState, KeyboardInput};
+use winit::{AxisId, DeviceId};
 // Based primarily on https://www.gamedev.net/articles/programming/general-and-gameplay-programming/designing-a-robust-input-handling-system-for-games-r2975
 
 mod input_context;
