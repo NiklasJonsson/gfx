@@ -74,9 +74,5 @@ impl<'a> System<'a> for RenderSettingsSys {
 }
 
 pub fn register_systems<'a, 'b>(builder: DispatcherBuilder<'a, 'b>) -> DispatcherBuilder<'a, 'b> {
-    builder.with(
-        RenderSettingsSys,
-        "rendering_settings_sys",
-        &[crate::input::INPUT_MANAGER_SYSTEM_ID],
-    )
+    builder.with(RenderSettingsSys, "rendering_settings_sys", &[])
 }

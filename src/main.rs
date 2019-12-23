@@ -67,19 +67,32 @@ impl std::ops::Mul<f32> for DeltaTime {
     }
 }
 
+#[derive(Debug)]
+enum AppState {
+    Focused,
+    Unfocused,
+}
+
 struct App {
     world: World,
     events_loop: EventsLoop,
     vk_manager: VKManager,
+    state: AppState,
 }
 
 // TODO: Handle resized here as well
 #[derive(Debug)]
 enum AppAction {
     Quit,
-    IgnoreInput,
-    AcceptInput(Vec<input::ExternalInput>),
-    HandleEvents(Vec<input::ExternalInput>),
+    Focus,
+    Unfocus,
+    HandleInput(Vec<input::ExternalInput>),
+}
+
+impl Default for AppAction {
+    fn default() -> Self {
+        AppAction::HandleInput(Vec::new())
+    }
 }
 
 impl AppAction {
@@ -87,18 +100,21 @@ impl AppAction {
         use AppAction::*;
         match (new, self) {
             (_, Quit) => Quit,
-            (_, IgnoreInput) => IgnoreInput,
             (Quit, _) => Quit,
-            (IgnoreInput, _) => IgnoreInput,
-            (AcceptInput(vec), _) => AcceptInput(vec),
-            (HandleEvents(mut new_events), AcceptInput(mut old_events)) => {
-                old_events.append(&mut new_events);
-                AcceptInput(old_events)
+            (Unfocus, _) => Unfocus,
+            (Focus, Unfocus) => Focus,
+            (_, Unfocus) => Unfocus,
+            (HandleInput(mut new), HandleInput(mut old)) => HandleInput({
+                old.append(&mut new);
+                old
+            }),
+            (HandleInput(vec), Focus) => HandleInput(vec),
+            (Focus, HandleInput(v)) => {
+                log::warn!("Spurios focus event received, ignoring");
+                HandleInput(v)
             }
-            (HandleEvents(mut new_events), HandleEvents(mut old_events)) => {
-                old_events.append(&mut new_events);
-                HandleEvents(old_events)
-            }
+            // Sometimes there are several focus events in a row
+            (Focus, Focus) => Focus,
         }
     }
 }
@@ -115,7 +131,7 @@ struct EventManager {
 impl EventManager {
     fn new() -> Self {
         Self {
-            action: AppAction::HandleEvents(Vec::new()),
+            action: AppAction::HandleInput(Vec::new()),
         }
     }
 
@@ -126,23 +142,25 @@ impl EventManager {
 
     fn collect_event(&mut self, event: Event) {
         use input::ExternalInput as ExtInp;
+        log::trace!("Received event: {:?}", event);
         match event {
             Event::WindowEvent {
                 event: inner_event, ..
             } => match inner_event {
                 WindowEvent::CloseRequested => {
-                    log::info!("EventManager: Received CloseRequested window event");
+                    log::debug!("Received CloseRequested window event");
                     self.update_action(AppAction::Quit);
                 }
                 WindowEvent::Focused(false) => {
-                    log::trace!("Window lost focus, ignoring input");
-                    self.update_action(AppAction::IgnoreInput);
+                    log::debug!("Window lost focus, ignoring input");
+                    self.update_action(AppAction::Unfocus);
                 }
                 WindowEvent::Focused(true) => {
-                    log::trace!("Window gained focus, accepting input");
-                    self.update_action(AppAction::AcceptInput(Vec::new()));
+                    log::debug!("Window gained focus, accepting input");
+                    self.update_action(AppAction::Focus);
                 }
                 WindowEvent::KeyboardInput { device_id, input } => {
+                    log::debug!("Captured key: {:?} from {:?}", input, device_id);
                     let is_pressed = input.state == winit::ElementState::Pressed;
                     if let Some(key) = input.virtual_keycode {
                         let ei = if is_pressed {
@@ -151,29 +169,37 @@ impl EventManager {
                             input::ExternalInput::KeyRelease(key)
                         };
 
-                        self.update_action(AppAction::HandleEvents(vec![ei]));
+                        self.update_action(AppAction::HandleInput(vec![ei]));
                     } else {
                         log::warn!("Key clicked but no virtual key mapped!");
                     }
                 }
-                e => log::trace!("Igoring window event {:?}", e),
+                e => log::trace!("Ignoring window event {:?}", e),
             },
             Event::DeviceEvent {
                 event: inner_event, ..
             } => {
                 if let winit::DeviceEvent::MouseMotion { delta: (x, y) } = inner_event {
+                    log::debug!("Captured mouse motion: ({:?}, {:?})", x, y);
                     let ei = input::ExternalInput::MouseDelta { x, y };
-                    self.update_action(AppAction::HandleEvents(vec![ei]));
+                    self.update_action(AppAction::HandleInput(vec![ei]));
                 } else {
-                    log::trace!("Igoring device event {:?}", inner_event);
+                    log::trace!("Ignoring device event {:?}", inner_event);
                 }
             }
-            e => log::trace!("Igoring event {:?}", e),
+            e => log::trace!("Ignoring event {:?}", e),
         };
     }
 
     fn resolve(&mut self) -> AppAction {
-        std::mem::replace(&mut self.action, AppAction::HandleEvents(Vec::new()))
+        let new = match &self.action {
+            AppAction::HandleInput(_) => AppAction::HandleInput(Vec::new()),
+            AppAction::Focus => AppAction::Focus,
+            AppAction::Unfocus => AppAction::Unfocus,
+            AppAction::Quit => AppAction::Quit,
+        };
+
+        std::mem::replace(&mut self.action, new)
     }
 }
 
@@ -187,23 +213,31 @@ impl App {
     // FIXME: This lives here only because the lifetime parameters are a pain.
     // The whole App struct would need to be templated if this was included.
     // Maybe this can be solved in another way...
-    fn init_dispatcher<'a, 'b>() -> Dispatcher<'a, 'b> {
-        let builder = DispatcherBuilder::new();
+    // TODO: Add a dispatcher with <'static, 'static> to app (or two)
+    /// Return two dispatchers, one for systems that run regardless if the game is paused
+    /// or not and one that is is not run when paused.
+    fn init_dispatchers<'a, 'b>() -> (Dispatcher<'a, 'b>, Dispatcher<'a, 'b>) {
+        let control_builder = DispatcherBuilder::new();
         // Input needs to go before as most systems depends on it
-        let builder = input::register_systems(builder);
+        let control_builder = input::register_systems(control_builder);
+        let control_builder = game_state::register_systems(control_builder);
 
-        let builder = camera::register_systems(builder);
-        let builder = settings::register_systems(builder);
-        let builder = game_state::register_systems(builder);
+        let control = control_builder.build();
 
-        builder
+        let engine_builder = DispatcherBuilder::new();
+        let engine_builder = camera::register_systems(engine_builder);
+        let engine_builder = settings::register_systems(engine_builder);
+
+        let engine = engine_builder
             .with_barrier()
             .with(
                 render_graph::TransformPropagation,
                 "transform_propagation",
                 &[],
             )
-            .build()
+            .build();
+
+        (control, engine)
     }
 
     fn setup_resources(&mut self) {
@@ -259,7 +293,7 @@ impl App {
     }
 
     fn run(&mut self, args: Args) {
-        let mut dispatcher = Self::init_dispatcher();
+        let (mut control_systems, mut engine_systems) = Self::init_dispatchers();
 
         // Register all component types
         self.world.register::<Renderable>();
@@ -268,7 +302,8 @@ impl App {
         self.world.register::<render_graph::RenderGraphRoot>();
         self.world.register::<render_graph::RenderGraphChild>();
         self.world.register::<camera::Camera>();
-        dispatcher.setup(&mut self.world);
+        control_systems.setup(&mut self.world);
+        engine_systems.setup(&mut self.world);
 
         // Setup world objects, e.g. camera and chalet model
         self.populate_world(&args);
@@ -301,33 +336,50 @@ impl App {
                 .poll_events(|event| event_manager.collect_event(event));
 
             match event_manager.resolve() {
-                AppAction::Quit => {
-                    return;
+                AppAction::Quit => return,
+                AppAction::Focus => self.state = AppState::Focused,
+                AppAction::Unfocus => {
+                    self.state = AppState::Unfocused;
+                    *self.world.write_resource::<GameState>() = GameState::Paused;
                 }
-                AppAction::IgnoreInput => {
-                    continue;
-                }
-                AppAction::AcceptInput(events) | AppAction::HandleEvents(events) => {
-                    let mut cur_events = self
+                AppAction::HandleInput(input) => {
+                    let mut cur_inputs = self
                         .world
                         .write_resource::<input::CurrentFrameExternalInputs>();
-                    *cur_events = input::CurrentFrameExternalInputs(events);
+                    *cur_inputs = input::CurrentFrameExternalInputs(input);
                 }
             }
 
-            let grab_cursor = *self.world.read_resource::<GameState>() == GameState::Running;
+            let running = *self.world.read_resource::<GameState>() == GameState::Running;
+            let focused = if let AppState::Focused = self.state {
+                true
+            } else {
+                false
+            };
 
-            if grab_cursor {
+            if running {
+                assert!(focused, "Can't be running but not be in focus!");
                 self.vk_manager.take_cursor();
             } else {
                 self.vk_manager.release_cursor();
+            }
+
+            if !focused {
+                continue;
+            }
+
+            // Run input manager and escape catcher here
+            control_systems.dispatch(&self.world);
+
+            if let GameState::Paused = *self.world.read_resource::<GameState>() {
+                continue;
             }
 
             // Acquires next swapchain frame and waits for previous work to the upcoming framebuffer to be finished.
             self.vk_manager.prepare_frame();
 
             // Run all ECS systems (blocking call)
-            dispatcher.dispatch(&self.world);
+            engine_systems.dispatch(&self.world);
 
             // Send data to GPU
             self.vk_manager
@@ -358,10 +410,13 @@ impl App {
 
         let vk_manager = VKManager::create(vk_instance, vk_surface);
 
+        let state = AppState::Focused;
+
         App {
             world,
             events_loop,
             vk_manager,
+            state,
         }
     }
 }

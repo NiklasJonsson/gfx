@@ -41,6 +41,8 @@ impl<'a> System<'a> for GameStateSwitcher {
                     Running => Paused,
                 };
 
+                log::debug!("GameStateSwitcher: set state: {:?}", *state);
+
                 ctx.set_consume_all(*state == Paused);
             }
             inp.clear();

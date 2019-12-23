@@ -183,6 +183,7 @@ impl<'a> System<'a> for InputManager {
     );
 
     fn run(&mut self, (contexts, inputs, mut mapped): Self::SystemData) {
+        log::trace!("InputManager: run");
         // TODO: Use a stack/queue/set instead and loop with while !empty?
         let mut event_used: Vec<bool> = inputs.iter().map(|_| false).collect::<Vec<_>>();
 
@@ -204,12 +205,13 @@ impl<'a> System<'a> for InputManager {
                         let is_new_press = self.register_key_press(*key);
 
                         if is_new_press {
-                            log::trace!("It's a new key press!");
+                            log::debug!("It's a new key press!");
                             if let Some(&action_id) = ctx.get_action_for(*key) {
+                                log::debug!("Mapped to action: {:?}", action_id);
                                 mi.add_mapped_action(action_id);
                                 event_used[idx] = true;
                             } else {
-                                log::trace!("But it was not mapped to an action");
+                                log::debug!("But it was not mapped to an action");
                             }
                         }
                     }

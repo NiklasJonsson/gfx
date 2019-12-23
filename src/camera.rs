@@ -349,9 +349,5 @@ impl<'a> System<'a> for FreeFlyCameraController {
 }
 
 pub fn register_systems<'a, 'b>(builder: DispatcherBuilder<'a, 'b>) -> DispatcherBuilder<'a, 'b> {
-    builder.with(
-        FreeFlyCameraController,
-        "free_fly_camera",
-        &[input::INPUT_MANAGER_SYSTEM_ID],
-    )
+    builder.with(FreeFlyCameraController, "free_fly_camera", &[])
 }
