@@ -319,14 +319,14 @@ fn mat2pos(m: impl Into<glm::Mat4>) -> String {
     )
 }
 
-fn node_to_dot<W: Write>(world: &World, e: Entity, w: &mut W, prefix: &str) {
+fn node_to_dot<W: Write>(world: &World, e: Entity, w: &mut W, prefix: &str) -> std::io::Result<()> {
     let nodes_storage = world.read_storage::<RenderGraphNode>();
     let node_name = format!("\"{} {}\"", prefix, e2str(e));
     let trns = world.read_storage::<Transform>();
     let mats = world.read_storage::<ModelMatrix>();
 
     let (trm_str, mat_str) = match (trns.get(e), mats.get(e)) {
-        (None, None) => return,
+        (None, None) => return Ok(()),
         (Some(m), None) => (mat2pos(*m), String::from("")),
         (None, Some(m)) => (String::from(""), mat2pos(*m)),
         (Some(m), Some(n)) => (mat2pos(*m), mat2pos(*n)),
@@ -336,39 +336,45 @@ fn node_to_dot<W: Write>(world: &World, e: Entity, w: &mut W, prefix: &str) {
         w,
         "  {} [label=\"{}\\n---------\\n{}\"]\n",
         node_name, trm_str, mat_str
-    );
+    )?;
 
     if let Some(node) = nodes_storage.get(e) {
         for child in node.children.iter() {
             if mats.get(*child).is_some() || trns.get(*child).is_some() {
-                write!(w, "  {} -> \"node {}\"\n", node_name, e2str(*child));
+                write!(w, "  {} -> \"node {}\"\n", node_name, e2str(*child))?;
                 node_to_dot(world, *child, w, "node");
             }
         }
     }
+
+    Ok(())
 }
 
-pub fn print_graph_to_dot(world: &World, roots: Vec<Entity>, mut w: impl Write) {
-    write!(w, "digraph {{\n");
+pub fn print_graph_to_dot(
+    world: &World,
+    roots: Vec<Entity>,
+    mut w: impl Write,
+) -> std::io::Result<()> {
+    write!(w, "digraph {{\n")?;
 
     for root in roots.iter() {
-        write!(w, "// ===== New subgraph =====\n");
-        node_to_dot(world, *root, &mut w, "root");
+        write!(w, "// ===== New subgraph =====\n")?;
+        node_to_dot(world, *root, &mut w, "root")?;
     }
 
-    write!(w, "}}\n");
+    write!(w, "}}\n")
 }
 
-pub fn print_graph(world: &World, mut w: impl Write) {
+pub fn print_graph(world: &World, mut w: impl Write) -> std::io::Result<()> {
     let entities = world.read_resource::<specs::world::EntitiesRes>();
     let roots_storage = world.read_storage::<RenderGraphRoot>();
 
-    write!(w, "digraph {{\n");
+    write!(w, "digraph {{\n")?;
     for (root, _) in (&entities, &roots_storage).join() {
-        write!(w, "// ===== New subgraph =====\n");
-        node_to_dot(world, root, &mut w, "root");
+        write!(w, "// ===== New subgraph =====\n")?;
+        node_to_dot(world, root, &mut w, "root")?;
     }
-    write!(w, "}}\n");
+    write!(w, "}}\n")
 }
 
 #[cfg(test)]

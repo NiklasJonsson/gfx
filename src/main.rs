@@ -207,6 +207,7 @@ struct Args {
     gltf_path: PathBuf,
     use_scene_camera: bool,
     run_n_frames: Option<usize>,
+    scene_out_file: Option<PathBuf>,
 }
 
 impl App {
@@ -284,6 +285,26 @@ impl App {
         };
 
         let loaded_asset = asset::load_asset_into(&mut self.world, desc);
+        if let Some(path) = &args.scene_out_file {
+            match std::fs::File::create(path) {
+                Ok(file) => {
+                    let result = render_graph::print_graph_to_dot(
+                        &self.world,
+                        loaded_asset.scene_roots,
+                        file,
+                    );
+                    if let Err(e) = result {
+                        log::warn!("Failed to write scene graph to file: {}", e);
+                    }
+                }
+                Err(e) => log::warn!(
+                    "Unable to write scene graph to {}, because {}",
+                    path.display(),
+                    e
+                ),
+            }
+        }
+
         // REFACTOR: Flatten this when support for && and if-let is on stable
         if args.use_scene_camera {
             if let Some(transform) = loaded_asset.camera {
@@ -442,6 +463,15 @@ fn main() {
                 .help("Use the camera encoded in e.g. a gltf scene"),
         )
         .arg(
+            clap::Arg::with_name("scene-out-file")
+                .value_name("FILE")
+                .long("scene-graph-to-file")
+                .takes_value(true)
+                .help(
+                    "Write the scene graph of the loaded scene in dot-format to the supplied file",
+                ),
+        )
+        .arg(
             clap::Arg::with_name("run-n-frames")
                 .long("run-n-frames")
                 .value_name("N")
@@ -471,10 +501,13 @@ fn main() {
         None
     };
 
+    let scene_out_file = matches.value_of("scene-out-file").map(|p| PathBuf::from(p));
+
     let args = Args {
         gltf_path: path_buf,
         use_scene_camera,
         run_n_frames,
+        scene_out_file,
     };
 
     let mut app = App::new();
