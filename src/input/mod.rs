@@ -7,7 +7,7 @@
 //! 4. When the InputMapper system has run, each entity will have it's mapped input available,
 //!    provided the event was not consumed by a InputContext with higher priority.
 use specs::prelude::*;
-use std::collections::{HashMap, HashSet};
+use std::collections::{HashMap, HashSet, VecDeque};
 use std::hash::{Hash, Hasher};
 use winit::{AxisId, DeviceId};
 // Based primarily on https://www.gamedev.net/articles/programming/general-and-gameplay-programming/designing-a-robust-input-handling-system-for-games-r2975
@@ -23,6 +23,10 @@ pub struct CurrentFrameExternalInputs(pub Vec<ExternalInput>);
 impl CurrentFrameExternalInputs {
     fn iter(&self) -> impl Iterator<Item = &ExternalInput> {
         self.0.iter()
+    }
+
+    fn len(&self) -> usize {
+        self.0.len()
     }
 }
 
@@ -184,85 +188,78 @@ impl<'a> System<'a> for InputManager {
 
     fn run(&mut self, (contexts, inputs, mut mapped): Self::SystemData) {
         log::trace!("InputManager: run");
-        // TODO: Use a stack/queue/set instead and loop with while !empty?
-        let mut event_used: Vec<bool> = inputs.iter().map(|_| false).collect::<Vec<_>>();
+        let mut action_keys = VecDeque::with_capacity(inputs.len());
+        let mut axes = VecDeque::with_capacity(inputs.len());
 
-        // First loop handles all events. Input contexts are sorted according to their priority.
-        // New key presses are mapped to actions, axis change to range. Key presses are recorded
-        // and if they are pressed, they are mapped to States in the second loop
-        let mut joined = (&contexts, &mut mapped).join().collect::<Vec<_>>();
-        joined.sort_by(|(ctx_a, _), (ctx_b, _)| ctx_a.cmp(ctx_b));
-        for (ctx, mi) in &mut joined {
-            log::trace!("Mapping for inputcontext: {:?}", ctx);
-
-            for (idx, input) in inputs.iter().enumerate() {
-                if event_used[idx] {
-                    continue;
-                }
-
-                match input {
-                    ExternalInput::KeyPress(key) => {
-                        let is_new_press = self.register_key_press(*key);
-
-                        if is_new_press {
-                            log::debug!("It's a new key press!");
-                            if let Some(&action_id) = ctx.get_action_for(*key) {
-                                log::debug!("Mapped to action: {:?}", action_id);
-                                mi.add_mapped_action(action_id);
-                                event_used[idx] = true;
-                            } else {
-                                log::debug!("But it was not mapped to an action");
-                            }
-                        }
-                    }
-                    ExternalInput::KeyRelease(key) => self.register_key_release(*key),
-                    ExternalInput::MouseDelta { x, y } => {
-                        log::trace!("Captured mouse motion ({}, {})", x, y);
-
-                        let axis_deltas = vec![(DeviceAxis::MouseX, x), (DeviceAxis::MouseY, y)];
-
-                        for (axis, &axis_delta) in axis_deltas.into_iter() {
-                            if let Some((range_id, range_delta)) =
-                                ctx.register_axis_delta(axis, axis_delta)
-                            {
-                                mi.set_range_delta(range_id, range_delta);
-                                event_used[idx] = true;
-                            } else {
-                                log::trace!("But x was not registered");
-                            }
-                        }
+        for input in inputs.iter() {
+            match input {
+                ExternalInput::KeyPress(key) => {
+                    let is_new_press = self.register_key_press(*key);
+                    if is_new_press {
+                        log::debug!("New key ({:?}) is an action!", key);
+                        action_keys.push_back(key);
                     }
                 }
-
-                if ctx.consume_all() {
-                    event_used[idx] = true;
+                ExternalInput::KeyRelease(key) => self.register_key_release(*key),
+                ExternalInput::MouseDelta { x, y } => {
+                    log::trace!("Captured mouse delta ({}, {})", x, y);
+                    axes.push_back((DeviceAxis::MouseX, x));
+                    axes.push_back((DeviceAxis::MouseY, y));
                 }
             }
         }
 
-        // Send out states as well
+        let mut state_keys = VecDeque::with_capacity(inputs.len());
+        for key in self.pressed_buttons.iter() {
+            log::debug!(
+                "Key ({:?}) is still pressed and will generate a state!",
+                key
+            );
+            state_keys.push_back(key);
+        }
 
-        // Keep track of consumed button presses/states so that two contexts can't
-        // match on the same pressed button.
-        let mut button_used: Vec<bool> = self
-            .pressed_buttons
-            .iter()
-            .map(|_| false)
-            .collect::<Vec<_>>();
+        let mut joined = (&contexts, &mut mapped).join().collect::<Vec<_>>();
+        joined.sort_by(|(ctx_a, _), (ctx_b, _)| ctx_a.cmp(ctx_b));
 
-        for (ctx, mi) in joined {
-            for (idx, btn) in self.pressed_buttons.iter().enumerate() {
-                if button_used[idx] {
-                    continue;
-                }
-
-                if let Some(&id) = ctx.get_state_for(*btn) {
-                    mi.add_mapped_state(id);
-                    button_used[idx] = true;
+        log::trace!("Mapping actions");
+        for key in action_keys {
+            for (ctx, mi) in &mut joined {
+                if let Some(&action_id) = ctx.get_action_for(*key) {
+                    log::debug!("Mapped to action: {:?}", action_id);
+                    mi.add_mapped_action(action_id);
+                    break;
                 }
 
                 if ctx.consume_all() {
-                    button_used[idx] = true;
+                    break;
+                }
+            }
+        }
+
+        log::trace!("Mapping states");
+        for key in state_keys {
+            for (ctx, mi) in &mut joined {
+                if let Some(&id) = ctx.get_state_for(*key) {
+                    mi.add_mapped_state(id);
+                    break;
+                }
+
+                if ctx.consume_all() {
+                    break;
+                }
+            }
+        }
+
+        log::trace!("Mapping ranges");
+        for (axis, &axis_delta) in axes {
+            for (ctx, mi) in &mut joined {
+                if let Some((range_id, range_delta)) = ctx.register_axis_delta(axis, axis_delta) {
+                    mi.set_range_delta(range_id, range_delta);
+                    break;
+                }
+
+                if ctx.consume_all() {
+                    break;
                 }
             }
         }

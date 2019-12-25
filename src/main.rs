@@ -13,7 +13,7 @@ use winit::{Event, EventsLoop, WindowBuilder, WindowEvent};
 
 use specs::prelude::*;
 
-use std::path::{PathBuf};
+use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 

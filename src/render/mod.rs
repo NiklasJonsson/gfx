@@ -170,15 +170,18 @@ impl VKManager {
 
         // TODO: Use transfer queue for sending to gpu
         let (vertex_buffer, vertex_data_copied) = match &primitive.vertex_data {
-            VertexBuf::Base(vertices) => {
-                create_and_submit_vertex_buffer::<VertexBase>(&self.graphics_queue, vertices.to_owned())
-            }
-            VertexBuf::UV(vertices) => {
-                create_and_submit_vertex_buffer::<VertexUV>(&self.graphics_queue, vertices.to_owned())
-            }
-            VertexBuf::UVCol(vertices) => {
-                create_and_submit_vertex_buffer::<VertexUVCol>(&self.graphics_queue, vertices.to_owned())
-            }
+            VertexBuf::Base(vertices) => create_and_submit_vertex_buffer::<VertexBase>(
+                &self.graphics_queue,
+                vertices.to_owned(),
+            ),
+            VertexBuf::UV(vertices) => create_and_submit_vertex_buffer::<VertexUV>(
+                &self.graphics_queue,
+                vertices.to_owned(),
+            ),
+            VertexBuf::UVCol(vertices) => create_and_submit_vertex_buffer::<VertexUVCol>(
+                &self.graphics_queue,
+                vertices.to_owned(),
+            ),
         };
 
         let (index_buffer, index_data_copied) =
