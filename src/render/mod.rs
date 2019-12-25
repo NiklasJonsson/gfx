@@ -32,12 +32,15 @@ use winit::Window;
 use nalgebra_glm as glm;
 
 use specs::prelude::*;
+use specs::storage::StorageEntry;
 
 use std::collections::HashSet;
 use std::sync::Arc;
 
 use crate::camera::*;
 use crate::common::*;
+
+use crate::settings::{RenderMode, RenderSettings};
 
 mod pipeline;
 
@@ -149,21 +152,18 @@ impl VKManager {
         }
     }
 
-    fn create_renderable(&self, primitive: &GraphicsPrimitive) -> Renderable {
-        // TODO: Move this
-        use vulkano::pipeline::input_assembly::PrimitiveTopology;
-        let mode = PrimitiveTopology::TriangleList;
-
-        let indices = match mode {
-            PrimitiveTopology::LineList => &primitive.line_indices.data,
-            _ => &primitive.triangle_indices.data,
+    fn create_renderable(&self, primitive: &GraphicsPrimitive, mode: RenderMode) -> Renderable {
+        use vulkano::pipeline::input_assembly::PrimitiveTopology as PT;
+        let (indices, vk_mode) = match mode {
+            RenderMode::Wireframe => (&primitive.line_indices.data, PT::LineList),
+            RenderMode::Opaque => (&primitive.triangle_indices.data, PT::TriangleList),
         };
 
         let g_pipeline = pipeline::create_graphics_pipeline(
             &self.vk_device,
             &self.render_pass,
             self.swapchain.dimensions(),
-            mode,
+            vk_mode,
             &primitive.vertex_data,
             &primitive.material,
         );
@@ -171,13 +171,13 @@ impl VKManager {
         // TODO: Use transfer queue for sending to gpu
         let (vertex_buffer, vertex_data_copied) = match &primitive.vertex_data {
             VertexBuf::Base(vertices) => {
-                create_and_submit_vertex_buffer(&self.graphics_queue, vertices.to_owned())
+                create_and_submit_vertex_buffer::<VertexBase>(&self.graphics_queue, vertices.to_owned())
             }
             VertexBuf::UV(vertices) => {
-                create_and_submit_vertex_buffer(&self.graphics_queue, vertices.to_owned())
+                create_and_submit_vertex_buffer::<VertexUV>(&self.graphics_queue, vertices.to_owned())
             }
             VertexBuf::UVCol(vertices) => {
-                create_and_submit_vertex_buffer(&self.graphics_queue, vertices.to_owned())
+                create_and_submit_vertex_buffer::<VertexUVCol>(&self.graphics_queue, vertices.to_owned())
             }
         };
 
@@ -206,6 +206,7 @@ impl VKManager {
             g_pipeline,
             material_data_buf,
             base_color_tex,
+            mode,
         }
     }
 
@@ -213,10 +214,27 @@ impl VKManager {
         let primitives = world.read_storage::<GraphicsPrimitive>();
         let mut renderables = world.write_storage::<Renderable>();
         let entities = world.read_resource::<EntitiesRes>();
+        let render_settings = world.read_resource::<RenderSettings>();
+        let render_mode = render_settings.render_mode;
+
         for (ent, prim) in (&entities, &primitives).join() {
-            // TODO: Don't create unncessary renderable if it is not needed
-            let rend = self.create_renderable(prim);
-            renderables.entry(ent).unwrap().or_insert(rend);
+            let entry = renderables.entry(ent).expect("Failed to get entry!");
+            match entry {
+                StorageEntry::Occupied(mut occ_entry) => {
+                    if occ_entry.get().mode != render_mode {
+                        log::trace!("Renderable did not match render mode, creating new");
+                        let rend = self.create_renderable(prim, render_mode);
+                        occ_entry.insert(rend);
+                    } else {
+                        log::trace!("Using existing renderable");
+                    }
+                }
+                StorageEntry::Vacant(vac_entry) => {
+                    log::trace!("No renderable found, creating new");
+                    let rend = self.create_renderable(prim, render_mode);
+                    vac_entry.insert(rend);
+                }
+            }
         }
     }
 
@@ -886,8 +904,7 @@ struct TextureAccess {
 //    1: BaseColorTexture
 // TODO:
 // - Should Model matrix have its own set?
-// -
-//
+// - How to precompute the MVP matrices as much as possible?
 
 #[derive(Component)]
 #[storage(VecStorage)]
@@ -897,6 +914,7 @@ pub struct Renderable {
     g_pipeline: Arc<dyn GraphicsPipelineAbstract + Send + Sync>,
     material_data_buf: Arc<dyn BufferAccess + Send + Sync>,
     base_color_tex: Option<TextureAccess>,
+    mode: RenderMode,
 }
 
 impl Renderable {

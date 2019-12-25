@@ -4,21 +4,21 @@ use winit::VirtualKeyCode;
 use specs::prelude::*;
 
 #[derive(Debug, Copy, Clone, PartialEq, Eq, FromPrimitive)]
-enum RenderMode {
+pub enum RenderMode {
     Opaque,
     Wireframe,
 }
 
 #[derive(Debug, Copy, Clone, PartialEq, Eq)]
-struct RenderSettings {
+pub struct RenderSettings {
     // Affects all entities
-    rendering_mode: RenderMode,
+    pub render_mode: RenderMode,
 }
 
 impl Default for RenderSettings {
     fn default() -> Self {
         Self {
-            rendering_mode: RenderMode::Opaque,
+            render_mode: RenderMode::Opaque,
         }
     }
 }
@@ -47,10 +47,11 @@ impl<'a> System<'a> for RenderSettingsSys {
     );
 
     fn run(&mut self, (mut r_settings, mut inputs, unique_component): Self::SystemData) {
-        log::trace!("RenderSettingsSys: run");
+        log::debug!("RenderSettingsSys: run");
         for (inp, _id) in (&mut inputs, &unique_component).join() {
             if inp.contains_action(RENDER_MODE_SWITCH) {
-                r_settings.rendering_mode = match r_settings.rendering_mode {
+                log::debug!("Render mode switch!");
+                r_settings.render_mode = match r_settings.render_mode {
                     RenderMode::Opaque => RenderMode::Wireframe,
                     RenderMode::Wireframe => RenderMode::Opaque,
                 };
