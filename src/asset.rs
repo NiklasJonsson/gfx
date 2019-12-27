@@ -123,7 +123,27 @@ fn get_primitives_from_mesh<'a>(ctx: &RecGltfCtx, mesh: gltf::Mesh<'a>) -> Vec<P
                 (Some(_), None) => unimplemented!(),
             };
 
-            let pbr_mr = primitive.material().pbr_metallic_roughness();
+            let mat = primitive.material();
+
+            let pbr_mr = mat.pbr_metallic_roughness();
+
+            if let Some(_) = pbr_mr.metallic_roughness_texture() {
+                // TODO: Support this
+                log::error!("No support for metallic roughness texture!");
+                unimplemented!();
+            }
+
+            if let Some(_) = mat.normal_texture() {
+                // TODO: Support this
+                log::error!("No support for normal texture!");
+                unimplemented!();
+            }
+
+            if let Some(_) = mat.emissive_texture() {
+                // TODO: Support this
+                log::error!("No support for emissive texture!");
+                unimplemented!();
+            }
 
             let tex = pbr_mr.base_color_texture().map(|texture_info| {
                 assert_eq!(texture_info.tex_coord(), 0, "Not implemented!");
