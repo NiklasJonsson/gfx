@@ -175,10 +175,10 @@ impl InputManager {
     }
 }
 
-// TODO: Use unique_id here?
 // Requirements:
 //  - A new "pressed" event for a button should generate both an action and set a state
 //  - A new "release" should only update input manager internal state
+//  - Resend state for keys that remain pressed
 impl<'a> System<'a> for InputManager {
     type SystemData = (
         ReadStorage<'a, InputContext>,
@@ -211,10 +211,7 @@ impl<'a> System<'a> for InputManager {
 
         let mut state_keys = VecDeque::with_capacity(inputs.len());
         for key in self.pressed_buttons.iter() {
-            log::debug!(
-                "Key ({:?}) is still pressed and will generate a state!",
-                key
-            );
+            log::debug!("Key ({:?}) is pressed and will generate a state!", key);
             state_keys.push_back(key);
         }
 

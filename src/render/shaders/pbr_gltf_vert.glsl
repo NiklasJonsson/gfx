@@ -35,11 +35,11 @@ void main() {
     world_normal = normalize((model_ubo.model_it * vec4(normal, 0.0)).xyz);
     world_pos = (model_ubo.model * vec4(position, 1.0)).xyz;
 #if HAS_TEX_COORDS
-	tex_coords_0 = tex_coords;
+    tex_coords_0 = tex_coords;
 #endif
 
 #if HAS_VERTEX_COLOR
-	color_0 = color.rgb;
+    color_0 = color.rgb;
 #endif
 
     gl_Position = ubo.proj * ubo.view * model_ubo.model * vec4(position, 1.0);

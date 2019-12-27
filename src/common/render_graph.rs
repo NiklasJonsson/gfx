@@ -1,4 +1,4 @@
-use nalgebra_glm::Mat4;
+use nalgebra_glm::{Mat4, U4};
 use specs::prelude::*;
 use specs_hierarchy::Parent as HParent;
 
@@ -7,9 +7,13 @@ use super::*;
 use std::collections::VecDeque;
 use std::io::Write;
 
+use specs::storage::StorageEntry;
+
+use crate::settings::RenderSettings;
+
 /// Components for defining a node in a render graph
 /// Useful when representing 3d models comprised of
-/// several GraphicsPrimitive where we might have
+/// several PolygonMesh where we might have
 /// transforms on several levels that should be concatenated
 
 /// A child always has a parent. A root node will not have this component
@@ -56,6 +60,24 @@ pub fn root() -> RenderGraphRoot {
 pub fn node(children: Vec<Entity>) -> RenderGraphNode {
     RenderGraphNode { children }
 }
+
+pub fn attach_leaf(world: &mut World, parent: Entity) -> Entity {
+    let child_ent = world.create_entity().with(child(parent)).build();
+
+    let mut node_storage = world.write_storage::<RenderGraphNode>();
+
+    let entry = node_storage.entry(parent).expect("Failed to get entry!");
+    match entry {
+        StorageEntry::Occupied(mut entry) => entry.get_mut().children.push(child_ent),
+        StorageEntry::Vacant(entry) => {
+            entry.insert(node(vec![child_ent]));
+        }
+    };
+
+    child_ent
+}
+
+pub const TRANSFORM_PROPAGATION_SYSTEM_ID: &str = "transform_propagation";
 
 /// SPECS system to concatenate model matrices
 pub struct TransformPropagation;
@@ -138,9 +160,110 @@ impl<'a> System<'a> for TransformPropagation {
     }
 }
 
-pub fn breadth_first(world: &World, root: Entity, mut visit_node: impl FnMut(Entity)) {
-    let nodes_storage = world.read_storage::<RenderGraphNode>();
+#[derive(Component)]
+#[storage(HashMapStorage)]
+pub struct RenderedBoundingBox(Entity);
 
+pub const RENDERED_BOUNDING_BOXES_SYSTEM_ID: &str = "rendered_bounding_boxes";
+/// SPECS system to generate bounding boxes for rendering
+/// Works per root node in the scene graph
+pub struct RenderedBoundingBoxes;
+impl<'a> System<'a> for RenderedBoundingBoxes {
+    type SystemData = (
+        Entities<'a>,
+        ReadStorage<'a, RenderGraphRoot>,
+        ReadStorage<'a, ModelMatrix>,
+        WriteStorage<'a, PolygonMesh>,
+        WriteStorage<'a, RenderGraphNode>,
+        WriteStorage<'a, RenderGraphChild>,
+        WriteStorage<'a, RenderedBoundingBox>,
+        WriteStorage<'a, crate::render::Renderable>,
+        Read<'a, RenderSettings>,
+    );
+
+    fn run(
+        &mut self,
+        (
+            entities,
+            roots,
+            matrices,
+            mut meshes,
+            mut rgnodes,
+            mut rgchildren,
+            mut rbbs,
+            mut renderables,
+            settings,
+        ): Self::SystemData,
+    ) {
+        let remove_rbbs = !settings.render_bounding_box;
+
+        if remove_rbbs {
+            let mut to_remove = Vec::new();
+            for (root_ent, bb) in (&entities, &rbbs).join() {
+                let bb_node = bb.0;
+                meshes.remove(bb_node);
+                renderables.remove(bb_node);
+                to_remove.push(root_ent);
+            }
+
+            for ent in to_remove {
+                rbbs.remove(ent);
+            }
+
+            return;
+        }
+
+        for (root_ent, _root) in (&entities, &roots).join() {
+            let mut biggest_bounding_box = BoundingBox::default();
+            let update_biggest = |ent: Entity| {
+                if let Some(new) = meshes.get(ent) {
+                    let m = *matrices.get(ent).unwrap();
+                    if let Some(bounding_box) = &new.bounding_box {
+                        let min = m * bounding_box.min;
+                        let max = m * bounding_box.max;
+                        let new = BoundingBox { min, max };
+                        biggest_bounding_box.combine_with(&new);
+                    }
+                }
+            };
+
+            render_graph::breadth_first_sys_mut(&rgnodes, root_ent, update_biggest);
+            let child = entities.create();
+            rgnodes
+                .get_mut(root_ent)
+                .expect("Only a single root node")
+                .children
+                .push(child);
+            rgchildren
+                .insert(child, render_graph::child(root_ent))
+                .expect("Can't add child->parent");
+
+            rbbs.insert(root_ent, RenderedBoundingBox(child))
+                .expect("Can't add rbb");
+
+            let (vertex_data, indices) = biggest_bounding_box.to_vertices_and_indices();
+            let ty = MeshType::Line { indices };
+            let material = Material::Color {
+                color: [1.0, 0.0, 0.0, 1.0],
+            };
+            let mesh = PolygonMesh {
+                ty,
+                vertex_data,
+                material,
+                bounding_box: None,
+            };
+            meshes
+                .insert(child, mesh)
+                .expect("Unable to insert bb mesh");
+        }
+    }
+}
+
+fn breadth_first_sys_mut<'a>(
+    nodes_storage: &WriteStorage<'a, RenderGraphNode>,
+    root: Entity,
+    mut visit_node: impl FnMut(Entity),
+) {
     let mut queue = VecDeque::new();
     queue.push_back(root);
 
@@ -156,9 +279,36 @@ pub fn breadth_first(world: &World, root: Entity, mut visit_node: impl FnMut(Ent
     }
 }
 
-pub fn depth_first(world: &World, root: Entity, mut visit_node: impl FnMut(Entity)) {
-    let nodes_storage = world.read_storage::<RenderGraphNode>();
+fn breadth_first_sys<'a>(
+    nodes_storage: &ReadStorage<'a, RenderGraphNode>,
+    root: Entity,
+    mut visit_node: impl FnMut(Entity),
+) {
+    let mut queue = VecDeque::new();
+    queue.push_back(root);
 
+    while !queue.is_empty() {
+        let ent = queue.pop_front().unwrap();
+        visit_node(ent);
+
+        if let Some(node) = nodes_storage.get(ent) {
+            for c in node.children.iter() {
+                queue.push_back(*c);
+            }
+        }
+    }
+}
+
+pub fn breadth_first(world: &World, root: Entity, visit_node: impl FnMut(Entity)) {
+    let nodes_storage = world.read_storage::<RenderGraphNode>();
+    breadth_first_sys(&nodes_storage, root, visit_node);
+}
+
+fn depth_first_sys<'a>(
+    nodes_storage: &ReadStorage<'a, RenderGraphNode>,
+    root: Entity,
+    mut visit_node: impl FnMut(Entity),
+) {
     let mut stack = Vec::new();
     stack.push(root);
 
@@ -172,6 +322,11 @@ pub fn depth_first(world: &World, root: Entity, mut visit_node: impl FnMut(Entit
             }
         }
     }
+}
+
+pub fn depth_first(world: &World, root: Entity, visit_node: impl FnMut(Entity)) {
+    let nodes_storage = world.read_storage::<RenderGraphNode>();
+    depth_first_sys(&nodes_storage, root, visit_node);
 }
 
 enum PathDirection {

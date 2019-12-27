@@ -13,12 +13,14 @@ pub enum RenderMode {
 pub struct RenderSettings {
     // Affects all entities
     pub render_mode: RenderMode,
+    pub render_bounding_box: bool,
 }
 
 impl Default for RenderSettings {
     fn default() -> Self {
         Self {
             render_mode: RenderMode::Opaque,
+            render_bounding_box: false,
         }
     }
 }
@@ -27,11 +29,14 @@ fn get_input_context() -> InputContext {
     InputContext::start("RenderSettingsSys")
         .with_description("Input for changing render settings")
         .with_action(VirtualKeyCode::O, RENDER_MODE_SWITCH)
-        .expect("Should only be one action!")
+        .unwrap()
+        .with_action(VirtualKeyCode::P, RENDER_BOUNDING_BOX_SWITCH)
+        .unwrap()
         .build()
 }
 
 const RENDER_MODE_SWITCH: ActionId = ActionId(0);
+const RENDER_BOUNDING_BOX_SWITCH: ActionId = ActionId(1);
 
 #[derive(Default, Component)]
 #[storage(NullStorage)]
@@ -47,7 +52,7 @@ impl<'a> System<'a> for RenderSettingsSys {
     );
 
     fn run(&mut self, (mut r_settings, mut inputs, unique_component): Self::SystemData) {
-        log::debug!("RenderSettingsSys: run");
+        log::trace!("RenderSettingsSys: run");
         for (inp, _id) in (&mut inputs, &unique_component).join() {
             if inp.contains_action(RENDER_MODE_SWITCH) {
                 log::debug!("Render mode switch!");
@@ -56,6 +61,11 @@ impl<'a> System<'a> for RenderSettingsSys {
                     RenderMode::Wireframe => RenderMode::Opaque,
                 };
             }
+            if inp.contains_action(RENDER_BOUNDING_BOX_SWITCH) {
+                log::debug!("Render bounding box switch!");
+                r_settings.render_bounding_box = !r_settings.render_bounding_box;
+            }
+
             inp.clear();
         }
     }

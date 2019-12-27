@@ -152,11 +152,17 @@ impl VKManager {
         }
     }
 
-    fn create_renderable(&self, primitive: &GraphicsPrimitive, mode: RenderMode) -> Renderable {
+    fn create_renderable(&self, mesh: &PolygonMesh, mode: RenderMode) -> Renderable {
         use vulkano::pipeline::input_assembly::PrimitiveTopology as PT;
-        let (indices, vk_mode) = match mode {
-            RenderMode::Wireframe => (&primitive.line_indices.data, PT::LineList),
-            RenderMode::Opaque => (&primitive.triangle_indices.data, PT::TriangleList),
+        let (indices, vk_mode) = match &mesh.ty {
+            MeshType::Triangle {
+                triangle_indices,
+                line_indices,
+            } => match mode {
+                RenderMode::Wireframe => (&line_indices.0, PT::LineList),
+                RenderMode::Opaque => (&triangle_indices.0, PT::TriangleList),
+            },
+            MeshType::Line { indices } => (&indices.0, PT::LineList),
         };
 
         let g_pipeline = pipeline::create_graphics_pipeline(
@@ -164,12 +170,16 @@ impl VKManager {
             &self.render_pass,
             self.swapchain.dimensions(),
             vk_mode,
-            &primitive.vertex_data,
-            &primitive.material,
+            &mesh.vertex_data,
+            &mesh.material,
         );
 
         // TODO: Use transfer queue for sending to gpu
-        let (vertex_buffer, vertex_data_copied) = match &primitive.vertex_data {
+        let (vertex_buffer, vertex_data_copied) = match &mesh.vertex_data {
+            VertexBuf::PosOnly(vertices) => create_and_submit_vertex_buffer::<VertexPosOnly>(
+                &self.graphics_queue,
+                vertices.to_owned(),
+            ),
             VertexBuf::Base(vertices) => create_and_submit_vertex_buffer::<VertexBase>(
                 &self.graphics_queue,
                 vertices.to_owned(),
@@ -189,12 +199,9 @@ impl VKManager {
 
         let data_copied = vertex_data_copied.join(index_data_copied);
 
+        // TODO: Can we use a big buffer for all materials of the same type?
         let (material_data_buf, base_color_tex, material_data_copied) =
-            submit_material_uniform_data(
-                &self.vk_device,
-                &self.graphics_queue,
-                &primitive.material,
-            );
+            submit_material_uniform_data(&self.vk_device, &self.graphics_queue, &mesh.material);
 
         data_copied
             .join(material_data_copied)
@@ -203,6 +210,12 @@ impl VKManager {
             .wait(None)
             .unwrap();
 
+        let render_material = match &mesh.material {
+            Material::GlTFPBR { .. } => RenderableMaterial::GltfPBR,
+            Material::Color { .. } => RenderableMaterial::UniformColor,
+            _ => unimplemented!(),
+        };
+
         Renderable {
             vertex_buffer,
             index_buffer,
@@ -210,12 +223,14 @@ impl VKManager {
             material_data_buf,
             base_color_tex,
             mode,
+            material: render_material,
         }
     }
 
     pub fn prepare_primitives_for_rendering(&self, world: &World) {
-        let primitives = world.read_storage::<GraphicsPrimitive>();
+        let primitives = world.read_storage::<PolygonMesh>();
         let mut renderables = world.write_storage::<Renderable>();
+
         let entities = world.read_resource::<EntitiesRes>();
         let render_settings = world.read_resource::<RenderSettings>();
         let render_mode = render_settings.render_mode;
@@ -304,8 +319,7 @@ impl VKManager {
             .expect("Could not get rotation state for camera");
 
         // TODO: Camera system should write to ViewMatrixResource at the end of system
-        // and we should read it here. Or there should be a resource 'ActiveCamera' that
-        // we read the values from.
+        // and we should read it here.
         let view = FreeFlyCameraController::get_view_matrix_from(cam_pos, cam_rotation_state);
 
         log::trace!("View matrix: {:#?}", view);
@@ -326,7 +340,7 @@ impl VKManager {
 
         let lighting_data = pipeline::fs_pbr::ty::LightingData {
             light_pos: [5.0f32, 5.0f32, 5.0f32],
-            view_pos: cam_pos.to_vec3().into(),
+            view_pos: cam_pos.xyz().into(),
             _dummy0: [0; 4], // Magic Vulkano alignment
         };
 
@@ -755,46 +769,55 @@ fn submit_material_uniform_data(
     // can we solve this another way?
     Box<dyn GpuFuture>,
 ) {
-    if let Material::GlTFPBRMaterial {
-        base_color_factor,
-        metallic_factor,
-        roughness_factor,
-        base_color_texture,
-    } = material
-    {
-        let data = pipeline::fs_pbr_base_color_texture::ty::PBRMaterialData {
-            base_color_factor: *base_color_factor,
-            metallic_factor: *metallic_factor,
-            roughness_factor: *roughness_factor,
-        };
-        let (buf, mat_copied) =
-            ImmutableBuffer::from_data(data, BufferUsage::uniform_buffer(), Arc::clone(queue))
-                .expect("Could not create vertex buffer");
+    match material {
+        Material::GlTFPBR {
+            base_color_factor,
+            metallic_factor,
+            roughness_factor,
+            base_color_texture,
+        } => {
+            let data = pipeline::fs_pbr_base_color_texture::ty::PBRMaterialData {
+                base_color_factor: *base_color_factor,
+                metallic_factor: *metallic_factor,
+                roughness_factor: *roughness_factor,
+            };
+            let (buf, mat_copied) =
+                ImmutableBuffer::from_data(data, BufferUsage::uniform_buffer(), Arc::clone(queue))
+                    .expect("Could not create vertex buffer");
 
-        let (tex_access, fut) = match base_color_texture {
-            Some(texture) => {
-                assert_eq!(texture.coord_set, 0, "Not implemented!");
+            let (tex_access, fut) = match base_color_texture {
+                Some(texture) => {
+                    assert_eq!(texture.coord_set, 0, "Not implemented!");
 
-                let (image_buffer, texture_data_copied) =
-                    create_and_submit_texture_image(queue, texture.image.clone());
+                    let (image_buffer, texture_data_copied) =
+                        create_and_submit_texture_image(queue, texture.image.clone());
 
-                let sampler = Sampler::simple_repeat_linear(Arc::clone(vk_device));
+                    let sampler = Sampler::simple_repeat_linear(Arc::clone(vk_device));
 
-                (
-                    Some(TextureAccess {
-                        image_buffer,
-                        sampler,
-                    }),
-                    Box::new(mat_copied.join(texture_data_copied)) as Box<dyn GpuFuture>,
-                )
-            }
-            None => (None, Box::new(mat_copied) as Box<dyn GpuFuture>),
-        };
+                    (
+                        Some(TextureAccess {
+                            image_buffer,
+                            sampler,
+                        }),
+                        Box::new(mat_copied.join(texture_data_copied)) as Box<dyn GpuFuture>,
+                    )
+                }
+                None => (None, Box::new(mat_copied) as Box<dyn GpuFuture>),
+            };
 
-        (buf, tex_access, fut)
-    } else {
+            (buf, tex_access, fut)
+        }
+        Material::Color { color } => {
+            let data = pipeline::fs_uniform_color::ty::Color { x: *color };
+
+            let (buf, mat_copied) =
+                ImmutableBuffer::from_data(data, BufferUsage::uniform_buffer(), Arc::clone(queue))
+                    .expect("Could not create vertex buffer");
+
+            (buf, None, Box::new(mat_copied) as Box<dyn GpuFuture>)
+        }
         // TODO: Support more material types
-        unimplemented!()
+        _ => unimplemented!(),
     }
 }
 
@@ -909,6 +932,11 @@ struct TextureAccess {
 // - Should Model matrix have its own set?
 // - How to precompute the MVP matrices as much as possible?
 
+pub enum RenderableMaterial {
+    GltfPBR,
+    UniformColor,
+}
+
 #[derive(Component)]
 #[storage(VecStorage)]
 pub struct Renderable {
@@ -918,6 +946,7 @@ pub struct Renderable {
     material_data_buf: Arc<dyn BufferAccess + Send + Sync>,
     base_color_tex: Option<TextureAccess>,
     mode: RenderMode,
+    material: RenderableMaterial,
 }
 
 impl Renderable {
@@ -944,37 +973,67 @@ impl Renderable {
             .next(model_data)
             .expect("Could not allocated usub model buf");
 
-        let descriptor_set_0 = Arc::new(
-            PersistentDescriptorSet::start(Arc::clone(&self.g_pipeline), 0)
-                .add_buffer(vp_buf.clone())
-                .expect("Could not add vp buf")
-                .add_buffer(model_buf)
-                .expect("Could not add model buf")
-                .add_buffer(light_buf.clone())
-                .expect("Could not add light buf")
-                .build()
-                .expect("Failed to create persistent descriptor set for mvp ubo"),
-        ) as Arc<dyn DescriptorSet + Send + Sync>;
+        let descriptor_sets = match self.material {
+            RenderableMaterial::GltfPBR => {
+                let descriptor_set_0 = Arc::new(
+                    PersistentDescriptorSet::start(Arc::clone(&self.g_pipeline), 0)
+                        .add_buffer(vp_buf.clone())
+                        .expect("Could not add vp buf")
+                        .add_buffer(model_buf)
+                        .expect("Could not add model buf")
+                        .add_buffer(light_buf.clone())
+                        .expect("Could not add light buf")
+                        .build()
+                        .expect("Failed to create persistent descriptor set for mvp ubo"),
+                ) as Arc<dyn DescriptorSet + Send + Sync>;
 
-        // TODO: Create this earlier?
-        let descriptor_set_1 = Arc::new(match &self.base_color_tex {
-            Some(tex_access) => Arc::new(
-                PersistentDescriptorSet::start(Arc::clone(&self.g_pipeline), 1)
-                    .add_buffer(self.material_data_buf.clone())
-                    .expect("Could not add material data buf")
-                    .add_sampled_image(tex_access.image_buffer.clone(), tex_access.sampler.clone())
-                    .expect("Could not add texture access!")
-                    .build()
-                    .expect("Failed to build desc set 1 for material data"),
-            ) as Arc<dyn DescriptorSet + Send + Sync>,
-            None => Arc::new(
-                PersistentDescriptorSet::start(Arc::clone(&self.g_pipeline), 1)
-                    .add_buffer(self.material_data_buf.clone())
-                    .expect("Could not add material data buf")
-                    .build()
-                    .expect("Failed to build desc set 1 for material data"),
-            ),
-        });
+                // TODO: Create this earlier?
+                let descriptor_set_1 = Arc::new(match &self.base_color_tex {
+                    Some(tex_access) => Arc::new(
+                        PersistentDescriptorSet::start(Arc::clone(&self.g_pipeline), 1)
+                            .add_buffer(self.material_data_buf.clone())
+                            .expect("Could not add material data buf")
+                            .add_sampled_image(
+                                tex_access.image_buffer.clone(),
+                                tex_access.sampler.clone(),
+                            )
+                            .expect("Could not add texture access!")
+                            .build()
+                            .expect("Failed to build desc set 1 for material data"),
+                    )
+                        as Arc<dyn DescriptorSet + Send + Sync>,
+                    None => Arc::new(
+                        PersistentDescriptorSet::start(Arc::clone(&self.g_pipeline), 1)
+                            .add_buffer(self.material_data_buf.clone())
+                            .expect("Could not add material data buf")
+                            .build()
+                            .expect("Failed to build desc set 1 for material data"),
+                    ),
+                }) as Arc<dyn DescriptorSet + Send + Sync>;
+
+                (descriptor_set_0, descriptor_set_1)
+            }
+            RenderableMaterial::UniformColor => {
+                let set_0 = Arc::new(
+                    PersistentDescriptorSet::start(Arc::clone(&self.g_pipeline), 0)
+                        .add_buffer(vp_buf.clone())
+                        .expect("Could not add vp buf")
+                        .add_buffer(model_buf)
+                        .expect("Could not add model buf")
+                        .build()
+                        .expect("Failed to create persistent descriptor set for mvp ubo"),
+                ) as Arc<dyn DescriptorSet + Send + Sync>;
+                let set_1 = Arc::new(
+                    PersistentDescriptorSet::start(Arc::clone(&self.g_pipeline), 1)
+                        .add_buffer(self.material_data_buf.clone())
+                        .expect("Could not add material data buf")
+                        .build()
+                        .expect("Failed to build desc set 1 for material data"),
+                ) as Arc<dyn DescriptorSet + Send + Sync>;
+
+                (set_0, set_1)
+            }
+        };
 
         cmd_buf
             .draw_indexed(
@@ -982,7 +1041,7 @@ impl Renderable {
                 &DynamicState::none(),
                 vec![Arc::clone(&self.vertex_buffer)],
                 Arc::clone(&self.index_buffer),
-                (descriptor_set_0, descriptor_set_1),
+                descriptor_sets,
                 (),
             )
             .expect("Failed after draw_indexed")

@@ -6,6 +6,10 @@ Free flying camera controls:
 * Mouse to look around.
 * ESC to pause/resume.
 
+Rendering controls:
+* O to switch between wireframe and opaque for models
+* P to render the bounding box of an object
+
 Renders:
 Box
 BoxTextured

@@ -38,12 +38,8 @@ pub fn load_asset_into(world: &mut World, descr: AssetDescriptor) -> LoadedAsset
 }
 
 fn generate_line_list_from(index_data: &IndexData) -> IndexData {
-    let IndexData {
-        rendering_mode,
-        data: indices,
-    } = index_data;
+    let IndexData(indices) = index_data;
     let mut ret = Vec::new();
-    assert_eq!(*rendering_mode, PrimitiveTopology::TriangleList);
     assert_eq!(indices.len() % 3, 0);
     for triangle in indices.chunks(3) {
         ret.push(triangle[0]);
@@ -54,7 +50,7 @@ fn generate_line_list_from(index_data: &IndexData) -> IndexData {
         ret.push(triangle[0]);
     }
 
-    IndexData::line_list(ret)
+    IndexData(ret)
 }
 
 fn gltf_to_vulkano_topology(mode: gltf::mesh::Mode) -> PrimitiveTopology {
@@ -85,7 +81,7 @@ fn arr4x4_to_mat4(arr: &[[f32; 4]; 4]) -> glm::Mat4 {
     glm::make_mat4(&tmp)
 }
 
-fn get_primitives_from_mesh<'a>(ctx: &RecGltfCtx, mesh: gltf::Mesh<'a>) -> Vec<GraphicsPrimitive> {
+fn get_primitives_from_mesh<'a>(ctx: &RecGltfCtx, mesh: gltf::Mesh<'a>) -> Vec<PolygonMesh> {
     mesh.primitives()
         .map(|primitive| {
             let reader = primitive.reader(|buffer| Some(&ctx.buffers[buffer.index()]));
@@ -159,27 +155,32 @@ fn get_primitives_from_mesh<'a>(ctx: &RecGltfCtx, mesh: gltf::Mesh<'a>) -> Vec<G
                 }
             });
 
-            let material = Material::GlTFPBRMaterial {
+            let material = Material::GlTFPBR {
                 base_color_factor: pbr_mr.base_color_factor(),
                 metallic_factor: pbr_mr.metallic_factor(),
                 roughness_factor: pbr_mr.roughness_factor(),
                 base_color_texture: tex,
             };
 
-            let triangle_indices = IndexData::triangle_list(triangle_index_data);
+            let triangle_indices = IndexData(triangle_index_data);
 
             let line_indices = generate_line_list_from(&triangle_indices);
 
-            let bounding_box = BoundingBox {
+            let bounding_box = Some(BoundingBox {
                 min: primitive.bounding_box().min.into(),
                 max: primitive.bounding_box().max.into(),
-            };
+            });
 
-            GraphicsPrimitive {
+            let ty = MeshType::Triangle {
                 triangle_indices,
                 line_indices,
+            };
+
+            PolygonMesh {
+                ty,
                 vertex_data,
                 material,
+                bounding_box,
             }
         })
         .collect::<Vec<_>>()

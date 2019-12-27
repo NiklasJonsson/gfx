@@ -232,8 +232,13 @@ impl App {
             .with_barrier()
             .with(
                 render_graph::TransformPropagation,
-                "transform_propagation",
+                render_graph::TRANSFORM_PROPAGATION_SYSTEM_ID,
                 &[],
+            )
+            .with(
+                render_graph::RenderedBoundingBoxes,
+                render_graph::RENDERED_BOUNDING_BOXES_SYSTEM_ID,
+                &[render_graph::TRANSFORM_PROPAGATION_SYSTEM_ID],
             )
             .build();
 
@@ -317,7 +322,7 @@ impl App {
 
         // Register all component types
         self.world.register::<Renderable>();
-        self.world.register::<GraphicsPrimitive>();
+        self.world.register::<PolygonMesh>();
         self.world.register::<render_graph::RenderGraphNode>();
         self.world.register::<render_graph::RenderGraphRoot>();
         self.world.register::<render_graph::RenderGraphChild>();
@@ -402,11 +407,14 @@ impl App {
             engine_systems.dispatch(&self.world);
 
             // Send data to GPU
+            // TODO: Merge this with prepare_primitives?
             self.vk_manager
                 .prepare_primitives_for_rendering(&self.world);
 
             // Run render systems, this is done after the dispatch call to enforce serialization
             self.vk_manager.draw_next_frame(&mut self.world);
+
+            self.world.maintain();
 
             frame_count += 1;
             if let Some(n_frames) = args.run_n_frames {

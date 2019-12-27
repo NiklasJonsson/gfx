@@ -1,10 +1,16 @@
-use nalgebra_glm::{Mat4, Vec3, U4};
 use specs::prelude::*;
-use specs_hierarchy::Parent as HParent;
-use std::ops::AddAssign;
-use vulkano::pipeline::input_assembly::PrimitiveTopology;
 
+pub mod math;
 pub mod render_graph;
+
+pub use math::*;
+
+#[derive(Copy, Clone, Debug, Default)]
+pub struct VertexPosOnly {
+    pub position: [f32; 3],
+}
+
+impl_vertex!(VertexPosOnly, position);
 
 #[derive(Copy, Clone, Debug, Default)]
 pub struct VertexBase {
@@ -73,111 +79,17 @@ pub struct Vertex {
 
 #[derive(Debug)]
 pub enum VertexBuf {
+    PosOnly(Vec<VertexPosOnly>),
     Base(Vec<VertexBase>),
     UV(Vec<VertexUV>),
     UVCol(Vec<VertexUVCol>),
 }
 
-// TODO: Auto derive inner type traits
-#[derive(Debug, Component)]
-#[storage(VecStorage)]
-pub struct Position(glm::Vec3);
-
-impl Position {
-    pub fn to_vec3(&self) -> glm::Vec3 {
-        self.0
-    }
-    pub fn x(&self) -> f32 {
-        self.0.x
-    }
-
-    pub fn y(&self) -> f32 {
-        self.0.y
-    }
-
-    pub fn z(&self) -> f32 {
-        self.0.z
-    }
-}
-
-impl From<glm::Vec3> for Position {
-    fn from(src: glm::Vec3) -> Self {
-        Position(src)
-    }
-}
-
-impl AddAssign<&glm::Vec3> for Position {
-    fn add_assign(&mut self, other: &glm::Vec3) {
-        self.0 += other;
-    }
-}
-
-// TODO: Alias this?
-#[derive(Debug, Component, Copy, Clone)]
-#[storage(DenseVecStorage)]
-pub struct Transform(Mat4);
-
-impl From<[[f32; 4]; 4]> for Transform {
-    fn from(x: [[f32; 4]; 4]) -> Self {
-        Transform(x.into())
-    }
-}
-
-impl From<Mat4> for Transform {
-    fn from(x: Mat4) -> Self {
-        Transform(x)
-    }
-}
-
-impl Into<Mat4> for Transform {
-    fn into(self) -> Mat4 {
-        self.0
-    }
-}
-
-impl Transform {
-    pub fn identity() -> Transform {
-        Self(glm::identity::<f32, glm::U4>())
-    }
-}
-
-#[derive(Debug, Component, Clone, Copy)]
-#[storage(DenseVecStorage)]
-pub struct ModelMatrix(Mat4);
-
-impl From<[[f32; 4]; 4]> for ModelMatrix {
-    fn from(x: [[f32; 4]; 4]) -> Self {
-        Self(x.into())
-    }
-}
-
-impl Into<[[f32; 4]; 4]> for ModelMatrix {
-    fn into(self) -> [[f32; 4]; 4] {
-        self.0.into()
-    }
-}
-
-impl From<Mat4> for ModelMatrix {
-    fn from(x: Mat4) -> Self {
-        Self(x)
-    }
-}
-
-impl Into<Mat4> for ModelMatrix {
-    fn into(self) -> Mat4 {
-        self.0
-    }
-}
-
-impl ModelMatrix {
-    pub fn identity() -> ModelMatrix {
-        Self(glm::identity::<f32, glm::U4>())
-    }
-}
-
-impl std::fmt::Display for ModelMatrix {
-    fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
-        write!(f, "{}", self.0)
+mod vertex {
+    pub fn pos_only(x: f32, y: f32, z: f32) -> super::VertexPosOnly {
+        super::VertexPosOnly {
+            position: [x, y, z],
+        }
     }
 }
 
@@ -193,7 +105,7 @@ pub enum Material {
         color: [f32; 4],
     },
     ColorTexture(Texture),
-    GlTFPBRMaterial {
+    GlTFPBR {
         base_color_factor: [f32; 4],
         metallic_factor: f32,
         roughness_factor: f32,
@@ -203,40 +115,30 @@ pub enum Material {
 }
 
 #[derive(Debug)]
-pub struct IndexData {
-    pub rendering_mode: PrimitiveTopology,
-    pub data: Vec<u32>,
-}
+pub struct IndexData(pub Vec<u32>);
 
-impl IndexData {
-    pub fn line_list(data: Vec<u32>) -> Self {
-        IndexData {
-            rendering_mode: PrimitiveTopology::LineList,
-            data,
-        }
-    }
-
-    pub fn triangle_list(data: Vec<u32>) -> Self {
-        IndexData {
-            rendering_mode: PrimitiveTopology::TriangleList,
-            data,
-        }
-    }
-}
-
-#[derive(Debug, Component)]
-#[storage(DenseVecStorage)]
-pub struct BoundingBox {
-    pub min: Vec3,
-    pub max: Vec3,
+// REFACTOR:
+// - Rename
+// - Make a single enum and no struct?
+// - Create structs for each enum content
+#[derive(Debug)]
+pub enum MeshType {
+    Triangle {
+        triangle_indices: IndexData,
+        line_indices: IndexData,
+    },
+    Line {
+        indices: IndexData,
+    },
 }
 
 // One ore more vertices with associated data on how to render them
 #[derive(Debug, Component)]
 #[storage(DenseVecStorage)]
-pub struct GraphicsPrimitive {
-    pub triangle_indices: IndexData,
-    pub line_indices: IndexData,
+pub struct PolygonMesh {
+    pub ty: MeshType,
     pub vertex_data: VertexBuf,
     pub material: Material,
+    // TODO: Move this to it's own component?
+    pub bounding_box: Option<BoundingBox>,
 }

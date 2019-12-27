@@ -82,6 +82,51 @@ void main() {
     }
 }
 
+pub mod vs_passthrough {
+    vulkano_shaders::shader! {
+        ty: "vertex",
+        src: "
+#version 450
+#extension GL_ARB_separate_shader_objects : enable
+
+layout(set = 0, binding = 0) uniform Transforms {
+    mat4 view;
+    mat4 proj;
+} ubo;
+
+layout(set = 0, binding = 1) uniform Model {
+    mat4 model;
+    mat4 model_it;
+} model_ubo;
+
+layout(location = 0) in vec3 position;
+
+void main() {
+    gl_Position = ubo.proj * ubo.view * model_ubo.model * vec4(position, 1.0);
+}
+"
+    }
+}
+
+pub mod fs_uniform_color {
+    vulkano_shaders::shader! {
+        ty: "fragment",
+        src: "
+#version 450
+#extension GL_ARB_separate_shader_objects : enable
+
+layout(set = 1, binding = 0) uniform Color {
+    vec4 x;
+} color;
+
+layout(location = 0) out vec4 outColor;
+
+void main() {
+    outColor = color.x;
+}
+"
+    }
+}
 // TODO: Can we autogenerate these variants based on Vertex:s Optional members?
 pub mod vs_pbr {
     vulkano_shaders::shader! {
@@ -128,31 +173,6 @@ pub mod fs_pbr_uv_col {
     define: &[("HAS_TEX_COORDS", "1"), ("HAS_VERTEX_COLOR", "1")],
     }
 }
-
-/*
- *
-        Arc::new(
-            GraphicsPipeline::start()
-                .vertex_input_single_buffer::<T>()
-                // How to interpret the vertex input
-                .vertex_shader(vs.main_entry_point(), ())
-                .primitive_topology(rendering_mode)
-                // Whether to support special indices in in the vertex buffer to split triangles
-                .primitive_restart(false)
-                .viewports([viewport].iter().cloned())
-                .depth_clamp(false)
-                .polygon_mode_fill()
-                .line_width(1.0)
-                .cull_mode_back()
-                .depth_stencil_simple_depth()
-                .fragment_shader(fs.main_entry_point(), ())
-                .blend_pass_through()
-                .front_face_counter_clockwise()
-                .render_pass(Subpass::from(Arc::clone(render_pass), 0).unwrap())
-                .build(Arc::clone(device))
-                .expect("Could not create graphics pipeline"),
-        )
-*/
 
 pub fn create_graphics_pipeline(
     device: &Arc<Device>,
@@ -206,7 +226,7 @@ pub fn create_graphics_pipeline(
         }
         (
             VertexBuf::UV(_),
-            Material::GlTFPBRMaterial {
+            Material::GlTFPBR {
                 base_color_texture, ..
             },
         ) => {
@@ -231,7 +251,7 @@ pub fn create_graphics_pipeline(
         }
         (
             VertexBuf::UVCol(_),
-            Material::GlTFPBRMaterial {
+            Material::GlTFPBR {
                 base_color_texture, ..
             },
         ) => {
@@ -253,6 +273,21 @@ pub fn create_graphics_pipeline(
             } else {
                 unimplemented!()
             }
+        }
+        (VertexBuf::PosOnly(_), Material::Color { .. }) => {
+            let vs = vs_passthrough::Shader::load(Arc::clone(device))
+                .expect("Vertex shader compilation failed");
+            let fs = fs_uniform_color::Shader::load(Arc::clone(device))
+                .expect("Fragment shader compilation failed");
+            Arc::new(
+                builder
+                    .vertex_input_single_buffer::<VertexPosOnly>()
+                    // How to interpret the vertex input
+                    .vertex_shader(vs.main_entry_point(), ())
+                    .fragment_shader(fs.main_entry_point(), ())
+                    .build(Arc::clone(device))
+                    .expect("Could not create graphics pipeline"),
+            )
         }
         (_, _) => unimplemented!(),
     }

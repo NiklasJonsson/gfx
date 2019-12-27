@@ -61,8 +61,8 @@ enum CameraMovement {
     Down,
 }
 
-impl From<&StateId> for CameraMovement {
-    fn from(id: &StateId) -> Self {
+impl From<StateId> for CameraMovement {
+    fn from(id: StateId) -> Self {
         Self::from_u32(id.0).expect("Error in input context setup, can't convert to CameraMovement")
     }
 }
@@ -79,8 +79,8 @@ enum CameraRotation {
     PitchDelta,
 }
 
-impl From<&RangeId> for CameraRotation {
-    fn from(id: &RangeId) -> Self {
+impl From<RangeId> for CameraRotation {
+    fn from(id: RangeId) -> Self {
         Self::from_u32(id.0).expect("Error in input context setup, can't convert to CameraRotation")
     }
 }
@@ -163,7 +163,7 @@ impl FreeFlyCameraController {
         */
 
         // This is the code from the opengl tutorial
-        let translation_inv = glm::translate(&glm::identity(), &-(pos.to_vec3()));
+        let translation_inv = glm::translate(&glm::identity(), &-(pos.xyz()));
 
         let rotation_inv = glm::mat4(
             cam_right.x,
@@ -280,7 +280,7 @@ impl<'a> System<'a> for FreeFlyCameraController {
                 match input {
                     Input::Range(id, val) => {
                         log::trace!("Found range, applying");
-                        let rot: CameraRotation = id.into();
+                        let rot: CameraRotation = (*id).into();
                         if rot == CameraRotation::YawDelta {
                             rotation_state.yaw += *val as f32;
                         } else {
@@ -296,7 +296,7 @@ impl<'a> System<'a> for FreeFlyCameraController {
                         use CameraMovement::*;
                         let dir = *delta_time
                             * MOVEMENT_SPEED
-                            * match id.into() {
+                            * match (*id).into() {
                                 Forward => view_direction,
                                 Backward => -view_direction,
                                 Left => glm::normalize(&glm::cross::<f32, glm::U3>(
