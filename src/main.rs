@@ -67,7 +67,7 @@ impl std::ops::Mul<f32> for DeltaTime {
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, PartialEq, Eq)]
 enum AppState {
     Focused,
     Unfocused,
@@ -123,11 +123,6 @@ struct EventManager {
     action: AppAction,
 }
 
-// TODO: We should not have "ignore-code" in both event manager and input manager
-// Only stuff that is relevant to input manager should be forwarded.
-// Create enum to represent what we want the input manager to receive
-// But should this really be done here? Separate window/input handling?
-// Move this to input? IOManager? Use Channels to propagate info instead of resource?
 impl EventManager {
     fn new() -> Self {
         Self {
@@ -376,11 +371,7 @@ impl App {
             }
 
             let running = *self.world.read_resource::<GameState>() == GameState::Running;
-            let focused = if let AppState::Focused = self.state {
-                true
-            } else {
-                false
-            };
+            let focused = self.state == AppState::Focused;
 
             if running {
                 assert!(focused, "Can't be running but not be in focus!");
