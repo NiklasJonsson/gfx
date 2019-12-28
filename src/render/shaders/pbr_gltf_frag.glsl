@@ -13,11 +13,16 @@ layout(set = 0, binding = 2) uniform LightingData {
 layout(location = 0) in vec3 world_normal;
 layout(location = 1) in vec3 world_pos;
 #if HAS_TEX_COORDS
-layout(location = 2) in vec2 tex_coords_0;
+layout(location = TEX_COORDS_LOC) in vec2 tex_coords_0;
 #endif
 
 #if HAS_VERTEX_COLOR
-layout(location = 3) in vec3 color_0;
+layout(location = VCOL_LOC) in vec3 color_0;
+#endif
+
+#if HAS_TANGENTS
+layout(location = TAN_LOC) in vec3 world_tangent;
+layout(location = BITAN_LOC) in vec3 world_bitangent;
 #endif
 
 layout(location = 0) out vec4 out_color;
@@ -32,10 +37,20 @@ layout(set = 1, binding = 0) uniform PBRMaterialData {
     vec4 base_color_factor;
     float metallic_factor;
     float roughness_factor;
+    // For the normal map, 1.0 if there is no map
+    float normal_scale;
 } material_data;
 
 #if HAS_BASE_COLOR_TEXTURE
 layout(set = 1, binding = 1) uniform sampler2D base_color_texture;
+#endif
+
+#if HAS_METALLIC_ROUGHNESS_TEXTURE
+layout(set = 1, binding = 2) uniform sampler2D metallic_roughness_texture;
+#endif
+
+#if HAS_NORMAL_MAP
+layout(set = 1, binding = 3) uniform sampler2D normal_map;
 #endif
 
 vec3 fresnel(vec3 fresnel_0, float VdotH) {
@@ -53,6 +68,16 @@ float normal_distribution_function(float NdotH, float alpha_roughness) {
 
 void main() {
     vec3 normal = normalize(world_normal);
+
+#if HAS_NORMAL_MAP
+    vec3 tangent = normalize(world_tangent);
+    vec3 bitangent = normalize(world_bitangent);
+    mat3 tbn = mat3(tangent, bitangent, normal);
+    vec3 tex_normal = texture(normal_map, tex_coords_0).xyz * 2.0 - 1.0;
+    // Only scale .xy, as per the gltf spec
+    tex_normal *= vec3(material_data.normal_scale, material_data.normal_scale, 1.0);
+    normal = normalize(tbn * tex_normal);
+#endif
 
     vec3 light_dir = normalize(lighting_data.light_pos - world_pos);
     vec3 view_dir = normalize(lighting_data.view_pos - world_pos);
@@ -85,11 +110,17 @@ void main() {
     vec3 black = vec3(0.0);
 
 #if HAS_BASE_COLOR_TEXTURE
-	base_color *= texture(base_color_texture, tex_coords_0).rgb;
+    base_color *= texture(base_color_texture, tex_coords_0).rgb;
+#endif
+
+#if HAS_METALLIC_ROUGHNESS_TEXTURE
+    vec4 mr_tex = texture(metallic_roughness_texture, tex_coords_0);
+    roughness *= mr_tex.g;
+    metallic *= mr_tex.b;
 #endif
 
 #if HAS_VERTEX_COLOR
-	base_color *= color_0.rgb;
+    base_color *= color_0.rgb;
 #endif
 
     // Diffuse reflection is the light that is refracted into the material and then emitted again.

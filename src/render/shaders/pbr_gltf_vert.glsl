@@ -14,21 +14,31 @@ layout(set = 0, binding = 1) uniform Model {
 layout(location = 0) in vec3 position;
 layout(location = 1) in vec3 normal;
 #if HAS_TEX_COORDS
-layout(location = 2) in vec2 tex_coords;
+layout(location = TEX_COORDS_LOC) in vec2 tex_coords;
 #endif
 
 #if HAS_VERTEX_COLOR
-layout(location = 3) in vec4 color;
+layout(location = VCOL_LOC) in vec4 color;
+#endif
+
+#if HAS_TANGENTS
+layout(location = TAN_LOC) in vec4 tangent;
 #endif
 
 layout(location = 0) out vec3 world_normal;
 layout(location = 1) out vec3 world_pos;
+
 #if HAS_TEX_COORDS
-layout(location = 2) out vec2 tex_coords_0;
+layout(location = TEX_COORDS_LOC) out vec2 tex_coords_0;
 #endif
 
 #if HAS_VERTEX_COLOR
-layout(location = 3) out vec3 color_0;
+layout(location = VCOL_LOC) out vec3 color_0;
+#endif
+
+#if HAS_TANGENTS
+layout(location = TAN_LOC) out vec3 world_tangent;
+layout(location = BITAN_LOC) out vec3 world_bitangent;
 #endif
 
 void main() {
@@ -40,6 +50,11 @@ void main() {
 
 #if HAS_VERTEX_COLOR
     color_0 = color.rgb;
+#endif
+
+#if HAS_TANGENTS
+    world_tangent = normalize((model_ubo.model * vec4(tangent.xyz, 0.0)).xyz);
+    world_bitangent = normalize(cross(world_normal, world_tangent) * tangent.w);
 #endif
 
     gl_Position = ubo.proj * ubo.view * model_ubo.model * vec4(position, 1.0);

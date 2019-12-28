@@ -9,11 +9,22 @@ pub enum RenderMode {
     Wireframe,
 }
 
+use vulkano::pipeline::input_assembly::PrimitiveTopology;
+impl Into<PrimitiveTopology> for RenderMode {
+    fn into(self) -> PrimitiveTopology {
+        match self {
+            RenderMode::Opaque => PrimitiveTopology::TriangleList,
+            RenderMode::Wireframe => PrimitiveTopology::LineList,
+        }
+    }
+}
+
 #[derive(Debug, Copy, Clone, PartialEq, Eq)]
 pub struct RenderSettings {
     // Affects all entities
     pub render_mode: RenderMode,
     pub render_bounding_box: bool,
+    pub reload_runtime_shaders: bool,
 }
 
 impl Default for RenderSettings {
@@ -21,6 +32,7 @@ impl Default for RenderSettings {
         Self {
             render_mode: RenderMode::Opaque,
             render_bounding_box: false,
+            reload_runtime_shaders: false,
         }
     }
 }
@@ -32,11 +44,14 @@ fn get_input_context() -> InputContext {
         .unwrap()
         .with_action(VirtualKeyCode::P, RENDER_BOUNDING_BOX_SWITCH)
         .unwrap()
+        .with_action(VirtualKeyCode::R, RELOAD_RUNTIME_SHADERS)
+        .unwrap()
         .build()
 }
 
 const RENDER_MODE_SWITCH: ActionId = ActionId(0);
 const RENDER_BOUNDING_BOX_SWITCH: ActionId = ActionId(1);
+const RELOAD_RUNTIME_SHADERS: ActionId = ActionId(2);
 
 #[derive(Default, Component)]
 #[storage(NullStorage)]
@@ -64,6 +79,11 @@ impl<'a> System<'a> for RenderSettingsSys {
             if inp.contains_action(RENDER_BOUNDING_BOX_SWITCH) {
                 log::debug!("Render bounding box switch!");
                 r_settings.render_bounding_box = !r_settings.render_bounding_box;
+            }
+
+            if inp.contains_action(RELOAD_RUNTIME_SHADERS) {
+                log::debug!("Reload runtime shaders!");
+                r_settings.reload_runtime_shaders = true;
             }
 
             inp.clear();

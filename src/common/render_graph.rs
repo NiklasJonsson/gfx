@@ -250,6 +250,7 @@ impl<'a> System<'a> for RenderedBoundingBoxes {
                 ty,
                 vertex_data,
                 material,
+                compilation_mode: CompilationMode::CompileTime,
                 bounding_box: None,
             };
             meshes
@@ -302,6 +303,12 @@ fn breadth_first_sys<'a>(
 pub fn breadth_first(world: &World, root: Entity, visit_node: impl FnMut(Entity)) {
     let nodes_storage = world.read_storage::<RenderGraphNode>();
     breadth_first_sys(&nodes_storage, root, visit_node);
+}
+
+/// Traverse the graph starting at root and apply the function to each node.
+/// Use this when the order does not matter, only that each node is visited once.
+pub fn map(world: &World, root: Entity, visit_node: impl FnMut(Entity)) {
+    breadth_first(world, root, visit_node);
 }
 
 fn depth_first_sys<'a>(
@@ -507,14 +514,14 @@ fn node_to_dot<W: Write>(world: &World, e: Entity, w: &mut W, prefix: &str) -> s
 
 pub fn print_graph_to_dot(
     world: &World,
-    roots: Vec<Entity>,
+    roots: impl Iterator<Item = Entity>,
     mut w: impl Write,
 ) -> std::io::Result<()> {
     writeln!(w, "digraph {{")?;
 
-    for root in roots.iter() {
+    for root in roots {
         writeln!(w, "// ===== New subgraph =====")?;
-        node_to_dot(world, *root, &mut w, "root")?;
+        node_to_dot(world, root, &mut w, "root")?;
     }
 
     writeln!(w, "}}")

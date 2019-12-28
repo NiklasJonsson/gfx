@@ -285,11 +285,12 @@ impl App {
 
         let loaded_asset = asset::load_asset_into(&mut self.world, desc);
         if let Some(path) = &args.scene_out_file {
+            // TODO: Base this into print_graph_to_dot?
             match std::fs::File::create(path) {
                 Ok(file) => {
                     let result = render_graph::print_graph_to_dot(
                         &self.world,
-                        loaded_asset.scene_roots,
+                        loaded_asset.scene_roots.iter().cloned(),
                         file,
                     );
                     if let Err(e) = result {
@@ -304,11 +305,40 @@ impl App {
             }
         }
 
+        // TODO: Start here with overwriting polygonMesh
+        // Note: Maybe we need to say what material it should do it for?
+        // Or can we call shaderc to compile with the same defs? How to share
+        // defs though?
+
         // REFACTOR: Flatten this when support for && and if-let is on stable
         if args.use_scene_camera {
             if let Some(transform) = loaded_asset.camera {
                 camera::Camera::set_camera_state(&mut self.world, cam_entity, &transform);
             }
+        }
+
+        let match_material = |mat: &Material| {
+            if let Material::GlTFPBR {
+                normal_map: Some(_),
+                base_color_texture: Some(_),
+                metallic_roughness_texture: Some(_),
+                ..
+            } = mat
+            {
+                true
+            } else {
+                false
+            }
+        };
+
+        for root in loaded_asset.scene_roots.iter() {
+            runtime_shaders_for_material(
+                &self.world,
+                *root,
+                "src/render/shaders/pbr_gltf_vert.spv",
+                "src/render/shaders/pbr_gltf_frag.spv",
+                match_material,
+            )
         }
     }
 
@@ -325,7 +355,7 @@ impl App {
         control_systems.setup(&mut self.world);
         engine_systems.setup(&mut self.world);
 
-        // Setup world objects, e.g. camera and chalet model
+        // Setup world objects, e.g. camera and model from cmdline
         self.populate_world(&args);
 
         // Collects events and resolves to AppAction

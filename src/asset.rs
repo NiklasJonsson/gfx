@@ -53,20 +53,6 @@ fn generate_line_list_from(index_data: &IndexData) -> IndexData {
     IndexData(ret)
 }
 
-fn gltf_to_vulkano_topology(mode: gltf::mesh::Mode) -> PrimitiveTopology {
-    use gltf::mesh::Mode;
-
-    match mode {
-        Mode::Points => PrimitiveTopology::PointList,
-        Mode::Lines => PrimitiveTopology::LineList,
-        Mode::LineLoop => panic!("Not supported!?"),
-        Mode::LineStrip => PrimitiveTopology::LineStrip,
-        Mode::Triangles => PrimitiveTopology::TriangleList,
-        Mode::TriangleStrip => PrimitiveTopology::TriangleStrip,
-        Mode::TriangleFan => PrimitiveTopology::TriangleFan,
-    }
-}
-
 // This assumes column major
 fn arr4x4_to_mat4(arr: &[[f32; 4]; 4]) -> glm::Mat4 {
     let mut tmp = [0.0f32; 16];
@@ -79,6 +65,64 @@ fn arr4x4_to_mat4(arr: &[[f32; 4]; 4]) -> glm::Mat4 {
         }
     }
     glm::make_mat4(&tmp)
+}
+
+fn load_texture_common(
+    ctx: &RecGltfCtx,
+    texture: &gltf::texture::Texture,
+    coord_set: u32,
+    color_space: ColorSpace,
+) -> Texture {
+    assert_eq!(coord_set, 0, "Not implemented!");
+    assert_eq!(
+        texture.sampler().wrap_s(),
+        gltf::texture::WrappingMode::Repeat
+    );
+    assert_eq!(
+        texture.sampler().wrap_t(),
+        gltf::texture::WrappingMode::Repeat
+    );
+
+    let image_src = texture.source().source();
+
+    use gltf::image::Source;
+    let image = match image_src {
+        Source::Uri { uri, .. } => {
+            let parent_path = Path::new(&ctx.path).parent().expect("Invalid path");
+            let mut image_path = parent_path.to_path_buf();
+            image_path.push(uri);
+            load_image(image_path.to_str().expect("Could not create image path!"))
+        }
+        _ => unimplemented!(),
+    };
+
+    let format = Format {
+        component_layout: ComponentLayout::R8G8B8A8,
+        color_space,
+    };
+
+    Texture {
+        image,
+        coord_set,
+        format,
+    }
+}
+
+fn load_texture(ctx: &RecGltfCtx, texture_info: &gltf::texture::Info, cs: ColorSpace) -> Texture {
+    load_texture_common(ctx, &texture_info.texture(), texture_info.tex_coord(), cs)
+}
+
+fn load_normal_map(ctx: &RecGltfCtx, normal_tex: &gltf::material::NormalTexture) -> NormalMap {
+    // The normal map is always linear
+    let tex = load_texture_common(
+        ctx,
+        &normal_tex.texture(),
+        normal_tex.tex_coord(),
+        ColorSpace::Linear,
+    );
+    let scale = normal_tex.scale();
+
+    NormalMap { tex, scale }
 }
 
 fn get_primitives_from_mesh<'a>(ctx: &RecGltfCtx, mesh: gltf::Mesh<'a>) -> Vec<PolygonMesh> {
@@ -98,10 +142,19 @@ fn get_primitives_from_mesh<'a>(ctx: &RecGltfCtx, mesh: gltf::Mesh<'a>) -> Vec<P
             // TODO: Don't convert all tex_coords to f32
             let tex_coords = reader.read_tex_coords(0);
             let colors = reader.read_colors(0);
+            let tangents = reader.read_tangents();
             let it = positions.zip(normals);
 
-            let vertex_data = match (colors, tex_coords) {
-                (Some(colors), Some(tex_coords)) => VertexBuf::UVCol(
+            let vertex_data = match (colors, tex_coords, tangents) {
+                (None, Some(tex_coords), Some(tangents)) => VertexBuf::UVTan(
+                    tex_coords
+                        .into_f32()
+                        .zip(tangents)
+                        .zip(it)
+                        .map(|((uv, tan), (pos, nor))| (pos, nor, uv, tan).into())
+                        .collect::<Vec<VertexUVTan>>(),
+                ),
+                (Some(colors), Some(tex_coords), None) => VertexBuf::UVCol(
                     tex_coords
                         .into_f32()
                         .zip(colors.into_rgba_f32())
@@ -109,35 +162,23 @@ fn get_primitives_from_mesh<'a>(ctx: &RecGltfCtx, mesh: gltf::Mesh<'a>) -> Vec<P
                         .map(|((uv, col), (pos, nor))| (pos, nor, uv, col).into())
                         .collect::<Vec<VertexUVCol>>(),
                 ),
-                (None, Some(tex_coords)) => VertexBuf::UV(
+                (None, Some(tex_coords), None) => VertexBuf::UV(
                     tex_coords
                         .into_f32()
                         .zip(it)
                         .map(|(uv, (pos, nor))| (pos, nor, uv).into())
                         .collect::<Vec<VertexUV>>(),
                 ),
-                (None, None) => VertexBuf::Base(
+                (None, None, None) => VertexBuf::Base(
                     it.map(|pos_nor| pos_nor.into())
                         .collect::<Vec<VertexBase>>(),
                 ),
-                (Some(_), None) => unimplemented!(),
+                _ => unimplemented!(),
             };
 
             let mat = primitive.material();
 
             let pbr_mr = mat.pbr_metallic_roughness();
-
-            if let Some(_) = pbr_mr.metallic_roughness_texture() {
-                // TODO: Support this
-                log::error!("No support for metallic roughness texture!");
-                unimplemented!();
-            }
-
-            if let Some(_) = mat.normal_texture() {
-                // TODO: Support this
-                log::error!("No support for normal texture!");
-                unimplemented!();
-            }
 
             if let Some(_) = mat.emissive_texture() {
                 // TODO: Support this
@@ -145,41 +186,26 @@ fn get_primitives_from_mesh<'a>(ctx: &RecGltfCtx, mesh: gltf::Mesh<'a>) -> Vec<P
                 unimplemented!();
             }
 
-            let tex = pbr_mr.base_color_texture().map(|texture_info| {
-                assert_eq!(texture_info.tex_coord(), 0, "Not implemented!");
-                assert_eq!(
-                    texture_info.texture().sampler().wrap_s(),
-                    gltf::texture::WrappingMode::Repeat
-                );
-                assert_eq!(
-                    texture_info.texture().sampler().wrap_t(),
-                    gltf::texture::WrappingMode::Repeat
-                );
+            // TODO: Only the first three components are in sRGB, alpha is linear!
+            let base_color_texture = pbr_mr
+                .base_color_texture()
+                .map(|texture_info| load_texture(ctx, &texture_info, ColorSpace::Srgb));
 
-                let image_src = texture_info.texture().source().source();
+            let metallic_roughness_texture = pbr_mr
+                .metallic_roughness_texture()
+                .map(|info| load_texture(ctx, &info, ColorSpace::Linear));
 
-                use gltf::image::Source;
-                let image = match image_src {
-                    Source::Uri { uri, .. } => {
-                        let parent_path = Path::new(&ctx.path).parent().expect("Invalid path");
-                        let mut image_path = parent_path.to_path_buf();
-                        image_path.push(uri);
-                        load_image(image_path.to_str().expect("Could not create image path!"))
-                    }
-                    _ => unimplemented!(),
-                };
-
-                Texture {
-                    image,
-                    coord_set: texture_info.tex_coord(),
-                }
-            });
+            let normal_map = mat
+                .normal_texture()
+                .map(|normal_map| load_normal_map(ctx, &normal_map));
 
             let material = Material::GlTFPBR {
                 base_color_factor: pbr_mr.base_color_factor(),
                 metallic_factor: pbr_mr.metallic_factor(),
                 roughness_factor: pbr_mr.roughness_factor(),
-                base_color_texture: tex,
+                base_color_texture,
+                metallic_roughness_texture,
+                normal_map,
             };
 
             let triangle_indices = IndexData(triangle_index_data);
@@ -196,10 +222,13 @@ fn get_primitives_from_mesh<'a>(ctx: &RecGltfCtx, mesh: gltf::Mesh<'a>) -> Vec<P
                 line_indices,
             };
 
+            // Default to static compilation, this can be fixed later
+            let compilation_mode = CompilationMode::CompileTime;
             PolygonMesh {
                 ty,
                 vertex_data,
                 material,
+                compilation_mode,
                 bounding_box,
             }
         })
