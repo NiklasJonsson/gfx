@@ -305,11 +305,6 @@ impl App {
             }
         }
 
-        // TODO: Start here with overwriting polygonMesh
-        // Note: Maybe we need to say what material it should do it for?
-        // Or can we call shaderc to compile with the same defs? How to share
-        // defs though?
-
         // REFACTOR: Flatten this when support for && and if-let is on stable
         if args.use_scene_camera {
             if let Some(transform) = loaded_asset.camera {
@@ -317,6 +312,7 @@ impl App {
             }
         }
 
+        /* Uncomment for runtime shaders
         let match_material = |mat: &Material| {
             if let Material::GlTFPBR {
                 normal_map: Some(_),
@@ -340,6 +336,7 @@ impl App {
                 match_material,
             )
         }
+        */
     }
 
     fn run(&mut self, args: Args) {
