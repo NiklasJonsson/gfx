@@ -1,4 +1,5 @@
 use crate::input::{ActionId, InputContext, MappedInput};
+use specs::Component;
 use winit::VirtualKeyCode;
 
 use specs::prelude::*;

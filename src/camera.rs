@@ -2,6 +2,8 @@ extern crate nalgebra_glm as glm;
 extern crate num_derive;
 extern crate winit;
 
+use specs::Component;
+
 use crate::common::*;
 use crate::input::{
     DeviceAxis, Input, InputContext, InputContextError, MappedInput, RangeId, Sensitivity, StateId,

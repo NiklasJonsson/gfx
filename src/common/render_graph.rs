@@ -1,5 +1,6 @@
 use nalgebra_glm::{Mat4, U4};
 use specs::prelude::*;
+use specs::Component;
 use specs_hierarchy::Parent as HParent;
 
 use super::*;

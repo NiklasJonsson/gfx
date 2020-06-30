@@ -1,4 +1,5 @@
 use specs::prelude::*;
+use specs::Component;
 
 pub mod math;
 pub mod render_graph;

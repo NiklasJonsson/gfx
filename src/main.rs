@@ -2,8 +2,6 @@
 extern crate vulkano;
 #[macro_use]
 extern crate num_derive;
-#[macro_use]
-extern crate specs_derive;
 extern crate clap;
 extern crate nalgebra_glm as glm;
 

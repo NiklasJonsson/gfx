@@ -1,6 +1,7 @@
 use crate::input::{ActionId, InputContext, InputContextPriority, MappedInput};
 
 use specs::prelude::*;
+use specs::Component;
 
 #[derive(Debug, Copy, Clone, PartialEq, Eq)]
 pub enum GameState {

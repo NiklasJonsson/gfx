@@ -1,6 +1,6 @@
 use super::*;
 use nalgebra_glm::{Mat4, Vec3};
-use std::f32;
+use specs::Component;
 use std::ops::{AddAssign, Mul};
 
 // TODO: Auto derive inner type traits
@@ -68,7 +68,7 @@ impl From<glm::Vec3> for Position {
 impl AddAssign<&glm::Vec3> for Position {
     fn add_assign(&mut self, other: &glm::Vec3) {
         self.0 += glm::vec4(other.x, other.y, other.z, 0.0);
-        assert!(self.0.w == 1.0);
+        assert!(self.0.w == 1.0f32);
     }
 }
 
@@ -157,8 +157,8 @@ pub struct BoundingBox {
 impl Default for BoundingBox {
     fn default() -> Self {
         BoundingBox {
-            min: Position::new(f32::MAX, f32::MAX, f32::MAX),
-            max: Position::new(f32::MIN, f32::MIN, f32::MIN),
+            min: Position::new(std::f32::MAX, std::f32::MAX, std::f32::MAX),
+            max: Position::new(std::f32::MIN, std::f32::MIN, std::f32::MIN),
         }
     }
 }
@@ -179,8 +179,8 @@ impl BoundingBox {
     }
 
     pub fn to_vertices_and_indices(self) -> (VertexBuf, IndexData) {
-        assert!(self.min.iter().all(|x| x != f32::MAX));
-        assert!(self.max.iter().all(|x| x != f32::MIN));
+        assert!(self.min.iter().all(|x| x != std::f32::MAX));
+        assert!(self.max.iter().all(|x| x != std::f32::MIN));
 
         let BoundingBox { min, max } = self;
 

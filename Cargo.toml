@@ -5,9 +5,8 @@ authors = ["Niklas Jonsson <niklasandersjonsson@gmail.com>"]
 edition = "2018"
 
 [dependencies]
-specs = "0.15.0"
-specs-hierarchy = "0.5.1"
-specs-derive = "0.4.0"
+specs-hierarchy = "0.6.0"
+specs = { version = "0.16.1", features = ["specs-derive"] }
 
 # Rendering/Graphics
 vulkano = { git = "https://github.com/vulkano-rs/vulkano" }

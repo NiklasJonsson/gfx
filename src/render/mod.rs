@@ -24,6 +24,7 @@ use vulkano::swapchain::{
 };
 
 use specs::world::EntitiesRes;
+use specs::Component;
 use vulkano::sampler::Sampler;
 use vulkano::sync::{FlushError, GpuFuture, NowFuture, SharingMode};
 

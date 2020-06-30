@@ -7,6 +7,7 @@
 //! 4. When the InputMapper system has run, each entity will have it's mapped input available,
 //!    provided the event was not consumed by a InputContext with higher priority.
 use specs::prelude::*;
+use specs::Component;
 use std::collections::{HashMap, HashSet, VecDeque};
 use std::hash::{Hash, Hasher};
 use winit::{AxisId, DeviceId};
