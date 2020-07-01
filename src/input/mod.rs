@@ -10,13 +10,15 @@ use specs::prelude::*;
 use specs::Component;
 use std::collections::{HashMap, HashSet, VecDeque};
 use std::hash::{Hash, Hasher};
-use winit::{AxisId, DeviceId};
+use winit::{event::AxisId, event::DeviceId};
 // Based primarily on https://www.gamedev.net/articles/programming/general-and-gameplay-programming/designing-a-robust-input-handling-system-for-games-r2975
 
 mod input_context;
 pub use crate::input::input_context::InputContext;
 pub use crate::input::input_context::InputContextError;
 pub use crate::input::input_context::InputContextPriority;
+
+pub use winit::event::VirtualKeyCode as KeyCode;
 
 #[derive(Default, Debug)]
 pub struct CurrentFrameExternalInputs(pub Vec<ExternalInput>);
@@ -145,14 +147,14 @@ pub type AxisValue = f64;
 
 #[derive(Debug)]
 pub enum ExternalInput {
-    KeyPress(winit::VirtualKeyCode),
-    KeyRelease(winit::VirtualKeyCode),
+    KeyPress(KeyCode),
+    KeyRelease(KeyCode),
     MouseDelta { x: AxisValue, y: AxisValue },
 }
 
 #[derive(Debug)]
 struct InputManager {
-    pressed_buttons: HashSet<winit::VirtualKeyCode>,
+    pressed_buttons: HashSet<KeyCode>,
     axis_movement: HashMap<(DeviceId, AxisId), AxisValue>,
 }
 
@@ -164,11 +166,11 @@ impl InputManager {
         }
     }
 
-    fn register_key_press(&mut self, key: winit::VirtualKeyCode) -> bool {
+    fn register_key_press(&mut self, key: KeyCode) -> bool {
         self.pressed_buttons.insert(key)
     }
 
-    fn register_key_release(&mut self, key: winit::VirtualKeyCode) {
+    fn register_key_release(&mut self, key: KeyCode) {
         let existed = self.pressed_buttons.remove(&key);
         if !existed {
             log::warn!("Button was released, but was not registered as pressed.");

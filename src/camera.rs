@@ -1,8 +1,6 @@
-extern crate nalgebra_glm as glm;
-extern crate num_derive;
-extern crate winit;
-
 use specs::Component;
+
+use num_derive::FromPrimitive;
 
 use crate::common::*;
 use crate::input::{
@@ -13,7 +11,8 @@ use crate::DeltaTime;
 use crate::GameState;
 
 use glm::Vec3;
-use winit::VirtualKeyCode;
+use nalgebra_glm as glm;
+use winit::event::VirtualKeyCode;
 
 use specs::prelude::*;
 

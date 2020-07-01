@@ -1,6 +1,8 @@
 use crate::input::{ActionId, InputContext, MappedInput};
 use specs::Component;
-use winit::VirtualKeyCode;
+use winit::event::VirtualKeyCode;
+
+use num_derive::FromPrimitive;
 
 use specs::prelude::*;
 

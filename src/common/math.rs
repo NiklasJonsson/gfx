@@ -1,4 +1,5 @@
 use super::*;
+use nalgebra_glm as glm;
 use nalgebra_glm::{Mat4, Vec3};
 use specs::Component;
 use std::ops::{AddAssign, Mul};

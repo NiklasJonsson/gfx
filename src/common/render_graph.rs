@@ -1,3 +1,4 @@
+use nalgebra_glm as glm;
 use nalgebra_glm::{Mat4, U4};
 use specs::prelude::*;
 use specs::Component;

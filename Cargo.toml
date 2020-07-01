@@ -5,15 +5,16 @@ authors = ["Niklas Jonsson <niklasandersjonsson@gmail.com>"]
 edition = "2018"
 
 [dependencies]
+# ECS
 specs-hierarchy = "0.6.0"
 specs = { version = "0.16.1", features = ["specs-derive"] }
 
 # Rendering/Graphics
-vulkano = { git = "https://github.com/vulkano-rs/vulkano" }
-winit = "0.19"
-vulkano-win = { git = "https://github.com/vulkano-rs/vulkano" }
-vulkano-shaders = { git = "https://github.com/vulkano-rs/vulkano" }
-vk-sys = { git = "https://github.com/vulkano-rs/vulkano" }
+vulkano = "0.19.0"
+vulkano-win = "0.19.0"
+vulkano-shaders = "0.19.0"
+vk-sys = "0.5.2"
+winit = "0.22.2"
 
 # Math/Physics
 nalgebra-glm = "0.4.0"
@@ -29,3 +30,6 @@ gltf = "0.14.0"
 log = "0.4.8"
 env_logger = "0.6.2"
 clap = "2.33.0"
+
+# Threading
+crossbeam = "0.7.3"

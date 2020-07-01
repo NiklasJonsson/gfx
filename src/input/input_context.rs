@@ -9,8 +9,8 @@ use std::collections::HashMap;
 
 use crate::input::*;
 
-type ActionMap = HashMap<winit::VirtualKeyCode, ActionId>;
-type StateMap = HashMap<winit::VirtualKeyCode, StateId>;
+type ActionMap = HashMap<KeyCode, ActionId>;
+type StateMap = HashMap<KeyCode, StateId>;
 type AxisConvMap = HashMap<DeviceAxis, (RangeId, Sensitivity)>;
 
 // Order is important! Declaration order determines sorting order since PartialOrd and Ord are
@@ -56,11 +56,11 @@ impl InputContext {
             .map(|(range_id, sensitivity)| (*range_id, sensitivity * value))
     }
 
-    pub fn get_action_for(&self, key: winit::VirtualKeyCode) -> Option<&ActionId> {
+    pub fn get_action_for(&self, key: KeyCode) -> Option<&ActionId> {
         self.action_map.get(&key)
     }
 
-    pub fn get_state_for(&self, key: winit::VirtualKeyCode) -> Option<&StateId> {
+    pub fn get_state_for(&self, key: KeyCode) -> Option<&StateId> {
         self.state_map.get(&key)
     }
 }
@@ -131,7 +131,7 @@ impl InputContextBuilder {
 
     pub fn with_action(
         mut self,
-        key: winit::VirtualKeyCode,
+        key: KeyCode,
         id: impl Into<ActionId>,
     ) -> Result<Self, InputContextError> {
         match self.action_map.entry(key) {
@@ -145,7 +145,7 @@ impl InputContextBuilder {
 
     pub fn with_state(
         mut self,
-        key: winit::VirtualKeyCode,
+        key: KeyCode,
         id: impl Into<StateId>,
     ) -> Result<Self, InputContextError> {
         match self.state_map.entry(key) {

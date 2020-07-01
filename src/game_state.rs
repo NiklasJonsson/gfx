@@ -1,5 +1,7 @@
 use crate::input::{ActionId, InputContext, InputContextPriority, MappedInput};
 
+use crate::input;
+
 use specs::prelude::*;
 use specs::Component;
 
@@ -55,7 +57,7 @@ impl<'a> System<'a> for GameStateSwitcher {
         world.insert(GameState::default());
         let escape_catcher = InputContext::start("EscapeCatcher")
             .with_description("Global top-level escape catcher for game state switcher")
-            .with_action(winit::VirtualKeyCode::Escape, GAME_STATE_SWITCH)
+            .with_action(input::KeyCode::Escape, GAME_STATE_SWITCH)
             .expect("Could not insert Escape action for GameStateSwitcher")
             .with_priority(InputContextPriority::First)
             .build();

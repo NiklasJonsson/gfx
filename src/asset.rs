@@ -3,7 +3,8 @@ use crate::common::*;
 use specs::prelude::*;
 use specs::{Entity, World};
 use std::path::{Path, PathBuf};
-use vulkano::pipeline::input_assembly::PrimitiveTopology;
+
+use nalgebra_glm as glm;
 
 use gltf::buffer::Data as GltfData;
 
@@ -53,6 +54,7 @@ fn generate_line_list_from(index_data: &IndexData) -> IndexData {
     IndexData(ret)
 }
 
+/*
 // This assumes column major
 fn arr4x4_to_mat4(arr: &[[f32; 4]; 4]) -> glm::Mat4 {
     let mut tmp = [0.0f32; 16];
@@ -66,6 +68,7 @@ fn arr4x4_to_mat4(arr: &[[f32; 4]; 4]) -> glm::Mat4 {
     }
     glm::make_mat4(&tmp)
 }
+*/
 
 fn load_texture_common(
     ctx: &RecGltfCtx,

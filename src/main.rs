@@ -1,25 +1,16 @@
-#[macro_use]
-extern crate vulkano;
-#[macro_use]
-extern crate num_derive;
-extern crate clap;
-extern crate nalgebra_glm as glm;
-
-use vulkano_win::VkSurfaceBuild;
-
-use winit::{Event, EventsLoop, WindowBuilder, WindowEvent};
-
 use specs::prelude::*;
+
+use std::time::Instant;
 
 use std::path::PathBuf;
 use std::sync::Arc;
-use std::time::{Duration, Instant};
 
 mod asset;
 mod camera;
 mod common;
 mod game_state;
 mod input;
+mod io;
 mod render;
 mod settings;
 
@@ -29,41 +20,7 @@ use self::render::*;
 
 use self::game_state::GameState;
 
-#[derive(Default, Debug, Copy, Clone)]
-pub struct DeltaTime(Duration);
-
-impl DeltaTime {
-    pub fn zero() -> DeltaTime {
-        DeltaTime(Duration::new(0, 0))
-    }
-
-    pub fn to_f32(self) -> f32 {
-        (self.0.as_secs() as f64 + self.0.subsec_nanos() as f64 / 1_000_000_000.0) as f32
-    }
-
-    pub fn as_fps(self) -> f32 {
-        1.0 / self.to_f32()
-    }
-}
-
-impl Into<Duration> for DeltaTime {
-    fn into(self) -> Duration {
-        self.0
-    }
-}
-
-impl From<Duration> for DeltaTime {
-    fn from(dur: Duration) -> Self {
-        DeltaTime(dur)
-    }
-}
-
-impl std::ops::Mul<f32> for DeltaTime {
-    type Output = f32;
-    fn mul(self, other: f32) -> Self::Output {
-        self.to_f32() * other
-    }
-}
+use io::windowing::Event;
 
 #[derive(Debug, PartialEq, Eq)]
 enum AppState {
@@ -73,126 +30,9 @@ enum AppState {
 
 struct App {
     world: World,
-    events_loop: EventsLoop,
+    event_queue: io::EventQueue,
     vk_manager: VKManager,
     state: AppState,
-}
-
-// TODO: Handle resized here as well
-#[derive(Debug)]
-enum AppAction {
-    Quit,
-    Focus,
-    Unfocus,
-    HandleInput(Vec<input::ExternalInput>),
-}
-
-impl Default for AppAction {
-    fn default() -> Self {
-        AppAction::HandleInput(Vec::new())
-    }
-}
-
-impl AppAction {
-    fn update_with(self, new: Self) -> Self {
-        use AppAction::*;
-        match (new, self) {
-            (_, Quit) => Quit,
-            (Quit, _) => Quit,
-            (Unfocus, _) => Unfocus,
-            (Focus, Unfocus) => Focus,
-            (_, Unfocus) => Unfocus,
-            (HandleInput(mut new), HandleInput(mut old)) => HandleInput({
-                old.append(&mut new);
-                old
-            }),
-            (HandleInput(vec), Focus) => HandleInput(vec),
-            (Focus, HandleInput(v)) => {
-                log::warn!("Spurios focus event received, ignoring");
-                HandleInput(v)
-            }
-            // Sometimes there are several focus events in a row
-            (Focus, Focus) => Focus,
-        }
-    }
-}
-
-struct EventManager {
-    action: AppAction,
-}
-
-impl EventManager {
-    fn new() -> Self {
-        Self {
-            action: AppAction::HandleInput(Vec::new()),
-        }
-    }
-
-    fn update_action(&mut self, action: AppAction) {
-        let cur = std::mem::replace(&mut self.action, AppAction::Quit);
-        self.action = cur.update_with(action);
-    }
-
-    fn collect_event(&mut self, event: Event) {
-        log::trace!("Received event: {:?}", event);
-        match event {
-            Event::WindowEvent {
-                event: inner_event, ..
-            } => match inner_event {
-                WindowEvent::CloseRequested => {
-                    log::debug!("Received CloseRequested window event");
-                    self.update_action(AppAction::Quit);
-                }
-                WindowEvent::Focused(false) => {
-                    log::debug!("Window lost focus, ignoring input");
-                    self.update_action(AppAction::Unfocus);
-                }
-                WindowEvent::Focused(true) => {
-                    log::debug!("Window gained focus, accepting input");
-                    self.update_action(AppAction::Focus);
-                }
-                WindowEvent::KeyboardInput { device_id, input } => {
-                    log::debug!("Captured key: {:?} from {:?}", input, device_id);
-                    let is_pressed = input.state == winit::ElementState::Pressed;
-                    if let Some(key) = input.virtual_keycode {
-                        let ei = if is_pressed {
-                            input::ExternalInput::KeyPress(key)
-                        } else {
-                            input::ExternalInput::KeyRelease(key)
-                        };
-
-                        self.update_action(AppAction::HandleInput(vec![ei]));
-                    } else {
-                        log::warn!("Key clicked but no virtual key mapped!");
-                    }
-                }
-                e => log::trace!("Ignoring window event {:?}", e),
-            },
-            Event::DeviceEvent {
-                event: inner_event, ..
-            } => {
-                if let winit::DeviceEvent::MouseMotion { delta: (x, y) } = inner_event {
-                    log::debug!("Captured mouse motion: ({:?}, {:?})", x, y);
-                    let ei = input::ExternalInput::MouseDelta { x, y };
-                    self.update_action(AppAction::HandleInput(vec![ei]));
-                } else {
-                    log::trace!("Ignoring device event {:?}", inner_event);
-                }
-            }
-            e => log::trace!("Ignoring event {:?}", e),
-        };
-    }
-
-    fn resolve(&mut self) -> AppAction {
-        let new = match &self.action {
-            AppAction::HandleInput(_) => AppAction::HandleInput(Vec::new()),
-            AppAction::Focus => AppAction::Focus,
-            AppAction::Unfocus => AppAction::Unfocus,
-            AppAction::Quit => AppAction::Quit,
-        };
-
-        std::mem::replace(&mut self.action, new)
-    }
 }
 
 struct Args {
@@ -337,6 +177,10 @@ impl App {
         */
     }
 
+    fn next_event(&self) -> Option<Event> {
+        self.event_queue.pop().ok()
+    }
+
     fn run(&mut self, args: Args) {
         let (mut control_systems, mut engine_systems) = Self::init_dispatchers();
 
@@ -354,8 +198,6 @@ impl App {
         self.populate_world(&args);
 
         // Collects events and resolves to AppAction
-        let mut event_manager = EventManager::new();
-
         let _start_time = Instant::now();
         let mut prev_frame = Instant::now();
 
@@ -377,22 +219,20 @@ impl App {
 
             *self.world.write_resource::<DeltaTime>() = diff.into();
 
-            self.events_loop
-                .poll_events(|event| event_manager.collect_event(event));
-
-            match event_manager.resolve() {
-                AppAction::Quit => return,
-                AppAction::Focus => self.state = AppState::Focused,
-                AppAction::Unfocus => {
+            match self.next_event() {
+                Some(Event::Quit) => return,
+                Some(Event::Focus) => self.state = AppState::Focused,
+                Some(Event::Unfocus) => {
                     self.state = AppState::Unfocused;
                     *self.world.write_resource::<GameState>() = GameState::Paused;
                 }
-                AppAction::HandleInput(input) => {
+                Some(Event::Input(input)) => {
                     let mut cur_inputs = self
                         .world
                         .write_resource::<input::CurrentFrameExternalInputs>();
                     *cur_inputs = input::CurrentFrameExternalInputs(input);
                 }
+                None => (),
             }
 
             let running = *self.world.read_resource::<GameState>() == GameState::Running;
@@ -445,10 +285,9 @@ impl App {
     fn new() -> Self {
         let vk_instance = render::get_vk_instance();
 
-        let events_loop = EventsLoop::new();
-        let vk_surface = WindowBuilder::new()
-            .build_vk_surface(&events_loop, Arc::clone(&vk_instance))
-            .expect("Unable to create window/surface");
+        let (vk_surface, event_queue) =
+            io::init_windowing_and_input_thread(Arc::clone(&vk_instance))
+                .expect("Failed to init windowing!");
 
         let world = World::new();
 
@@ -458,8 +297,8 @@ impl App {
 
         App {
             world,
-            events_loop,
             vk_manager,
+            event_queue,
             state,
         }
     }

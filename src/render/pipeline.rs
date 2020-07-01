@@ -1,4 +1,3 @@
-use std::path::Path;
 use std::sync::Arc;
 use vulkano::descriptor::descriptor::ShaderStages;
 use vulkano::device::Device;

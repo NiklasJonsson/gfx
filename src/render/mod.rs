@@ -1,4 +1,3 @@
-use image::RgbaImage;
 use vulkano::buffer::{
     cpu_pool::CpuBufferPoolSubbuffer, BufferAccess, BufferUsage, CpuBufferPool, ImmutableBuffer,
     TypedBufferAccess,
@@ -28,7 +27,9 @@ use specs::Component;
 use vulkano::sampler::Sampler;
 use vulkano::sync::{FlushError, GpuFuture, NowFuture, SharingMode};
 
-use winit::Window;
+use vulkano::single_pass_renderpass;
+
+use winit::window::Window;
 
 use nalgebra_glm as glm;
 
@@ -83,7 +84,7 @@ impl VKManager {
 
         let (swapchain, swapchain_images) = self
             .swapchain
-            .recreate_with_dimension(dimensions)
+            .recreate_with_dimensions(dimensions)
             .expect("Unable to recreated swap chain");
 
         self.swapchain = swapchain;
@@ -279,26 +280,27 @@ impl VKManager {
     }
 
     pub fn take_cursor(&mut self) {
-        self.grab_cursor(true);
+        self.cursor_grab(true);
     }
 
     pub fn release_cursor(&mut self) {
-        self.grab_cursor(false);
+        self.cursor_grab(false);
     }
 
-    fn grab_cursor(&mut self, grab_cursor: bool) {
+    fn cursor_grab(&mut self, cursor_grab: bool) {
         self.vk_surface
             .window()
-            .grab_cursor(grab_cursor)
+            .set_cursor_grab(cursor_grab)
             .expect("Unable to grab cursor");
-        self.vk_surface.window().hide_cursor(grab_cursor);
+        self.vk_surface.window().set_cursor_visible(!cursor_grab);
     }
 
     pub fn prepare_frame(&mut self) {
         let (img_idx, swapchain_img_acquired) =
             match swapchain::acquire_next_image(Arc::clone(&self.swapchain), None) {
-                Ok(r) => r,
-                Err(AcquireError::OutOfDate) => {
+                Ok((idx, false, fut)) => (idx, fut),
+                // true means suboptimal swapchain
+                Err(AcquireError::OutOfDate) | Ok((_, true, _)) => {
                     self.recreate_swap_chain();
                     return;
                 }
@@ -380,17 +382,19 @@ impl VKManager {
         ];
 
         // Render all the renderables as one render pass
-        let builder = AutoCommandBufferBuilder::primary_one_time_submit(
+        let mut builder_orig = AutoCommandBufferBuilder::primary_one_time_submit(
             Arc::clone(&self.vk_device),
             self.graphics_queue.family(),
         )
-        .expect("Failed to create command buffer builder")
-        .begin_render_pass(
-            Arc::clone(&self.framebuffers[frame_idx]),
-            false,
-            clear_color,
-        )
-        .expect("Failed after begin render pass");
+        .expect("Failed to create command buffer builder");
+
+        let builder = builder_orig
+            .begin_render_pass(
+                Arc::clone(&self.framebuffers[frame_idx]),
+                false,
+                clear_color,
+            )
+            .expect("Failed after begin render pass");
 
         let model_ubo_buf = CpuBufferPool::uniform_buffer(Arc::clone(&self.vk_device));
 
@@ -407,14 +411,16 @@ impl VKManager {
                             .get(ent)
                             .copied()
                             .unwrap_or_else(ModelMatrix::identity),
-                    )
+                    );
+
+                    builder
                 });
 
-        let cmd_buf = builder
+        builder
             .end_render_pass()
-            .expect("Unable to end render pass")
-            .build()
-            .expect("Unable to build render pass");
+            .expect("Unable to end render pass");
+
+        let cmd_buf = builder_orig.build().expect("Unable to build render pass");
 
         let presented = prev_frame
             .then_execute(Arc::clone(&self.graphics_queue), cmd_buf)
@@ -588,7 +594,7 @@ fn create_swapchain(
     };
 
     let sharing_mode: SharingMode = if queue_family_ids.iter().all(|&x| x == queue_family_ids[0]) {
-        SharingMode::Exclusive(queue_family_ids[0])
+        SharingMode::Exclusive
     } else {
         SharingMode::Concurrent(queue_family_ids.to_vec())
     };
@@ -607,6 +613,7 @@ fn create_swapchain(
         SurfaceTransform::Identity,
         alpha,
         present_mode,
+        vulkano::swapchain::FullscreenExclusive::Default,
         /* clipped */ true,
         ColorSpace::SrgbNonLinear,
     )
@@ -1060,9 +1067,9 @@ pub struct Renderable {
 }
 
 impl Renderable {
-    fn record_draw_commands(
+    fn record_draw_commands<'a>(
         &self,
-        cmd_buf: AutoCommandBufferBuilder,
+        cmd_buf: &'a mut AutoCommandBufferBuilder,
         vp_buf: &CpuBufferPoolSubbuffer<
             pipeline::pbr::vs::base::ty::Transforms,
             Arc<vulkano::memory::pool::StdMemoryPool>,
@@ -1073,7 +1080,7 @@ impl Renderable {
         >,
         model_ubo_buf: &CpuBufferPool<pipeline::pbr::vs::base::ty::Model>,
         model_matrix: ModelMatrix,
-    ) -> AutoCommandBufferBuilder {
+    ) -> &'a mut AutoCommandBufferBuilder {
         let model_data = pipeline::pbr::vs::base::ty::Model {
             model: model_matrix.into(),
             model_it: glm::inverse_transpose(model_matrix.into()).into(),
@@ -1149,11 +1156,7 @@ pub fn get_vk_instance() -> Arc<Instance> {
 }
 
 fn get_physical_window_dims(window: &Window) -> [u32; 2] {
-    window
-        .get_inner_size()
-        .map(|dims| {
-            let dims: (u32, u32) = dims.to_physical(window.get_hidpi_factor()).into();
-            [dims.0, dims.1]
-        })
-        .expect("Was not able to read window dimensions, is it open?")
+    let ph = window.inner_size();
+
+    [ph.width, ph.height]
 }
