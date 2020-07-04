@@ -14,9 +14,9 @@ use winit::{event::AxisId, event::DeviceId};
 // Based primarily on https://www.gamedev.net/articles/programming/general-and-gameplay-programming/designing-a-robust-input-handling-system-for-games-r2975
 
 mod input_context;
-pub use crate::input::input_context::InputContext;
-pub use crate::input::input_context::InputContextError;
-pub use crate::input::input_context::InputContextPriority;
+pub use input_context::InputContext;
+pub use input_context::InputContextError;
+pub use input_context::InputContextPriority;
 
 pub use winit::event::VirtualKeyCode as KeyCode;
 

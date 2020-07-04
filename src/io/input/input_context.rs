@@ -7,7 +7,7 @@ use std::collections::HashMap;
 // Basic idea:
 // InputContext acts as a filter for inputs (key press/release, mouse click etc...). There are several InputContexts that consume input and if it's not interested in some input, it passes it on.
 
-use crate::input::*;
+use super::*;
 
 type ActionMap = HashMap<KeyCode, ActionId>;
 type StateMap = HashMap<KeyCode, StateId>;

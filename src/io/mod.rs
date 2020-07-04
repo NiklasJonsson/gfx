@@ -1,3 +1,4 @@
+pub mod input;
 pub mod windowing;
 
 use vulkano::instance::Instance;

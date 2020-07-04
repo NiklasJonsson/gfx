@@ -1,4 +1,4 @@
-use crate::input;
+use super::input;
 
 use winit::event::DeviceEvent;
 use winit::event::ElementState;

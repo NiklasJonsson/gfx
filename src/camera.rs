@@ -3,7 +3,7 @@ use specs::Component;
 use num_derive::FromPrimitive;
 
 use crate::common::*;
-use crate::input::{
+use crate::io::input::{
     DeviceAxis, Input, InputContext, InputContextError, MappedInput, RangeId, Sensitivity, StateId,
 };
 

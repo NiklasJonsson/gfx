@@ -9,7 +9,6 @@ mod asset;
 mod camera;
 mod common;
 mod game_state;
-mod input;
 mod io;
 mod render;
 mod settings;
@@ -52,7 +51,7 @@ impl App {
     fn init_dispatchers<'a, 'b>() -> (Dispatcher<'a, 'b>, Dispatcher<'a, 'b>) {
         let control_builder = DispatcherBuilder::new();
         // Input needs to go before as most systems depends on it
-        let control_builder = input::register_systems(control_builder);
+        let control_builder = io::input::register_systems(control_builder);
         let control_builder = game_state::register_systems(control_builder);
 
         let control = control_builder.build();
@@ -80,7 +79,7 @@ impl App {
 
     fn setup_resources(&mut self) {
         self.world
-            .insert(input::CurrentFrameExternalInputs(Vec::new()));
+            .insert(io::input::CurrentFrameExternalInputs(Vec::new()));
         self.world.insert(ActiveCamera::empty());
         self.world.insert(DeltaTime::zero());
     }
@@ -229,8 +228,8 @@ impl App {
                 Some(Event::Input(input)) => {
                     let mut cur_inputs = self
                         .world
-                        .write_resource::<input::CurrentFrameExternalInputs>();
-                    *cur_inputs = input::CurrentFrameExternalInputs(input);
+                        .write_resource::<io::input::CurrentFrameExternalInputs>();
+                    *cur_inputs = io::input::CurrentFrameExternalInputs(input);
                 }
                 None => (),
             }
