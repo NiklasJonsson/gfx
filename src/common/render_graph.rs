@@ -138,7 +138,7 @@ impl<'a> System<'a> for TransformPropagation {
             let transform: Mat4 = transforms
                 .get(ent)
                 .copied()
-                .unwrap_or(glm::identity::<f32, U4>().into())
+                .unwrap_or_else(|| glm::identity::<f32, U4>().into())
                 .into();
             stack.push(transform);
 

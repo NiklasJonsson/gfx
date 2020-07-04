@@ -362,7 +362,7 @@ fn main() {
         None
     };
 
-    let scene_out_file = matches.value_of("scene-out-file").map(|p| PathBuf::from(p));
+    let scene_out_file = matches.value_of("scene-out-file").map(PathBuf::from);
 
     let args = Args {
         gltf_path: path_buf,

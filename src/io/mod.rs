@@ -11,11 +11,6 @@ use vulkano_win::VkSurfaceBuild;
 
 use std::sync::Arc;
 
-enum EventLoopControl {
-    Done(windowing::Event),
-    Continue,
-}
-
 pub type VkSurface = vulkano::swapchain::Surface<winit::window::Window>;
 
 pub type EventQueue = Arc<crossbeam::queue::SegQueue<windowing::Event>>;
@@ -53,11 +48,11 @@ pub fn init_windowing_and_input_thread(
             *control_flow = WinCFlow::Wait;
 
             match event_manager.collect_event(winit_event) {
-                EventLoopControl::Done(event) => {
+                windowing::EventLoopControl::Done(event) => {
                     log::debug!("Sending event on queue: {:?}", event);
                     event_queue.push(event)
                 }
-                EventLoopControl::Continue => (),
+                windowing::EventLoopControl::Continue => (),
             }
         });
     });

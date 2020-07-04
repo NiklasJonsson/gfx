@@ -179,7 +179,7 @@ impl BoundingBox {
         self.max = Position::new(x, y, z);
     }
 
-    pub fn to_vertices_and_indices(self) -> (VertexBuf, IndexData) {
+    pub fn to_vertices_and_indices(&self) -> (VertexBuf, IndexData) {
         assert!(self.min.iter().all(|x| x != std::f32::MAX));
         assert!(self.max.iter().all(|x| x != std::f32::MIN));
 

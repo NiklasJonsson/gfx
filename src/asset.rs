@@ -183,7 +183,7 @@ fn get_primitives_from_mesh<'a>(ctx: &RecGltfCtx, mesh: gltf::Mesh<'a>) -> Vec<P
 
             let pbr_mr = mat.pbr_metallic_roughness();
 
-            if let Some(_) = mat.emissive_texture() {
+            if mat.emissive_texture().is_some() {
                 // TODO: Support this
                 log::error!("No support for emissive texture!");
                 unimplemented!();
@@ -343,7 +343,7 @@ pub fn load_gltf_asset(world: &mut World, path: &Path) -> LoadedAsset {
     };
 
     // A scene may have several root nodes
-    let nodes = gltf_doc.scenes().nth(0).expect("No scenes!").nodes();
+    let nodes = gltf_doc.scenes().next().expect("No scenes!").nodes();
     if gltf_doc.scenes().len() > 1 {
         log::warn!("More than one scene found, only displaying the first");
         log::warn!("Number of scenes: {}", gltf_doc.scenes().len());
@@ -360,7 +360,7 @@ pub fn load_gltf_asset(world: &mut World, path: &Path) -> LoadedAsset {
     }
 
     let mut cam_transform: Option<Transform> = None;
-    if gltf_doc.cameras().nth(0).is_some() {
+    if gltf_doc.cameras().next().is_some() {
         log::info!("Found camera in scene");
         if gltf_doc.cameras().len() > 1 {
             log::warn!("More than one camera found, only using the first");

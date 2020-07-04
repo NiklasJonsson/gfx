@@ -43,6 +43,12 @@ impl Event {
     }
 }
 
+#[derive(Debug)]
+pub enum EventLoopControl {
+    Done(Event),
+    Continue,
+}
+
 pub struct EventManager {
     action: Event,
 }
@@ -59,10 +65,7 @@ impl EventManager {
         self.action = cur.update_with(action);
     }
 
-    pub fn collect_event<'a>(
-        &mut self,
-        event: winit::event::Event<'a, ()>,
-    ) -> super::EventLoopControl {
+    pub fn collect_event<'a>(&mut self, event: winit::event::Event<'a, ()>) -> EventLoopControl {
         log::trace!("Received event: {:?}", event);
         let mut resolve = false;
         use winit::event::Event as WinEvent;
@@ -121,11 +124,11 @@ impl EventManager {
         if resolve {
             let r = self.resolve();
             match &r {
-                Event::Input(v) if v.is_empty() => super::EventLoopControl::Continue,
-                x => super::EventLoopControl::Done(r),
+                Event::Input(v) if v.is_empty() => EventLoopControl::Continue,
+                _ => EventLoopControl::Done(r),
             }
         } else {
-            super::EventLoopControl::Continue
+            EventLoopControl::Continue
         }
     }
 
