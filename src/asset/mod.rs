@@ -6,8 +6,10 @@ use std::path::PathBuf;
 mod gltf;
 mod obj;
 mod storage;
+mod cache;
 
 // Per asset type description, generally all the files needed to load an asset
+#[derive(Debug)]
 pub enum AssetDescriptor {
     Obj {
         data_file: PathBuf,
@@ -16,6 +18,9 @@ pub enum AssetDescriptor {
     Gltf {
         path: PathBuf,
     },
+    Texture {
+        path: PathBuf,
+    }
 }
 
 pub struct LoadedAsset {
