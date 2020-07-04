@@ -15,7 +15,7 @@ use crate::settings::RenderSettings;
 
 /// Components for defining a node in a render graph
 /// Useful when representing 3d models comprised of
-/// several PolygonMesh where we might have
+/// several Mesh where we might have
 /// transforms on several levels that should be concatenated
 
 /// A child always has a parent. A root node will not have this component
@@ -175,7 +175,8 @@ impl<'a> System<'a> for RenderedBoundingBoxes {
         Entities<'a>,
         ReadStorage<'a, RenderGraphRoot>,
         ReadStorage<'a, ModelMatrix>,
-        WriteStorage<'a, PolygonMesh>,
+        WriteStorage<'a, Mesh>,
+        WriteStorage<'a, Material>,
         WriteStorage<'a, RenderGraphNode>,
         WriteStorage<'a, RenderGraphChild>,
         WriteStorage<'a, RenderedBoundingBox>,
@@ -190,6 +191,7 @@ impl<'a> System<'a> for RenderedBoundingBoxes {
             roots,
             matrices,
             mut meshes,
+            mut materials,
             mut rgnodes,
             mut rgchildren,
             mut rbbs,
@@ -245,19 +247,23 @@ impl<'a> System<'a> for RenderedBoundingBoxes {
 
             let (vertex_data, indices) = biggest_bounding_box.to_vertices_and_indices();
             let ty = MeshType::Line { indices };
-            let material = Material::Color {
-                color: [1.0, 0.0, 0.0, 1.0],
+            let material = Material {
+                data: MaterialData::Color {
+                    color: [1.0, 0.0, 0.0, 1.0],
+                },
+                compilation_mode: CompilationMode::CompileTime,
             };
-            let mesh = PolygonMesh {
+            let mesh = Mesh {
                 ty,
                 vertex_data,
-                material,
-                compilation_mode: CompilationMode::CompileTime,
                 bounding_box: None,
             };
             meshes
                 .insert(child, mesh)
                 .expect("Unable to insert bb mesh");
+            materials
+                .insert(child, material)
+                .expect("Unable to add bb material");
         }
     }
 }

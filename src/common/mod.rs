@@ -1,16 +1,16 @@
+pub mod math;
+pub mod render_graph;
+pub mod time;
+
 use specs::prelude::*;
 use specs::Component;
 
 use vulkano::impl_vertex;
 
-pub mod math;
-pub mod render_graph;
-pub mod time;
-
+use crate::render::texture::Texture;
 pub use math::*;
 pub use time::*;
 
-use std::fmt;
 use std::path::PathBuf;
 
 #[derive(Copy, Clone, Debug, Default)]
@@ -141,68 +141,10 @@ impl Into<VkFormat> for Format {
     }
 }
 
-#[derive(Clone)]
-pub struct Texture {
-    pub image: image::RgbaImage,
-    pub coord_set: u32,
-    pub format: Format,
-}
-
-impl fmt::Debug for Texture {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        f.debug_struct("Texture")
-            .field(
-                "image",
-                &format_args!(
-                    "RgbaImage{{ w: {}, h: {}}}",
-                    self.image.width(),
-                    self.image.height()
-                ),
-            )
-            .field("coord_set", &self.coord_set)
-            .finish()
-    }
-}
-
 #[derive(Clone, Debug)]
 pub struct NormalMap {
     pub tex: Texture,
     pub scale: f32,
-}
-
-#[derive(Clone, Debug)]
-pub enum Material {
-    Color {
-        color: [f32; 4],
-    },
-    ColorTexture(Texture),
-    GlTFPBR {
-        base_color_factor: [f32; 4],
-        metallic_factor: f32,
-        roughness_factor: f32,
-        normal_map: Option<NormalMap>,
-        base_color_texture: Option<Texture>,
-        metallic_roughness_texture: Option<Texture>,
-    },
-    None,
-}
-
-#[derive(Debug)]
-pub struct IndexData(pub Vec<u32>);
-
-// REFACTOR:
-// - Rename
-// - Make a single enum and no struct?
-// - Create structs for each enum content
-#[derive(Debug)]
-pub enum MeshType {
-    Triangle {
-        triangle_indices: IndexData,
-        line_indices: IndexData,
-    },
-    Line {
-        indices: IndexData,
-    },
 }
 
 /// Compile time means that the material will be used to lookup what pre-compiled shader to use.
@@ -223,14 +165,49 @@ impl PartialEq for CompilationMode {
     }
 }
 
-// One ore more vertices with associated data on how to render them
+#[derive(Clone, Debug)]
+pub enum MaterialData {
+    Color {
+        color: [f32; 4],
+    },
+    ColorTexture(Texture),
+    GlTFPBR {
+        base_color_factor: [f32; 4],
+        metallic_factor: f32,
+        roughness_factor: f32,
+        normal_map: Option<NormalMap>,
+        base_color_texture: Option<Texture>,
+        metallic_roughness_texture: Option<Texture>,
+    },
+    None,
+}
+
+#[derive(Clone, Debug, Component)]
+#[storage(DenseVecStorage)]
+pub struct Material {
+    pub data: MaterialData,
+    pub compilation_mode: CompilationMode,
+}
+
+#[derive(Debug)]
+pub struct IndexData(pub Vec<u32>);
+#[derive(Debug)]
+pub enum MeshType {
+    Triangle {
+        triangle_indices: IndexData,
+        line_indices: IndexData,
+    },
+    Line {
+        indices: IndexData,
+    },
+}
+
+// One ore more vertices with associated data
 #[derive(Debug, Component)]
 #[storage(DenseVecStorage)]
-pub struct PolygonMesh {
+pub struct Mesh {
     pub ty: MeshType,
     pub vertex_data: VertexBuf,
-    pub material: Material,
-    pub compilation_mode: CompilationMode,
     // TODO: Move this to it's own component?
     pub bounding_box: Option<BoundingBox>,
 }
@@ -242,15 +219,15 @@ pub fn runtime_shaders_for_material(
     fs_path: impl Into<PathBuf>,
     match_material: impl Fn(&Material) -> bool,
 ) {
-    let mut meshes = world.write_storage::<PolygonMesh>();
+    let mut materials = world.write_storage::<Material>();
     let vs_path = vs_path.into();
     let fs_path = fs_path.into();
     let change_to_runtime = |ent| {
-        if let Some(mesh) = meshes.get_mut(ent) {
-            if match_material(&mesh.material) {
+        if let Some(mat) = materials.get_mut(ent) {
+            if match_material(&mat) {
                 let vs_path = vs_path.clone();
                 let fs_path = fs_path.clone();
-                (*mesh).compilation_mode = CompilationMode::RunTime { vs_path, fs_path };
+                (*mat).compilation_mode = CompilationMode::RunTime { vs_path, fs_path };
             }
         }
     };

@@ -185,7 +185,8 @@ impl App {
 
         // Register all component types
         self.world.register::<Renderable>();
-        self.world.register::<PolygonMesh>();
+        self.world.register::<Mesh>();
+        self.world.register::<Material>();
         self.world.register::<render_graph::RenderGraphNode>();
         self.world.register::<render_graph::RenderGraphRoot>();
         self.world.register::<render_graph::RenderGraphChild>();

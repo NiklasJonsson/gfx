@@ -45,6 +45,9 @@ use crate::common::*;
 use crate::settings::{RenderMode, RenderSettings};
 
 mod pipeline;
+pub mod texture;
+
+use texture::Texture;
 
 #[derive(Debug, Default)]
 pub struct ActiveCamera(Option<Entity>);
@@ -154,7 +157,7 @@ impl VKManager {
         }
     }
 
-    fn create_renderable(&self, mesh: &PolygonMesh, mode: RenderMode) -> Renderable {
+    fn create_renderable(&self, mesh: &Mesh, mat: &Material, mode: RenderMode) -> Renderable {
         let vk_mode = mode.into();
 
         let indices = match &mesh.ty {
@@ -174,8 +177,8 @@ impl VKManager {
             self.swapchain.dimensions(),
             vk_mode,
             &mesh.vertex_data,
-            &mesh.material,
-            &mesh.compilation_mode,
+            &mat.data,
+            &mat.compilation_mode,
         );
 
         // TODO: Use transfer queue for sending to gpu
@@ -210,7 +213,7 @@ impl VKManager {
 
         // TODO: Can we use a big buffer for all materials of the same type?
         let (material_descriptor_set, render_material, material_data_copied) =
-            create_material_descriptor_set(&self.graphics_queue, &g_pipeline, &mesh.material);
+            create_material_descriptor_set(&self.graphics_queue, &g_pipeline, &mat.data);
 
         data_copied
             .join(material_data_copied)
@@ -230,11 +233,13 @@ impl VKManager {
     }
 
     pub fn prepare_primitives_for_rendering(&self, world: &World) {
-        let meshes = world.write_storage::<PolygonMesh>();
+        let meshes = world.write_storage::<Mesh>();
+        let materials = world.write_storage::<Material>();
         let mut renderables = world.write_storage::<Renderable>();
 
         let entities = world.read_resource::<EntitiesRes>();
         let mut render_settings = world.write_resource::<RenderSettings>();
+
         let render_mode = render_settings.render_mode;
         let reload_shaders = render_settings.reload_runtime_shaders;
 
@@ -242,28 +247,28 @@ impl VKManager {
             log::debug!("Shader reload requested");
         }
 
-        for (ent, mesh) in (&entities, &meshes).join() {
+        for (ent, mesh, mat) in (&entities, &meshes, &materials).join() {
             let entry = renderables.entry(ent).expect("Failed to get entry!");
             match entry {
                 StorageEntry::Occupied(mut occ_entry) => {
                     if occ_entry.get().mode != render_mode {
                         // TODO: Reuse some stuff here?
                         log::trace!("Renderable did not match render mode, creating new");
-                        let rend = self.create_renderable(mesh, render_mode);
+                        let rend = self.create_renderable(mesh, mat, render_mode);
                         occ_entry.insert(rend);
                     } else {
                         log::trace!("Using existing renderable");
                         if reload_shaders {
                             log::trace!("Reloading shader");
-                            if let CompilationMode::RunTime { .. } = &mesh.compilation_mode {
+                            if let CompilationMode::RunTime { .. } = &mat.compilation_mode {
                                 occ_entry.get_mut().g_pipeline = pipeline::create_graphics_pipeline(
                                     &self.vk_device,
                                     &self.render_pass,
                                     self.swapchain.dimensions(),
                                     render_mode.into(),
                                     &mesh.vertex_data,
-                                    &mesh.material,
-                                    &mesh.compilation_mode,
+                                    &mat.data,
+                                    &mat.compilation_mode,
                                 );
                             }
                         }
@@ -271,7 +276,7 @@ impl VKManager {
                 }
                 StorageEntry::Vacant(vac_entry) => {
                     log::trace!("No renderable found, creating new");
-                    let rend = self.create_renderable(mesh, render_mode);
+                    let rend = self.create_renderable(mesh, mat, render_mode);
                     vac_entry.insert(rend);
                 }
             }
@@ -811,7 +816,7 @@ macro_rules! descriptor_set_with_textures {
 fn create_material_descriptor_set(
     queue: &Arc<Queue>,
     g_pipeline: &Arc<dyn GraphicsPipelineAbstract + Send + Sync>,
-    material: &Material,
+    material: &MaterialData,
 ) -> (
     Arc<dyn DescriptorSet + Send + Sync>,
     RenderableMaterial,
@@ -820,7 +825,7 @@ fn create_material_descriptor_set(
     Box<dyn GpuFuture>,
 ) {
     match material {
-        Material::GlTFPBR {
+        MaterialData::GlTFPBR {
             base_color_factor,
             metallic_factor,
             roughness_factor,
@@ -912,7 +917,7 @@ fn create_material_descriptor_set(
                 _ => unimplemented!(),
             }
         }
-        Material::Color { color } => {
+        MaterialData::Color { color } => {
             let data = pipeline::fs_uniform_color::ty::Color { x: *color };
 
             let (buf, mat_copied) =

@@ -256,7 +256,7 @@ pub fn create_graphics_pipeline(
     swapchain_dimensions: [u32; 2],
     rendering_mode: PrimitiveTopology,
     vertex_buf: &VertexBuf,
-    material: &Material,
+    material: &MaterialData,
     compilation_mode: &CompilationMode,
 ) -> Arc<dyn GraphicsPipelineAbstract + Send + Sync> {
     let dims = [
@@ -285,7 +285,7 @@ pub fn create_graphics_pipeline(
         .render_pass(Subpass::from(Arc::clone(render_pass), 0).unwrap());
 
     match (vertex_buf, material) {
-        (VertexBuf::Base(_), Material::GlTFPBR { .. }) => create_pipeline!(
+        (VertexBuf::Base(_), MaterialData::GlTFPBR { .. }) => create_pipeline!(
             device,
             builder,
             pbr::vs::base,
@@ -295,7 +295,7 @@ pub fn create_graphics_pipeline(
         ),
         (
             VertexBuf::UV(_),
-            Material::GlTFPBR {
+            MaterialData::GlTFPBR {
                 base_color_texture: Some(_),
                 normal_map: None,
                 metallic_roughness_texture: None,
@@ -311,7 +311,7 @@ pub fn create_graphics_pipeline(
         ),
         (
             VertexBuf::UVTan(_),
-            Material::GlTFPBR {
+            MaterialData::GlTFPBR {
                 base_color_texture: Some(_),
                 metallic_roughness_texture: Some(_),
                 normal_map: Some(_),
@@ -327,7 +327,7 @@ pub fn create_graphics_pipeline(
         ),
         (
             VertexBuf::UVCol(_),
-            Material::GlTFPBR {
+            MaterialData::GlTFPBR {
                 base_color_texture: Some(_),
                 normal_map: None,
                 metallic_roughness_texture: None,
@@ -341,7 +341,7 @@ pub fn create_graphics_pipeline(
             VertexUVCol,
             compilation_mode
         ),
-        (VertexBuf::PosOnly(_), Material::Color { .. }) => create_pipeline!(
+        (VertexBuf::PosOnly(_), MaterialData::Color { .. }) => create_pipeline!(
             device,
             builder,
             vs_passthrough,
