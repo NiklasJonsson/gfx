@@ -228,6 +228,7 @@ impl App {
                     *self.world.write_resource::<GameState>() = GameState::Paused;
                 }
                 Some(Event::Input(input)) => {
+                    dbg!("input");
                     let mut cur_inputs = self
                         .world
                         .write_resource::<io::input::CurrentFrameExternalInputs>();
@@ -272,6 +273,11 @@ impl App {
             self.vk_manager.draw_next_frame(&mut self.world);
 
             self.world.maintain();
+
+            let mut cur_inputs = self
+                .world
+                .write_resource::<io::input::CurrentFrameExternalInputs>();
+            cur_inputs.0.clear();
 
             frame_count += 1;
             if let Some(n_frames) = args.run_n_frames {
