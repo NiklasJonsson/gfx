@@ -1,27 +1,41 @@
 use std::marker::PhantomData;
 
-#[derive(Debug, Copy, Clone, PartialEq, Eq, Ord, PartialOrd)]
-pub struct ID {
+#[derive(Debug, Copy, Clone, PartialEq, Eq, Ord, PartialOrd, Hash)]
+struct ID {
     index: usize,
 }
 
-#[derive(Debug, PartialEq, Eq, PartialOrd, Ord)]
+// Can't derive things on Handle because of PhantomData + generic
+// https://github.com/rust-lang/rust/issues/26925
+#[derive(Debug)]
 pub struct Handle<A> {
     id: ID,
     ty: PhantomData<A>,
+}
+
+impl<A> std::cmp::PartialEq for Handle<A> {
+    fn eq(&self, other: &Self) -> bool {
+        self.id == other.id
+    }
+}
+
+impl<A> std::cmp::Eq for Handle<A> {}
+
+impl<A> std::hash::Hash for Handle<A> {
+    fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
+        self.id.hash(state);
+    }
 }
 
 impl<A> Handle<A> {
     fn new(id: ID) -> Self {
         Handle::<A> {
             id,
-            ty: PhantomData{}
+            ty: PhantomData {},
         }
     }
 }
 
-// Can't derive clone because of the phantom-data member + no bounds on A
-// https://github.com/rust-lang/rust/issues/26925
 impl<A> Clone for Handle<A> {
     fn clone(&self) -> Self {
         Handle::<A>::new(self.id)
@@ -52,14 +66,12 @@ impl<A> Storage<A> {
     pub fn add(&mut self, a: A) -> Handle<A> {
         assert_eq!(self.data.len(), self.dense.len());
         //assert!(self.free.iter().any() || self.sparse.len() < u32::MAX as usize, "Ran out of ids!");
- 
+
         let sparse_idx = self.sparse.len();
         let dense_idx = self.dense.len();
         self.sparse.push(dense_idx);
         self.data.push(a);
-        let id = ID {
-            index: sparse_idx,
-        };
+        let id = ID { index: sparse_idx };
 
         self.dense.push(id);
 
@@ -133,7 +145,6 @@ impl<A> Default for Storage<A> {
     }
 }
 
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -186,21 +197,18 @@ mod tests {
     }
 
     fn add_int_range(s: &mut Storage<u32>, start: u32, end: u32) -> Vec<Handle<u32>> {
-
-        (start..end).map(|x| s.add(x)).collect::<Vec::<_>>()
+        (start..end).map(|x| s.add(x)).collect::<Vec<_>>()
     }
-
 
     fn remove_with_cond(s: &mut Storage<u32>, handles: &[Handle<u32>], cond: fn(usize) -> bool) {
         for (i, h) in handles.iter().enumerate() {
             assert!(s.has(*h));
             assert_eq!(*s.get(*h).unwrap() as usize, i);
-             
+
             if cond(i) {
                 assert_eq!(s.remove(*h).unwrap() as usize, i);
             }
         }
-
     }
 
     fn check_with_cond(s: &Storage<u32>, handles: &[Handle<u32>], cond: fn(usize) -> bool) {
@@ -290,4 +298,3 @@ mod tests {
         check_with_cond(&m, &r3, |_| false);
     }
 }
-

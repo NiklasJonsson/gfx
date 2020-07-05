@@ -1,3 +1,4 @@
+pub mod material;
 pub mod math;
 pub mod render_graph;
 pub mod time;
@@ -8,6 +9,7 @@ use specs::Component;
 use vulkano::impl_vertex;
 
 use crate::render::texture::Texture;
+pub use material::*;
 pub use math::*;
 pub use time::*;
 
@@ -114,18 +116,18 @@ mod vertex {
     }
 }
 
-#[derive(Clone, Debug, Copy, PartialEq, Eq)]
+#[derive(Clone, Debug, Copy, PartialEq, Eq, Hash)]
 pub enum ComponentLayout {
     R8G8B8A8,
 }
 
-#[derive(Clone, Debug, Copy, PartialEq, Eq)]
+#[derive(Clone, Debug, Copy, PartialEq, Eq, Hash)]
 pub enum ColorSpace {
     Linear,
     Srgb,
 }
 
-#[derive(Clone, Debug, Copy, PartialEq, Eq)]
+#[derive(Clone, Debug, Copy, PartialEq, Eq, Hash)]
 pub struct Format {
     pub component_layout: ComponentLayout,
     pub color_space: ColorSpace,
@@ -139,54 +141,6 @@ impl Into<VkFormat> for Format {
             (ComponentLayout::R8G8B8A8, ColorSpace::Linear) => VkFormat::R8G8B8A8Unorm,
         }
     }
-}
-
-#[derive(Clone, Debug)]
-pub struct NormalMap {
-    pub tex: Texture,
-    pub scale: f32,
-}
-
-/// Compile time means that the material will be used to lookup what pre-compiled shader to use.
-#[derive(Debug, Clone, Eq)]
-pub enum CompilationMode {
-    CompileTime,
-    RunTime { vs_path: PathBuf, fs_path: PathBuf },
-}
-
-impl PartialEq for CompilationMode {
-    fn eq(&self, other: &Self) -> bool {
-        use CompilationMode::*;
-        match (self, other) {
-            (CompileTime, CompileTime) => true,
-            (RunTime { .. }, RunTime { .. }) => true,
-            _ => false,
-        }
-    }
-}
-
-#[derive(Clone, Debug)]
-pub enum MaterialData {
-    Color {
-        color: [f32; 4],
-    },
-    ColorTexture(Texture),
-    GlTFPBR {
-        base_color_factor: [f32; 4],
-        metallic_factor: f32,
-        roughness_factor: f32,
-        normal_map: Option<NormalMap>,
-        base_color_texture: Option<Texture>,
-        metallic_roughness_texture: Option<Texture>,
-    },
-    None,
-}
-
-#[derive(Clone, Debug, Component)]
-#[storage(DenseVecStorage)]
-pub struct Material {
-    pub data: MaterialData,
-    pub compilation_mode: CompilationMode,
 }
 
 #[derive(Debug)]
@@ -210,27 +164,4 @@ pub struct Mesh {
     pub vertex_data: VertexBuf,
     // TODO: Move this to it's own component?
     pub bounding_box: Option<BoundingBox>,
-}
-
-pub fn runtime_shaders_for_material(
-    world: &World,
-    root: Entity,
-    vs_path: impl Into<PathBuf>,
-    fs_path: impl Into<PathBuf>,
-    match_material: impl Fn(&Material) -> bool,
-) {
-    let mut materials = world.write_storage::<Material>();
-    let vs_path = vs_path.into();
-    let fs_path = fs_path.into();
-    let change_to_runtime = |ent| {
-        if let Some(mat) = materials.get_mut(ent) {
-            if match_material(&mat) {
-                let vs_path = vs_path.clone();
-                let fs_path = fs_path.clone();
-                (*mat).compilation_mode = CompilationMode::RunTime { vs_path, fs_path };
-            }
-        }
-    };
-
-    render_graph::map(world, root, change_to_runtime);
 }

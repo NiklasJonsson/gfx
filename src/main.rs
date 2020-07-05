@@ -82,6 +82,7 @@ impl App {
             .insert(io::input::CurrentFrameExternalInputs(Vec::new()));
         self.world.insert(ActiveCamera::empty());
         self.world.insert(DeltaTime::zero());
+        self.world.insert(render::texture::Textures::default());
     }
 
     pub fn get_entity_with_marker<C>(w: &World) -> Entity

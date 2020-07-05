@@ -25,6 +25,7 @@ use vulkano::swapchain::{
 use specs::world::EntitiesRes;
 use specs::Component;
 use vulkano::sampler::Sampler;
+use vulkano::sync;
 use vulkano::sync::{FlushError, GpuFuture, NowFuture, SharingMode};
 
 use vulkano::single_pass_renderpass;
@@ -39,6 +40,7 @@ use specs::storage::StorageEntry;
 use std::collections::HashSet;
 use std::sync::Arc;
 
+use crate::asset::storage::Handle;
 use crate::camera::*;
 use crate::common::*;
 
@@ -47,7 +49,7 @@ use crate::settings::{RenderMode, RenderSettings};
 mod pipeline;
 pub mod texture;
 
-use texture::Texture;
+use texture::{GpuTextures, Texture, TextureAccess, Textures};
 
 #[derive(Debug, Default)]
 pub struct ActiveCamera(Option<Entity>);
@@ -78,6 +80,7 @@ pub struct VKManager {
     frame_completions: Vec<Option<Box<dyn GpuFuture>>>,
     multisample_count: u32,
     current_sc_index: usize,
+    gpu_textures: GpuTextures,
 }
 
 impl VKManager {
@@ -139,6 +142,8 @@ impl VKManager {
         let transforms_buf = CpuBufferPool::uniform_buffer(Arc::clone(&vk_device));
         let lighting_data_buf = CpuBufferPool::uniform_buffer(Arc::clone(&vk_device));
 
+        let gpu_textures = GpuTextures::default();
+
         VKManager {
             vk_instance,
             vk_surface,
@@ -154,10 +159,17 @@ impl VKManager {
             frame_completions,
             transforms_buf,
             lighting_data_buf,
+            gpu_textures,
         }
     }
 
-    fn create_renderable(&self, mesh: &Mesh, mat: &Material, mode: RenderMode) -> Renderable {
+    fn create_renderable(
+        &mut self,
+        cpu_textures: &Textures,
+        mesh: &Mesh,
+        mat: &Material,
+        mode: RenderMode,
+    ) -> Renderable {
         let vk_mode = mode.into();
 
         let indices = match &mesh.ty {
@@ -213,7 +225,13 @@ impl VKManager {
 
         // TODO: Can we use a big buffer for all materials of the same type?
         let (material_descriptor_set, render_material, material_data_copied) =
-            create_material_descriptor_set(&self.graphics_queue, &g_pipeline, &mat.data);
+            create_material_descriptor_set(
+                &self.graphics_queue,
+                cpu_textures,
+                &mut self.gpu_textures,
+                &g_pipeline,
+                &mat.data,
+            );
 
         data_copied
             .join(material_data_copied)
@@ -232,13 +250,14 @@ impl VKManager {
         }
     }
 
-    pub fn prepare_primitives_for_rendering(&self, world: &World) {
-        let meshes = world.write_storage::<Mesh>();
-        let materials = world.write_storage::<Material>();
+    pub fn prepare_primitives_for_rendering(&mut self, world: &World) {
+        let meshes = world.read_storage::<Mesh>();
+        let materials = world.read_storage::<Material>();
         let mut renderables = world.write_storage::<Renderable>();
 
         let entities = world.read_resource::<EntitiesRes>();
         let mut render_settings = world.write_resource::<RenderSettings>();
+        let cpu_textures = world.read_resource::<Textures>();
 
         let render_mode = render_settings.render_mode;
         let reload_shaders = render_settings.reload_runtime_shaders;
@@ -254,13 +273,13 @@ impl VKManager {
                     if occ_entry.get().mode != render_mode {
                         // TODO: Reuse some stuff here?
                         log::trace!("Renderable did not match render mode, creating new");
-                        let rend = self.create_renderable(mesh, mat, render_mode);
+                        let rend = self.create_renderable(&cpu_textures, mesh, mat, render_mode);
                         occ_entry.insert(rend);
                     } else {
                         log::trace!("Using existing renderable");
                         if reload_shaders {
                             log::trace!("Reloading shader");
-                            if let CompilationMode::RunTime { .. } = &mat.compilation_mode {
+                            if let ShaderUse::RunTime { .. } = &mat.compilation_mode {
                                 occ_entry.get_mut().g_pipeline = pipeline::create_graphics_pipeline(
                                     &self.vk_device,
                                     &self.render_pass,
@@ -276,7 +295,7 @@ impl VKManager {
                 }
                 StorageEntry::Vacant(vac_entry) => {
                     log::trace!("No renderable found, creating new");
-                    let rend = self.create_renderable(mesh, mat, render_mode);
+                    let rend = self.create_renderable(&cpu_textures, mesh, mat, render_mode);
                     vac_entry.insert(rend);
                 }
             }
@@ -771,34 +790,6 @@ fn create_and_submit_index_buffer(
     (buf, fut)
 }
 
-fn create_and_submit_texture_image(
-    queue: &Arc<Queue>,
-    tex: &Texture,
-) -> (
-    TextureAccess,
-    CommandBufferExecFuture<NowFuture, AutoCommandBuffer>,
-) {
-    let vk_format: VkFormat = tex.format.into();
-    // TODO: Support mip maps
-    let width = tex.image.width();
-    let height = tex.image.height();
-    let (buf, fut) = ImmutableImage::from_iter(
-        tex.image.clone().into_raw().into_iter(),
-        Dimensions::Dim2d { width, height },
-        vk_format,
-        Arc::clone(queue),
-    )
-    .expect("Unable to create vertex buffer");
-
-    // TODO: handle other sampling types
-    let sampler = Sampler::simple_repeat_linear(Arc::clone(queue.device()));
-    let tex_access = TextureAccess {
-        image_buffer: buf,
-        sampler,
-    };
-    (tex_access, fut)
-}
-
 macro_rules! descriptor_set_with_textures {
     ($cur_set:ident, $($name:ident),+) => {
         Arc::new(
@@ -815,6 +806,8 @@ macro_rules! descriptor_set_with_textures {
 
 fn create_material_descriptor_set(
     queue: &Arc<Queue>,
+    cpu_textures: &Textures,
+    gpu_textures: &mut GpuTextures,
     g_pipeline: &Arc<dyn GraphicsPipelineAbstract + Send + Sync>,
     material: &MaterialData,
 ) -> (
@@ -854,12 +847,10 @@ fn create_material_descriptor_set(
 
             match (base_color_texture, metallic_roughness_texture, normal_map) {
                 (Some(bc_tex), Some(mr_tex), Some(normal_map)) => {
-                    let (bc_tex_access, bc_data_copied) =
-                        create_and_submit_texture_image(queue, bc_tex);
-                    let (mr_tex_access, mr_data_copied) =
-                        create_and_submit_texture_image(queue, mr_tex);
-                    let (normal_tex_access, normal_data_copied) =
-                        create_and_submit_texture_image(queue, &normal_map.tex);
+                    let bc_tex_access = gpu_textures.upload(queue, cpu_textures, bc_tex.handle);
+                    let mr_tex_access = gpu_textures.upload(queue, cpu_textures, mr_tex.handle);
+                    let normal_tex_access =
+                        gpu_textures.upload(queue, cpu_textures, normal_map.tex.handle);
 
                     let set = descriptor_set_with_textures!(
                         descriptor_set,
@@ -868,39 +859,30 @@ fn create_material_descriptor_set(
                         normal_tex_access
                     );
 
-                    let fut = Box::new(
-                        data_copied
-                            .join(bc_data_copied)
-                            .join(mr_data_copied)
-                            .join(normal_data_copied),
-                    ) as Box<dyn GpuFuture>;
+                    let fut = vulkano::sync::now(Arc::clone(queue.device())).boxed();
 
                     (set, RenderableMaterial::GlTFPBR, fut)
                 }
                 (Some(bc_tex), Some(mr_tex), None) => {
                     assert_eq!(bc_tex.coord_set, 0, "Not implemented!");
                     assert_eq!(mr_tex.coord_set, 0, "Not implemented!");
-                    let (bc_tex_access, bc_data_copied) =
-                        create_and_submit_texture_image(queue, bc_tex);
-                    let (mr_tex_access, mr_data_copied) =
-                        create_and_submit_texture_image(queue, mr_tex);
+                    let bc_tex_access = gpu_textures.upload(queue, cpu_textures, bc_tex.handle);
+                    let mr_tex_access = gpu_textures.upload(queue, cpu_textures, mr_tex.handle);
 
                     let set =
                         descriptor_set_with_textures!(descriptor_set, bc_tex_access, mr_tex_access);
 
-                    let fut = Box::new(data_copied.join(bc_data_copied).join(mr_data_copied))
-                        as Box<dyn GpuFuture>;
+                    let fut = vulkano::sync::now(Arc::clone(queue.device())).boxed();
 
                     (set, RenderableMaterial::GlTFPBR, fut)
                 }
                 (Some(bc_tex), None, None) => {
                     assert_eq!(bc_tex.coord_set, 0, "Not implemented!");
-                    let (bc_tex_access, bc_data_copied) =
-                        create_and_submit_texture_image(queue, bc_tex);
+                    let bc_tex_access = gpu_textures.upload(queue, cpu_textures, bc_tex.handle);
 
                     let set = descriptor_set_with_textures!(descriptor_set, bc_tex_access);
 
-                    let fut = Box::new(data_copied.join(bc_data_copied)) as Box<dyn GpuFuture>;
+                    let fut = vulkano::sync::now(Arc::clone(queue.device())).boxed();
 
                     (set, RenderableMaterial::GlTFPBR, fut)
                 }
@@ -943,100 +925,6 @@ fn create_material_descriptor_set(
         }
         _ => unimplemented!("Support more material types!"),
     }
-}
-
-/*
-fn create_command_buffers(
-    device: &Arc<Device>,
-    queue_family: QueueFamily,
-    vertex_buffer: &Arc<BufferAccess + Send + Sync>,
-    index_buffer: &Arc<TypedBufferAccess<Content = [u32]> + Send + Sync>,
-    descriptor_sets: &[Arc<DescriptorSet + Send + Sync>],
-    pipeline: &Arc<GraphicsPipelineAbstract + Send + Sync>,
-    framebuffers: &[Arc<FramebufferAbstract + Send + Sync>],
-) -> Vec<Arc<AutoCommandBuffer>> {
-    framebuffers
-        .iter()
-        .enumerate()
-        .map(|(i, fb)| {
-            let clear_color = vec![
-                [0.0, 0.0, 0.0, 1.0].into(),
-                vulkano::format::ClearValue::None,
-                1.0f32.into(),
-            ];
-
-            Arc::new(
-                AutoCommandBufferBuilder::primary_simultaneous_use(
-                    Arc::clone(device),
-                    queue_family,
-                )
-                .expect("Failed to create command buffer builder")
-                .begin_render_pass(Arc::clone(fb), false, clear_color)
-                .expect("Failed after begin render pass")
-                .draw_indexed(
-                    Arc::clone(pipeline),
-                    &DynamicState::none(),
-                    vec![Arc::clone(vertex_buffer)],
-                    Arc::clone(index_buffer),
-                    Arc::clone(&descriptor_sets[i]),
-                    (),
-                )
-                .expect("Failed after draw_indexed")
-                .end_render_pass()
-                .unwrap()
-                .build()
-                .unwrap(),
-            )
-        })
-        .collect::<Vec<_>>()
-}
-*/
-/*
-fn create_command_buffer_with_push_constants(
-    device: &Arc<Device>,
-    queue_family: QueueFamily,
-    vertex_buffer: &Arc<BufferAccess + Send + Sync>,
-    index_buffer: &Arc<TypedBufferAccess<Content = [u32]> + Send + Sync>,
-    descriptor_set: &Arc<DescriptorSet + Send + Sync>,
-    pipeline: &Arc<GraphicsPipelineAbstract + Send + Sync>,
-    framebuffer: &Arc<FramebufferAbstract + Send + Sync>,
-    model_matrix: glm::Mat4,
-) -> Arc<AutoCommandBuffer> {
-    let clear_color = vec![
-        [0.0, 0.0, 0.0, 1.0].into(),
-        vulkano::format::ClearValue::None,
-        1.0f32.into(),
-    ];
-
-    let push_constant_model_matrix = pipeline::vs_pbr_static::ty::ModelMatrix {
-        matrix: model_matrix.into(),
-    };
-
-    Arc::new(
-        AutoCommandBufferBuilder::primary_one_time_submit(Arc::clone(device), queue_family)
-            .expect("Failed to create command buffer builder")
-            .begin_render_pass(Arc::clone(framebuffer), false, clear_color)
-            .expect("Failed after begin render pass")
-            .draw_indexed(
-                Arc::clone(pipeline),
-                &DynamicState::none(),
-                vec![Arc::clone(vertex_buffer)],
-                Arc::clone(index_buffer),
-                Arc::clone(&descriptor_set),
-                push_constant_model_matrix,
-            )
-            .expect("Failed after draw_indexed")
-            .end_render_pass()
-            .expect("Failed after end_render_pass")
-            .build()
-            .expect("Failed to build command buffer"),
-    )
-}
-*/
-
-struct TextureAccess {
-    pub image_buffer: Arc<dyn ImageViewAccess + Send + Sync>,
-    pub sampler: Arc<Sampler>,
 }
 
 // Renderable needs to have the sampler and the material data buf bound into

@@ -1,12 +1,19 @@
 use crate::common::math;
+use crate::common::Format;
 use crate::common::IndexData;
 use specs::{Entity, World};
 use std::path::PathBuf;
 
+pub mod cache;
 mod gltf;
 mod obj;
-mod storage;
-mod cache;
+pub mod storage;
+
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub struct TextureDescriptor {
+    pub path: PathBuf,
+    pub format: Format,
+}
 
 // Per asset type description, generally all the files needed to load an asset
 #[derive(Debug)]
@@ -18,9 +25,7 @@ pub enum AssetDescriptor {
     Gltf {
         path: PathBuf,
     },
-    Texture {
-        path: PathBuf,
-    }
+    Texture(TextureDescriptor),
 }
 
 pub struct LoadedAsset {
@@ -55,7 +60,9 @@ fn generate_line_list_from(index_data: &IndexData) -> IndexData {
     IndexData(ret)
 }
 
-fn load_image(path: &str) -> image::RgbaImage {
+pub fn load_image(desc: &TextureDescriptor) -> image::RgbaImage {
+    let path = desc.path.to_str().expect("Failed to create path");
+
     log::info!("Trying to load image from {}", path);
     let image = image::open(path)
         .unwrap_or_else(|_| panic!("Unable to load image from {}", path))

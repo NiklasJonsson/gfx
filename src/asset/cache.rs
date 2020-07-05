@@ -1,22 +1,35 @@
+use std::collections::HashMap;
+use std::hash::Hash;
 use std::marker::PhantomData;
-use std::container::HashMap;
 
-use super::AssetDescriptor;
+use super::storage::Handle;
 
-using CacheEntry = super::AssetDescriptor
-
-#[Derive(Debug)]
-pub struct Cache<A> {
-    ty: PhantomData,
-    cache: HashMap<AssetDescriptor, Handle<A>>,
+/// Cache for descriptor to Handle<Asset>
+#[derive(Debug)]
+pub struct Cache<D: Hash + Eq, A> {
+    ty: PhantomData<A>,
+    cache: HashMap<D, Handle<A>>,
 }
 
-impl<A> Cache<A> {
+impl<D: Hash + Eq, A> Cache<D, A> {
     pub fn new() -> Self {
         Default::default()
     }
 
-    pub fn get(ad: &AssetDescriptor) -> Option<Handle<A>> {
-        self.cache.get(ad)
+    pub fn get(&self, desc: &D) -> Option<Handle<A>> {
+        self.cache.get(desc).copied()
+    }
+
+    pub fn add(&mut self, desc: D, h: Handle<A>) {
+        self.cache.insert(desc, h);
+    }
+}
+
+impl<D: Hash + Eq, A> Default for Cache<D, A> {
+    fn default() -> Self {
+        Cache::<D, A> {
+            ty: PhantomData {},
+            cache: HashMap::new(),
+        }
     }
 }

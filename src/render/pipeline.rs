@@ -166,7 +166,7 @@ macro_rules! create_pipeline {
         use $frag_mod as fmod;
         use $vert_mod as vmod;
         match $render_mode {
-            CompilationMode::CompileTime => {
+            ShaderUse::StaticInferredFromMaterial => {
                 let vs = vmod::Shader::load(Arc::clone($device))
                     .expect("Vertex shader compilation failed");
                 let fs = fmod::Shader::load(Arc::clone($device))
@@ -182,7 +182,7 @@ macro_rules! create_pipeline {
                         .expect("Could not create graphics pipeline"),
                 )
             }
-            CompilationMode::RunTime { vs_path, fs_path } => {
+            ShaderUse::RunTime { vs_path, fs_path } => {
                 let vs = {
                     let mut f = File::open(vs_path).expect(
                         format!(
@@ -257,7 +257,7 @@ pub fn create_graphics_pipeline(
     rendering_mode: PrimitiveTopology,
     vertex_buf: &VertexBuf,
     material: &MaterialData,
-    compilation_mode: &CompilationMode,
+    compilation_mode: &ShaderUse,
 ) -> Arc<dyn GraphicsPipelineAbstract + Send + Sync> {
     let dims = [
         swapchain_dimensions[0] as f32,

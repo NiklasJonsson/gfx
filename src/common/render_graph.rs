@@ -251,7 +251,7 @@ impl<'a> System<'a> for RenderedBoundingBoxes {
                 data: MaterialData::Color {
                     color: [1.0, 0.0, 0.0, 1.0],
                 },
-                compilation_mode: CompilationMode::CompileTime,
+                compilation_mode: ShaderUse::StaticInferredFromMaterial,
             };
             let mesh = Mesh {
                 ty,

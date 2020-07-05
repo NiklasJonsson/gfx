@@ -8,17 +8,24 @@ use super::generate_line_list_from;
 use super::load_image;
 use super::LoadedAsset;
 use crate::render::texture::Texture;
+use crate::render::texture::Textures;
 
 use nalgebra_glm as glm;
 // Crate gltf
 use gltf::buffer::Data as GltfData;
 
-fn load_texture_common(
-    ctx: &RecGltfCtx,
+struct RecGltfCtx<'a> {
+    pub buffers: Vec<GltfData>,
+    pub path: PathBuf,
+    pub world: &'a mut World,
+}
+
+fn load_texture_common<'a>(
+    ctx: &RecGltfCtx<'a>,
     texture: &gltf::texture::Texture,
     coord_set: u32,
     color_space: ColorSpace,
-) -> Texture {
+) -> TextureUse {
     assert_eq!(coord_set, 0, "Not implemented!");
     assert_eq!(
         texture.sampler().wrap_s(),
@@ -32,12 +39,12 @@ fn load_texture_common(
     let image_src = texture.source().source();
 
     use gltf::image::Source;
-    let image = match image_src {
+    let image_path = match image_src {
         Source::Uri { uri, .. } => {
             let parent_path = Path::new(&ctx.path).parent().expect("Invalid path");
             let mut image_path = parent_path.to_path_buf();
             image_path.push(uri);
-            load_image(image_path.to_str().expect("Could not create image path!"))
+            image_path
         }
         _ => unimplemented!(),
     };
@@ -47,14 +54,21 @@ fn load_texture_common(
         color_space,
     };
 
-    Texture {
-        image,
-        coord_set,
+    let desc = super::TextureDescriptor {
+        path: image_path,
         format,
-    }
+    };
+
+    let handle = ctx.world.write_resource::<Textures>().load(&desc);
+
+    TextureUse { handle, coord_set }
 }
 
-fn load_texture(ctx: &RecGltfCtx, texture_info: &gltf::texture::Info, cs: ColorSpace) -> Texture {
+fn load_texture(
+    ctx: &RecGltfCtx,
+    texture_info: &gltf::texture::Info,
+    cs: ColorSpace,
+) -> TextureUse {
     load_texture_common(ctx, &texture_info.texture(), texture_info.tex_coord(), cs)
 }
 
@@ -160,7 +174,7 @@ fn get_primitives_from_mesh<'a>(
 
             let material = Material {
                 data: material_data,
-                compilation_mode: CompilationMode::CompileTime,
+                compilation_mode: ShaderUse::StaticInferredFromMaterial,
             };
 
             let triangle_indices = IndexData(triangle_index_data);
@@ -189,11 +203,6 @@ fn get_primitives_from_mesh<'a>(
         .collect::<Vec<_>>()
 }
 
-struct RecGltfCtx {
-    pub buffers: Vec<GltfData>,
-    pub path: PathBuf,
-}
-
 struct AssetGraphResult {
     // The enitity that was created
     node: Entity,
@@ -201,12 +210,9 @@ struct AssetGraphResult {
     camera: Option<Entity>,
 }
 
-fn build_asset_graph_common<'a>(
-    ctx: &RecGltfCtx,
-    world: &'a mut World,
-    src: &gltf::Node<'a>,
-) -> AssetGraphResult {
-    let node = world
+fn build_asset_graph_common<'a>(ctx: &mut RecGltfCtx, src: &gltf::Node<'a>) -> AssetGraphResult {
+    let node = ctx
+        .world
         .create_entity()
         .with(Transform::from(src.transform().matrix()))
         .build();
@@ -217,7 +223,7 @@ fn build_asset_graph_common<'a>(
             get_primitives_from_mesh(ctx, mesh)
                 .into_iter()
                 .map(|(mesh, material)| {
-                    world
+                    ctx.world
                         .create_entity()
                         .with(mesh)
                         .with(material)
@@ -233,7 +239,7 @@ fn build_asset_graph_common<'a>(
     let (mut nodes, cameras): (Vec<_>, Vec<Option<_>>) = src
         .children()
         .map(|child| {
-            let AssetGraphResult { node, camera } = build_asset_graph_rec(ctx, world, &child, node);
+            let AssetGraphResult { node, camera } = build_asset_graph_rec(ctx, &child, node);
             (node, camera)
         })
         .unzip();
@@ -247,7 +253,7 @@ fn build_asset_graph_common<'a>(
     // more than 1 camera per scene.
     let camera: Option<Entity> = cameras.iter().fold(this_node_cam, |acc, &x| acc.or(x));
 
-    let mut nodes = world.write_storage::<render_graph::RenderGraphNode>();
+    let mut nodes = ctx.world.write_storage::<render_graph::RenderGraphNode>();
     nodes
         .insert(node, render_graph::node(children))
         .expect("Could not insert render graph node!");
@@ -256,28 +262,23 @@ fn build_asset_graph_common<'a>(
 }
 
 fn build_asset_graph_rec<'a>(
-    ctx: &RecGltfCtx,
-    world: &mut World,
+    ctx: &mut RecGltfCtx,
     src: &gltf::Node<'a>,
     parent: Entity,
 ) -> AssetGraphResult {
-    let result = build_asset_graph_common(ctx, world, src);
+    let result = build_asset_graph_common(ctx, src);
 
-    let mut nodes = world.write_storage::<render_graph::RenderGraphChild>();
+    let mut nodes = ctx.world.write_storage::<render_graph::RenderGraphChild>();
     nodes
         .insert(result.node, render_graph::child(parent))
         .expect("Could not insert render graph node!");
     result
 }
 
-fn build_asset_graph(
-    ctx: &RecGltfCtx,
-    world: &mut World,
-    src_root: &gltf::Node,
-) -> AssetGraphResult {
-    let result = build_asset_graph_common(ctx, world, src_root);
+fn build_asset_graph(ctx: &mut RecGltfCtx, src_root: &gltf::Node) -> AssetGraphResult {
+    let result = build_asset_graph_common(ctx, src_root);
 
-    let mut roots = world.write_storage::<render_graph::RenderGraphRoot>();
+    let mut roots = ctx.world.write_storage::<render_graph::RenderGraphRoot>();
     roots
         .insert(result.node, render_graph::root())
         .expect("Could not insert render graph root!");
@@ -289,9 +290,10 @@ pub fn load_asset(world: &mut World, path: &Path) -> LoadedAsset {
     log::trace!("load gltf asset {}", path.display());
     let (gltf_doc, buffers, _images) = gltf::import(path).expect("Unable to import gltf");
     assert_eq!(gltf_doc.scenes().len(), 1);
-    let rec_ctx = RecGltfCtx {
+    let mut rec_ctx = RecGltfCtx {
         buffers,
         path: path.into(),
+        world,
     };
 
     // A scene may have several root nodes
@@ -306,7 +308,7 @@ pub fn load_asset(world: &mut World, path: &Path) -> LoadedAsset {
         log::trace!("Root node {}", node.name().unwrap_or("node_no_name"));
         log::trace!("#children {}", node.children().len());
 
-        let AssetGraphResult { node, camera } = build_asset_graph(&rec_ctx, world, &node);
+        let AssetGraphResult { node, camera } = build_asset_graph(&mut rec_ctx, &node);
         roots.push(node);
         camera_ent = camera;
     }
@@ -322,7 +324,7 @@ pub fn load_asset(world: &mut World, path: &Path) -> LoadedAsset {
         if let Some(cam) = camera_ent {
             log::info!("Found camera in scene graph.");
             log::info!("Concatenating transforms.");
-            let path = render_graph::root_to_node_path(world, cam);
+            let path = render_graph::root_to_node_path(rec_ctx.world, cam);
             let mut transform: glm::Mat4 = glm::identity::<f32, glm::U4>();
             for ent in path {
                 let transforms = world.read_storage::<Transform>();
