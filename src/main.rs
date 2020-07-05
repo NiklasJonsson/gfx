@@ -228,7 +228,6 @@ impl App {
                     *self.world.write_resource::<GameState>() = GameState::Paused;
                 }
                 Some(Event::Input(input)) => {
-                    dbg!("input");
                     let mut cur_inputs = self
                         .world
                         .write_resource::<io::input::CurrentFrameExternalInputs>();

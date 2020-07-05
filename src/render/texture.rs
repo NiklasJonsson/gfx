@@ -33,10 +33,17 @@ impl std::fmt::Debug for Texture {
     }
 }
 
+#[derive(Clone, Debug, Default)]
+struct Stats {
+    pub hits: usize,
+    pub misses: usize,
+}
+
 #[derive(Default)]
 pub struct Textures {
     cache: Cache<TextureDescriptor, Texture>,
     storage: Storage<Texture>,
+    stats: Stats,
 }
 
 impl Textures {
@@ -45,9 +52,13 @@ impl Textures {
     }
 
     pub fn load(&mut self, tex_desc: &TextureDescriptor) -> Handle<Texture> {
-        match self.cache.get(tex_desc) {
-            Some(h) => h,
+        let h = match self.cache.get(tex_desc) {
+            Some(h) => {
+                self.stats.hits += 1;
+                h
+            }
             None => {
+                self.stats.misses += 1;
                 let t = Texture {
                     image: asset::load_image(tex_desc),
                     format: tex_desc.format,
@@ -56,7 +67,15 @@ impl Textures {
                 self.cache.add(tex_desc.clone(), h);
                 h
             }
-        }
+        };
+
+        log::debug!(
+            "Cache hits: {} / {}",
+            self.stats.hits,
+            self.stats.misses + self.stats.hits
+        );
+
+        h
     }
 
     pub fn get(&self, h: Handle<Texture>) -> Option<&Texture> {
