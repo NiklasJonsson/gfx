@@ -8,7 +8,7 @@ pub struct Args {
 }
 
 pub fn parse() -> Option<Args> {
-let matches = clap::App::new("ramneryd")
+    let matches = clap::App::new("ramneryd")
         .version("0.1.0")
         .about("Vulkan renderer")
         .arg(
@@ -67,7 +67,7 @@ let matches = clap::App::new("ramneryd")
 
     let scene_out_file = matches.value_of("scene-out-file").map(PathBuf::from);
 
-    Some (Args {
+    Some(Args {
         gltf_path: path_buf,
         use_scene_camera,
         run_n_frames,

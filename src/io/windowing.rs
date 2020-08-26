@@ -3,7 +3,6 @@ use super::input;
 use winit::event::ElementState;
 use winit::event::WindowEvent;
 
-
 // TODO: Handle resized here as well
 #[derive(Debug)]
 pub enum Event {

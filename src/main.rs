@@ -5,11 +5,11 @@ use std::time::Instant;
 use std::path::PathBuf;
 use std::sync::Arc;
 
+mod arg_parse;
 mod asset;
 mod camera;
 mod common;
 mod game_state;
-mod arg_parse;
 mod io;
 mod render;
 mod settings;
@@ -31,7 +31,7 @@ enum AppState {
 
 struct App {
     world: World,
-    event_queue: io::EventQueue,
+    event_queue: Arc<io::EventQueue>,
     renderer: trekanten::Renderer,
     state: AppState,
 }
@@ -175,7 +175,7 @@ impl App {
     fn next_event(&self) -> Option<Event> {
         self.event_queue.pop().ok()
     }
-    
+
     fn post_frame(&mut self) {
         self.world.maintain();
 
@@ -274,7 +274,7 @@ impl App {
         }
     }
 
-    fn new(renderer: trekanten::Renderer, event_queue: io::EventQueue) -> Self {
+    fn new(renderer: trekanten::Renderer, event_queue: Arc<io::EventQueue>) -> Self {
         App {
             world: World::new(),
             renderer,
@@ -285,11 +285,8 @@ impl App {
 }
 
 fn window_extents(window: &winit::window::Window) -> trekanten::util::Extent2D {
-    let winit::dpi::PhysicalSize {width, height} = window.inner_size();
-    trekanten::util::Extent2D {
-        width,
-        height,
-    }
+    let winit::dpi::PhysicalSize { width, height } = window.inner_size();
+    trekanten::util::Extent2D { width, height }
 }
 
 fn main() {
@@ -302,12 +299,18 @@ fn main() {
     let event_loop = winit::event_loop::EventLoop::new();
     let window = winit::window::Window::new(&event_loop).expect("Failed to create window");
 
-    let event_queue = Arc::new(crossbeam::queue::SegQueue::new());
+    let event_queue = Arc::new(io::EventQueue::new());
     let event_queue2 = Arc::clone(&event_queue);
 
     // Thread runs the app while main takes the event loop
-    std::thread::spawn(move || {    
-        let renderer = trekanten::Renderer::new(&window, window_extents(&window)).expect("Failed to create renderer");
+    std::thread::spawn(move || {
+        let renderer = match trekanten::Renderer::new(&window, window_extents(&window)) {
+            Err(e) => {
+                println!("Failed to create renderer: {}", e);
+                return;
+            },
+            Ok(x) => x,
+        };
         let mut app = App::new(renderer, event_queue2);
         app.run(args);
     });
@@ -325,7 +328,6 @@ fn main() {
             io::windowing::EventLoopControl::Continue => (),
         }
     });
-
 }
 /*
 pub fn init_windowing_and_input_thread(
