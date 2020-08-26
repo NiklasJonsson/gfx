@@ -1,55 +1,25 @@
-use vulkano::buffer::{
-    cpu_pool::CpuBufferPoolSubbuffer, BufferAccess, BufferUsage, CpuBufferPool, ImmutableBuffer,
-    TypedBufferAccess,
-};
-use vulkano::command_buffer::{
-    AutoCommandBuffer, AutoCommandBufferBuilder, CommandBufferExecFuture, DynamicState,
-};
-use vulkano::descriptor::{descriptor_set::PersistentDescriptorSet, DescriptorSet};
-use vulkano::device::{Device, DeviceExtensions, Features, Queue};
-use vulkano::format::Format as VkFormat;
-use vulkano::framebuffer::{Framebuffer, FramebufferAbstract, RenderPassAbstract};
-use vulkano::image::{
-    attachment::AttachmentImage, immutable::ImmutableImage, swapchain::SwapchainImage, Dimensions,
-    ImageUsage, ImageViewAccess,
-};
-use vulkano::instance;
-use vulkano::instance::{Instance, InstanceExtensions, PhysicalDevice, QueueFamily};
-use vulkano::pipeline::GraphicsPipelineAbstract;
-use vulkano::swapchain;
-use vulkano::swapchain::Surface;
-use vulkano::swapchain::{
-    AcquireError, ColorSpace, CompositeAlpha, PresentMode, SurfaceTransform, Swapchain,
-};
-
 use specs::world::EntitiesRes;
 use specs::Component;
-use vulkano::sampler::Sampler;
-use vulkano::sync;
-use vulkano::sync::{FlushError, GpuFuture, NowFuture, SharingMode};
-
-use vulkano::single_pass_renderpass;
-
-use winit::window::Window;
 
 use nalgebra_glm as glm;
 
 use specs::prelude::*;
 use specs::storage::StorageEntry;
 
-use std::collections::HashSet;
-use std::sync::Arc;
+use trekanten::command;
+use trekanten::descriptor;
+use trekanten::resource::Handle;
+use trekanten::resource::ResourceManager;
+use trekanten::Renderer;
+use trekanten::BufferHandle;
+use trekanten::uniform::UniformBuffer;
 
-use crate::asset::storage::Handle;
+pub mod uniform;
+
 use crate::camera::*;
-use crate::common::*;
+use crate::common::{Material, ModelMatrix, Position, ShaderUse};
 
 use crate::settings::{RenderMode, RenderSettings};
-
-mod pipeline;
-pub mod texture;
-
-use texture::{GpuTextures, Texture, TextureAccess, Textures};
 
 #[derive(Debug, Default)]
 pub struct ActiveCamera(Option<Entity>);
@@ -64,416 +34,41 @@ impl ActiveCamera {
     }
 }
 
-// TODO: Move all vs_pbr::* uniform types to its own file
-pub struct VKManager {
-    vk_instance: Arc<Instance>,
-    vk_surface: Arc<Surface<Window>>,
-    vk_device: Arc<Device>,
-    graphics_queue: Arc<Queue>,
-    presentation_queue: Arc<Queue>,
-    swapchain: Arc<Swapchain<Window>>,
-    swapchain_images: Vec<Arc<SwapchainImage<Window>>>,
-    transforms_buf: CpuBufferPool<pipeline::pbr::vs::base::ty::Transforms>,
-    lighting_data_buf: CpuBufferPool<pipeline::pbr::fs::base::ty::LightingData>,
-    framebuffers: Vec<Arc<dyn FramebufferAbstract + Send + Sync>>,
-    render_pass: Arc<dyn RenderPassAbstract + Send + Sync>,
-    frame_completions: Vec<Option<Box<dyn GpuFuture>>>,
-    multisample_count: u32,
-    current_sc_index: usize,
-    gpu_textures: GpuTextures,
+#[derive(Default)]
+pub struct FrameData {
+    pub light_buffer: BufferHandle<UniformBuffer>,
+    pub light_set: Handle<descriptor::DescriptorSet>,
+    pub transforms_buffer: BufferHandle<UniformBuffer>,
+    pub transforms_set: Handle<descriptor::DescriptorSet>,
+    pub dummy_pipeline: Handle<trekanten::pipeline::GraphicsPipeline>,
 }
 
-impl VKManager {
-    fn recreate_swap_chain(&mut self) {
-        // Setup swap chain dimensions to that of the window
-        let dimensions = get_physical_window_dims(self.vk_surface.window());
+fn get_view_data(world: &World) -> (glm::Mat4, Position) {
+    let camera_entity = world
+        .read_resource::<ActiveCamera>()
+        .0
+        .expect("No active camera!");
 
-        let (swapchain, swapchain_images) = self
-            .swapchain
-            .recreate_with_dimensions(dimensions)
-            .expect("Unable to recreated swap chain");
+    let positions = world.read_storage::<Position>();
 
-        self.swapchain = swapchain;
-        self.swapchain_images = swapchain_images;
+    let cam_pos = positions
+        .get(camera_entity)
+        .expect("Could not get position component for camera");
 
-        self.frame_completions = vec![None, None, None];
+    let rots = world.read_storage::<CameraRotationState>();
+    let cam_rotation_state = rots
+        .get(camera_entity)
+        .expect("Could not get rotation state for camera");
 
-        let (render_pass, framebuffers) = create_swapchain_dependent_objects(
-            &self.vk_device,
-            &self.swapchain,
-            self.swapchain_images.as_slice(),
-            self.multisample_count,
-        );
+    // TODO: Camera system should write to ViewMatrixResource at the end of system
+    // and we should read it here.
+    let view = FreeFlyCameraController::get_view_matrix_from(cam_pos, cam_rotation_state);
+    log::trace!("View matrix: {:#?}", view);
 
-        self.render_pass = render_pass;
-        self.framebuffers = framebuffers;
-    }
-
-    pub fn create(vk_instance: Arc<Instance>, vk_surface: Arc<Surface<Window>>) -> Self {
-        let device_extensions = DeviceExtensions {
-            khr_swapchain: true,
-            ..DeviceExtensions::none()
-        };
-
-        let physical_device = pick_physical_device(&vk_instance, device_extensions);
-        let (vk_device, graphics_queue, presentation_queue) =
-            create_logical_device(physical_device, &vk_surface, device_extensions);
-
-        let (swapchain, images) = create_swapchain(
-            &vk_device,
-            &vk_surface,
-            [
-                graphics_queue.family().id(),
-                presentation_queue.family().id(),
-            ],
-        );
-
-        let multisample_count = query_max_sample_count(&physical_device);
-
-        let (render_pass, framebuffers) = create_swapchain_dependent_objects(
-            &vk_device,
-            &swapchain,
-            images.as_slice(),
-            multisample_count,
-        );
-
-        let frame_completions = vec![None, None, None];
-
-        let transforms_buf = CpuBufferPool::uniform_buffer(Arc::clone(&vk_device));
-        let lighting_data_buf = CpuBufferPool::uniform_buffer(Arc::clone(&vk_device));
-
-        let gpu_textures = GpuTextures::default();
-
-        VKManager {
-            vk_instance,
-            vk_surface,
-            vk_device,
-            graphics_queue,
-            presentation_queue,
-            swapchain,
-            swapchain_images: images,
-            framebuffers,
-            render_pass,
-            multisample_count,
-            current_sc_index: 0,
-            frame_completions,
-            transforms_buf,
-            lighting_data_buf,
-            gpu_textures,
-        }
-    }
-
-    fn create_renderable(
-        &mut self,
-        cpu_textures: &Textures,
-        mesh: &Mesh,
-        mat: &Material,
-        mode: RenderMode,
-    ) -> Renderable {
-        let vk_mode = mode.into();
-
-        let indices = match &mesh.ty {
-            MeshType::Triangle {
-                triangle_indices,
-                line_indices,
-            } => match mode {
-                RenderMode::Wireframe => &line_indices.0,
-                RenderMode::Opaque => &triangle_indices.0,
-            },
-            MeshType::Line { indices } => &indices.0,
-        };
-
-        let g_pipeline = pipeline::create_graphics_pipeline(
-            &self.vk_device,
-            &self.render_pass,
-            self.swapchain.dimensions(),
-            vk_mode,
-            &mesh.vertex_data,
-            &mat.data,
-            &mat.compilation_mode,
-        );
-
-        // TODO: Use transfer queue for sending to gpu
-        // TODO: Can we get rid of this by implementing VertexSource and VertexDefinition?
-        let (vertex_buffer, vertex_data_copied) = match &mesh.vertex_data {
-            VertexBuf::PosOnly(vertices) => create_and_submit_vertex_buffer::<VertexPosOnly>(
-                &self.graphics_queue,
-                vertices.to_owned(),
-            ),
-            VertexBuf::Base(vertices) => create_and_submit_vertex_buffer::<VertexBase>(
-                &self.graphics_queue,
-                vertices.to_owned(),
-            ),
-            VertexBuf::UV(vertices) => create_and_submit_vertex_buffer::<VertexUV>(
-                &self.graphics_queue,
-                vertices.to_owned(),
-            ),
-            VertexBuf::UVCol(vertices) => create_and_submit_vertex_buffer::<VertexUVCol>(
-                &self.graphics_queue,
-                vertices.to_owned(),
-            ),
-            VertexBuf::UVTan(vertices) => create_and_submit_vertex_buffer::<VertexUVTan>(
-                &self.graphics_queue,
-                vertices.to_owned(),
-            ),
-        };
-
-        let (index_buffer, index_data_copied) =
-            create_and_submit_index_buffer(&self.graphics_queue, indices.to_owned());
-
-        let data_copied = vertex_data_copied.join(index_data_copied);
-
-        // TODO: Can we use a big buffer for all materials of the same type?
-        let (material_descriptor_set, render_material, material_data_copied) =
-            create_material_descriptor_set(
-                &self.graphics_queue,
-                cpu_textures,
-                &mut self.gpu_textures,
-                &g_pipeline,
-                &mat.data,
-            );
-
-        data_copied
-            .join(material_data_copied)
-            .then_signal_fence_and_flush()
-            .expect("Unable to signal fence and flush for prepare for rendering data copy command")
-            .wait(None)
-            .unwrap();
-
-        Renderable {
-            vertex_buffer,
-            index_buffer,
-            g_pipeline,
-            material_descriptor_set,
-            material: render_material,
-            mode,
-        }
-    }
-
-    pub fn prepare_primitives_for_rendering(&mut self, world: &World) {
-        let meshes = world.read_storage::<Mesh>();
-        let materials = world.read_storage::<Material>();
-        let mut renderables = world.write_storage::<Renderable>();
-
-        let entities = world.read_resource::<EntitiesRes>();
-        let mut render_settings = world.write_resource::<RenderSettings>();
-        let cpu_textures = world.read_resource::<Textures>();
-
-        let render_mode = render_settings.render_mode;
-        let reload_shaders = render_settings.reload_runtime_shaders;
-
-        if reload_shaders {
-            log::debug!("Shader reload requested");
-        }
-
-        for (ent, mesh, mat) in (&entities, &meshes, &materials).join() {
-            let entry = renderables.entry(ent).expect("Failed to get entry!");
-            match entry {
-                StorageEntry::Occupied(mut occ_entry) => {
-                    if occ_entry.get().mode != render_mode {
-                        // TODO: Reuse some stuff here?
-                        log::trace!("Renderable did not match render mode, creating new");
-                        let rend = self.create_renderable(&cpu_textures, mesh, mat, render_mode);
-                        occ_entry.insert(rend);
-                    } else {
-                        log::trace!("Using existing renderable");
-                        if reload_shaders {
-                            log::trace!("Reloading shader");
-                            if let ShaderUse::RunTime { .. } = &mat.compilation_mode {
-                                occ_entry.get_mut().g_pipeline = pipeline::create_graphics_pipeline(
-                                    &self.vk_device,
-                                    &self.render_pass,
-                                    self.swapchain.dimensions(),
-                                    render_mode.into(),
-                                    &mesh.vertex_data,
-                                    &mat.data,
-                                    &mat.compilation_mode,
-                                );
-                            }
-                        }
-                    }
-                }
-                StorageEntry::Vacant(vac_entry) => {
-                    log::trace!("No renderable found, creating new");
-                    let rend = self.create_renderable(&cpu_textures, mesh, mat, render_mode);
-                    vac_entry.insert(rend);
-                }
-            }
-        }
-        render_settings.reload_runtime_shaders = false;
-    }
-
-    pub fn take_cursor(&mut self) {
-        self.cursor_grab(true);
-    }
-
-    pub fn release_cursor(&mut self) {
-        self.cursor_grab(false);
-    }
-
-    fn cursor_grab(&mut self, cursor_grab: bool) {
-        self.vk_surface
-            .window()
-            .set_cursor_grab(cursor_grab)
-            .expect("Unable to grab cursor");
-        self.vk_surface.window().set_cursor_visible(!cursor_grab);
-    }
-
-    pub fn prepare_frame(&mut self) {
-        let (img_idx, swapchain_img_acquired) =
-            match swapchain::acquire_next_image(Arc::clone(&self.swapchain), None) {
-                Ok((idx, false, fut)) => (idx, fut),
-                // true means suboptimal swapchain
-                Err(AcquireError::OutOfDate) | Ok((_, true, _)) => {
-                    self.recreate_swap_chain();
-                    return;
-                }
-                Err(e) => panic!("Can't acquire next image from swapchain: \t{}", e),
-            };
-
-        self.current_sc_index = img_idx;
-        let prev_frame = std::mem::replace(&mut self.frame_completions[img_idx], None);
-
-        self.frame_completions[img_idx] = Some(match prev_frame {
-            None => Box::new(swapchain_img_acquired),
-            Some(mut prev) => {
-                prev.cleanup_finished();
-                Box::new(prev.join(swapchain_img_acquired))
-            }
-        });
-    }
-
-    // TODO: Can we migrate to System? Would be nice but the VKManager monolith is noth "Send +
-    // Sync". We might get by by mutexing and such but do we really need it? Might be able to use
-    // thread_local_system which would not require thread safe systems.
-    pub fn draw_next_frame(&mut self, world: &mut World) {
-        let active_camera = world.read_resource::<ActiveCamera>();
-        let positions = world.read_storage::<Position>();
-        let cam_rots = world.read_storage::<CameraRotationState>();
-        let renderables = world.read_storage::<Renderable>();
-        let model_matrices = world.read_storage::<ModelMatrix>();
-        let entities = world.read_resource::<EntitiesRes>();
-
-        let camera_entity = active_camera.0.unwrap();
-
-        let frame_idx = self.current_sc_index;
-
-        let cam_pos = positions
-            .get(camera_entity)
-            .expect("Could not get position component for camera");
-
-        let cam_rotation_state = cam_rots
-            .get(camera_entity)
-            .expect("Could not get rotation state for camera");
-
-        // TODO: Camera system should write to ViewMatrixResource at the end of system
-        // and we should read it here.
-        let view = FreeFlyCameraController::get_view_matrix_from(cam_pos, cam_rotation_state);
-
-        log::trace!("View matrix: {:#?}", view);
-
-        let dims = get_physical_window_dims(self.vk_surface.window());
-        let aspect_ratio = dims[0] as f32 / dims[1] as f32;
-        let proj = get_proj_matrix(aspect_ratio);
-
-        let vp_buf = pipeline::pbr::vs::base::ty::Transforms {
-            view: view.into(),
-            proj: proj.into(),
-        };
-
-        let transforms_sub_buf = self
-            .transforms_buf
-            .next(vp_buf)
-            .expect("Could not get next ring buffer sub buffer for view proj");
-
-        let lighting_data = pipeline::pbr::fs::base::ty::LightingData {
-            light_pos: [5.0f32, 5.0f32, 5.0f32],
-            view_pos: cam_pos.xyz().into(),
-            _dummy0: [0; 4], // Magic Vulkano alignment
-        };
-
-        let lighting_sub_buf = self
-            .lighting_data_buf
-            .next(lighting_data)
-            .expect("Could not get next ring buffer sub buffer for view proj");
-
-        let prev_frame = std::mem::replace(&mut self.frame_completions[frame_idx], None).unwrap();
-
-        let clear_color = vec![
-            [0.0, 0.0, 0.0, 1.0].into(),
-            vulkano::format::ClearValue::None,
-            1.0f32.into(),
-        ];
-
-        // Render all the renderables as one render pass
-        let mut builder_orig = AutoCommandBufferBuilder::primary_one_time_submit(
-            Arc::clone(&self.vk_device),
-            self.graphics_queue.family(),
-        )
-        .expect("Failed to create command buffer builder");
-
-        let builder = builder_orig
-            .begin_render_pass(
-                Arc::clone(&self.framebuffers[frame_idx]),
-                false,
-                clear_color,
-            )
-            .expect("Failed after begin render pass");
-
-        let model_ubo_buf = CpuBufferPool::uniform_buffer(Arc::clone(&self.vk_device));
-
-        let builder =
-            (&entities, &renderables)
-                .join()
-                .fold(builder, |builder, (ent, renderable)| {
-                    renderable.record_draw_commands(
-                        builder,
-                        &transforms_sub_buf,
-                        &lighting_sub_buf,
-                        &model_ubo_buf,
-                        model_matrices
-                            .get(ent)
-                            .copied()
-                            .unwrap_or_else(ModelMatrix::identity),
-                    );
-
-                    builder
-                });
-
-        builder
-            .end_render_pass()
-            .expect("Unable to end render pass");
-
-        let cmd_buf = builder_orig.build().expect("Unable to build render pass");
-
-        let presented = prev_frame
-            .then_execute(Arc::clone(&self.graphics_queue), cmd_buf)
-            .expect("unable to execute render cmd buf")
-            .then_swapchain_present(
-                Arc::clone(&self.graphics_queue),
-                Arc::clone(&self.swapchain),
-                frame_idx,
-            )
-            .then_signal_fence_and_flush();
-
-        let rendered_and_presented = match presented {
-            Ok(r) => r,
-            Err(FlushError::OutOfDate) => {
-                self.recreate_swap_chain();
-                return;
-            }
-            Err(e) => panic!(
-                "Can't write to the swapchain image (idx: {}):\n\t{}",
-                frame_idx, e
-            ),
-        };
-
-        self.frame_completions[frame_idx] = Some(Box::new(rendered_and_presented));
-    }
+    (view, *cam_pos)
 }
 
 fn get_proj_matrix(aspect_ratio: f32) -> glm::Mat4 {
-    // TODO: Rewrite this
     let mut proj = glm::perspective(aspect_ratio, std::f32::consts::FRAC_PI_4, 0.1, 10.0);
 
     // glm::perspective is based on opengl left-handed coordinate system, vulkan has the y-axis
@@ -483,573 +78,256 @@ fn get_proj_matrix(aspect_ratio: f32) -> glm::Mat4 {
     proj
 }
 
-fn create_framebuffers(
-    device: &Arc<Device>,
-    render_pass: &Arc<dyn RenderPassAbstract + Send + Sync>,
-    sc_images: &[Arc<SwapchainImage<Window>>],
-    multisample_count: u32,
-    color_format: VkFormat,
-    depth_format: VkFormat,
-) -> Vec<Arc<dyn FramebufferAbstract + Send + Sync>> {
-    sc_images
-        .iter()
-        .map(|image| {
-            let dims = SwapchainImage::dimensions(&image);
-            let depth_buffer = AttachmentImage::transient_multisampled(
-                Arc::clone(device),
-                dims,
-                multisample_count,
-                depth_format,
-            )
-            .unwrap();
-            let multisample_image = AttachmentImage::transient_multisampled(
-                Arc::clone(device),
-                dims,
-                multisample_count,
-                color_format,
-            )
-            .unwrap();
+#[derive(Component)]
+#[storage(VecStorage)]
+pub struct Mesh(pub trekanten::mesh::Mesh);
 
-            Arc::new(
-                Framebuffer::start(Arc::clone(&render_pass))
-                    .add(multisample_image)
-                    .unwrap()
-                    .add(Arc::clone(image))
-                    .unwrap()
-                    .add(depth_buffer)
-                    .unwrap()
-                    .build()
-                    .unwrap(),
-            ) as Arc<dyn FramebufferAbstract + Send + Sync>
-        })
-        .collect::<Vec<_>>()
-}
-
-fn pick_physical_device<'a>(
-    vk_instance: &'a Arc<Instance>,
-    required_extensions: DeviceExtensions,
-) -> PhysicalDevice<'a> {
-    // TODO: For proper device selection, this should also be done:
-    //  - the available queues should be checked as well
-    //  - swap chain support/adequacy
-    PhysicalDevice::enumerate(vk_instance)
-        .find(|&ph_dev| {
-            // TODO: Subset instead
-            let supported_extensions = DeviceExtensions::supported_by_device(ph_dev);
-
-            required_extensions.intersection(&supported_extensions) == required_extensions
-        })
-        .expect("No suitable device available")
-}
-
-fn query_max_sample_count(physical_device: &PhysicalDevice) -> u32 {
-    let color_samples = physical_device.limits().framebuffer_color_sample_counts();
-    let depth_samples = physical_device.limits().framebuffer_depth_sample_counts();
-
-    log::info!(
-        "Physical device, framebuffer_color_sample_counts: {}",
-        color_samples
-    );
-    log::info!(
-        "Physical device, framebuffer_depth_sample_counts: {}",
-        depth_samples
-    );
-
-    // TODO: Clean this up (port to vulkano?)
-    let bits = vec![
-        vk_sys::SAMPLE_COUNT_1_BIT,
-        vk_sys::SAMPLE_COUNT_2_BIT,
-        vk_sys::SAMPLE_COUNT_4_BIT,
-        vk_sys::SAMPLE_COUNT_8_BIT,
-        vk_sys::SAMPLE_COUNT_16_BIT,
-        vk_sys::SAMPLE_COUNT_32_BIT,
-        vk_sys::SAMPLE_COUNT_64_BIT,
-    ];
-
-    bits.iter()
-        .rev()
-        .find(|&&bit| (color_samples & bit != 0) && (depth_samples & bit != 0))
-        .cloned()
-        .unwrap_or(bits[0])
-}
-
-fn create_swapchain(
-    device: &Arc<Device>,
-    surface: &Arc<Surface<Window>>,
-    queue_family_ids: [u32; 2],
-) -> (Arc<Swapchain<Window>>, Vec<Arc<SwapchainImage<Window>>>) {
-    let physical_device = device.physical_device();
-    let capabilities = surface
-        .capabilities(physical_device)
-        .expect("Can't fetch surface capabilites");
-
-    log::info!("Surface capabilities, supported formats:");
-    for f in &capabilities.supported_formats {
-        log::info!("{:?}", f);
-    }
-
-    let format = capabilities
-        .supported_formats
-        .iter()
-        .find(|&format| format == &(VkFormat::B8G8R8A8Srgb, ColorSpace::SrgbNonLinear))
-        .expect("Unable to find proper format in surface capabilities");
-
-    let present_mode = capabilities
-        .present_modes
-        .iter()
-        .find(|&mode| mode == PresentMode::Mailbox)
-        .unwrap_or(PresentMode::Fifo);
-
-    // Setup swap chain dimensions to that of the window
-    let dimensions = get_physical_window_dims(surface.window());
-
-    // Add 1 to try to get triple buffering
-    let triple_buffering_img_count = capabilities.min_image_count;
-    let img_count = match capabilities.max_image_count {
-        Some(max) => std::cmp::min(max, triple_buffering_img_count),
-        None => triple_buffering_img_count,
-    };
-
-    // The imageArrayLayers, likely. Is not 1 when rendering stereoscoping 3D
-    let layers = 1;
-    let usage = ImageUsage {
-        color_attachment: true,
-        ..ImageUsage::none()
-    };
-
-    let sharing_mode: SharingMode = if queue_family_ids.iter().all(|&x| x == queue_family_ids[0]) {
-        SharingMode::Exclusive
-    } else {
-        SharingMode::Concurrent(queue_family_ids.to_vec())
-    };
-
-    let alpha = CompositeAlpha::Opaque;
-
-    Swapchain::new(
-        Arc::clone(device),
-        Arc::clone(surface),
-        img_count,
-        format.0,
-        dimensions,
-        layers,
-        usage,
-        sharing_mode,
-        SurfaceTransform::Identity,
-        alpha,
-        present_mode,
-        vulkano::swapchain::FullscreenExclusive::Default,
-        /* clipped */ true,
-        ColorSpace::SrgbNonLinear,
-    )
-    .expect("Failed to create swap chain")
-}
-
-fn create_render_pass(
-    device: &Arc<Device>,
-    color_format: VkFormat,
-    depth_format: VkFormat,
-    multisample_count: u32,
-) -> Arc<dyn RenderPassAbstract + Send + Sync> {
-    Arc::new(
-        single_pass_renderpass!(Arc::clone(device),
-        attachments: {
-            msaa_color: {
-                load: Clear,
-                store: DontCare,
-                format: color_format,
-                samples: multisample_count,
-            },
-            color: {
-                load: DontCare,
-                store: Store,
-                format: color_format,
-                samples: 1,
-            },
-            depth: {
-                load: Clear,
-                store: DontCare,
-                format: depth_format,
-                samples: multisample_count,
-            }
-        },
-        pass: {
-            color: [msaa_color],
-            depth_stencil: {depth},
-            resolve: [color],
-        })
-        .unwrap(),
-    )
-}
-
-fn create_swapchain_dependent_objects(
-    device: &Arc<Device>,
-    swapchain: &Arc<Swapchain<Window>>,
-    images: &[Arc<SwapchainImage<Window>>],
-    multisample_count: u32,
-) -> (
-    Arc<dyn RenderPassAbstract + Send + Sync>,
-    Vec<Arc<dyn FramebufferAbstract + Send + Sync>>,
-) {
-    // TODO: If we can query the swapchain formats before creating it, we can decouple the
-    // creation of render pass and swapchain.
-    let color_format = swapchain.format();
-    // TODO: Query for support for this
-    let depth_format = VkFormat::D32Sfloat;
-
-    let render_pass = create_render_pass(device, color_format, depth_format, multisample_count);
-
-    let framebuffers = create_framebuffers(
-        device,
-        &render_pass,
-        images,
-        multisample_count,
-        color_format,
-        depth_format,
-    );
-    (render_pass, framebuffers)
-}
-
-fn create_logical_device(
-    physical_device: PhysicalDevice,
-    surface: &Arc<Surface<Window>>,
-    device_extensions: DeviceExtensions,
-) -> (Arc<Device>, Arc<Queue>, Arc<Queue>) {
-    let graphics_queue_family = physical_device
-        .queue_families()
-        .find(|&q| q.supports_graphics())
-        .expect("Could not find suitable queue");
-
-    let presentation_queue_family = physical_device
-        .queue_families()
-        .find(|&q| surface.is_supported(q).unwrap_or(false))
-        .expect("Could not find suitable queue");
-
-    // TODO: This should not be necessary, it's a bug in vulkano
-    let q_families = [graphics_queue_family, presentation_queue_family];
-    use std::iter::FromIterator;
-    let unique_queue_families: HashSet<u32> =
-        HashSet::from_iter(q_families.iter().map(QueueFamily::id));
-
-    let queue_priority = 1.0;
-    let q_families = unique_queue_families.iter().map(|&i| {
-        (
-            physical_device.queue_family_by_id(i).unwrap(),
-            queue_priority,
-        )
-    });
-
-    let (device, mut queues) = Device::new(
-        physical_device,
-        /* features */ &Features::none(),
-        /* extensions */ &device_extensions,
-        q_families,
-    )
-    .expect("Failed to create device");
-
-    let graphics_queue = queues.next().expect("Device queues not created");
-    let presentation_queue = queues.next().unwrap_or_else(|| Arc::clone(&graphics_queue));
-
-    (device, graphics_queue, presentation_queue)
-}
-
-// TODO: Try to refactor here
-fn create_and_submit_vertex_buffer<T>(
-    queue: &Arc<Queue>,
-    vertex_data: Vec<T>,
-) -> (
-    Arc<dyn BufferAccess + Send + Sync>,
-    CommandBufferExecFuture<NowFuture, AutoCommandBuffer>,
-)
-where
-    T: vulkano::pipeline::vertex::Vertex + std::clone::Clone,
-{
-    let (buf, fut) = ImmutableBuffer::from_iter(
-        vertex_data.iter().cloned(),
-        BufferUsage::vertex_buffer(),
-        Arc::clone(queue),
-    )
-    .expect("Could not create vertex buffer");
-
-    (buf, fut)
-}
-
-fn create_and_submit_index_buffer(
-    queue: &Arc<Queue>,
-    index_data: Vec<u32>,
-) -> (
-    Arc<dyn TypedBufferAccess<Content = [u32]> + Send + Sync>,
-    CommandBufferExecFuture<NowFuture, AutoCommandBuffer>,
-) {
-    let (buf, fut) = ImmutableBuffer::from_iter(
-        index_data.iter().cloned(),
-        BufferUsage::index_buffer(),
-        Arc::clone(queue),
-    )
-    .expect("Could not create index buffer");
-
-    (buf, fut)
-}
-
-macro_rules! descriptor_set_with_textures {
-    ($cur_set:ident, $($name:ident),+) => {
-        Arc::new(
-        $cur_set
-        $(
-            .add_sampled_image($name.image_buffer.clone(), $name.sampler.clone())
-            .expect(format!("Could not add sampled image {}!", stringify!($name)).as_str())
-        )+
-        .build()
-        .expect("Could not create desciptor set!")
-        ) as Arc<dyn DescriptorSet + Send + Sync>
+impl std::ops::Deref for Mesh {
+    type Target = trekanten::mesh::Mesh;
+    fn deref(&self) -> &Self::Target {
+        &self.0
     }
 }
 
-fn create_material_descriptor_set(
-    queue: &Arc<Queue>,
-    cpu_textures: &Textures,
-    gpu_textures: &mut GpuTextures,
-    g_pipeline: &Arc<dyn GraphicsPipelineAbstract + Send + Sync>,
-    material: &MaterialData,
-) -> (
-    Arc<dyn DescriptorSet + Send + Sync>,
-    RenderableMaterial,
-    // TODO: This is boxed since we want to return different types of GPUFuture,
-    // can we solve this another way?
-    Box<dyn GpuFuture>,
-) {
-    match material {
-        MaterialData::GlTFPBR {
-            base_color_factor,
-            metallic_factor,
-            roughness_factor,
-            base_color_texture,
-            metallic_roughness_texture,
-            normal_map,
-        } => {
-            let normal_scale = normal_map.as_ref().map(|x| x.scale).unwrap_or(1.0);
-            let data = pipeline::pbr::fs::base::ty::PBRMaterialData {
-                base_color_factor: *base_color_factor,
-                metallic_factor: *metallic_factor,
-                roughness_factor: *roughness_factor,
-                normal_scale,
-            };
-            let (material_data_buf, data_copied) =
-                ImmutableBuffer::from_data(data, BufferUsage::uniform_buffer(), Arc::clone(queue))
-                    .expect("Could not create vertex buffer");
-
-            let layout = g_pipeline
-                .descriptor_set_layout(1)
-                .expect("No such descriptor set");
-
-            let descriptor_set = PersistentDescriptorSet::start(Arc::clone(layout))
-                .add_buffer(material_data_buf.clone())
-                .expect("Could not add material data buf");
-
-            match (base_color_texture, metallic_roughness_texture, normal_map) {
-                (Some(bc_tex), Some(mr_tex), Some(normal_map)) => {
-                    let bc_tex_access = gpu_textures.upload(queue, cpu_textures, bc_tex.handle);
-                    let mr_tex_access = gpu_textures.upload(queue, cpu_textures, mr_tex.handle);
-                    let normal_tex_access =
-                        gpu_textures.upload(queue, cpu_textures, normal_map.tex.handle);
-
-                    let set = descriptor_set_with_textures!(
-                        descriptor_set,
-                        bc_tex_access,
-                        mr_tex_access,
-                        normal_tex_access
-                    );
-
-                    let fut = vulkano::sync::now(Arc::clone(queue.device())).boxed();
-
-                    (set, RenderableMaterial::GlTFPBR, fut)
-                }
-                (Some(bc_tex), Some(mr_tex), None) => {
-                    assert_eq!(bc_tex.coord_set, 0, "Not implemented!");
-                    assert_eq!(mr_tex.coord_set, 0, "Not implemented!");
-                    let bc_tex_access = gpu_textures.upload(queue, cpu_textures, bc_tex.handle);
-                    let mr_tex_access = gpu_textures.upload(queue, cpu_textures, mr_tex.handle);
-
-                    let set =
-                        descriptor_set_with_textures!(descriptor_set, bc_tex_access, mr_tex_access);
-
-                    let fut = vulkano::sync::now(Arc::clone(queue.device())).boxed();
-
-                    (set, RenderableMaterial::GlTFPBR, fut)
-                }
-                (Some(bc_tex), None, None) => {
-                    assert_eq!(bc_tex.coord_set, 0, "Not implemented!");
-                    let bc_tex_access = gpu_textures.upload(queue, cpu_textures, bc_tex.handle);
-
-                    let set = descriptor_set_with_textures!(descriptor_set, bc_tex_access);
-
-                    let fut = vulkano::sync::now(Arc::clone(queue.device())).boxed();
-
-                    (set, RenderableMaterial::GlTFPBR, fut)
-                }
-                (None, None, None) => {
-                    let set = Arc::new(
-                        descriptor_set
-                            .build()
-                            .expect("Could not crate material desc set!"),
-                    ) as Arc<dyn DescriptorSet + Send + Sync>;
-                    let fut = Box::new(data_copied);
-
-                    (set, RenderableMaterial::GlTFPBR, fut)
-                }
-                _ => unimplemented!(),
-            }
-        }
-        MaterialData::Color { color } => {
-            let data = pipeline::fs_uniform_color::ty::Color { x: *color };
-
-            let (buf, mat_copied) =
-                ImmutableBuffer::from_data(data, BufferUsage::uniform_buffer(), Arc::clone(queue))
-                    .expect("Could not create vertex buffer");
-
-            let data_copied = Box::new(mat_copied) as Box<dyn GpuFuture>;
-
-            let layout = g_pipeline
-                .descriptor_set_layout(1)
-                .expect("No such descriptor set");
-            let descriptor_set = PersistentDescriptorSet::start(Arc::clone(layout))
-                .add_buffer(buf.clone())
-                .expect("Could not add material data buf")
-                .build()
-                .expect("Could not create material descriptor set");
-
-            (
-                Arc::new(descriptor_set),
-                RenderableMaterial::UniformColor,
-                data_copied,
-            )
-        }
-        _ => unimplemented!("Support more material types!"),
+impl Into<Mesh> for trekanten::mesh::Mesh {
+    fn into(self) -> Mesh {
+        Mesh(self)
     }
-}
-
-// Renderable needs to have the sampler and the material data buf bound into
-// its descriptor set. The descriptor set is created here because it needs to
-// be recreated each time we pass in new data to the CpuBufferPool, which is done
-// each draw call.
-//
-// Descriptor set organisation:
-// 0: Draw call variant data,
-//    0: Transforms (view/proj)
-//    1: Model matrix
-//    2: Lighting Data (light_pos, view_pos)
-// 1: Constant/Material data
-//    0: MaterialData
-//    1: BaseColorTexture
-// TODO:
-// - Should Model matrix have its own set?
-// - How to precompute the MVP matrices as much as possible?
-enum RenderableMaterial {
-    GlTFPBR,
-    UniformColor,
 }
 
 #[derive(Component)]
 #[storage(VecStorage)]
-pub struct Renderable {
-    vertex_buffer: Arc<dyn BufferAccess + Send + Sync>,
-    index_buffer: Arc<dyn TypedBufferAccess<Content = [u32]> + Send + Sync>,
-    g_pipeline: Arc<dyn GraphicsPipelineAbstract + Send + Sync>,
-    material_descriptor_set: Arc<dyn DescriptorSet + Send + Sync>,
-    material: RenderableMaterial,
+pub struct RenderableMaterial {
+    gfx_pipeline: Handle<trekanten::pipeline::GraphicsPipeline>,
+    material_descriptor_set: Handle<descriptor::DescriptorSet>,
     mode: RenderMode,
 }
 
-impl Renderable {
-    fn record_draw_commands<'a>(
-        &self,
-        cmd_buf: &'a mut AutoCommandBufferBuilder,
-        vp_buf: &CpuBufferPoolSubbuffer<
-            pipeline::pbr::vs::base::ty::Transforms,
-            Arc<vulkano::memory::pool::StdMemoryPool>,
-        >,
-        light_buf: &CpuBufferPoolSubbuffer<
-            pipeline::pbr::fs::base::ty::LightingData,
-            Arc<vulkano::memory::pool::StdMemoryPool>,
-        >,
-        model_ubo_buf: &CpuBufferPool<pipeline::pbr::vs::base::ty::Model>,
-        model_matrix: ModelMatrix,
-    ) -> &'a mut AutoCommandBufferBuilder {
-        let model_data = pipeline::pbr::vs::base::ty::Model {
-            model: model_matrix.into(),
-            model_it: glm::inverse_transpose(model_matrix.into()).into(),
+// TODO: Bindings here need to match with shader
+fn create_material_descriptor_set(
+    renderer: &mut Renderer,
+    material: &Material,
+) -> Handle<descriptor::DescriptorSet> {
+    match &material.data {
+        trekanten::material::MaterialData::PBR {
+            material_uniforms,
+            normal_map,
+            base_color_texture,
+            metallic_roughness_texture,
+            has_vertex_colors,
+        } => {
+            let mut desc_set_builder = descriptor::DescriptorSet::builder(
+                renderer,
+                trekanten::pipeline::ShaderStage::Fragment,
+            );
+
+            desc_set_builder = desc_set_builder.add_buffer(&material_uniforms, 0);
+
+            if let Some(bct) = &base_color_texture {
+                desc_set_builder = desc_set_builder.add_texture(&bct.handle, 1);
+            }
+
+            if let Some(mrt) = &metallic_roughness_texture {
+                desc_set_builder = desc_set_builder.add_texture(&mrt.handle, 2);
+            }
+
+            if let Some(nm) = &normal_map {
+                desc_set_builder = desc_set_builder.add_texture(&nm.tex.handle, 3);
+            }
+
+            desc_set_builder.build()
+        }
+        _ => unimplemented!("Could not create descriptor set, unsupported material"),
+    }
+}
+
+fn create_renderable(
+    renderer: &mut Renderer,
+    mesh: &Mesh,
+    material: &Material,
+    render_mode: RenderMode,
+) -> RenderableMaterial {
+    log::trace!("Creating renderable: {:?}, {:?}", material, render_mode);
+    let material_descriptor_set = create_material_descriptor_set(renderer, material);
+    let gfx_pipeline = trekanten::pipeline::get_pipeline_for(renderer, mesh, &material.data);
+    RenderableMaterial {
+        gfx_pipeline,
+        material_descriptor_set,
+        mode: render_mode,
+    }
+}
+
+fn draw_model(
+    renderer: &Renderer,
+    cmd_buf: command::CommandBuffer,
+    renderable: &RenderableMaterial,
+    mesh: &Mesh,
+    mtx: &ModelMatrix,
+) -> command::CommandBuffer {
+    let gfx_pipeline = renderer
+        .get_resource(&renderable.gfx_pipeline)
+        .expect("Missing graphics pipeline");
+    let index_buffer = renderer
+        .get_resource(&mesh.index_buffer.handle())
+        .expect("Missing index buffer");
+    let vertex_buffer = renderer
+        .get_resource(&mesh.vertex_buffer.handle())
+        .expect("Missing vertex buffer");
+    let mat_desc_set = renderer
+        .get_descriptor_set(&renderable.material_descriptor_set)
+        .expect("Missing descriptor set");
+
+    let vertex_index = mesh.vertex_buffer.idx() as u64;
+    let indices_index = mesh.index_buffer.idx() as u64;
+    let n_indices = mesh.index_buffer.len();
+
+    let trn = uniform::Model {
+        model: mtx.0.into(),
+        model_it: glm::inverse_transpose(mtx.0).into(),
+    };
+    
+    cmd_buf
+    .bind_graphics_pipeline(&gfx_pipeline)
+    .bind_descriptor_set(1, &mat_desc_set, &gfx_pipeline)
+    .bind_index_buffer(&index_buffer, indices_index)
+    .bind_vertex_buffer(&vertex_buffer, vertex_index)
+    .bind_push_constant(&gfx_pipeline, trekanten::pipeline::ShaderStage::Vertex, &trn)
+    .draw_indexed(n_indices as u32)
+}
+
+fn draw_entities(
+    renderer: &mut Renderer,
+    world: &mut World,
+    mut cmd_buf: command::CommandBuffer,
+    render_mode: RenderMode,
+    reload_shaders: bool,
+) -> command::CommandBuffer {
+    let model_matrices = world.read_storage::<ModelMatrix>();
+    let meshes = world.read_storage::<Mesh>();
+    let materials = world.read_storage::<Material>();
+    let mut renderables = world.write_storage::<RenderableMaterial>();
+    let entities = world.read_resource::<EntitiesRes>();
+
+    for (ent, mesh, mat, mtx) in (&entities, &meshes, &materials, &model_matrices).join() {
+        // TODO: Move to function
+        let entry = renderables.entry(ent).expect("Failed to get entry!");
+        cmd_buf = match entry {
+            StorageEntry::Occupied(mut occ_entry) => {
+                if occ_entry.get().mode != render_mode {
+                    log::trace!("Renderable did not match render mode, creating new");
+                    todo!("No support for render modes yet!")
+                /*
+                let rend = create_renderable(&renderer, mat, render_mode);
+                occ_entry.insert(rend)
+                */
+                } else {
+                    log::trace!("Using existing Renderable");
+                    if reload_shaders {
+                        log::trace!("Reloading shader");
+                        if let ShaderUse::Reloadable { .. } = &mat.compilation_mode {
+                            todo!("No support for reloadable shaders yet")
+                            /* TODO
+                            occ_entry.get_mut().g_pipeline = pipeline::create_graphics_pipeline(
+                                &self.vk_device,
+                                &self.render_pass,
+                                self.swapchain.dimensions(),
+                                render_mode.into(),
+                                &mesh.vertex_data,
+                                &mat.data,
+                                &mat.compilation_mode,
+                            )
+                            */
+                        }
+                    }
+                }
+                draw_model(renderer, cmd_buf, occ_entry.get(), mesh, mtx)
+            }
+            StorageEntry::Vacant(vac_entry) => {
+                log::trace!("No Renderable found, creating new");
+                let rend = create_renderable(renderer, mesh, mat, render_mode);
+                let cmd_buf = draw_model(renderer, cmd_buf, &rend, mesh, mtx);
+                vac_entry.insert(rend);
+                cmd_buf
+            }
         };
+    }
 
-        let model_buf = model_ubo_buf
-            .next(model_data)
-            .expect("Could not allocated usub model buf");
+    cmd_buf
+}
 
-        let layout = &self
-            .g_pipeline
-            .descriptor_set_layout(0)
-            .expect("No such descriptor set");
+pub fn draw_frame(world: &mut World, renderer: &mut Renderer) {
+    let (render_mode, reload_shaders) = {
+        let render_settings = world.read_resource::<RenderSettings>();
+        (
+            render_settings.render_mode,
+            render_settings.reload_runtime_shaders,
+        )
+    };
 
-        let descriptor_set = match self.material {
-            RenderableMaterial::GlTFPBR => Arc::new(
-                PersistentDescriptorSet::start(Arc::clone(layout))
-                    .add_buffer(vp_buf.clone())
-                    .expect("Could not add vp buf")
-                    .add_buffer(model_buf)
-                    .expect("Could not add model buf")
-                    .add_buffer(light_buf.clone())
-                    .expect("Could not add light buf")
-                    .build()
-                    .expect("Failed to create persistent descriptor set for mvp ubo"),
-            ) as Arc<dyn DescriptorSet + Send + Sync>,
-            RenderableMaterial::UniformColor => Arc::new(
-                PersistentDescriptorSet::start(Arc::clone(layout))
-                    .add_buffer(vp_buf.clone())
-                    .expect("Could not add vp buf")
-                    .add_buffer(model_buf)
-                    .expect("Could not add model buf")
-                    .build()
-                    .expect("Failed to create persistent descriptor set for mvp ubo"),
-            )
-                as Arc<dyn DescriptorSet + Send + Sync>,
+    if reload_shaders {
+        log::debug!("Shader reload requested");
+    }
+    // Note: Don't do any rendering related stuff before this.
+    // TODO: Move functions from renderer to frame to ensure ordering.
+    let mut frame = renderer.next_frame().expect("Failed to get frame");
+
+    // Per-frame data
+    let mut cmd_buf = {
+        let FrameData {
+            light_buffer,
+            light_set,
+            transforms_buffer,
+            transforms_set,
+            dummy_pipeline,
+        } = &*world.read_resource::<FrameData>();
+    
+        let (view_matrix, cam_pos) = get_view_data(world);
+        
+        let lighting_data = uniform::LightingData {
+            light_pos: [5.0f32, 5.0f32, 5.0f32, 0.0f32],
+            view_pos: [cam_pos.x(), cam_pos.y(), cam_pos.z(), 0.0f32],
         };
+    
+        let transforms = uniform::Transforms {
+            view: view_matrix.into(),
+            proj: get_proj_matrix(renderer.aspect_ratio()).into(),
+        };
+        renderer.update_uniform(light_buffer, &lighting_data);
+        renderer.update_uniform(transforms_buffer, &transforms);
 
-        cmd_buf
-            .draw_indexed(
-                Arc::clone(&self.g_pipeline),
-                &DynamicState::none(),
-                vec![Arc::clone(&self.vertex_buffer)],
-                Arc::clone(&self.index_buffer),
-                (descriptor_set, Arc::clone(&self.material_descriptor_set)),
-                (),
-            )
-            .expect("Failed after draw_indexed")
-    }
-}
+        let render_pass = renderer.render_pass();
+        let extent = renderer.swapchain_extent();
+        let framebuffer = renderer.framebuffer(&frame);
+        let transforms_set = renderer
+            .get_descriptor_set(&transforms_set)
+            .expect("Missing descriptor set");
 
-fn print_validation_layers() {
-    log::info!("Available vulkan validation layers:");
-    for avail in instance::layers_list().expect("Can't query validation layers") {
-        log::info!("\t{}", avail.name());
-    }
-}
+        let light_set = renderer
+            .get_descriptor_set(&light_set)
+            .expect("Missing descriptor set");
 
-pub fn get_vk_instance() -> Arc<Instance> {
-    let available_extensions =
-        InstanceExtensions::supported_by_core().expect("can't get supported extensions");
-    let required_extensions = vulkano_win::required_extensions();
+        let dummy_pipeline = renderer
+            .get_resource(&dummy_pipeline)
+            .expect("Missing pipeline!");
 
-    // TODO: Subset
-    if available_extensions.intersection(&required_extensions) != required_extensions {
-        log::error!("Can't create a window, not all extensions supported.");
-        unreachable!();
-    }
+        frame
+            .new_command_buffer()
+            .expect("Failed to create new command buffer")
+            .begin_render_pass(render_pass, framebuffer, extent)
+            .bind_descriptor_set(0, transforms_set, dummy_pipeline)
+            .bind_descriptor_set(2, light_set, dummy_pipeline)
+    };
+    
+    cmd_buf = draw_entities(renderer, world, cmd_buf, render_mode, reload_shaders);
 
-    print_validation_layers();
+    cmd_buf = cmd_buf
+        .end_render_pass()
+        .end()
+        .expect("Failed to end command buffer");
 
-    Instance::new(None, &required_extensions, None).expect("Could not create vulkan instance")
-}
-
-fn get_physical_window_dims(window: &Window) -> [u32; 2] {
-    let ph = window.inner_size();
-
-    [ph.width, ph.height]
+    frame.add_command_buffer(cmd_buf);
+    renderer.submit(frame).expect("Failed to submit frame");
+    world
+        .write_resource::<RenderSettings>()
+        .reload_runtime_shaders = false;
 }

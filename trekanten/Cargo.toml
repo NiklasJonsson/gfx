@@ -1,0 +1,32 @@
+[package]
+name = "trekanten"
+version = "0.1.0"
+authors = ["Niklas Jonsson <niklasandersjonsson@gmail.com>"]
+edition = "2018"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+[dependencies]
+# Graphics
+ash = "0.31.0"
+spirv-reflect = "0.2.3"
+vk-mem = "0.2.2"
+
+# Windowing
+ash-window = "0.4.1"
+raw-window-handle = "0.3.3"
+glfw = {version = "0.39.0", features = ["vulkan"]}
+
+# Math
+nalgebra-glm = "0.7.0"
+
+# Util
+memoffset = "0.5.5"
+log = "0.4.8"
+env_logger = "0.7.1"
+image = "0.23.8"
+thiserror = "1.0.20"
+
+[dev-dependencies]
+inline-spirv = "0.1.1"
+reqwest = {version = "0.10.7", features = ["blocking"]}
+tobj = "2.0.2"

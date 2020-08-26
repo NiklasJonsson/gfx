@@ -166,6 +166,7 @@ impl<'a> System<'a> for TransformPropagation {
 #[storage(HashMapStorage)]
 pub struct RenderedBoundingBox(Entity);
 
+/* TODO: TREKANTEN
 pub const RENDERED_BOUNDING_BOXES_SYSTEM_ID: &str = "rendered_bounding_boxes";
 /// SPECS system to generate bounding boxes for rendering
 /// Works per root node in the scene graph
@@ -248,10 +249,10 @@ impl<'a> System<'a> for RenderedBoundingBoxes {
             let (vertex_data, indices) = biggest_bounding_box.to_vertices_and_indices();
             let ty = MeshType::Line { indices };
             let material = Material {
-                data: MaterialData::Color {
+                data: trekanten::material::MaterialData::Color {
                     color: [1.0, 0.0, 0.0, 1.0],
                 },
-                compilation_mode: ShaderUse::StaticInferredFromMaterial,
+                compilation_mode: ShaderUse::PreCompiled,
             };
             let mesh = Mesh {
                 ty,
@@ -267,6 +268,7 @@ impl<'a> System<'a> for RenderedBoundingBoxes {
         }
     }
 }
+*/
 
 fn breadth_first_sys_mut<'a>(
     nodes_storage: &WriteStorage<'a, RenderGraphNode>,

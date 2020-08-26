@@ -1,68 +1,37 @@
-use super::render_graph;
-use crate::asset::storage::Handle;
-use crate::render::texture::Texture;
-
 use std::path::PathBuf;
+
+use trekanten::material::MaterialData;
 
 use specs::prelude::*;
 use specs::Component;
 
-use super::*;
-
-#[derive(Clone, Copy, Debug)]
-pub struct TextureUse {
-    pub handle: Handle<Texture>,
-    pub coord_set: u32,
-}
-
-#[derive(Clone, Debug)]
-pub struct NormalMap {
-    pub tex: TextureUse,
-    pub scale: f32,
-}
-
-/// Compile time means that the material will be used to lookup what pre-compiled shader to use.
+/// PreCompiled means that the material will be used to lookup what pre-compiled shader to use.
 #[derive(Debug, Clone, Eq)]
 pub enum ShaderUse {
-    StaticInferredFromMaterial,
-    RunTime { vs_path: PathBuf, fs_path: PathBuf },
+    PreCompiled,
+    Reloadable { vs_path: PathBuf, fs_path: PathBuf },
 }
 
 impl PartialEq for ShaderUse {
     fn eq(&self, other: &Self) -> bool {
         use ShaderUse::*;
         match (self, other) {
-            (StaticInferredFromMaterial, StaticInferredFromMaterial) => true,
-            (RunTime { .. }, RunTime { .. }) => true,
-            _ => false,
+            (PreCompiled, PreCompiled) => true,
+            (Reloadable { .. }, Reloadable { .. }) => true,
+            (PreCompiled, Reloadable { .. }) => false,
+            (Reloadable { .. }, PreCompiled) => false,
         }
     }
 }
 
-#[derive(Clone, Debug)]
-pub enum MaterialData {
-    Color {
-        color: [f32; 4],
-    },
-    ColorTexture(Texture),
-    GlTFPBR {
-        base_color_factor: [f32; 4],
-        metallic_factor: f32,
-        roughness_factor: f32,
-        normal_map: Option<NormalMap>,
-        base_color_texture: Option<TextureUse>,
-        metallic_roughness_texture: Option<TextureUse>,
-    },
-    None,
-}
-
-#[derive(Clone, Debug, Component)]
+#[derive(Debug, Clone, Component)]
 #[storage(DenseVecStorage)]
 pub struct Material {
     pub data: MaterialData,
     pub compilation_mode: ShaderUse,
 }
 
+/*
 pub fn runtime_shaders_for_material(
     world: &World,
     root: Entity,
@@ -83,5 +52,6 @@ pub fn runtime_shaders_for_material(
         }
     };
 
-    render_graph::map(world, root, change_to_runtime);
+    // render_graph::map(world, root, change_to_runtime);
 }
+*/

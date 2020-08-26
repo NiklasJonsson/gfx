@@ -111,6 +111,7 @@ impl Transform {
 
 #[derive(Debug, Component, Clone, Copy)]
 #[storage(DenseVecStorage)]
+#[repr(transparent)]
 pub struct ModelMatrix(pub Mat4);
 
 impl From<[[f32; 4]; 4]> for ModelMatrix {

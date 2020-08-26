@@ -12,16 +12,6 @@ pub enum RenderMode {
     Wireframe,
 }
 
-use vulkano::pipeline::input_assembly::PrimitiveTopology;
-impl Into<PrimitiveTopology> for RenderMode {
-    fn into(self) -> PrimitiveTopology {
-        match self {
-            RenderMode::Opaque => PrimitiveTopology::TriangleList,
-            RenderMode::Wireframe => PrimitiveTopology::LineList,
-        }
-    }
-}
-
 #[derive(Debug, Copy, Clone, PartialEq, Eq)]
 pub struct RenderSettings {
     // Affects all entities

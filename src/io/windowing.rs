@@ -1,6 +1,5 @@
 use super::input;
 
-use winit::event::DeviceEvent;
 use winit::event::ElementState;
 use winit::event::WindowEvent;
 
@@ -107,7 +106,7 @@ impl EventManager {
             WinEvent::DeviceEvent {
                 event: inner_event, ..
             } => {
-                if let DeviceEvent::MouseMotion { delta: (x, y) } = inner_event {
+                if let winit::event::DeviceEvent::MouseMotion { delta: (x, y) } = inner_event {
                     log::debug!("Captured mouse motion: ({:?}, {:?})", x, y);
                     let ei = input::ExternalInput::MouseDelta { x, y };
                     self.update_action(Event::Input(vec![ei]));

@@ -5,6 +5,7 @@ use std::time::Instant;
 use std::path::PathBuf;
 use std::sync::Arc;
 
+mod arg_parse;
 mod asset;
 mod camera;
 mod common;
@@ -13,11 +14,11 @@ mod io;
 mod render;
 mod settings;
 
-use self::asset::AssetDescriptor;
-use self::common::*;
-use self::render::*;
+use arg_parse::Args;
+use asset::AssetDescriptor;
+use common::*;
 
-use self::game_state::GameState;
+use game_state::GameState;
 
 use io::windowing::Event;
 
@@ -29,16 +30,27 @@ enum AppState {
 
 struct App {
     world: World,
-    event_queue: io::EventQueue,
-    vk_manager: VKManager,
+    window: winit::window::Window,
+    event_queue: Arc<io::EventQueue>,
+    renderer: trekanten::Renderer,
     state: AppState,
 }
 
-struct Args {
-    gltf_path: PathBuf,
-    use_scene_camera: bool,
-    run_n_frames: Option<usize>,
-    scene_out_file: Option<PathBuf>,
+impl App {
+    pub fn take_cursor(&mut self) {
+        self.cursor_grab(true);
+    }
+
+    pub fn release_cursor(&mut self) {
+        self.cursor_grab(false);
+    }
+
+    fn cursor_grab(&mut self, cursor_grab: bool) {
+        self.window
+            .set_cursor_grab(cursor_grab)
+            .expect("Unable to grab cursor");
+        self.window.set_cursor_visible(!cursor_grab);
+    }
 }
 
 impl App {
@@ -67,11 +79,13 @@ impl App {
                 render_graph::TRANSFORM_PROPAGATION_SYSTEM_ID,
                 &[],
             )
+            /* TODO: TREKANTEN
             .with(
                 render_graph::RenderedBoundingBoxes,
                 render_graph::RENDERED_BOUNDING_BOXES_SYSTEM_ID,
                 &[render_graph::TRANSFORM_PROPAGATION_SYSTEM_ID],
             )
+            */
             .build();
 
         (control, engine)
@@ -80,9 +94,57 @@ impl App {
     fn setup_resources(&mut self) {
         self.world
             .insert(io::input::CurrentFrameExternalInputs(Vec::new()));
-        self.world.insert(ActiveCamera::empty());
+        self.world.insert(render::ActiveCamera::empty());
         self.world.insert(DeltaTime::zero());
-        self.world.insert(render::texture::Textures::default());
+
+        // TODO: Move
+        use trekanten::uniform::UniformBufferDescriptor;
+        use render::uniform::LightingData;
+        use render::uniform::Transforms;
+        use trekanten::uniform::UniformBuffer;
+        use trekanten::BufferHandle;
+        use trekanten::descriptor::DescriptorSet;
+        use trekanten::resource::ResourceManager;
+        use trekanten::pipeline::GraphicsPipelineDescriptor;
+        use trekanten::util;
+        use trekanten::vertex::VertexFormat;
+
+        let desc = UniformBufferDescriptor::uninitialized::<LightingData>(1);
+        let light_buffer = self.renderer.create_resource(desc).expect("FAIL");
+        let light_buffer = BufferHandle::<UniformBuffer>::from_typed_buffer::<LightingData>(light_buffer, 0, 1);
+
+        let desc = UniformBufferDescriptor::uninitialized::<Transforms>(1);
+        let transforms_buffer = self.renderer.create_resource(desc).expect("FAIL");
+        let transforms_buffer = BufferHandle::<UniformBuffer>::from_typed_buffer::<Transforms>(transforms_buffer, 0, 1);
+
+        // TODO: Put these in the same set
+        let transforms_set = DescriptorSet::builder(&mut self.renderer, trekanten::pipeline::ShaderStage::Vertex)
+            .add_buffer(&transforms_buffer, 0)
+            .build();
+
+        let light_set = DescriptorSet::builder(&mut self.renderer, trekanten::pipeline::ShaderStage::Fragment)
+            .add_buffer(&light_buffer, 0)
+            .build();
+
+        let vertex_format = VertexFormat::builder()
+            .add_attribute(util::Format::FLOAT3)
+            .add_attribute(util::Format::FLOAT3)
+            .build();
+        let desc = GraphicsPipelineDescriptor {
+            vert: PathBuf::from("vs_pbr_base.spv"),
+            frag: PathBuf::from("fs_pbr_base.spv"),
+            vertex_format,
+        };
+
+        let dummy_pipeline = self.renderer.create_resource(desc).expect("FAIL");
+        
+        self.world.insert(render::FrameData {
+            light_buffer,
+            light_set,
+            transforms_buffer,
+            transforms_set,
+            dummy_pipeline,
+        });
     }
 
     pub fn get_entity_with_marker<C>(w: &World) -> Entity
@@ -115,13 +177,11 @@ impl App {
         self.setup_resources();
 
         let cam_entity = Self::get_entity_with_marker::<camera::Camera>(&self.world);
-        *self.world.write_resource::<ActiveCamera>() = ActiveCamera::with_entity(cam_entity);
+        *self.world.write_resource::<render::ActiveCamera>() =
+            render::ActiveCamera::with_entity(cam_entity);
 
-        let desc = AssetDescriptor::Gltf {
-            path: args.gltf_path.to_owned(),
-        };
-
-        let loaded_asset = asset::load_asset_into(&mut self.world, desc);
+        let loaded_asset =
+            asset::gltf::load_asset(&mut self.world, &mut self.renderer, &args.gltf_path);
         if let Some(path) = &args.scene_out_file {
             // TODO: Base this into print_graph_to_dot?
             match std::fs::File::create(path) {
@@ -144,10 +204,8 @@ impl App {
         }
 
         // REFACTOR: Flatten this when support for && and if-let is on stable
-        if args.use_scene_camera {
-            if let Some(transform) = loaded_asset.camera {
-                camera::Camera::set_camera_state(&mut self.world, cam_entity, &transform);
-            }
+        if let (Some(transform), true) = (loaded_asset.camera, args.use_scene_camera) {
+            camera::Camera::set_camera_state(&mut self.world, cam_entity, &transform);
         }
 
         /* Uncomment for runtime shaders
@@ -181,17 +239,27 @@ impl App {
         self.event_queue.pop().ok()
     }
 
-    fn run(&mut self, args: Args) {
+    fn post_frame(&mut self) {
+        self.world.maintain();
+
+        let mut cur_inputs = self
+            .world
+            .write_resource::<io::input::CurrentFrameExternalInputs>();
+        cur_inputs.0.clear();
+    }
+
+    fn run(&mut self, args: arg_parse::Args) {
         let (mut control_systems, mut engine_systems) = Self::init_dispatchers();
 
         // Register all component types
-        self.world.register::<Renderable>();
-        self.world.register::<Mesh>();
+        self.world.register::<render::RenderableMaterial>();
+        self.world.register::<render::Mesh>();
         self.world.register::<Material>();
         self.world.register::<render_graph::RenderGraphNode>();
         self.world.register::<render_graph::RenderGraphRoot>();
         self.world.register::<render_graph::RenderGraphChild>();
         self.world.register::<camera::Camera>();
+        asset::gltf::register_components(&mut self.world);
         control_systems.setup(&mut self.world);
         engine_systems.setup(&mut self.world);
 
@@ -241,9 +309,9 @@ impl App {
 
             if running {
                 assert!(focused, "Can't be running but not be in focus!");
-                self.vk_manager.take_cursor();
+                self.take_cursor();
             } else {
-                self.vk_manager.release_cursor();
+                self.release_cursor();
             }
 
             if !focused {
@@ -257,26 +325,10 @@ impl App {
                 continue;
             }
 
-            // Acquires next swapchain frame and waits for previous work to the upcoming framebuffer to be finished.
-            self.vk_manager.prepare_frame();
-
-            // Run all ECS systems (blocking call)
             engine_systems.dispatch(&self.world);
 
-            // Send data to GPU
-            // TODO: Merge this with prepare_primitives?
-            self.vk_manager
-                .prepare_primitives_for_rendering(&self.world);
-
-            // Run render systems, this is done after the dispatch call to enforce serialization
-            self.vk_manager.draw_next_frame(&mut self.world);
-
-            self.world.maintain();
-
-            let mut cur_inputs = self
-                .world
-                .write_resource::<io::input::CurrentFrameExternalInputs>();
-            cur_inputs.0.clear();
+            render::draw_frame(&mut self.world, &mut self.renderer);
+            self.post_frame();
 
             frame_count += 1;
             if let Some(n_frames) = args.run_n_frames {
@@ -288,97 +340,65 @@ impl App {
         }
     }
 
-    fn new() -> Self {
-        let vk_instance = render::get_vk_instance();
-
-        let (vk_surface, event_queue) =
-            io::init_windowing_and_input_thread(Arc::clone(&vk_instance))
-                .expect("Failed to init windowing!");
-
-        let world = World::new();
-
-        let vk_manager = VKManager::create(vk_instance, vk_surface);
-
-        let state = AppState::Focused;
-
+    fn new(
+        renderer: trekanten::Renderer,
+        window: winit::window::Window,
+        event_queue: Arc<io::EventQueue>,
+    ) -> Self {
         App {
-            world,
-            vk_manager,
+            world: World::new(),
+            window,
+            renderer,
             event_queue,
-            state,
+            state: AppState::Focused,
         }
     }
 }
 
+fn window_extents(window: &winit::window::Window) -> trekanten::util::Extent2D {
+    let winit::dpi::PhysicalSize { width, height } = window.inner_size();
+    trekanten::util::Extent2D { width, height }
+}
+
 fn main() {
     env_logger::init();
-    let matches = clap::App::new("ramneryd")
-        .version("0.1.0")
-        .about("Vulkan renderer")
-        .arg(
-            clap::Arg::with_name("view-gltf")
-                .short("-i")
-                .long("view-gltf")
-                .value_name("GLTF-FILE")
-                .help("Reads a gltf file and renders it.")
-                .takes_value(true)
-                .required(true),
-        )
-        // TODO: This can only be used if we are passing a scene from the command line
-        .arg(
-            clap::Arg::with_name("use-scene-camera")
-                .long("use-scene-camera")
-                .help("Use the camera encoded in e.g. a gltf scene"),
-        )
-        .arg(
-            clap::Arg::with_name("scene-out-file")
-                .value_name("FILE")
-                .long("scene-graph-to-file")
-                .takes_value(true)
-                .help(
-                    "Write the scene graph of the loaded scene in dot-format to the supplied file",
-                ),
-        )
-        .arg(
-            clap::Arg::with_name("run-n-frames")
-                .long("run-n-frames")
-                .value_name("N")
-                .takes_value(true)
-                .help("Run only N frames"),
-        )
-        .get_matches();
+    let args = match arg_parse::parse() {
+        None => return,
+        Some(args) => args,
+    };
 
-    let path = matches.value_of("view-gltf").expect("This is required!");
-    let path_buf = PathBuf::from(path);
-    if !path_buf.exists() {
-        println!("No such path: {}!", path_buf.as_path().display());
-        return;
-    }
+    let event_loop = winit::event_loop::EventLoop::new();
+    let window = winit::window::Window::new(&event_loop).expect("Failed to create window");
 
-    let use_scene_camera = matches.is_present("use-scene-camera");
+    let event_queue = Arc::new(io::EventQueue::new());
+    let event_queue2 = Arc::clone(&event_queue);
 
-    let run_n_frames = if let Some(s) = matches.value_of("run-n-frames") {
-        match s.parse::<usize>() {
-            Ok(n) => Some(n),
+    // Thread runs the app while main takes the event loop
+    let done = std::thread::spawn(move || {
+        let renderer = match trekanten::Renderer::new(&window, window_extents(&window)) {
             Err(e) => {
-                println!("Invalid value for run-n-frames: {}", e);
+                println!("Failed to create renderer: {}", e);
                 return;
             }
+            Ok(x) => x,
+        };
+        let mut app = App::new(renderer, window, event_queue2);
+        app.run(args);
+    });
+
+    let mut event_manager = io::windowing::EventManager::new();
+    event_loop.run(move |winit_event, _, control_flow| {
+        // Since this is a separate thread, it is fine to wait
+        *control_flow = winit::event_loop::ControlFlow::Wait;
+
+        match event_manager.collect_event(winit_event) {
+            io::windowing::EventLoopControl::Done(event) => {
+                log::debug!("Sending event on queue: {:?}", event);
+                event_queue.push(event)
+            }
+            io::windowing::EventLoopControl::Continue => (),
         }
-    } else {
-        None
-    };
+    });
 
-    let scene_out_file = matches.value_of("scene-out-file").map(PathBuf::from);
-
-    let args = Args {
-        gltf_path: path_buf,
-        use_scene_camera,
-        run_n_frames,
-        scene_out_file,
-    };
-
-    let mut app = App::new();
-
-    app.run(args);
+    done.join();
 }
