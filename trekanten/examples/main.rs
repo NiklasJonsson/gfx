@@ -173,7 +173,7 @@ fn main() -> Result<(), trekanten::RenderError> {
     let (vertices, indices) = load_viking_house();
 
     let mut window = trekanten::window::GlfwWindow::new();
-    let mut renderer = trekanten::Renderer::new(&window)?;
+    let mut renderer = trekanten::Renderer::new(&window, window.extents())?;
 
     let vertex_buffer_descriptor = mesh::VertexBufferDescriptor::from_slice(&vertices);
     let vertex_buffer_handle: Handle<mesh::VertexBuffer> = renderer
