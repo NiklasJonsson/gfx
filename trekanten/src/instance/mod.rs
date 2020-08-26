@@ -3,7 +3,7 @@ use ash::version::InstanceV1_0; // For destroy_instance
 use ash::{version::EntryV1_0, vk, Entry};
 use std::ffi::{CStr, CString};
 
-use crate::util::ffi::*;
+use crate::util::ffi::{c_char, vec_cstring_from_raw, vec_cstring_to_raw, log_cstrings};
 use crate::util::lifetime::LifetimeToken;
 
 pub mod error;
@@ -102,46 +102,52 @@ pub fn choose_validation_layers(entry: &Entry) -> Vec<CString> {
     }
 }
 
-fn choose_instance_extensions<T: AsRef<str>>(
+#[cfg(all(unix, not(target_os = "android"), not(target_os = "macos")))]
+fn required_window_extensions() ->  Vec<&'static CStr> {
+    vec![
+        ash::extensions::khr::Surface::name(),
+        ash::extensions::khr::XlibSurface::name(),
+    ]
+}
+
+#[cfg(target_os = "macos")]
+fn required_window_extensions() -> Vec<&'static CStr> {
+    vec![
+        ash::extensions::khr::Surface::name(),
+        ash::extensions::mvk::MacOSSurface::name(),
+    ]
+}
+
+#[cfg(all(windows))]
+fn required_window_extensions() -> Vec<&'static CStr> {
+    vec![
+        ash::extensions::khr::Surface::name(),
+        ash::extensions::khr::Win32Surface::name(),
+    ]
+}
+
+fn choose_instance_extensions(
     entry: &Entry,
-    required_window_extensions: &[T],
-) -> Result<Vec<CString>, InstanceError> {
+) -> Result<Vec<*const c_char>, InstanceError> {
     let available = entry
         .enumerate_instance_extension_properties()
         .map_err(|e| InstanceError::InternalVulkan(e, "Instance extension enumeration"))?;
-    let required = required_window_extensions
-        .iter()
-        .map(|x| CString::new(x.as_ref()).expect("CString failed!"))
-        .collect::<Vec<CString>>();
-
-    check_extensions(&required, &available)?;
-    let mut instance_extensions = required.to_vec();
-
-    // Glfw gives only the xcb surface extension but ash-window tries to create a xlibs surface.
-    // Add the xlib one if, there is only a xcb surface extension.
-    // TODO: Move this up to application level
-    if instance_extensions
-        .iter()
-        .any(|x| x.as_c_str() == ash::extensions::khr::XcbSurface::name())
-        && !instance_extensions
-            .iter()
-            .any(|x| x.as_c_str() == ash::extensions::khr::XlibSurface::name())
-    {
-        instance_extensions.push(ash::extensions::khr::XlibSurface::name().to_owned());
-    }
+    let mut required = required_window_extensions();
 
     if use_vk_validation() {
-        instance_extensions.push(ext::DebugUtils::name().to_owned());
+        required.push(ash::extensions::ext::DebugUtils::name());
     }
 
-    log::trace!("Choosing instance extensions:");
-    log_cstrings(&instance_extensions);
+    check_extensions(&required, &available)?;
 
-    Ok(instance_extensions)
+    log::trace!("Choosing instance extensions: ");
+    log_cstrings(&required);
+
+    Ok(required.iter().map(|x| x.as_ptr()).collect())
 }
 
 impl Instance {
-    pub fn new<T: AsRef<str>>(required_window_extensions: &[T]) -> Result<Self, InstanceError> {
+    pub fn new() -> Result<Self, InstanceError> {
         let entry = Entry::new().expect("Failed to create Entry!");
 
         let app_info = vk::ApplicationInfo {
@@ -149,8 +155,7 @@ impl Instance {
             ..Default::default()
         };
 
-        let extensions = choose_instance_extensions(&entry, required_window_extensions)?;
-        let extensions_ptrs = vec_cstring_to_raw(extensions);
+        let extensions_ptrs = choose_instance_extensions(&entry)?;
 
         let validation_layers = choose_validation_layers(&entry);
         let layers_ptrs = vec_cstring_to_raw(validation_layers);
@@ -167,7 +172,6 @@ impl Instance {
         };
 
         let _owned_layers = vec_cstring_from_raw(layers_ptrs);
-        let _owned_extensions = vec_cstring_from_raw(extensions_ptrs);
 
         let lifetime_token = LifetimeToken::<Instance>::new();
 

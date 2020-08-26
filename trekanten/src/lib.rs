@@ -22,7 +22,7 @@ mod swapchain;
 mod sync;
 pub mod texture;
 pub mod uniform;
-mod util;
+pub mod util;
 pub mod vertex;
 pub mod window;
 
@@ -166,18 +166,15 @@ fn create_swapchain_and_co(
 }
 
 impl Renderer {
-    pub fn new<W>(window: &W) -> Result<Self, RenderError>
+    pub fn new<W>(window: &W, window_extent: util::Extent2D) -> Result<Self, RenderError>
     where
-        W: raw_window_handle::HasRawWindowHandle + window::Window,
+        W: raw_window_handle::HasRawWindowHandle,
     {
-        let extensions = window.required_instance_extensions();
-
-        let instance = instance::Instance::new(&extensions)?;
+        let instance = instance::Instance::new()?;
         let _debug_utils = util::vk_debug::DebugUtils::new(&instance)?;
         let surface = surface::Surface::new(&instance, window)?;
         let device = device::Device::new(&instance, &surface)?;
 
-        let extent = window.extents();
         let SwapchainAndCo {
             swapchain,
             swapchain_framebuffers,
@@ -185,7 +182,7 @@ impl Renderer {
             color_buffer,
             image_to_frame_idx,
             render_pass,
-        } = create_swapchain_and_co(&instance, &device, &surface, &extent, None)?;
+        } = create_swapchain_and_co(&instance, &device, &surface, &window_extent, None)?;
 
         let frames = [None, None];
         let frame_synchronization = [
@@ -408,6 +405,15 @@ impl Renderer {
         let util::Extent2D { width, height } = self.swapchain_extent();
 
         width as f32 / height as f32
+    }
+
+    // TODO: Move this to window
+    pub fn take_cursor(&self) {
+        unimplemented!();
+    }
+
+    pub fn release_cursor(&self) {
+        unimplemented!();
     }
 }
 

@@ -690,8 +690,6 @@ fn create_swapchain_dependent_objects(
     Arc<dyn RenderPassAbstract + Send + Sync>,
     Vec<Arc<dyn FramebufferAbstract + Send + Sync>>,
 ) {
-    // TODO: If we can query the swapchain formats before creating it, we can decouple the
-    // creation of render pass and swapchain.
     let color_format = swapchain.format();
     // TODO: Query for support for this
     let depth_format = VkFormat::D32Sfloat;
@@ -1052,4 +1050,8 @@ fn get_physical_window_dims(window: &Window) -> [u32; 2] {
     let ph = window.inner_size();
 
     [ph.width, ph.height]
+}
+
+pub fn draw_frame(world: &mut World, renderer: &mut trekanten::Renderer) {
+    unimplemented!();
 }

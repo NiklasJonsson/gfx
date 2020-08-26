@@ -2,7 +2,6 @@ use crate::util;
 use std::time::Duration;
 
 pub trait Window {
-    fn required_instance_extensions(&self) -> Vec<String>;
     fn extents(&self) -> util::Extent2D;
 }
 
@@ -70,12 +69,6 @@ impl GlfwWindow {
 }
 
 impl Window for GlfwWindow {
-    fn required_instance_extensions(&self) -> Vec<String> {
-        self.glfw
-            .get_required_instance_extensions()
-            .expect("Could not get required instance extensions")
-    }
-
     fn extents(&self) -> util::Extent2D {
         let (w, h) = self.window.get_framebuffer_size();
         util::Extent2D {

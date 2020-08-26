@@ -9,6 +9,7 @@ mod asset;
 mod camera;
 mod common;
 mod game_state;
+mod arg_parse;
 mod io;
 mod render;
 mod settings;
@@ -16,6 +17,7 @@ mod settings;
 use self::asset::AssetDescriptor;
 use self::common::*;
 use self::render::*;
+use crate::arg_parse::Args;
 
 use self::game_state::GameState;
 
@@ -32,13 +34,6 @@ struct App {
     event_queue: io::EventQueue,
     renderer: trekanten::Renderer,
     state: AppState,
-}
-
-struct Args {
-    gltf_path: PathBuf,
-    use_scene_camera: bool,
-    run_n_frames: Option<usize>,
-    scene_out_file: Option<PathBuf>,
 }
 
 impl App {
@@ -180,8 +175,17 @@ impl App {
     fn next_event(&self) -> Option<Event> {
         self.event_queue.pop().ok()
     }
+    
+    fn post_frame(&mut self) {
+        self.world.maintain();
 
-    fn run(&mut self, args: Args) {
+        let mut cur_inputs = self
+            .world
+            .write_resource::<io::input::CurrentFrameExternalInputs>();
+        cur_inputs.0.clear();
+    }
+
+    fn run(&mut self, args: arg_parse::Args) {
         let (mut control_systems, mut engine_systems) = Self::init_dispatchers();
 
         // Register all component types
@@ -257,27 +261,8 @@ impl App {
                 continue;
             }
 
-            // Run all ECS systems (blocking call)
-            engine_systems.dispatch(&self.world);
-
-            // Acquires next swapchain frame and waits for previous work to the upcoming framebuffer to be finished.
-            self.renderer.next_frame();
-
-
-            // Send data to GPU
-            // TODO: Merge this with prepare_primitives?
-            self.vk_manager
-                .prepare_primitives_for_rendering(&self.world);
-
-            // Run render systems, this is done after the dispatch call to enforce serialization
-            self.vk_manager.draw_next_frame(&mut self.world);
-
-            self.world.maintain();
-
-            let mut cur_inputs = self
-                .world
-                .write_resource::<io::input::CurrentFrameExternalInputs>();
-            cur_inputs.0.clear();
+            render::draw_frame(&mut self.world, &mut self.renderer);
+            self.post_frame();
 
             frame_count += 1;
             if let Some(n_frames) = args.run_n_frames {
@@ -289,97 +274,97 @@ impl App {
         }
     }
 
-    fn new() -> Self {
-        let vk_instance = render::get_vk_instance();
-
-        let (vk_surface, event_queue) =
-            io::init_windowing_and_input_thread(Arc::clone(&vk_instance))
-                .expect("Failed to init windowing!");
-
-        let world = World::new();
-
-        let vk_manager = VKManager::create(vk_instance, vk_surface);
-
-        let state = AppState::Focused;
-
+    fn new(renderer: trekanten::Renderer, event_queue: io::EventQueue) -> Self {
         App {
-            world,
-            vk_manager,
+            world: World::new(),
+            renderer,
             event_queue,
-            state,
+            state: AppState::Focused,
         }
+    }
+}
+
+fn window_extents(window: &winit::window::Window) -> trekanten::util::Extent2D {
+    let winit::dpi::PhysicalSize {width, height} = window.inner_size();
+    trekanten::util::Extent2D {
+        width,
+        height,
     }
 }
 
 fn main() {
     env_logger::init();
-    let matches = clap::App::new("ramneryd")
-        .version("0.1.0")
-        .about("Vulkan renderer")
-        .arg(
-            clap::Arg::with_name("view-gltf")
-                .short("-i")
-                .long("view-gltf")
-                .value_name("GLTF-FILE")
-                .help("Reads a gltf file and renders it.")
-                .takes_value(true)
-                .required(true),
-        )
-        // TODO: This can only be used if we are passing a scene from the command line
-        .arg(
-            clap::Arg::with_name("use-scene-camera")
-                .long("use-scene-camera")
-                .help("Use the camera encoded in e.g. a gltf scene"),
-        )
-        .arg(
-            clap::Arg::with_name("scene-out-file")
-                .value_name("FILE")
-                .long("scene-graph-to-file")
-                .takes_value(true)
-                .help(
-                    "Write the scene graph of the loaded scene in dot-format to the supplied file",
-                ),
-        )
-        .arg(
-            clap::Arg::with_name("run-n-frames")
-                .long("run-n-frames")
-                .value_name("N")
-                .takes_value(true)
-                .help("Run only N frames"),
-        )
-        .get_matches();
+    let args = match arg_parse::parse() {
+        None => return,
+        Some(args) => args,
+    };
 
-    let path = matches.value_of("view-gltf").expect("This is required!");
-    let path_buf = PathBuf::from(path);
-    if !path_buf.exists() {
-        println!("No such path: {}!", path_buf.as_path().display());
-        return;
-    }
+    let event_loop = winit::event_loop::EventLoop::new();
+    let window = winit::window::Window::new(&event_loop).expect("Failed to create window");
 
-    let use_scene_camera = matches.is_present("use-scene-camera");
+    let event_queue = Arc::new(crossbeam::queue::SegQueue::new());
+    let event_queue2 = Arc::clone(&event_queue);
 
-    let run_n_frames = if let Some(s) = matches.value_of("run-n-frames") {
-        match s.parse::<usize>() {
-            Ok(n) => Some(n),
-            Err(e) => {
-                println!("Invalid value for run-n-frames: {}", e);
-                return;
+    // Thread runs the app while main takes the event loop
+    std::thread::spawn(move || {    
+        let renderer = trekanten::Renderer::new(&window, window_extents(&window)).expect("Failed to create renderer");
+        let mut app = App::new(renderer, event_queue2);
+        app.run(args);
+    });
+
+    let mut event_manager = io::windowing::EventManager::new();
+    event_loop.run(move |winit_event, _, control_flow| {
+        // Since this is a separate thread, it is fine to wait
+        *control_flow = winit::event_loop::ControlFlow::Wait;
+
+        match event_manager.collect_event(winit_event) {
+            io::windowing::EventLoopControl::Done(event) => {
+                log::debug!("Sending event on queue: {:?}", event);
+                event_queue.push(event)
             }
+            io::windowing::EventLoopControl::Continue => (),
         }
-    } else {
-        None
-    };
+    });
 
-    let scene_out_file = matches.value_of("scene-out-file").map(PathBuf::from);
-
-    let args = Args {
-        gltf_path: path_buf,
-        use_scene_camera,
-        run_n_frames,
-        scene_out_file,
-    };
-
-    let mut app = App::new();
-
-    app.run(args);
 }
+/*
+pub fn init_windowing_and_input_thread(
+    vk_instance: Arc<Instance>,
+) -> Result<(Arc<VkSurface>, EventQueue), WindowingError> {
+
+    // Spawn off thread that handles windowing/events
+    std::thread::spawn(move || {
+        let event_queue = event_queue_2;
+        let event_loop = winit::event_loop::EventLoop::new_any_thread();
+
+        let vk_surface_result =
+            WindowBuilder::new().build_vk_surface(&event_loop, Arc::clone(&vk_instance));
+
+        // We pass ownership with the channel so save this
+        let mut is_err = vk_surface_result.is_err();
+        is_err |= sender.send(vk_surface_result).is_err();
+
+        if is_err {
+            return;
+        }
+
+        let mut event_manager = windowing::EventManager::new();
+
+        event_loop.run(move |winit_event, _, control_flow| {
+            // Since this is a separate thread, it is fine to wait
+            *control_flow = WinCFlow::Wait;
+
+            match event_manager.collect_event(winit_event) {
+                windowing::EventLoopControl::Done(event) => {
+                    log::debug!("Sending event on queue: {:?}", event);
+                    event_queue.push(event)
+                }
+                windowing::EventLoopControl::Continue => (),
+            }
+        });
+    });
+
+    let vk_surface_result = receiver.recv().expect("Failed to receive");
+    vk_surface_result.map(|r| (r, event_queue))
+}
+*/

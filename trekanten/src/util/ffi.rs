@@ -1,7 +1,7 @@
 use std::ffi::CString;
-use std::os::raw::c_char;
+pub use std::os::raw::c_char;
 
-pub fn log_cstrings(a: &[CString]) {
+pub fn log_cstrings<T: AsRef<std::ffi::CStr> + std::fmt::Debug>(a: &[T]) {
     for cs in a {
         log::trace!("{:?}", cs);
     }
