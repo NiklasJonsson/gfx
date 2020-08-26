@@ -30,7 +30,7 @@ enum AppState {
 struct App {
     world: World,
     event_queue: io::EventQueue,
-    vk_manager: VKManager,
+    renderer: trekanten::Renderer,
     state: AppState,
 }
 
@@ -241,9 +241,9 @@ impl App {
 
             if running {
                 assert!(focused, "Can't be running but not be in focus!");
-                self.vk_manager.take_cursor();
+                self.renderer.take_cursor();
             } else {
-                self.vk_manager.release_cursor();
+                self.renderer.release_cursor();
             }
 
             if !focused {
@@ -257,11 +257,12 @@ impl App {
                 continue;
             }
 
-            // Acquires next swapchain frame and waits for previous work to the upcoming framebuffer to be finished.
-            self.vk_manager.prepare_frame();
-
             // Run all ECS systems (blocking call)
             engine_systems.dispatch(&self.world);
+
+            // Acquires next swapchain frame and waits for previous work to the upcoming framebuffer to be finished.
+            self.renderer.next_frame();
+
 
             // Send data to GPU
             // TODO: Merge this with prepare_primitives?

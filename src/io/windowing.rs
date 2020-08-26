@@ -1,6 +1,5 @@
 use super::input;
 
-use winit::event::DeviceEvent;
 use winit::event::ElementState;
 use winit::event::WindowEvent;
 

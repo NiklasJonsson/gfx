@@ -264,6 +264,7 @@ impl<'a> System<'a> for FreeFlyCameraController {
             unique_id,
         ) = data;
 
+        // TODO: Can this be removed?
         if *game_state == GameState::Paused {
             log::trace!("Game is paused, camera won't be moved");
             return;

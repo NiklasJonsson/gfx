@@ -15,6 +15,7 @@ vulkano-win = "0.19.0"
 vulkano-shaders = "0.19.0"
 vk-sys = "0.5.2"
 winit = "0.22.2"
+trekanten = {path = "trekanten" }
 
 # Math/Physics
 nalgebra-glm = "0.4.0"

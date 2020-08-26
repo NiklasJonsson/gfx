@@ -5,7 +5,14 @@ use vulkano::instance::Instance;
 use winit::event_loop::ControlFlow as WinCFlow;
 use winit::window::WindowBuilder;
 
+
+#[cfg(target_os = "unix")]
 use winit::platform::unix::EventLoopExtUnix;
+
+#[cfg(target_os = "windows")]
+use winit::platform::windows::EventLoopExtWindows;
+
+use winit::event::DeviceEvent;
 
 use vulkano_win::VkSurfaceBuild;
 
