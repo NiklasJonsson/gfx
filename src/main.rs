@@ -79,7 +79,6 @@ impl App {
             .insert(io::input::CurrentFrameExternalInputs(Vec::new()));
         self.world.insert(ActiveCamera::empty());
         self.world.insert(DeltaTime::zero());
-        self.world.insert(render::texture::Textures::default());
     }
 
     pub fn get_entity_with_marker<C>(w: &World) -> Entity
@@ -118,7 +117,7 @@ impl App {
             path: args.gltf_path.to_owned(),
         };
 
-        let loaded_asset = asset::load_asset_into(&mut self.world, desc);
+        let loaded_asset = asset::load_asset_into(&mut self.world, &mut self.renderer, desc);
         if let Some(path) = &args.scene_out_file {
             // TODO: Base this into print_graph_to_dot?
             match std::fs::File::create(path) {

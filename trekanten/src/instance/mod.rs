@@ -1,4 +1,3 @@
-use ash::extensions::ext;
 use ash::version::InstanceV1_0; // For destroy_instance
 use ash::{version::EntryV1_0, vk, Entry};
 use std::ffi::{CStr, CString};

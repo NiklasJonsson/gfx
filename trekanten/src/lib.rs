@@ -416,6 +416,14 @@ impl Renderer {
     pub fn release_cursor(&self) {
         unimplemented!();
     }
+
+        pub fn set_view_matrix<T>(&self, t: T) {
+            unimplemented!();
+        }
+    
+        pub fn set_proj_matrix<T>(&self, t: T) {
+            unimplemented!();
+        }
 }
 
 impl

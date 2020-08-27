@@ -4,15 +4,6 @@ use winit::platform::unix::EventLoopExtUnix;
 #[cfg(target_os = "windows")]
 use winit::platform::windows::EventLoopExtWindows;
 
-use winit::event::DeviceEvent;
-use winit::event_loop::ControlFlow as WinCFlow;
-use winit::window::WindowBuilder;
-
-use vulkano::instance::Instance;
-use vulkano_win::VkSurfaceBuild;
-
-use std::sync::Arc;
-
 pub mod input;
 pub mod windowing;
 

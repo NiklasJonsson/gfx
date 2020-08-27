@@ -8,15 +8,12 @@ use nalgebra_glm as glm;
 use specs::prelude::*;
 use specs::storage::StorageEntry;
 
-use std::collections::HashSet;
 use std::sync::Arc;
 
 use crate::camera::*;
-use crate::common::{Material, ShaderUse};
+use crate::common::{Material, ShaderUse, Position, ModelMatrix};
 
 use crate::settings::{RenderMode, RenderSettings};
-
-pub mod texture;
 
 #[derive(Debug, Default)]
 pub struct ActiveCamera(Option<Entity>);
@@ -31,60 +28,39 @@ impl ActiveCamera {
     }
 }
 
+fn get_view_matrix(world: &World) -> glm::Mat4 {
+    let camera_entity = world
+        .read_resource::<ActiveCamera>()
+        .0.expect("No active camera!");
+
+    let positions = world
+        .read_storage::<Position>();
+
+    let cam_pos = positions
+        .get(camera_entity)
+        .expect("Could not get position component for camera");
+    
+    let rots = world
+    .read_storage::<CameraRotationState>();
+    let cam_rotation_state = rots
+        .get(camera_entity)
+        .expect("Could not get rotation state for camera");
+
+    // TODO: Camera system should write to ViewMatrixResource at the end of system
+    // and we should read it here.
+    let view = FreeFlyCameraController::get_view_matrix_from(cam_pos, cam_rotation_state);
+    log::trace!("View matrix: {:#?}", view);
+
+    view
+}
+
 /*
-    // TODO: Can we migrate to System? Would be nice but the VKManager monolith is noth "Send +
-    // Sync". We might get by by mutexing and such but do we really need it? Might be able to use
-    // thread_local_system which would not require thread safe systems.
     pub fn draw_next_frame(&mut self, world: &mut World) {
         let active_camera = world.read_resource::<ActiveCamera>();
-        let positions = world.read_storage::<Position>();
-        let cam_rots = world.read_storage::<CameraRotationState>();
-        let renderables = world.read_storage::<OldRenderable>();
         let model_matrices = world.read_storage::<ModelMatrix>();
         let entities = world.read_resource::<EntitiesRes>();
-
-        let camera_entity = active_camera.0.unwrap();
-
         let frame_idx = self.current_sc_index;
 
-        let cam_pos = positions
-            .get(camera_entity)
-            .expect("Could not get position component for camera");
-
-        let cam_rotation_state = cam_rots
-            .get(camera_entity)
-            .expect("Could not get rotation state for camera");
-
-        // TODO: Camera system should write to ViewMatrixResource at the end of system
-        // and we should read it here.
-        let view = FreeFlyCameraController::get_view_matrix_from(cam_pos, cam_rotation_state);
-
-        log::trace!("View matrix: {:#?}", view);
-
-        let dims = get_physical_window_dims(self.vk_surface.window());
-        let aspect_ratio = dims[0] as f32 / dims[1] as f32;
-        let proj = get_proj_matrix(aspect_ratio);
-
-        let vp_buf = pipeline::pbr::vs::base::ty::Transforms {
-            view: view.into(),
-            proj: proj.into(),
-        };
-
-        let transforms_sub_buf = self
-            .transforms_buf
-            .next(vp_buf)
-            .expect("Could not get next ring buffer sub buffer for view proj");
-
-        let lighting_data = pipeline::pbr::fs::base::ty::LightingData {
-            light_pos: [5.0f32, 5.0f32, 5.0f32],
-            view_pos: cam_pos.xyz().into(),
-            _dummy0: [0; 4], // Magic Vulkano alignment
-        };
-
-        let lighting_sub_buf = self
-            .lighting_data_buf
-            .next(lighting_data)
-            .expect("Could not get next ring buffer sub buffer for view proj");
 
         let prev_frame = std::mem::replace(&mut self.frame_completions[frame_idx], None).unwrap();
 
@@ -162,7 +138,6 @@ impl ActiveCamera {
 */
 
 fn get_proj_matrix(aspect_ratio: f32) -> glm::Mat4 {
-    // TODO: Rewrite this
     let mut proj = glm::perspective(aspect_ratio, std::f32::consts::FRAC_PI_4, 0.1, 10.0);
 
     // glm::perspective is based on opengl left-handed coordinate system, vulkan has the y-axis
@@ -242,7 +217,7 @@ fn create_renderable(renderer: &mut Renderer, mesh: &Mesh, material: &Material, 
     }
 }
 
-fn draw_model(renderer: &Renderer, cmd_buf: command::CommandBuffer, renderable: &RenderableMaterial, mesh: &Mesh) -> command::CommandBuffer {
+fn draw_model(renderer: &Renderer, cmd_buf: command::CommandBuffer, renderable: &RenderableMaterial, mesh: &Mesh, mtx: &ModelMatrix) -> command::CommandBuffer {
     let gfx_pipeline = renderer
         .get_resource(&renderable.gfx_pipeline)
         .expect("Missing graphics pipeline");
@@ -272,33 +247,14 @@ fn draw_model(renderer: &Renderer, cmd_buf: command::CommandBuffer, renderable: 
 
 }
 
-pub fn draw_frame(world: &mut World, renderer: &mut Renderer) {
+fn draw_entities(renderer: &mut Renderer, world: &mut World, mut cmd_buf: command::CommandBuffer, render_mode: RenderMode, reload_shaders: bool) -> command::CommandBuffer {
+    let model_matrices = world.read_storage::<ModelMatrix>();
     let meshes = world.read_storage::<Mesh>();
     let materials = world.read_storage::<Material>();
     let mut renderables = world.write_storage::<RenderableMaterial>();
-
     let entities = world.read_resource::<EntitiesRes>();
-    let mut render_settings = world.write_resource::<RenderSettings>();
 
-    let render_mode = render_settings.render_mode;
-    let reload_shaders = render_settings.reload_runtime_shaders;
-
-    if reload_shaders {
-        log::debug!("Shader reload requested");
-    }
-
-    let mut frame = renderer.next_frame().expect("Failed to get frame");
-    let render_pass = renderer.render_pass();
-    let extent = renderer.swapchain_extent();
-    let framebuffer = renderer.framebuffer(&frame);
-    let mut cmd_buf = frame
-        .new_command_buffer()
-        .expect("Failed to create new command buffer")
-        .begin_render_pass(render_pass, framebuffer, extent);
-
-    // TODO: Bind lighting data, view & proj matrix
-
-    for (ent, mesh, mat) in (&entities, &meshes, &materials).join() {
+    for (ent, mesh, mat, mtx) in (&entities, &meshes, &materials, &model_matrices).join() {
         // TODO: Move to function
         let entry = renderables.entry(ent).expect("Failed to get entry!");
         cmd_buf = match entry {
@@ -331,17 +287,56 @@ pub fn draw_frame(world: &mut World, renderer: &mut Renderer) {
                         }
                     }
                 }
-                draw_model(renderer, cmd_buf, occ_entry.get(), mesh)
+                draw_model(renderer, cmd_buf, occ_entry.get(), mesh, mtx)
             }
             StorageEntry::Vacant(vac_entry) => {
                 log::trace!("No Renderable found, creating new");
                 let rend = create_renderable(renderer, mesh, mat, render_mode);
-                let cmd_buf = draw_model(renderer, cmd_buf, &rend, mesh);
+                let cmd_buf = draw_model(renderer, cmd_buf, &rend, mesh, mtx);
                 vac_entry.insert(rend);
                 cmd_buf
             }
         };
     }
+    
+    cmd_buf
+}
+
+pub fn draw_frame(world: &mut World, renderer: &mut Renderer) {
+
+    let (render_mode, reload_shaders)  = {
+        let render_settings = world.read_resource::<RenderSettings>();
+        (render_settings.render_mode, render_settings.reload_runtime_shaders)
+    };
+
+    if reload_shaders {
+        log::debug!("Shader reload requested");
+    }
+
+    let mut frame = renderer.next_frame().expect("Failed to get frame");
+    let render_pass = renderer.render_pass();
+    let extent = renderer.swapchain_extent();
+    let framebuffer = renderer.framebuffer(&frame);
+    let mut cmd_buf = frame
+        .new_command_buffer()
+        .expect("Failed to create new command buffer")
+        .begin_render_pass(render_pass, framebuffer, extent);
+
+    renderer.set_view_matrix(get_view_matrix(world));
+    renderer.set_proj_matrix(get_proj_matrix(renderer.aspect_ratio()));
+
+    log::error!("Unimplemented!");
+
+    /* TODO: Set lighting data
+    let lighting_data = pipeline::pbr::fs::base::ty::LightingData {
+        light_pos: [5.0f32, 5.0f32, 5.0f32],
+        view_pos: cam_pos.xyz().into(),
+        _dummy0: [0; 4], // Magic Vulkano alignment
+    };
+    */
+
+    cmd_buf = draw_entities(renderer, world, cmd_buf, render_mode, reload_shaders);
+    
     cmd_buf = cmd_buf
     .end_render_pass()
     .end()
@@ -349,5 +344,5 @@ pub fn draw_frame(world: &mut World, renderer: &mut Renderer) {
 
     frame.add_command_buffer(cmd_buf);
     renderer.submit(frame).expect("Failed to submit frame");
-    render_settings.reload_runtime_shaders = false;
+    world.write_resource::<RenderSettings>().reload_runtime_shaders = false;
 }

@@ -83,13 +83,7 @@ pub struct VertexBufferDescriptor<'a> {
 impl<'a> VertexBufferDescriptor<'a> {
     pub fn from_slice<V: VertexDefinition>(slice: &'a [V]) -> Self {
         let data = as_byte_slice(slice);
-
-        let format = VertexFormat {
-            binding_description: V::binding_description(),
-            attribute_description: V::attribute_description(),
-        };
-
-        Self { data, format }
+        Self { data, format: V::format() }
     }
 }
 

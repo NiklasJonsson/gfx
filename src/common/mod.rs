@@ -8,7 +8,6 @@ use specs::Component;
 
 use vulkano::impl_vertex;
 
-use crate::render::texture::Texture;
 pub use material::*;
 pub use math::*;
 pub use time::*;

@@ -1,31 +1,119 @@
 use crate::common::render_graph;
 use crate::common::*;
+use specs::Component;
+
 use specs::prelude::*;
 use specs::{Entity, World};
 use std::path::{Path, PathBuf};
+use std::collections::HashMap;
 
 use super::generate_line_list_from;
-use super::load_image;
 use super::LoadedAsset;
-use crate::render::texture::Texture;
-use crate::render::texture::Textures;
+
+use trekanten::vertex::{VertexFormatBuilder, VertexFormat};
+use trekanten::util;
 
 use nalgebra_glm as glm;
 // Crate gltf
-use gltf::buffer::Data as GltfData;
+struct GltfVertexBuffer {
+    data: Vec<u8>,
+    format: VertexFormat,
+}
+
+// TODO: More u32 below
+struct GltfIndexBufferHandle {
+    start: usize,
+    size: usize,
+}
+
+struct GltfVertexBufferHandle {
+    start_vertex: u32,
+    n_vertices: u32,
+    vertex_size: u32,
+}
+struct GltfMaterialBufferHandle {
+    idx: usize,
+}
 
 struct RecGltfCtx<'a> {
-    pub buffers: Vec<GltfData>,
+    pub buffers: Vec<gltf::buffer::Data>,
     pub path: PathBuf,
     pub world: &'a mut World,
+    all_index_buffers: Vec<u32>,
+    vertex_buffers: HashMap<VertexFormat, GltfVertexBuffer>,
+    material_buffer: Vec<GltfMaterialData>,
+}
+
+impl<'a> RecGltfCtx<'a> {
+    fn add_index_buffer(&mut self, mut v: Vec<u32>) -> GltfIndexBufferHandle {
+        let handle = GltfIndexBufferHandle {
+            start: self.all_index_buffers.len(),
+            size: v.len()
+        };
+
+        self.all_index_buffers.append(&mut v);
+
+        handle
+    }
+
+    fn add_vertex_buffer(&mut self, v: GltfVertexBuffer) -> GltfVertexBufferHandle {
+        use std::collections::hash_map::Entry;
+        let GltfVertexBuffer {mut data, format} = v;
+        let vertex_size = format.size();
+        let n_vertices = data.len() as u32 / vertex_size;
+
+        // TODO: Refactor with or_insert()?
+        match self.vertex_buffers.entry(format.clone()) {
+            Entry::Occupied(mut entry) => {
+                let entry = entry.get_mut();
+                assert_eq!(entry.data.len() % entry.format.size() as usize, 0);
+                assert_eq!(vertex_size, entry.format.size());
+
+                let h = GltfVertexBufferHandle {
+                    start_vertex: entry.data.len() as u32 / vertex_size,
+                    n_vertices,
+                    vertex_size,
+                };
+                entry.data.append(&mut data);
+                h
+            }
+            Entry::Vacant(entry) => {
+                let h = GltfVertexBufferHandle {
+                    start_vertex: 0,
+                    n_vertices,
+                    vertex_size,
+                };
+                entry.insert(GltfVertexBuffer {
+                    format,
+                    data,
+                 });
+
+                 h
+            }
+        }
+
+    }
+
+    fn add_material_data(&mut self, data: GltfMaterialData) -> GltfMaterialBufferHandle {
+        self.material_buffer.push(data);
+        GltfMaterialBufferHandle {
+            idx:         self.material_buffer.len() - 1
+        }
+    }
+
+}
+
+struct GltfTexture {
+    path: PathBuf,
+    format: util::Format,
 }
 
 fn load_texture_common<'a>(
     ctx: &RecGltfCtx<'a>,
     texture: &gltf::texture::Texture,
     coord_set: u32,
-    color_space: ColorSpace,
-) -> TextureUse {
+    format: util::Format,
+) -> GltfTexture {
     assert_eq!(coord_set, 0, "Not implemented!");
     assert_eq!(
         texture.sampler().wrap_s(),
@@ -49,158 +137,195 @@ fn load_texture_common<'a>(
         _ => unimplemented!(),
     };
 
-    let format = Format {
-        component_layout: ComponentLayout::R8G8B8A8,
-        color_space,
-    };
-
-    let desc = super::TextureDescriptor {
-        path: image_path,
-        format,
-    };
-
-    let handle = ctx.world.write_resource::<Textures>().load(&desc);
-
-    TextureUse { handle, coord_set }
+    GltfTexture { path: image_path, format }
 }
 
 fn load_texture(
     ctx: &RecGltfCtx,
     texture_info: &gltf::texture::Info,
-    cs: ColorSpace,
-) -> TextureUse {
+    cs: util::Format,
+) -> GltfTexture {
     load_texture_common(ctx, &texture_info.texture(), texture_info.tex_coord(), cs)
 }
 
-fn load_normal_map(ctx: &RecGltfCtx, normal_tex: &gltf::material::NormalTexture) -> NormalMap {
+struct GltfNormalMap {
+    tex: GltfTexture,
+    scale: f32,
+}
+
+fn load_normal_map(ctx: &RecGltfCtx, normal_tex: &gltf::material::NormalTexture) -> GltfNormalMap {
     // The normal map is always linear
     let tex = load_texture_common(
         ctx,
         &normal_tex.texture(),
         normal_tex.tex_coord(),
-        ColorSpace::Linear,
+        util::Format::RGBA_UNORM,
     );
     let scale = normal_tex.scale();
 
-    NormalMap { tex, scale }
+    GltfNormalMap { tex, scale }
 }
 
-fn get_primitives_from_mesh<'a>(
-    ctx: &RecGltfCtx,
-    gltf_mesh: gltf::Mesh<'a>,
-) -> Vec<(Mesh, Material)> {
-    gltf_mesh
-        .primitives()
-        .map(|primitive| {
-            let reader = primitive.reader(|buffer| Some(&ctx.buffers[buffer.index()]));
-            let positions = reader.read_positions().expect("Found no positions");
-            let normals = reader.read_normals().expect("Found no normals");
-            assert!(primitive.mode() == gltf::mesh::Mode::Triangles);
 
-            let triangle_index_data = reader
-                .read_indices()
-                .expect("Found no indices")
-                .into_u32()
-                .collect::<Vec<_>>();
+fn check_supported<'a>(primitive: &gltf::Primitive<'a>) {
+    use gltf::mesh::Semantic;
+    for (semantic, _accessor) in primitive.attributes() {
+        match semantic {
+            Semantic::Positions => (),
+            Semantic::Normals => (),
+            Semantic::Tangents => (),
+            Semantic::Colors(0) => (),
+            Semantic::TexCoords(0) => (),
+            _ => unimplemented!("Unsupported semantic: {:?}", semantic),
+        }
+    }
+}
 
-            // TODO: Don't convert all tex_coords to f32
-            let tex_coords = reader.read_tex_coords(0);
-            let colors = reader.read_colors(0);
-            let tangents = reader.read_tangents();
-            let it = positions.zip(normals);
+// TODO: Find a way to handle binding mapping here and in shader in one place.
+fn interleave_vertex_buffer<'a>(ctx: &RecGltfCtx, primitive: &gltf::Primitive<'a>) -> GltfVertexBuffer {
+    check_supported(primitive);
+    let reader = primitive.reader(|buffer| Some(&ctx.buffers[buffer.index()]));
+    let positions = reader.read_positions().expect("Found no positions");
+    let normals = reader.read_normals().expect("Found no normals");
 
-            let vertex_data = match (colors, tex_coords, tangents) {
-                (None, Some(tex_coords), Some(tangents)) => VertexBuf::UVTan(
-                    tex_coords
-                        .into_f32()
-                        .zip(tangents)
-                        .zip(it)
-                        .map(|((uv, tan), (pos, nor))| (pos, nor, uv, tan).into())
-                        .collect::<Vec<VertexUVTan>>(),
-                ),
-                (Some(colors), Some(tex_coords), None) => VertexBuf::UVCol(
-                    tex_coords
-                        .into_f32()
-                        .zip(colors.into_rgba_f32())
-                        .zip(it)
-                        .map(|((uv, col), (pos, nor))| (pos, nor, uv, col).into())
-                        .collect::<Vec<VertexUVCol>>(),
-                ),
-                (None, Some(tex_coords), None) => VertexBuf::UV(
-                    tex_coords
-                        .into_f32()
-                        .zip(it)
-                        .map(|(uv, (pos, nor))| (pos, nor, uv).into())
-                        .collect::<Vec<VertexUV>>(),
-                ),
-                (None, None, None) => VertexBuf::Base(
-                    it.map(|pos_nor| pos_nor.into())
-                        .collect::<Vec<VertexBase>>(),
-                ),
-                _ => unimplemented!(),
-            };
+    let mut format = VertexFormat::builder()
+        .add_attribute(util::Format::FLOAT3) // position
+        .add_attribute(util::Format::FLOAT3); // normal
 
-            let mat = primitive.material();
+    let tangents = reader.read_tangents();
+    let tex_coords = reader.read_tex_coords(0);
+    let colors = reader.read_colors(0);
+    
+    if tex_coords.is_some() {
+        format = format.add_attribute(util::Format::FLOAT2);
+    }
 
-            let pbr_mr = mat.pbr_metallic_roughness();
+    if colors.is_some() {
+        format = format.add_attribute(util::Format::FLOAT4);
+    }
 
-            if mat.emissive_texture().is_some() {
-                // TODO: Support this
-                log::error!("No support for emissive texture!");
-                unimplemented!();
+    if tangents.is_some() {
+        format = format.add_attribute(util::Format::FLOAT4);
+    }
+
+    let format = format.build();
+
+    // TODO: Prealloc
+    let mut data = Vec::new();
+
+    let it = positions.zip(normals);
+    match (colors, tex_coords, tangents) {
+        (None, Some(tex_coords), Some(tangents)) => {
+            for ((uv, tan), (pos, nor)) in tex_coords.into_f32().zip(tangents).zip(it) {
+                data.extend_from_slice(util::as_bytes(&pos));
+                data.extend_from_slice(util::as_bytes(&nor));
+                data.extend_from_slice(util::as_bytes(&uv));
+                data.extend_from_slice(util::as_bytes(&tan)); 
             }
+        },
+        (Some(colors), Some(tex_coords), None) => {
+            for ((uv, col), (pos, nor)) in tex_coords.into_f32().zip(colors.into_rgba_f32()).zip(it) {
+                data.extend_from_slice(util::as_bytes(&pos));
+                data.extend_from_slice(util::as_bytes(&nor));
+                data.extend_from_slice(util::as_bytes(&uv));
+                data.extend_from_slice(util::as_bytes(&col)); 
+            }           
+        },
+        (None, Some(tex_coords), None) => {
+            for (uv, (pos, nor)) in tex_coords
+                .into_f32()
+                .zip(it) {
+                    data.extend_from_slice(util::as_bytes(&pos));
+                    data.extend_from_slice(util::as_bytes(&nor));
+                    data.extend_from_slice(util::as_bytes(&uv));
+            }
+        },
+        (None, None, None) => {
+            for (pos, nor) in it {
+                data.extend_from_slice(util::as_bytes(&pos));
+                data.extend_from_slice(util::as_bytes(&nor));
+            }
+        },
+        _ => unimplemented!(),
+    }
 
-            // TODO: Only the first three components are in sRGB, alpha is linear!
-            let base_color_texture = pbr_mr
-                .base_color_texture()
-                .map(|texture_info| load_texture(ctx, &texture_info, ColorSpace::Srgb));
+    GltfVertexBuffer {
+        data,
+        format,
+    }
+}
 
-            let metallic_roughness_texture = pbr_mr
-                .metallic_roughness_texture()
-                .map(|info| load_texture(ctx, &info, ColorSpace::Linear));
+struct GltfMaterialData {
+    base_color_factor: [f32; 4],
+    metallic_factor: f32,
+    roughness_factor: f32,
+}
 
-            let normal_map = mat
-                .normal_texture()
-                .map(|normal_map| load_normal_map(ctx, &normal_map));
+struct GltfMaterial {
+    material: GltfMaterialBufferHandle,
+    normal_map: Option<GltfNormalMap>,
+    base_color: Option<GltfTexture>,
+    metallic_roughness: Option<GltfTexture>,
+}
 
-            let material_data = MaterialData::GlTFPBR {
-                base_color_factor: pbr_mr.base_color_factor(),
-                metallic_factor: pbr_mr.metallic_factor(),
-                roughness_factor: pbr_mr.roughness_factor(),
-                base_color_texture,
-                metallic_roughness_texture,
-                normal_map,
-            };
+#[derive(Component)]
+#[storage(VecStorage)]
+struct GltfModel {
+    mat: GltfMaterial,
+    index: GltfIndexBufferHandle,
+    vertex: GltfVertexBufferHandle,
+}
 
-            let material = Material {
-                data: material_data,
-                compilation_mode: ShaderUse::StaticInferredFromMaterial,
-            };
+fn load_primitive<'a>(ctx: &mut RecGltfCtx, primitive: &gltf::Primitive<'a>) -> GltfModel {
+    assert!(primitive.mode() == gltf::mesh::Mode::Triangles);
+    let reader = primitive.reader(|buffer| Some(&ctx.buffers[buffer.index()]));
 
-            let triangle_indices = IndexData(triangle_index_data);
+    let triangle_index_data = reader
+        .read_indices()
+        .expect("Found no indices")
+        .into_u32()
+        .collect::<Vec<_>>();
+    let index_handle = ctx.add_index_buffer(triangle_index_data);
+    let vertex_handle = ctx.add_vertex_buffer(interleave_vertex_buffer(ctx, primitive));
 
-            let line_indices = generate_line_list_from(&triangle_indices);
+    let mat = primitive.material();
+    let pbr_mr = mat.pbr_metallic_roughness();
+    if mat.emissive_texture().is_some() {
+        // TODO: Support this
+        log::error!("No support for emissive texture!");
+        unimplemented!();
+    }
 
-            let bounding_box = Some(BoundingBox {
-                min: primitive.bounding_box().min.into(),
-                max: primitive.bounding_box().max.into(),
-            });
+    let base_color_texture = pbr_mr
+        .base_color_texture()
+        .map(|texture_info| load_texture(ctx, &texture_info, util::Format::RGBA_SRGB));
 
-            let ty = MeshType::Triangle {
-                triangle_indices,
-                line_indices,
-            };
+    let metallic_roughness_texture = pbr_mr
+        .metallic_roughness_texture()
+        .map(|info| load_texture(ctx, &info, util::Format::RGBA_UNORM));
 
-            // Default to static compilation, this can be fixed later
-            let mesh = Mesh {
-                ty,
-                vertex_data,
-                bounding_box,
-            };
+    let normal_map = mat
+        .normal_texture()
+        .map(|normal_map| load_normal_map(ctx, &normal_map));
 
-            (mesh, material)
-        })
-        .collect::<Vec<_>>()
+    let material_data = GltfMaterialData {
+        base_color_factor: pbr_mr.base_color_factor(),
+        metallic_factor: pbr_mr.metallic_factor(),
+        roughness_factor: pbr_mr.roughness_factor(),
+    };
+
+    let mat_handle = ctx.add_material_data(material_data);
+
+    GltfModel {
+        mat: GltfMaterial {
+            material: mat_handle,
+            normal_map,
+            base_color: base_color_texture,
+            metallic_roughness: metallic_roughness_texture,
+        },
+        vertex: vertex_handle,
+        index: index_handle,
+    }
 }
 
 struct AssetGraphResult {
@@ -220,21 +345,20 @@ fn build_asset_graph_common<'a>(ctx: &mut RecGltfCtx, src: &gltf::Node<'a>) -> A
     let mut children = src
         .mesh()
         .map(|mesh| {
-            get_primitives_from_mesh(ctx, mesh)
-                .into_iter()
-                .map(|(mesh, material)| {
-                    ctx.world
-                        .create_entity()
-                        .with(mesh)
-                        .with(material)
-                        .with(render_graph::leaf(node))
-                        .build()
+            mesh
+            .primitives()
+            .map(|primitive| {
+                let gltf_model = load_primitive(ctx, &primitive);
+                ctx.world
+                    .create_entity()
+                    .with(gltf_model)
+                    .with(render_graph::leaf(node))
+                    .build()
                 })
                 .collect::<Vec<_>>()
-        })
-        .unwrap_or_else(Vec::new);
+        }).unwrap_or(Vec::new());
 
-    // For each child, we want its entity and if it has a camera
+    // For each child *node*, we want its entity and if it has a camera
     // attached to it.
     let (mut nodes, cameras): (Vec<_>, Vec<Option<_>>) = src
         .children()
@@ -286,34 +410,9 @@ fn build_asset_graph(ctx: &mut RecGltfCtx, src_root: &gltf::Node) -> AssetGraphR
     result
 }
 
-pub fn load_asset(world: &mut World, path: &Path) -> LoadedAsset {
-    log::trace!("load gltf asset {}", path.display());
-    let (gltf_doc, buffers, _images) = gltf::import(path).expect("Unable to import gltf");
-    assert_eq!(gltf_doc.scenes().len(), 1);
-    let mut rec_ctx = RecGltfCtx {
-        buffers,
-        path: path.into(),
-        world,
-    };
-
-    // A scene may have several root nodes
-    let nodes = gltf_doc.scenes().next().expect("No scenes!").nodes();
-    if gltf_doc.scenes().len() > 1 {
-        log::warn!("More than one scene found, only displaying the first");
-        log::warn!("Number of scenes: {}", gltf_doc.scenes().len());
-    }
-    let mut roots: Vec<Entity> = Vec::new();
-    let mut camera_ent: Option<Entity> = None;
-    for node in nodes {
-        log::trace!("Root node {}", node.name().unwrap_or("node_no_name"));
-        log::trace!("#children {}", node.children().len());
-
-        let AssetGraphResult { node, camera } = build_asset_graph(&mut rec_ctx, &node);
-        roots.push(node);
-        camera_ent = camera;
-    }
-
+fn get_cam_transform(gltf_doc: gltf::Document, world: &World, camera_ent: Option<Entity>) -> Option<Transform> {
     let mut cam_transform: Option<Transform> = None;
+
     if gltf_doc.cameras().next().is_some() {
         log::info!("Found camera in scene");
         if gltf_doc.cameras().len() > 1 {
@@ -324,7 +423,7 @@ pub fn load_asset(world: &mut World, path: &Path) -> LoadedAsset {
         if let Some(cam) = camera_ent {
             log::info!("Found camera in scene graph.");
             log::info!("Concatenating transforms.");
-            let path = render_graph::root_to_node_path(rec_ctx.world, cam);
+            let path = render_graph::root_to_node_path(world, cam);
             let mut transform: glm::Mat4 = glm::identity::<f32, glm::U4>();
             for ent in path {
                 let transforms = world.read_storage::<Transform>();
@@ -348,8 +447,48 @@ pub fn load_asset(world: &mut World, path: &Path) -> LoadedAsset {
         if let Some(t) = cam_transform {
             log::info!("Final camera transform: {:#?}", t);
         }
+    }
+    cam_transform
+}
+
+fn upload_to_gpu(renderer: &trekanten::Renderer, world: &mut World) {
+    unimplemented!()
+}
+
+pub fn load_asset(world: &mut World, renderer: &mut trekanten::Renderer, path: &Path) -> LoadedAsset {
+    log::trace!("load gltf asset {}", path.display());
+    let (gltf_doc, buffers, _images) = gltf::import(path).expect("Unable to import gltf");
+    assert_eq!(gltf_doc.scenes().len(), 1);
+    let mut rec_ctx = RecGltfCtx {
+        buffers,
+        path: path.into(),
+        world,
+        all_index_buffers: Vec::new(),
+        vertex_buffers: HashMap::new(),
+        material_buffer: Vec::new(),
     };
 
+    // A scene may have several root nodes
+    let nodes = gltf_doc.scenes().next().expect("No scenes!").nodes();
+    if gltf_doc.scenes().len() > 1 {
+        log::warn!("More than one scene found, only displaying the first");
+        log::warn!("Number of scenes: {}", gltf_doc.scenes().len());
+    }
+    let mut roots: Vec<Entity> = Vec::new();
+    let mut camera_ent: Option<Entity> = None;
+    for node in nodes {
+        log::trace!("Root node {}", node.name().unwrap_or("node_no_name"));
+        log::trace!("# children {}", node.children().len());
+
+        let AssetGraphResult { node, camera } = build_asset_graph(&mut rec_ctx, &node);
+        roots.push(node);
+        camera_ent = camera;
+    }
+
+    let cam_transform = get_cam_transform(gltf_doc, world, camera_ent);
+
+    upload_to_gpu(renderer, world);
+    
     LoadedAsset {
         scene_roots: roots,
         camera: cam_transform,

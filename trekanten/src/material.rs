@@ -1,5 +1,3 @@
-use std::path::PathBuf;
-
 use crate::texture::Texture;
 use crate::uniform::UniformBuffer;
 use crate::resource::Handle;
