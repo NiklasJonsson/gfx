@@ -175,6 +175,7 @@ pub struct RenderableMaterial {
     mode: RenderMode,
 }
 
+// TODO: Bindings here need to match with shader
 fn create_material_descriptor_set(renderer: &Renderer, material: &Material) -> Handle<descriptor::DescriptorSet> {
     match &material.data {
         trekanten::material::MaterialData::PBR {
@@ -187,10 +188,6 @@ fn create_material_descriptor_set(renderer: &Renderer, material: &Material) -> H
             let mut desc_set_builder = descriptor::DescriptorSet::builder(renderer)
             .add_buffer(&material_uniforms);
             
-            if let Some(nm) = &normal_map {
-                desc_set_builder = desc_set_builder.add_texture(&nm.tex.handle);
-            }
-
             if let Some(bct) = &base_color_texture {
                 desc_set_builder = desc_set_builder.add_texture(&bct.handle);
             }
@@ -198,6 +195,11 @@ fn create_material_descriptor_set(renderer: &Renderer, material: &Material) -> H
             if let Some(mrt) = &metallic_roughness_texture {
                 desc_set_builder = desc_set_builder.add_texture(&mrt.handle);
             }
+
+            if let Some(nm) = &normal_map {
+                desc_set_builder = desc_set_builder.add_texture(&nm.tex.handle);
+            }
+
 
             desc_set_builder.build()
         },

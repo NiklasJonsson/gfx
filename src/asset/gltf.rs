@@ -27,6 +27,7 @@ struct GltfIndexBufferHandle {
 }
 
 struct GltfVertexBufferHandle {
+    buf_idx: usize,
     start_vertex: u32,
     n_vertices: u32,
     vertex_size: u32,
@@ -40,7 +41,8 @@ struct RecGltfCtx<'a> {
     pub path: PathBuf,
     pub world: &'a mut World,
     all_index_buffers: Vec<u32>,
-    vertex_buffers: HashMap<VertexFormat, GltfVertexBuffer>,
+    vertex_buffers: Vec<GltfVertexBuffer>,
+    format_to_idx: HashMap<VertexFormat, usize>,
     material_buffer: Vec<GltfMaterialData>,
 }
 
@@ -63,13 +65,15 @@ impl<'a> RecGltfCtx<'a> {
         let n_vertices = data.len() as u32 / vertex_size;
 
         // TODO: Refactor with or_insert()?
-        match self.vertex_buffers.entry(format.clone()) {
-            Entry::Occupied(mut entry) => {
-                let entry = entry.get_mut();
+        match self.format_to_idx.entry(format.clone()) {
+            Entry::Occupied(entry) => {
+                let idx = entry.get();
+                let entry = &mut self.vertex_buffers[*idx];
                 assert_eq!(entry.data.len() % entry.format.size() as usize, 0);
                 assert_eq!(vertex_size, entry.format.size());
 
                 let h = GltfVertexBufferHandle {
+                    buf_idx: *idx,
                     start_vertex: entry.data.len() as u32 / vertex_size,
                     n_vertices,
                     vertex_size,
@@ -79,15 +83,17 @@ impl<'a> RecGltfCtx<'a> {
             }
             Entry::Vacant(entry) => {
                 let h = GltfVertexBufferHandle {
+                    buf_idx: self.vertex_buffers.len(),
                     start_vertex: 0,
                     n_vertices,
                     vertex_size,
                 };
-                entry.insert(GltfVertexBuffer {
-                    format,
-                    data,
+                 
+                self.vertex_buffers.push(
+                   GltfVertexBuffer {
+                        format,
+                        data,
                  });
-
                  h
             }
         }
@@ -451,7 +457,17 @@ fn get_cam_transform(gltf_doc: gltf::Document, world: &World, camera_ent: Option
     cam_transform
 }
 
-fn upload_to_gpu(renderer: &trekanten::Renderer, world: &mut World) {
+fn upload_to_gpu<'a>(renderer: &trekanten::Renderer, ctx: &mut RecGltfCtx<'a>) {
+    let meshes = ctx.world.write_storage::<Mesh>();
+    let materials = ctx.world.write_storage::<Material>();
+    let gltf_models = ctx.world.read_storage::<GltfModel>();
+
+    for model in (&gltf_models, !&meshes, !&materials).join() {
+
+
+
+    }
+
     unimplemented!()
 }
 
@@ -464,7 +480,8 @@ pub fn load_asset(world: &mut World, renderer: &mut trekanten::Renderer, path: &
         path: path.into(),
         world,
         all_index_buffers: Vec::new(),
-        vertex_buffers: HashMap::new(),
+        vertex_buffers: Vec::new(),
+        format_to_idx: HashMap::new(),
         material_buffer: Vec::new(),
     };
 
@@ -485,9 +502,9 @@ pub fn load_asset(world: &mut World, renderer: &mut trekanten::Renderer, path: &
         camera_ent = camera;
     }
 
-    let cam_transform = get_cam_transform(gltf_doc, world, camera_ent);
+    let cam_transform = get_cam_transform(gltf_doc, rec_ctx.world, camera_ent);
 
-    upload_to_gpu(renderer, world);
+    upload_to_gpu(renderer, &mut rec_ctx);
     
     LoadedAsset {
         scene_roots: roots,
