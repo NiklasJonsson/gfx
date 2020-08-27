@@ -62,11 +62,13 @@ impl App {
                 render_graph::TRANSFORM_PROPAGATION_SYSTEM_ID,
                 &[],
             )
+            /* TODO: TREKANTEN
             .with(
                 render_graph::RenderedBoundingBoxes,
                 render_graph::RENDERED_BOUNDING_BOXES_SYSTEM_ID,
                 &[render_graph::TRANSFORM_PROPAGATION_SYSTEM_ID],
             )
+            */
             .build();
 
         (control, engine)
@@ -189,7 +191,7 @@ impl App {
         let (mut control_systems, mut engine_systems) = Self::init_dispatchers();
 
         // Register all component types
-        self.world.register::<Renderable>();
+        self.world.register::<RenderableMaterial>();
         self.world.register::<Mesh>();
         self.world.register::<Material>();
         self.world.register::<render_graph::RenderGraphNode>();

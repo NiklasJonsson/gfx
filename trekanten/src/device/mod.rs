@@ -4,7 +4,7 @@ use ash::vk;
 
 use vk_mem::Allocator;
 
-use std::rc::Rc;
+use std::sync::Arc;
 
 use crate::instance::Instance;
 use crate::queue::Queue;
@@ -19,8 +19,8 @@ mod error;
 pub use error::DeviceError;
 
 pub type VkDevice = ash::Device;
-pub type VkDeviceHandle = Rc<VkDevice>;
-pub type AllocatorHandle = Rc<Allocator>;
+pub type VkDeviceHandle = Arc<VkDevice>;
+pub type AllocatorHandle = Arc<Allocator>;
 
 pub trait HasVkDevice {
     fn vk_device(&self) -> VkDeviceHandle;
@@ -28,7 +28,7 @@ pub trait HasVkDevice {
 
 impl HasVkDevice for VkDeviceHandle {
     fn vk_device(&self) -> VkDeviceHandle {
-        Rc::clone(&self)
+        VkDeviceHandle::clone(&self)
     }
 }
 
@@ -54,7 +54,7 @@ struct InnerDevice {
 impl std::ops::Drop for InnerDevice {
     fn drop(&mut self) {
         // TODO: Change to weak
-        if !Rc::strong_count(&self.vk_device) == 1 {
+        if !VkDeviceHandle::strong_count(&self.vk_device) == 1 {
             log::error!(
                 "References to inner vk device still existing but Device is being destroyed!"
             );
@@ -75,7 +75,7 @@ pub struct Device {
 
 impl HasVkDevice for Device {
     fn vk_device(&self) -> VkDeviceHandle {
-        Rc::clone(&self.inner_device.vk_device)
+        VkDeviceHandle::clone(&self.inner_device.vk_device)
     }
 }
 
@@ -154,10 +154,10 @@ impl Device {
             )
         };
 
-        let vk_device = Rc::new(vk_device);
+        let vk_device = VkDeviceHandle::new(vk_device);
 
-        let graphics_queue = Queue::new(Rc::clone(&vk_device), gfx);
-        let present_queue = Queue::new(Rc::clone(&vk_device), present);
+        let graphics_queue = Queue::new(VkDeviceHandle::clone(&vk_device), gfx);
+        let present_queue = Queue::new(VkDeviceHandle::clone(&vk_device), present);
 
         let physical_device_properties = unsafe {
             let memory_properties = instance
@@ -190,7 +190,7 @@ impl Device {
             present_queue,
         };
 
-        let allocator = Rc::new(Allocator::new(&vk_mem::AllocatorCreateInfo {
+        let allocator = AllocatorHandle::new(Allocator::new(&vk_mem::AllocatorCreateInfo {
             physical_device: vk_phys_device,
             device: (*vk_device).clone(),
             instance: instance.vk_instance().clone(),
@@ -263,6 +263,6 @@ impl Device {
     }
 
     pub fn allocator(&self) -> AllocatorHandle {
-        Rc::clone(&self.allocator)
+        AllocatorHandle::clone(&self.allocator)
     }
 }

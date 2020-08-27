@@ -483,3 +483,8 @@ impl GraphicsPipelines {
         self.mat_storage.get(h)
     }
 }
+
+pub fn get_pipeline_for(renderer: &mut crate::Renderer, mesh: &crate::mesh::Mesh, mat: &crate::material::MaterialData) -> Handle<GraphicsPipeline>
+{
+    unimplemented!()
+}

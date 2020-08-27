@@ -7,6 +7,12 @@ use crate::queue::Queue;
 use crate::util::as_byte_slice;
 use crate::vertex::VertexDefinition;
 use crate::vertex::VertexFormat;
+use crate::resource::Handle;
+
+pub struct Mesh {
+    pub vertex_buffer: Handle<VertexBuffer>,
+    pub index_buffer: Handle<IndexBuffer>,
+}
 
 #[derive(Debug, Copy, Clone)]
 pub enum IndexSize {

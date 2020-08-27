@@ -1,21 +1,22 @@
 use ash::vk;
 
 mod color_buffer;
-mod command;
+pub mod command;
 mod common;
 mod depth_buffer;
-mod descriptor;
+pub mod descriptor;
 mod device;
 mod error;
 mod framebuffer;
 mod image;
 mod instance;
 mod mem;
+pub mod material;
 pub mod mesh;
 pub mod pipeline;
 mod queue;
 mod render_pass;
-mod resource;
+pub mod resource;
 mod spirv;
 mod surface;
 mod swapchain;

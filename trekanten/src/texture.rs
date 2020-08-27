@@ -166,6 +166,12 @@ impl Texture {
     }
 }
 
+impl std::fmt::Debug for Texture {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "TEXTURE")
+    }
+}
+
 #[derive(Default)]
 pub struct Textures {
     storage: CachedStorage<TextureDescriptor, Texture>,

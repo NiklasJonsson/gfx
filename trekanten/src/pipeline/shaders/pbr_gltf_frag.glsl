@@ -39,6 +39,7 @@ layout(set = 1, binding = 0) uniform PBRMaterialData {
     float roughness_factor;
     // For the normal map, 1.0 if there is no map
     float normal_scale;
+    float _padding;
 } material_data;
 
 #if HAS_BASE_COLOR_TEXTURE

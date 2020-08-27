@@ -5,7 +5,7 @@ use specs::{Entity, World};
 use std::path::PathBuf;
 
 pub mod cache;
-mod gltf;
+//mod gltf;
 mod obj;
 pub mod storage;
 
@@ -34,6 +34,8 @@ pub struct LoadedAsset {
 }
 
 pub fn load_asset_into(world: &mut World, descr: AssetDescriptor) -> LoadedAsset {
+    unimplemented!()
+    /*
     match descr {
         AssetDescriptor::Obj {
             data_file,
@@ -42,6 +44,7 @@ pub fn load_asset_into(world: &mut World, descr: AssetDescriptor) -> LoadedAsset
         AssetDescriptor::Gltf { path } => gltf::load_asset(world, &path),
         _ => unimplemented!(),
     }
+    */
 }
 
 fn generate_line_list_from(index_data: &IndexData) -> IndexData {

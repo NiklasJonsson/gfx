@@ -1,34 +1,5 @@
-use vulkano::buffer::{
-    cpu_pool::CpuBufferPoolSubbuffer, BufferAccess, BufferUsage, CpuBufferPool, ImmutableBuffer,
-    TypedBufferAccess,
-};
-use vulkano::command_buffer::{
-    AutoCommandBuffer, AutoCommandBufferBuilder, CommandBufferExecFuture, DynamicState,
-};
-use vulkano::descriptor::{descriptor_set::PersistentDescriptorSet, DescriptorSet};
-use vulkano::device::{Device, DeviceExtensions, Features, Queue};
-use vulkano::format::Format as VkFormat;
-use vulkano::framebuffer::{Framebuffer, FramebufferAbstract, RenderPassAbstract};
-use vulkano::image::{
-    attachment::AttachmentImage, immutable::ImmutableImage, swapchain::SwapchainImage, Dimensions,
-    ImageUsage, ImageViewAccess,
-};
-use vulkano::instance;
-use vulkano::instance::{Instance, InstanceExtensions, PhysicalDevice, QueueFamily};
-use vulkano::pipeline::GraphicsPipelineAbstract;
-use vulkano::swapchain;
-use vulkano::swapchain::Surface;
-use vulkano::swapchain::{
-    AcquireError, ColorSpace, CompositeAlpha, PresentMode, SurfaceTransform, Swapchain,
-};
-
 use specs::world::EntitiesRes;
 use specs::Component;
-use vulkano::sampler::Sampler;
-use vulkano::sync;
-use vulkano::sync::{FlushError, GpuFuture, NowFuture, SharingMode};
-
-use vulkano::single_pass_renderpass;
 
 use winit::window::Window;
 
@@ -40,16 +11,12 @@ use specs::storage::StorageEntry;
 use std::collections::HashSet;
 use std::sync::Arc;
 
-use crate::asset::storage::Handle;
 use crate::camera::*;
-use crate::common::*;
+use crate::common::{Material, ShaderUse};
 
 use crate::settings::{RenderMode, RenderSettings};
 
-mod pipeline;
 pub mod texture;
-
-use texture::{GpuTextures, Texture, TextureAccess, Textures};
 
 #[derive(Debug, Default)]
 pub struct ActiveCamera(Option<Entity>);
@@ -208,27 +175,34 @@ fn get_proj_matrix(aspect_ratio: f32) -> glm::Mat4 {
 use trekanten::{Renderer, Frame};
 use trekanten::command;
 use trekanten::resource::Handle;
-use trekanten::mesh;
-use trekanten::pipeline;
 use trekanten::descriptor;
 use trekanten::uniform;
+use trekanten::resource::ResourceManager;
 
-pub struct Mesh {
-    vertex_buffer: Handle<mesh::VertexBuffer>,
-    index_buffer: Handle<mesh::IndexBuffer>,
+#[derive(Component)]
+#[storage(VecStorage)]
+struct Mesh {
+    mesh: trekanten::mesh::Mesh,
+}
+
+impl std::ops::Deref for Mesh {
+    type Target = trekanten::mesh::Mesh;
+    fn deref(&self) -> &Self::Target {
+        &self.mesh
+    }
 }
 
 #[derive(Component)]
 #[storage(VecStorage)]
 pub struct RenderableMaterial {
-    gfx_pipeline: Handle<pipeline::GraphicsPipeline>,
+    gfx_pipeline: Handle<trekanten::pipeline::GraphicsPipeline>,
     material_descriptor_set: Handle<descriptor::DescriptorSet>,
     mode: RenderMode,
 }
 
-fn create_material_descriptor_set2(renderer: &Renderer, material: &Material) -> Handle<descriptor::DescriptorSet> {
-    match material {
-        Material::PBR {
+fn create_material_descriptor_set(renderer: &Renderer, material: &Material) -> Handle<descriptor::DescriptorSet> {
+    match &material.data {
+        trekanten::material::MaterialData::PBR {
             material_uniforms,
             normal_map,
             base_color_texture,
@@ -236,18 +210,18 @@ fn create_material_descriptor_set2(renderer: &Renderer, material: &Material) -> 
         } => {
 
             let mut desc_set_builder = descriptor::DescriptorSet::builder(renderer)
-            .add_buffer(material_uniforms);
+            .add_buffer(&material_uniforms);
             
-            if let Some(nm) = normal_map {
-                desc_set_builder.add_texture(&nm.tex.handle);
+            if let Some(nm) = &normal_map {
+                desc_set_builder = desc_set_builder.add_texture(&nm.tex.handle);
             }
 
-            if let Some(bct) = base_color_texture {
-                desc_set_builder.add_texture(&bct.handle);
+            if let Some(bct) = &base_color_texture {
+                desc_set_builder = desc_set_builder.add_texture(&bct.handle);
             }
 
-            if let Some(mrt) = metallic_roughness_texture {
-                desc_set_builder.add_texture(&mrt.handle);
+            if let Some(mrt) = &metallic_roughness_texture {
+                desc_set_builder = desc_set_builder.add_texture(&mrt.handle);
             }
 
             desc_set_builder.build()
@@ -256,21 +230,19 @@ fn create_material_descriptor_set2(renderer: &Renderer, material: &Material) -> 
     }
 }
 
-fn create_renderable(renderer: &mut Renderer, material: &Material, render_mode: &RenderMode) -> RenderableMaterial
+fn create_renderable(renderer: &mut Renderer, mesh: &Mesh, material: &Material, render_mode: RenderMode) -> RenderableMaterial
 {
     log::trace!("Creating renderable: {:?}, {:?}", material, render_mode);
-    let material_descriptor_set = create_material_descriptor_set2(renderer, material);
-    let gfx_pipeline = pipeline::get_pipeline_for(&material, render_mode);
+    let material_descriptor_set = create_material_descriptor_set(renderer, material);
+    let gfx_pipeline = trekanten::pipeline::get_pipeline_for(renderer, mesh, &material.data);
     RenderableMaterial {
         gfx_pipeline,
         material_descriptor_set,
-        mode: *render_mode,
+        mode: render_mode,
     }
 }
 
 fn draw_model(renderer: &Renderer, cmd_buf: command::CommandBuffer, renderable: &RenderableMaterial, mesh: &Mesh) -> command::CommandBuffer {
-{
-    // TODO: Call functions on frame instead of directly on the frame buffer
     let gfx_pipeline = renderer
         .get_resource(&renderable.gfx_pipeline)
         .expect("Missing graphics pipeline");
@@ -307,7 +279,6 @@ pub fn draw_frame(world: &mut World, renderer: &mut Renderer) {
 
     let entities = world.read_resource::<EntitiesRes>();
     let mut render_settings = world.write_resource::<RenderSettings>();
-    let cpu_textures = world.read_resource::<Textures>();
 
     let render_mode = render_settings.render_mode;
     let reload_shaders = render_settings.reload_runtime_shaders;
@@ -316,7 +287,7 @@ pub fn draw_frame(world: &mut World, renderer: &mut Renderer) {
         log::debug!("Shader reload requested");
     }
 
-    let frame = renderer.next_frame().expect("Failed to get frame");
+    let mut frame = renderer.next_frame().expect("Failed to get frame");
     let render_pass = renderer.render_pass();
     let extent = renderer.swapchain_extent();
     let framebuffer = renderer.framebuffer(&frame);
@@ -330,7 +301,7 @@ pub fn draw_frame(world: &mut World, renderer: &mut Renderer) {
     for (ent, mesh, mat) in (&entities, &meshes, &materials).join() {
         // TODO: Move to function
         let entry = renderables.entry(ent).expect("Failed to get entry!");
-        let renderable = match entry {
+        cmd_buf = match entry {
             StorageEntry::Occupied(mut occ_entry) => {
                 if occ_entry.get().mode != render_mode {
                     log::trace!("Renderable did not match render mode, creating new");
@@ -339,11 +310,12 @@ pub fn draw_frame(world: &mut World, renderer: &mut Renderer) {
                     let rend = create_renderable(&renderer, mat, render_mode);
                     occ_entry.insert(rend)
                     */
+                    
                 } else {
                     log::trace!("Using existing Renderable");
                     if reload_shaders {
                         log::trace!("Reloading shader");
-                        if let ShaderUse::RunTime { .. } = &mat.compilation_mode {
+                        if let ShaderUse::Reloadable { .. } = &mat.compilation_mode {
                             unimplemented!()
                             /* TODO
                             occ_entry.get_mut().g_pipeline = pipeline::create_graphics_pipeline(
@@ -359,15 +331,18 @@ pub fn draw_frame(world: &mut World, renderer: &mut Renderer) {
                         }
                     }
                 }
+                draw_model(renderer, cmd_buf, occ_entry.get(), mesh)
             }
             StorageEntry::Vacant(vac_entry) => {
                 log::trace!("No Renderable found, creating new");
-                let rend = self.create_renderable(&cpu_textures, mesh, mat, render_mode);
-                vac_entry.insert(rend)
+                let rend = create_renderable(renderer, mesh, mat, render_mode);
+                let cmd_buf = draw_model(renderer, cmd_buf, &rend, mesh);
+                vac_entry.insert(rend);
+                cmd_buf
             }
         };
-        draw_mode(renderer, cmd_buf, renderable, mesh);
     }
+    cmd_buf = cmd_buf
     .end_render_pass()
     .end()
     .expect("Failed to end command buffer");

@@ -3,23 +3,12 @@ use std::path::PathBuf;
 use trekanten::texture::Texture;
 use trekanten::uniform::UniformBuffer;
 use trekanten::resource::Handle;
+use trekanten::material::MaterialData;
 
 use specs::prelude::*;
 use specs::Component;
 
 use super::*;
-
-#[derive(Clone, Copy, Debug)]
-pub struct TextureUse {
-    pub handle: Handle<Texture>,
-    pub coord_set: u32,
-}
-
-#[derive(Clone, Debug)]
-pub struct NormalMap {
-    pub tex: TextureUse,
-    pub scale: f32,
-}
 
 /// PreCompiled means that the material will be used to lookup what pre-compiled shader to use.
 #[derive(Debug, Clone, Eq)]
@@ -39,26 +28,7 @@ impl PartialEq for ShaderUse {
     }
 }
 
-/*
-        base_color_factor: [f32; 4],
-        metallic_factor: f32,
-        roughness_factor: f32,
-*/
-
-#[derive(Clone, Debug)]
-pub enum MaterialData {
-    UniformColor {
-        color: [f32; 4],
-    },
-    PBR {
-        material_uniforms: Handle<UniformBuffer>,
-        normal_map: Option<NormalMap>,
-        base_color_texture: Option<TextureUse>,
-        metallic_roughness_texture: Option<TextureUse>,
-    },
-}
-
-#[derive(Clone, Debug, Component)]
+#[derive(Debug, Clone, Component)]
 #[storage(DenseVecStorage)]
 pub struct Material {
     pub data: MaterialData,

@@ -92,6 +92,24 @@ impl DescriptorPool {
     }
 }
 
+pub struct DescriptorSetBuilder {
+
+}
+
+impl DescriptorSetBuilder {
+    pub fn add_buffer(self, _: &Handle<UniformBuffer>) -> Self {
+        unimplemented!()
+    }
+
+    pub fn add_texture(self, _: &Handle<Texture>) -> Self {
+        unimplemented!()
+    }
+
+    pub fn build(self) -> Handle<DescriptorSet> {
+        unimplemented!()
+    }
+}
+
 // TODO: Rename? (to avoid DescriptorSetDescriptor)
 pub struct DescriptorSet {
     vk_descriptor_set: vk::DescriptorSet,
@@ -100,6 +118,10 @@ pub struct DescriptorSet {
 impl DescriptorSet {
     fn new(vk_descriptor_set: vk::DescriptorSet) -> Self {
         Self { vk_descriptor_set }
+    }
+
+    pub fn builder(_renderer: &crate::Renderer) -> DescriptorSetBuilder {
+        unimplemented!()
     }
 
     fn bind_resources(
