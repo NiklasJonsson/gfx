@@ -1,17 +1,21 @@
 use specs::world::EntitiesRes;
 use specs::Component;
 
-use winit::window::Window;
-
 use nalgebra_glm as glm;
 
 use specs::prelude::*;
 use specs::storage::StorageEntry;
 
-use std::sync::Arc;
+use trekanten::command;
+use trekanten::descriptor;
+use trekanten::resource::Handle;
+use trekanten::resource::ResourceManager;
+use trekanten::Renderer;
+
+pub mod uniform;
 
 use crate::camera::*;
-use crate::common::{Material, ShaderUse, Position, ModelMatrix};
+use crate::common::{Material, ModelMatrix, Position, ShaderUse};
 
 use crate::settings::{RenderMode, RenderSettings};
 
@@ -31,17 +35,16 @@ impl ActiveCamera {
 fn get_view_matrix(world: &World) -> glm::Mat4 {
     let camera_entity = world
         .read_resource::<ActiveCamera>()
-        .0.expect("No active camera!");
+        .0
+        .expect("No active camera!");
 
-    let positions = world
-        .read_storage::<Position>();
+    let positions = world.read_storage::<Position>();
 
     let cam_pos = positions
         .get(camera_entity)
         .expect("Could not get position component for camera");
-    
-    let rots = world
-    .read_storage::<CameraRotationState>();
+
+    let rots = world.read_storage::<CameraRotationState>();
     let cam_rotation_state = rots
         .get(camera_entity)
         .expect("Could not get rotation state for camera");
@@ -147,23 +150,20 @@ fn get_proj_matrix(aspect_ratio: f32) -> glm::Mat4 {
     proj
 }
 
-use trekanten::{Renderer, Frame};
-use trekanten::command;
-use trekanten::resource::Handle;
-use trekanten::descriptor;
-use trekanten::uniform;
-use trekanten::resource::ResourceManager;
-
 #[derive(Component)]
 #[storage(VecStorage)]
-struct Mesh {
-    mesh: trekanten::mesh::Mesh,
-}
+pub struct Mesh(pub trekanten::mesh::Mesh);
 
 impl std::ops::Deref for Mesh {
     type Target = trekanten::mesh::Mesh;
     fn deref(&self) -> &Self::Target {
-        &self.mesh
+        &self.0
+    }
+}
+
+impl Into<Mesh> for trekanten::mesh::Mesh {
+    fn into(self) -> Mesh {
+        Mesh(self)
     }
 }
 
@@ -176,7 +176,10 @@ pub struct RenderableMaterial {
 }
 
 // TODO: Bindings here need to match with shader
-fn create_material_descriptor_set(renderer: &Renderer, material: &Material) -> Handle<descriptor::DescriptorSet> {
+fn create_material_descriptor_set(
+    renderer: &Renderer,
+    material: &Material,
+) -> Handle<descriptor::DescriptorSet> {
     match &material.data {
         trekanten::material::MaterialData::PBR {
             material_uniforms,
@@ -184,10 +187,9 @@ fn create_material_descriptor_set(renderer: &Renderer, material: &Material) -> H
             base_color_texture,
             metallic_roughness_texture,
         } => {
+            let mut desc_set_builder =
+                descriptor::DescriptorSet::builder(renderer).add_buffer(&material_uniforms);
 
-            let mut desc_set_builder = descriptor::DescriptorSet::builder(renderer)
-            .add_buffer(&material_uniforms);
-            
             if let Some(bct) = &base_color_texture {
                 desc_set_builder = desc_set_builder.add_texture(&bct.handle);
             }
@@ -200,15 +202,18 @@ fn create_material_descriptor_set(renderer: &Renderer, material: &Material) -> H
                 desc_set_builder = desc_set_builder.add_texture(&nm.tex.handle);
             }
 
-
             desc_set_builder.build()
-        },
+        }
         _ => unimplemented!(),
     }
 }
 
-fn create_renderable(renderer: &mut Renderer, mesh: &Mesh, material: &Material, render_mode: RenderMode) -> RenderableMaterial
-{
+fn create_renderable(
+    renderer: &mut Renderer,
+    mesh: &Mesh,
+    material: &Material,
+    render_mode: RenderMode,
+) -> RenderableMaterial {
     log::trace!("Creating renderable: {:?}, {:?}", material, render_mode);
     let material_descriptor_set = create_material_descriptor_set(renderer, material);
     let gfx_pipeline = trekanten::pipeline::get_pipeline_for(renderer, mesh, &material.data);
@@ -219,7 +224,13 @@ fn create_renderable(renderer: &mut Renderer, mesh: &Mesh, material: &Material, 
     }
 }
 
-fn draw_model(renderer: &Renderer, cmd_buf: command::CommandBuffer, renderable: &RenderableMaterial, mesh: &Mesh, mtx: &ModelMatrix) -> command::CommandBuffer {
+fn draw_model(
+    renderer: &Renderer,
+    cmd_buf: command::CommandBuffer,
+    renderable: &RenderableMaterial,
+    mesh: &Mesh,
+    mtx: &ModelMatrix,
+) -> command::CommandBuffer {
     let gfx_pipeline = renderer
         .get_resource(&renderable.gfx_pipeline)
         .expect("Missing graphics pipeline");
@@ -246,10 +257,15 @@ fn draw_model(renderer: &Renderer, cmd_buf: command::CommandBuffer, renderable: 
     // TODO: How many indices? Get it from the handle?
     .draw_indexed(0 as u32)
     */
-
 }
 
-fn draw_entities(renderer: &mut Renderer, world: &mut World, mut cmd_buf: command::CommandBuffer, render_mode: RenderMode, reload_shaders: bool) -> command::CommandBuffer {
+fn draw_entities(
+    renderer: &mut Renderer,
+    world: &mut World,
+    mut cmd_buf: command::CommandBuffer,
+    render_mode: RenderMode,
+    reload_shaders: bool,
+) -> command::CommandBuffer {
     let model_matrices = world.read_storage::<ModelMatrix>();
     let meshes = world.read_storage::<Mesh>();
     let materials = world.read_storage::<Material>();
@@ -264,11 +280,10 @@ fn draw_entities(renderer: &mut Renderer, world: &mut World, mut cmd_buf: comman
                 if occ_entry.get().mode != render_mode {
                     log::trace!("Renderable did not match render mode, creating new");
                     unimplemented!()
-                    /*
-                    let rend = create_renderable(&renderer, mat, render_mode);
-                    occ_entry.insert(rend)
-                    */
-                    
+                /*
+                let rend = create_renderable(&renderer, mat, render_mode);
+                occ_entry.insert(rend)
+                */
                 } else {
                     log::trace!("Using existing Renderable");
                     if reload_shaders {
@@ -300,15 +315,17 @@ fn draw_entities(renderer: &mut Renderer, world: &mut World, mut cmd_buf: comman
             }
         };
     }
-    
+
     cmd_buf
 }
 
 pub fn draw_frame(world: &mut World, renderer: &mut Renderer) {
-
-    let (render_mode, reload_shaders)  = {
+    let (render_mode, reload_shaders) = {
         let render_settings = world.read_resource::<RenderSettings>();
-        (render_settings.render_mode, render_settings.reload_runtime_shaders)
+        (
+            render_settings.render_mode,
+            render_settings.reload_runtime_shaders,
+        )
     };
 
     if reload_shaders {
@@ -338,13 +355,15 @@ pub fn draw_frame(world: &mut World, renderer: &mut Renderer) {
     */
 
     cmd_buf = draw_entities(renderer, world, cmd_buf, render_mode, reload_shaders);
-    
+
     cmd_buf = cmd_buf
-    .end_render_pass()
-    .end()
-    .expect("Failed to end command buffer");
+        .end_render_pass()
+        .end()
+        .expect("Failed to end command buffer");
 
     frame.add_command_buffer(cmd_buf);
     renderer.submit(frame).expect("Failed to submit frame");
-    world.write_resource::<RenderSettings>().reload_runtime_shaders = false;
+    world
+        .write_resource::<RenderSettings>()
+        .reload_runtime_shaders = false;
 }

@@ -1,6 +1,7 @@
+use crate::mem::BufferHandle;
+use crate::resource::Handle;
 use crate::texture::Texture;
 use crate::uniform::UniformBuffer;
-use crate::resource::Handle;
 
 #[derive(Debug, Clone)]
 pub struct TextureUse {
@@ -8,6 +9,7 @@ pub struct TextureUse {
     pub coord_set: u32,
 }
 
+// TODO: Do we need to pass around the scale here?
 #[derive(Debug, Clone)]
 pub struct NormalMap {
     pub tex: TextureUse,
@@ -20,7 +22,7 @@ pub enum MaterialData {
         color: [f32; 4],
     },
     PBR {
-        material_uniforms: Handle<UniformBuffer>,
+        material_uniforms: BufferHandle<UniformBuffer>,
         normal_map: Option<NormalMap>,
         base_color_texture: Option<TextureUse>,
         metallic_roughness_texture: Option<TextureUse>,

@@ -2,7 +2,7 @@ use ash::version::InstanceV1_0; // For destroy_instance
 use ash::{version::EntryV1_0, vk, Entry};
 use std::ffi::{CStr, CString};
 
-use crate::util::ffi::{c_char, vec_cstring_from_raw, vec_cstring_to_raw, log_cstrings};
+use crate::util::ffi::{c_char, log_cstrings, vec_cstring_from_raw, vec_cstring_to_raw};
 use crate::util::lifetime::LifetimeToken;
 
 pub mod error;
@@ -102,7 +102,7 @@ pub fn choose_validation_layers(entry: &Entry) -> Vec<CString> {
 }
 
 #[cfg(all(unix, not(target_os = "android"), not(target_os = "macos")))]
-fn required_window_extensions() ->  Vec<&'static CStr> {
+fn required_window_extensions() -> Vec<&'static CStr> {
     vec![
         ash::extensions::khr::Surface::name(),
         ash::extensions::khr::XlibSurface::name(),
@@ -125,9 +125,7 @@ fn required_window_extensions() -> Vec<&'static CStr> {
     ]
 }
 
-fn choose_instance_extensions(
-    entry: &Entry,
-) -> Result<Vec<*const c_char>, InstanceError> {
+fn choose_instance_extensions(entry: &Entry) -> Result<Vec<*const c_char>, InstanceError> {
     let available = entry
         .enumerate_instance_extension_properties()
         .map_err(|e| InstanceError::InternalVulkan(e, "Instance extension enumeration"))?;

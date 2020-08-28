@@ -1,17 +1,24 @@
 use crate::common::render_graph;
-use crate::common::*;
 use specs::Component;
 
 use specs::prelude::*;
 use specs::{Entity, World};
-use std::path::{Path, PathBuf};
+use specs::world::EntitiesRes;
 use std::collections::HashMap;
+use std::path::{Path, PathBuf};
 
-use super::generate_line_list_from;
 use super::LoadedAsset;
 
-use trekanten::vertex::{VertexFormatBuilder, VertexFormat};
+use crate::common::{Transform, ShaderUse, Material};
+use crate::render::Mesh;
+use crate::render::uniform::PBRMaterialData;
 use trekanten::util;
+use trekanten::vertex::VertexFormat;
+use trekanten::mesh::{VertexBufferDescriptor, VertexBuffer, IndexBuffer, IndexBufferDescriptor};
+use trekanten::uniform::{UniformBufferDescriptor, UniformBuffer};
+use trekanten::Handle;
+use trekanten::BufferHandle;
+use trekanten::resource::ResourceManager;
 
 use nalgebra_glm as glm;
 // Crate gltf
@@ -26,31 +33,97 @@ struct GltfIndexBufferHandle {
     size: usize,
 }
 
+impl GltfIndexBufferHandle {
+    fn as_gpu_handle(&self, h: Handle<IndexBuffer>) -> BufferHandle<IndexBuffer> {
+        BufferHandle::from_buffer(
+            h,
+            (self.start * std::mem::size_of::<u32>()) as u32,
+            (self.size * std::mem::size_of::<u32>()) as u32,
+            std::mem::size_of::<u32>() as u32,
+        )
+    }
+}
+
 struct GltfVertexBufferHandle {
     buf_idx: usize,
     start_vertex: u32,
     n_vertices: u32,
     vertex_size: u32,
 }
+
+impl GltfVertexBufferHandle {
+    fn as_gpu_handle(&self, h: Handle<VertexBuffer>) -> BufferHandle<VertexBuffer> {
+        BufferHandle::from_buffer(
+            h,
+            self.start_vertex * self.vertex_size,
+            self.n_vertices * self.vertex_size,
+            self.vertex_size,
+        )
+    }
+}
+
 struct GltfMaterialBufferHandle {
     idx: usize,
+}
+
+impl GltfMaterialBufferHandle {
+    fn as_gpu_handle(&self, h: Handle<UniformBuffer>) -> BufferHandle<UniformBuffer> {
+        BufferHandle::from_buffer(
+            h,
+            (self.idx * std::mem::size_of::<PBRMaterialData>()) as u32,
+            std::mem::size_of::<PBRMaterialData>() as u32,
+            std::mem::size_of::<PBRMaterialData>() as u32,
+        )
+    }
+}
+
+struct GltfMaterialData {
+    base_color_factor: [f32; 4],
+    metallic_factor: f32,
+    roughness_factor: f32,
+    normal_scale: f32,
+}
+
+struct GltfMaterial {
+    material: GltfMaterialBufferHandle,
+    normal_map: Option<GltfNormalMap>,
+    base_color: Option<GltfTexture>,
+    metallic_roughness: Option<GltfTexture>,
+}
+
+#[derive(Component)]
+#[storage(VecStorage)]
+struct GltfModel {
+    mat: GltfMaterial,
+    index: GltfIndexBufferHandle,
+    vertex: GltfVertexBufferHandle,
+}
+
+struct GltfTexture {
+    path: PathBuf,
+    format: util::Format,
+}
+
+struct GltfNormalMap {
+    tex: GltfTexture,
+    scale: f32,
 }
 
 struct RecGltfCtx<'a> {
     pub buffers: Vec<gltf::buffer::Data>,
     pub path: PathBuf,
     pub world: &'a mut World,
-    all_index_buffers: Vec<u32>,
-    vertex_buffers: Vec<GltfVertexBuffer>,
-    format_to_idx: HashMap<VertexFormat, usize>,
-    material_buffer: Vec<GltfMaterialData>,
+    pub all_index_buffers: Vec<u32>,
+    pub vertex_buffers: Vec<GltfVertexBuffer>,
+    pub format_to_idx: HashMap<VertexFormat, usize>,
+    pub material_buffer: Vec<PBRMaterialData>,
 }
 
 impl<'a> RecGltfCtx<'a> {
     fn add_index_buffer(&mut self, mut v: Vec<u32>) -> GltfIndexBufferHandle {
         let handle = GltfIndexBufferHandle {
             start: self.all_index_buffers.len(),
-            size: v.len()
+            size: v.len(),
         };
 
         self.all_index_buffers.append(&mut v);
@@ -60,7 +133,7 @@ impl<'a> RecGltfCtx<'a> {
 
     fn add_vertex_buffer(&mut self, v: GltfVertexBuffer) -> GltfVertexBufferHandle {
         use std::collections::hash_map::Entry;
-        let GltfVertexBuffer {mut data, format} = v;
+        let GltfVertexBuffer { mut data, format } = v;
         let vertex_size = format.size();
         let n_vertices = data.len() as u32 / vertex_size;
 
@@ -88,30 +161,19 @@ impl<'a> RecGltfCtx<'a> {
                     n_vertices,
                     vertex_size,
                 };
-                 
-                self.vertex_buffers.push(
-                   GltfVertexBuffer {
-                        format,
-                        data,
-                 });
-                 h
+
+                self.vertex_buffers.push(GltfVertexBuffer { format, data });
+                h
             }
         }
-
     }
 
-    fn add_material_data(&mut self, data: GltfMaterialData) -> GltfMaterialBufferHandle {
+    fn add_material_data(&mut self, data: PBRMaterialData) -> GltfMaterialBufferHandle {
         self.material_buffer.push(data);
         GltfMaterialBufferHandle {
-            idx:         self.material_buffer.len() - 1
+            idx: self.material_buffer.len() - 1,
         }
     }
-
-}
-
-struct GltfTexture {
-    path: PathBuf,
-    format: util::Format,
 }
 
 fn load_texture_common<'a>(
@@ -143,7 +205,10 @@ fn load_texture_common<'a>(
         _ => unimplemented!(),
     };
 
-    GltfTexture { path: image_path, format }
+    GltfTexture {
+        path: image_path,
+        format,
+    }
 }
 
 fn load_texture(
@@ -152,11 +217,6 @@ fn load_texture(
     cs: util::Format,
 ) -> GltfTexture {
     load_texture_common(ctx, &texture_info.texture(), texture_info.tex_coord(), cs)
-}
-
-struct GltfNormalMap {
-    tex: GltfTexture,
-    scale: f32,
 }
 
 fn load_normal_map(ctx: &RecGltfCtx, normal_tex: &gltf::material::NormalTexture) -> GltfNormalMap {
@@ -171,7 +231,6 @@ fn load_normal_map(ctx: &RecGltfCtx, normal_tex: &gltf::material::NormalTexture)
 
     GltfNormalMap { tex, scale }
 }
-
 
 fn check_supported<'a>(primitive: &gltf::Primitive<'a>) {
     use gltf::mesh::Semantic;
@@ -188,7 +247,10 @@ fn check_supported<'a>(primitive: &gltf::Primitive<'a>) {
 }
 
 // TODO: Find a way to handle binding mapping here and in shader in one place.
-fn interleave_vertex_buffer<'a>(ctx: &RecGltfCtx, primitive: &gltf::Primitive<'a>) -> GltfVertexBuffer {
+fn interleave_vertex_buffer<'a>(
+    ctx: &RecGltfCtx,
+    primitive: &gltf::Primitive<'a>,
+) -> GltfVertexBuffer {
     check_supported(primitive);
     let reader = primitive.reader(|buffer| Some(&ctx.buffers[buffer.index()]));
     let positions = reader.read_positions().expect("Found no positions");
@@ -201,7 +263,7 @@ fn interleave_vertex_buffer<'a>(ctx: &RecGltfCtx, primitive: &gltf::Primitive<'a
     let tangents = reader.read_tangents();
     let tex_coords = reader.read_tex_coords(0);
     let colors = reader.read_colors(0);
-    
+
     if tex_coords.is_some() {
         format = format.add_attribute(util::Format::FLOAT2);
     }
@@ -226,60 +288,35 @@ fn interleave_vertex_buffer<'a>(ctx: &RecGltfCtx, primitive: &gltf::Primitive<'a
                 data.extend_from_slice(util::as_bytes(&pos));
                 data.extend_from_slice(util::as_bytes(&nor));
                 data.extend_from_slice(util::as_bytes(&uv));
-                data.extend_from_slice(util::as_bytes(&tan)); 
+                data.extend_from_slice(util::as_bytes(&tan));
             }
-        },
+        }
         (Some(colors), Some(tex_coords), None) => {
-            for ((uv, col), (pos, nor)) in tex_coords.into_f32().zip(colors.into_rgba_f32()).zip(it) {
+            for ((uv, col), (pos, nor)) in tex_coords.into_f32().zip(colors.into_rgba_f32()).zip(it)
+            {
                 data.extend_from_slice(util::as_bytes(&pos));
                 data.extend_from_slice(util::as_bytes(&nor));
                 data.extend_from_slice(util::as_bytes(&uv));
-                data.extend_from_slice(util::as_bytes(&col)); 
-            }           
-        },
-        (None, Some(tex_coords), None) => {
-            for (uv, (pos, nor)) in tex_coords
-                .into_f32()
-                .zip(it) {
-                    data.extend_from_slice(util::as_bytes(&pos));
-                    data.extend_from_slice(util::as_bytes(&nor));
-                    data.extend_from_slice(util::as_bytes(&uv));
+                data.extend_from_slice(util::as_bytes(&col));
             }
-        },
+        }
+        (None, Some(tex_coords), None) => {
+            for (uv, (pos, nor)) in tex_coords.into_f32().zip(it) {
+                data.extend_from_slice(util::as_bytes(&pos));
+                data.extend_from_slice(util::as_bytes(&nor));
+                data.extend_from_slice(util::as_bytes(&uv));
+            }
+        }
         (None, None, None) => {
             for (pos, nor) in it {
                 data.extend_from_slice(util::as_bytes(&pos));
                 data.extend_from_slice(util::as_bytes(&nor));
             }
-        },
+        }
         _ => unimplemented!(),
     }
 
-    GltfVertexBuffer {
-        data,
-        format,
-    }
-}
-
-struct GltfMaterialData {
-    base_color_factor: [f32; 4],
-    metallic_factor: f32,
-    roughness_factor: f32,
-}
-
-struct GltfMaterial {
-    material: GltfMaterialBufferHandle,
-    normal_map: Option<GltfNormalMap>,
-    base_color: Option<GltfTexture>,
-    metallic_roughness: Option<GltfTexture>,
-}
-
-#[derive(Component)]
-#[storage(VecStorage)]
-struct GltfModel {
-    mat: GltfMaterial,
-    index: GltfIndexBufferHandle,
-    vertex: GltfVertexBufferHandle,
+    GltfVertexBuffer { data, format }
 }
 
 fn load_primitive<'a>(ctx: &mut RecGltfCtx, primitive: &gltf::Primitive<'a>) -> GltfModel {
@@ -314,10 +351,12 @@ fn load_primitive<'a>(ctx: &mut RecGltfCtx, primitive: &gltf::Primitive<'a>) -> 
         .normal_texture()
         .map(|normal_map| load_normal_map(ctx, &normal_map));
 
-    let material_data = GltfMaterialData {
+    let material_data = PBRMaterialData {
         base_color_factor: pbr_mr.base_color_factor(),
         metallic_factor: pbr_mr.metallic_factor(),
         roughness_factor: pbr_mr.roughness_factor(),
+        normal_scale: normal_map.as_ref().map(|x| x.scale).unwrap_or(1.0),
+        _padding: 0.0,
     };
 
     let mat_handle = ctx.add_material_data(material_data);
@@ -351,18 +390,18 @@ fn build_asset_graph_common<'a>(ctx: &mut RecGltfCtx, src: &gltf::Node<'a>) -> A
     let mut children = src
         .mesh()
         .map(|mesh| {
-            mesh
-            .primitives()
-            .map(|primitive| {
-                let gltf_model = load_primitive(ctx, &primitive);
-                ctx.world
-                    .create_entity()
-                    .with(gltf_model)
-                    .with(render_graph::leaf(node))
-                    .build()
+            mesh.primitives()
+                .map(|primitive| {
+                    let gltf_model = load_primitive(ctx, &primitive);
+                    ctx.world
+                        .create_entity()
+                        .with(gltf_model)
+                        .with(render_graph::leaf(node))
+                        .build()
                 })
                 .collect::<Vec<_>>()
-        }).unwrap_or(Vec::new());
+        })
+        .unwrap_or(Vec::new());
 
     // For each child *node*, we want its entity and if it has a camera
     // attached to it.
@@ -416,7 +455,11 @@ fn build_asset_graph(ctx: &mut RecGltfCtx, src_root: &gltf::Node) -> AssetGraphR
     result
 }
 
-fn get_cam_transform(gltf_doc: gltf::Document, world: &World, camera_ent: Option<Entity>) -> Option<Transform> {
+fn get_cam_transform(
+    gltf_doc: gltf::Document,
+    world: &World,
+    camera_ent: Option<Entity>,
+) -> Option<Transform> {
     let mut cam_transform: Option<Transform> = None;
 
     if gltf_doc.cameras().next().is_some() {
@@ -457,21 +500,103 @@ fn get_cam_transform(gltf_doc: gltf::Document, world: &World, camera_ent: Option
     cam_transform
 }
 
-fn upload_to_gpu<'a>(renderer: &trekanten::Renderer, ctx: &mut RecGltfCtx<'a>) {
-    let meshes = ctx.world.write_storage::<Mesh>();
-    let materials = ctx.world.write_storage::<Material>();
-    let gltf_models = ctx.world.read_storage::<GltfModel>();
-
-    for model in (&gltf_models, !&meshes, !&materials).join() {
-
+fn upload_to_gpu<'a>(renderer: &mut trekanten::Renderer, ctx: &mut RecGltfCtx<'a>) {
+    let mut meshes = ctx.world.write_storage::<Mesh>();
+    let mut materials = ctx.world.write_storage::<Material>();
+    let mut gltf_models = ctx.world.write_storage::<GltfModel>();
+    let entities = ctx.world.read_resource::<EntitiesRes>();
 
 
+    log::info!("Uploading gltf asset to gpu");
+    log::info!("\t# vertex_buffers: {}", ctx.vertex_buffers.len());
+    log::info!("\tindex_buffer len: {}", ctx.all_index_buffers.len());
+    log::info!("\t# materials: {}", ctx.material_buffer.len());
+
+    let gpu_vert_buffers: Vec<Handle<VertexBuffer>> = ctx.vertex_buffers.iter().map(|vert_buf| {
+        renderer.create_resource(VertexBufferDescriptor::from_raw(
+            &vert_buf.data,
+            vert_buf.format.clone(),
+        )).expect("Failed to create vertex buffer")
+    }).collect();
+
+    let gpu_index_buffer: Handle<IndexBuffer> = renderer
+        .create_resource(IndexBufferDescriptor::from_slice(&ctx.all_index_buffers))
+        .expect("Failed to create index buffer");
+
+    let gpu_uniform_buffer = renderer
+        .create_resource(UniformBufferDescriptor::from_slice(&ctx.material_buffer))
+        .expect("Failed to create uniform buffer for materials");
+
+    for (ent, model) in (&entities, &gltf_models).join() {
+        let gltf_vh = &model.vertex;
+        let gltf_ih = &model.index;
+        let gltf_mat = &model.mat;
+        let gpu_vh = gpu_vert_buffers[gltf_vh.buf_idx].clone();
+
+        let vertex_buffer = gltf_vh.as_gpu_handle(gpu_vh.clone());
+        let index_buffer = gltf_ih.as_gpu_handle(gpu_index_buffer.clone());
+        meshes.insert(ent, Mesh(trekanten::mesh::Mesh {
+            vertex_buffer,
+            index_buffer,
+        })).expect("Failed to insert mesh");
+
+        let material_uniforms = gltf_mat.material.as_gpu_handle(gpu_uniform_buffer.clone());
+        let normal_map = gltf_mat.normal_map.as_ref().map(|x| {
+            let tex_h = renderer
+            .create_resource(trekanten::texture::TextureDescriptor::new(x.tex.path.clone(), x.tex.format))
+            .expect("Failed to create texture handle for normal map");
+
+            let tex_use = trekanten::material::TextureUse {
+                handle: tex_h,
+                coord_set: 0,
+            };
+
+            trekanten::material::NormalMap {
+                tex: tex_use,
+                scale: x.scale,
+            }
+        });
+
+        let base_color_texture = gltf_mat.base_color.as_ref().map(|t| {
+            let tex_h = renderer
+                .create_resource(trekanten::texture::TextureDescriptor::new(t.path.clone(), t.format))
+                .expect("Failed to create texture handle for normal map");
+            trekanten::material::TextureUse {
+                handle: tex_h,
+                coord_set: 0,
+            }
+        });
+
+        let metallic_roughness_texture = gltf_mat.metallic_roughness.as_ref().map(|t| {
+            let tex_h = renderer
+                .create_resource(trekanten::texture::TextureDescriptor::new(t.path.clone(), t.format))
+                .expect("Failed to create texture handle for normal map");
+            trekanten::material::TextureUse {
+                handle: tex_h,
+                coord_set: 0,
+            }
+        });
+        let mat_data = trekanten::material::MaterialData::PBR {
+            material_uniforms,
+            normal_map,
+            base_color_texture,
+            metallic_roughness_texture,
+        };
+
+        materials.insert(ent, Material {
+            data: mat_data,
+            compilation_mode: ShaderUse::PreCompiled,
+        }).expect("Failed to insert material");
     }
 
-    unimplemented!()
+    gltf_models.clear();
 }
 
-pub fn load_asset(world: &mut World, renderer: &mut trekanten::Renderer, path: &Path) -> LoadedAsset {
+pub fn load_asset(
+    world: &mut World,
+    renderer: &mut trekanten::Renderer,
+    path: &Path,
+) -> LoadedAsset {
     log::trace!("load gltf asset {}", path.display());
     let (gltf_doc, buffers, _images) = gltf::import(path).expect("Unable to import gltf");
     assert_eq!(gltf_doc.scenes().len(), 1);
@@ -505,7 +630,7 @@ pub fn load_asset(world: &mut World, renderer: &mut trekanten::Renderer, path: &
     let cam_transform = get_cam_transform(gltf_doc, rec_ctx.world, camera_ent);
 
     upload_to_gpu(renderer, &mut rec_ctx);
-    
+
     LoadedAsset {
         scene_roots: roots,
         camera: cam_transform,

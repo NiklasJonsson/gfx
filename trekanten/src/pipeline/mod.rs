@@ -484,7 +484,10 @@ impl GraphicsPipelines {
     }
 }
 
-pub fn get_pipeline_for(renderer: &mut crate::Renderer, mesh: &crate::mesh::Mesh, mat: &crate::material::MaterialData) -> Handle<GraphicsPipeline>
-{
+pub fn get_pipeline_for(
+    _renderer: &mut crate::Renderer,
+    _mesh: &crate::mesh::Mesh,
+    _mat: &crate::material::MaterialData,
+) -> Handle<GraphicsPipeline> {
     unimplemented!()
 }

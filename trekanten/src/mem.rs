@@ -11,7 +11,51 @@ use crate::device::AllocatorHandle;
 use crate::device::Device;
 use crate::queue::Queue;
 use crate::queue::QueueError;
+use crate::resource::Handle;
 use crate::util;
+
+#[derive(Debug, PartialEq, Eq, Hash)]
+pub struct BufferHandle<T> {
+    h: Handle<T>,
+    // Unit is bytes
+    offset: u32,
+    size: u32,
+    elem_size: u32,
+}
+
+// Use trait for this instead?
+impl<T> core::ops::Deref for BufferHandle<T> {
+    type Target = Handle<T>;
+    fn deref(&self) -> &Self::Target {
+        &self.h
+    }
+}
+
+impl<T> Clone for BufferHandle<T> {
+    fn clone(&self) -> Self {
+        Self { ..*self }
+    }
+}
+impl<T> Copy for BufferHandle<T> {}
+
+impl<T> BufferHandle<T> {
+    pub fn from_buffer(h: Handle<T>, offset: u32, size: u32, elem_size: u32) -> Self {
+        Self {
+            h,
+            offset,
+            size,
+            elem_size,
+        }
+    }
+
+    pub fn handle(&self) -> &Handle<T> {
+        &self.h
+    }
+
+    pub fn offset(&self) -> u32 {
+        self.offset
+    }
+}
 
 #[derive(Debug, Error)]
 pub enum MemoryError {

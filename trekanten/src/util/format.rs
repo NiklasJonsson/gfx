@@ -13,7 +13,7 @@ impl Format {
             Self::RGBA_SRGB => 4,
             Self::RGBA_UNORM => 4,
             _ => unimplemented!(),
-        } 
+        }
     }
 
     pub const FLOAT4: Self = Self(vk::Format::R32G32B32A32_SFLOAT);
@@ -33,7 +33,6 @@ impl From<Format> for vk::Format {
 
 impl From<vk::Format> for Format {
     fn from(f: vk::Format) -> Self {
-        Self ( f )
+        Self(f)
     }
 }
-

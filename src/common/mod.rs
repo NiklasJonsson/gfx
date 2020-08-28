@@ -101,43 +101,12 @@ impl From<([f32; 3], [f32; 3], [f32; 2], [f32; 4])> for VertexUVTan {
 #[derive(Debug)]
 pub enum VertexBuf {
     PosOnly(Vec<VertexPosOnly>),
-    Base(Vec<VertexBase>),
-    UV(Vec<VertexUV>),
-    UVCol(Vec<VertexUVCol>),
-    UVTan(Vec<VertexUVTan>),
 }
 
 mod vertex {
     pub fn pos_only(x: f32, y: f32, z: f32) -> super::VertexPosOnly {
         super::VertexPosOnly {
             position: [x, y, z],
-        }
-    }
-}
-
-#[derive(Clone, Debug, Copy, PartialEq, Eq, Hash)]
-pub enum ComponentLayout {
-    R8G8B8A8,
-}
-
-#[derive(Clone, Debug, Copy, PartialEq, Eq, Hash)]
-pub enum ColorSpace {
-    Linear,
-    Srgb,
-}
-
-#[derive(Clone, Debug, Copy, PartialEq, Eq, Hash)]
-pub struct Format {
-    pub component_layout: ComponentLayout,
-    pub color_space: ColorSpace,
-}
-
-use vulkano::format::Format as VkFormat;
-impl Into<VkFormat> for Format {
-    fn into(self) -> VkFormat {
-        match (self.component_layout, self.color_space) {
-            (ComponentLayout::R8G8B8A8, ColorSpace::Srgb) => VkFormat::R8G8B8A8Srgb,
-            (ComponentLayout::R8G8B8A8, ColorSpace::Linear) => VkFormat::R8G8B8A8Unorm,
         }
     }
 }

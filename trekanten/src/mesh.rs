@@ -3,15 +3,15 @@ use ash::vk;
 use crate::command::CommandPool;
 use crate::device::Device;
 use crate::mem;
+use crate::mem::BufferHandle;
 use crate::queue::Queue;
 use crate::util::as_byte_slice;
 use crate::vertex::VertexDefinition;
 use crate::vertex::VertexFormat;
-use crate::resource::Handle;
 
 pub struct Mesh {
-    pub vertex_buffer: Handle<VertexBuffer>,
-    pub index_buffer: Handle<IndexBuffer>,
+    pub vertex_buffer: BufferHandle<VertexBuffer>,
+    pub index_buffer: BufferHandle<IndexBuffer>,
 }
 
 #[derive(Debug, Copy, Clone)]
@@ -83,7 +83,14 @@ pub struct VertexBufferDescriptor<'a> {
 impl<'a> VertexBufferDescriptor<'a> {
     pub fn from_slice<V: VertexDefinition>(slice: &'a [V]) -> Self {
         let data = as_byte_slice(slice);
-        Self { data, format: V::format() }
+        Self {
+            data,
+            format: V::format(),
+        }
+    }
+
+    pub fn from_raw(data: &'a [u8], format: VertexFormat) -> Self {
+        Self { data, format }
     }
 }
 

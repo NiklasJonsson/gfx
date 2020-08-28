@@ -102,10 +102,15 @@ impl UniformBuffer {
 
 impl std::fmt::Debug for UniformBuffer {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        writeln!(f, "UNIFORM BUFFER, elem_size * n_elems = {} * {} = {}", self.elem_size(), self.n_elems(), self.size())
+        writeln!(
+            f,
+            "UNIFORM BUFFER, elem_size * n_elems = {} * {} = {}",
+            self.elem_size(),
+            self.n_elems(),
+            self.size()
+        )
     }
 }
-
 
 #[derive(Default)]
 pub struct UniformBuffers {

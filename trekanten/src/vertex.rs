@@ -1,6 +1,6 @@
+use crate::util;
 use ash::vk;
 use std::hash::{Hash, Hasher};
-use crate::util;
 
 #[derive(Debug, Clone)]
 pub struct VertexFormat {
@@ -11,18 +11,31 @@ pub struct VertexFormat {
 impl Eq for VertexFormat {}
 impl PartialEq for VertexFormat {
     fn eq(&self, o: &Self) -> bool {
-        if self.binding_description.len() != o.binding_description.len() ||
-           self.attribute_description.len() != o.attribute_description.len() ||
-           self.size != o.size {
-               return false;
+        if self.binding_description.len() != o.binding_description.len()
+            || self.attribute_description.len() != o.attribute_description.len()
+            || self.size != o.size
+        {
+            return false;
         }
 
-        self.binding_description.iter().zip(o.binding_description.iter()).fold(true, |acc, (a, b)| {
-            acc && a.binding == b.binding && a.stride == b.stride && a.input_rate == b.input_rate
-        }) && 
-        self.attribute_description.iter().zip(o.attribute_description.iter()).fold(true, |acc, (a, b)| {
-            acc && a.location == b.location && a.binding == b.binding && a.format == b.format && a.offset == b.offset
-        })
+        self.binding_description
+            .iter()
+            .zip(o.binding_description.iter())
+            .fold(true, |acc, (a, b)| {
+                acc && a.binding == b.binding
+                    && a.stride == b.stride
+                    && a.input_rate == b.input_rate
+            })
+            && self
+                .attribute_description
+                .iter()
+                .zip(o.attribute_description.iter())
+                .fold(true, |acc, (a, b)| {
+                    acc && a.location == b.location
+                        && a.binding == b.binding
+                        && a.format == b.format
+                        && a.offset == b.offset
+                })
     }
 }
 
@@ -85,24 +98,24 @@ impl VertexFormatBuilder {
 
     pub fn add_attribute(mut self, format: util::Format) -> Self {
         let size = format.size();
-        self.format.attribute_description.push(vk::VertexInputAttributeDescription {
-            binding: 0,
-            location: self.format.attribute_description.len() as u32,
-            format: format.into(),
-            offset: self.format.size,
-        });
+        self.format
+            .attribute_description
+            .push(vk::VertexInputAttributeDescription {
+                binding: 0,
+                location: self.format.attribute_description.len() as u32,
+                format: format.into(),
+                offset: self.format.size,
+            });
         self.format.size += size;
         self
     }
 
     pub fn build(mut self) -> VertexFormat {
-        self.format.binding_description = vec![
-            vk::VertexInputBindingDescription {
-                binding: 0,
-                stride: self.format.size,
-                input_rate: vk::VertexInputRate::VERTEX,
-            }
-        ];
+        self.format.binding_description = vec![vk::VertexInputBindingDescription {
+            binding: 0,
+            stride: self.format.size,
+            input_rate: vk::VertexInputRate::VERTEX,
+        }];
         self.format
     }
 }
@@ -112,7 +125,9 @@ pub trait VertexDefinition {
     fn attribute_description() -> Vec<vk::VertexInputAttributeDescription>;
     fn format() -> VertexFormat {
         let attribute_description = Self::attribute_description();
-        let size = attribute_description.iter().fold(0, |acc, d| acc + util::Format::from(d.format).size());
+        let size = attribute_description
+            .iter()
+            .fold(0, |acc, d| acc + util::Format::from(d.format).size());
         VertexFormat {
             binding_description: Self::binding_description(),
             attribute_description: attribute_description,

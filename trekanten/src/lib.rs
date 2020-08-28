@@ -10,8 +10,8 @@ mod error;
 mod framebuffer;
 mod image;
 mod instance;
-mod mem;
 pub mod material;
+mod mem;
 pub mod mesh;
 pub mod pipeline;
 mod queue;
@@ -29,6 +29,7 @@ pub mod window;
 
 pub use error::RenderError;
 pub use error::ResizeReason;
+pub use mem::BufferHandle;
 pub use resource::Handle;
 pub use resource::ResourceManager;
 
@@ -417,13 +418,13 @@ impl Renderer {
         unimplemented!();
     }
 
-        pub fn set_view_matrix<T>(&self, t: T) {
-            unimplemented!();
-        }
-    
-        pub fn set_proj_matrix<T>(&self, t: T) {
-            unimplemented!();
-        }
+    pub fn set_view_matrix<T>(&self, _t: T) {
+        unimplemented!();
+    }
+
+    pub fn set_proj_matrix<T>(&self, _t: T) {
+        unimplemented!();
+    }
 }
 
 impl

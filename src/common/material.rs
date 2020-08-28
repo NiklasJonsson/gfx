@@ -1,14 +1,9 @@
 use std::path::PathBuf;
 
-use trekanten::texture::Texture;
-use trekanten::uniform::UniformBuffer;
-use trekanten::resource::Handle;
 use trekanten::material::MaterialData;
 
 use specs::prelude::*;
 use specs::Component;
-
-use super::*;
 
 /// PreCompiled means that the material will be used to lookup what pre-compiled shader to use.
 #[derive(Debug, Clone, Eq)]

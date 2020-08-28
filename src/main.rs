@@ -14,12 +14,11 @@ mod io;
 mod render;
 mod settings;
 
-use self::asset::AssetDescriptor;
-use self::common::*;
-use self::render::*;
-use crate::arg_parse::Args;
+use asset::AssetDescriptor;
+use common::*;
+use arg_parse::Args;
 
-use self::game_state::GameState;
+use game_state::GameState;
 
 use io::windowing::Event;
 
@@ -77,7 +76,7 @@ impl App {
     fn setup_resources(&mut self) {
         self.world
             .insert(io::input::CurrentFrameExternalInputs(Vec::new()));
-        self.world.insert(ActiveCamera::empty());
+        self.world.insert(render::ActiveCamera::empty());
         self.world.insert(DeltaTime::zero());
     }
 
@@ -111,7 +110,7 @@ impl App {
         self.setup_resources();
 
         let cam_entity = Self::get_entity_with_marker::<camera::Camera>(&self.world);
-        *self.world.write_resource::<ActiveCamera>() = ActiveCamera::with_entity(cam_entity);
+        *self.world.write_resource::<render::ActiveCamera>() = render::ActiveCamera::with_entity(cam_entity);
 
         let desc = AssetDescriptor::Gltf {
             path: args.gltf_path.to_owned(),
@@ -190,8 +189,8 @@ impl App {
         let (mut control_systems, mut engine_systems) = Self::init_dispatchers();
 
         // Register all component types
-        self.world.register::<RenderableMaterial>();
-        self.world.register::<Mesh>();
+        self.world.register::<render::RenderableMaterial>();
+        self.world.register::<render::Mesh>();
         self.world.register::<Material>();
         self.world.register::<render_graph::RenderGraphNode>();
         self.world.register::<render_graph::RenderGraphRoot>();
@@ -309,7 +308,7 @@ fn main() {
             Err(e) => {
                 println!("Failed to create renderer: {}", e);
                 return;
-            },
+            }
             Ok(x) => x,
         };
         let mut app = App::new(renderer, event_queue2);

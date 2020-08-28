@@ -92,9 +92,7 @@ impl DescriptorPool {
     }
 }
 
-pub struct DescriptorSetBuilder {
-
-}
+pub struct DescriptorSetBuilder {}
 
 impl DescriptorSetBuilder {
     pub fn add_buffer(self, _: &Handle<UniformBuffer>) -> Self {

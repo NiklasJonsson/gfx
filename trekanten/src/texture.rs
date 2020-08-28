@@ -32,11 +32,12 @@ pub enum TextureError {
 #[derive(Debug, Clone, Hash, PartialEq, Eq)]
 pub struct TextureDescriptor {
     file_path: PathBuf,
+    format: util::Format,
 }
 
 impl TextureDescriptor {
-    pub fn new(file_path: PathBuf) -> Self {
-        Self { file_path }
+    pub fn new(file_path: PathBuf, format: util::Format) -> Self {
+        Self { file_path, format }
     }
 }
 
@@ -125,9 +126,7 @@ impl Texture {
         };
 
         let mip_levels = (extents.max_dim() as f32).log2().floor() as u32 + 1;
-
-        let format: util::Format = vk::Format::R8G8B8A8_SRGB.into();
-
+        let format = descriptor.format;
         let raw_image_data = image.into_raw();
         let device_image = DeviceImage::device_local_mipmapped(
             device,

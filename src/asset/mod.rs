@@ -8,9 +8,7 @@ mod gltf;
 // Per asset type description, generally all the files needed to load an asset
 #[derive(Debug)]
 pub enum AssetDescriptor {
-    Gltf {
-        path: PathBuf,
-    },
+    Gltf { path: PathBuf },
 }
 
 pub struct LoadedAsset {
@@ -18,7 +16,11 @@ pub struct LoadedAsset {
     pub camera: Option<math::Transform>,
 }
 
-pub fn load_asset_into(world: &mut World, renderer: &mut trekanten::Renderer, descr: AssetDescriptor) -> LoadedAsset {
+pub fn load_asset_into(
+    world: &mut World,
+    renderer: &mut trekanten::Renderer,
+    descr: AssetDescriptor,
+) -> LoadedAsset {
     match descr {
         AssetDescriptor::Gltf { path } => gltf::load_asset(world, renderer, &path),
         _ => unimplemented!(),
