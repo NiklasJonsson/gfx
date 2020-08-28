@@ -45,7 +45,6 @@ impl<T> Default for BufferHandle<T> {
     }
 }
 
-
 impl<T> BufferHandle<T> {
     pub fn from_buffer(h: Handle<T>, offset: u32, size: u32, elem_size: u32) -> Self {
         Self {

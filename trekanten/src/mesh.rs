@@ -108,7 +108,11 @@ impl VertexBuffer {
         descriptor: &VertexBufferDescriptor<'a>,
     ) -> Result<Self, mem::MemoryError> {
         log::trace!("Creating vertex buffer");
-        log::trace!("\tslice: ({:?}, {})", descriptor.data.as_ptr(), descriptor.data.len());
+        log::trace!(
+            "\tslice: ({:?}, {})",
+            descriptor.data.as_ptr(),
+            descriptor.data.len()
+        );
         log::trace!("\tformat: {:#?}", descriptor.format);
         let buffer = mem::DeviceBuffer::device_local_by_staging(
             device,

@@ -364,7 +364,8 @@ impl Renderer {
             .get_mut(h.handle(), self.frame_idx as usize)
             .ok_or_else(|| RenderError::InvalidHandle(h.handle().id()))?;
 
-        ubuf.update_with(data, h.offset()).map_err(RenderError::UniformBuffer)
+        ubuf.update_with(data, h.offset())
+            .map_err(RenderError::UniformBuffer)
     }
 
     pub fn get_descriptor_set(

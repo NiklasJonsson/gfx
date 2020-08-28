@@ -389,7 +389,12 @@ impl CommandBuffer {
         self
     }
 
-    pub fn bind_push_constant<V>(self, pipeline: &GraphicsPipeline, stage: ShaderStage, v: &V) -> Self {
+    pub fn bind_push_constant<V>(
+        self,
+        pipeline: &GraphicsPipeline,
+        stage: ShaderStage,
+        v: &V,
+    ) -> Self {
         let bytes = util::as_bytes(v);
         assert!(bytes.len() <= 128);
         unsafe {

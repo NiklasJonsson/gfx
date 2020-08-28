@@ -47,7 +47,12 @@ fn read_shader_abs<P: AsRef<Path>>(path: P) -> io::Result<RawShader> {
 
 fn read_shader_rel<N: AsRef<Path>>(name: N) -> io::Result<RawShader> {
     let cd = std::env::current_dir()?;
-    let path = cd.join("trekanten").join("src").join("pipeline").join("shaders").join(name);
+    let path = cd
+        .join("trekanten")
+        .join("src")
+        .join("pipeline")
+        .join("shaders")
+        .join(name);
 
     read_shader_abs(path)
 }
@@ -300,8 +305,7 @@ impl<'a> GraphicsPipelineBuilder<'a> {
         }];
 
         // TODO: Parse this
-        let pipeline_layout_info =
-            vk::PipelineLayoutCreateInfo::builder()
+        let pipeline_layout_info = vk::PipelineLayoutCreateInfo::builder()
             .set_layouts(&descriptor_set_layouts)
             .push_constant_ranges(&pces);
 

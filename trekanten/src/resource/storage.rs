@@ -16,7 +16,7 @@ impl<T> Default for Handle<T> {
     fn default() -> Self {
         Self {
             id: ID::default(),
-            ty: PhantomData{},
+            ty: PhantomData {},
         }
     }
 }

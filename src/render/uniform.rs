@@ -22,7 +22,6 @@ pub struct LightingData {
     pub light_pos: [f32; 4],
 }
 
-
 #[derive(Copy, Clone, Debug)]
 #[repr(C, packed)]
 pub struct Model {

@@ -98,33 +98,39 @@ impl App {
         self.world.insert(DeltaTime::zero());
 
         // TODO: Move
-        use trekanten::uniform::UniformBufferDescriptor;
         use render::uniform::LightingData;
         use render::uniform::Transforms;
-        use trekanten::uniform::UniformBuffer;
-        use trekanten::BufferHandle;
         use trekanten::descriptor::DescriptorSet;
-        use trekanten::resource::ResourceManager;
         use trekanten::pipeline::GraphicsPipelineDescriptor;
+        use trekanten::resource::ResourceManager;
+        use trekanten::uniform::UniformBuffer;
+        use trekanten::uniform::UniformBufferDescriptor;
         use trekanten::util;
         use trekanten::vertex::VertexFormat;
+        use trekanten::BufferHandle;
 
         let desc = UniformBufferDescriptor::uninitialized::<LightingData>(1);
         let light_buffer = self.renderer.create_resource(desc).expect("FAIL");
-        let light_buffer = BufferHandle::<UniformBuffer>::from_typed_buffer::<LightingData>(light_buffer, 0, 1);
+        let light_buffer =
+            BufferHandle::<UniformBuffer>::from_typed_buffer::<LightingData>(light_buffer, 0, 1);
 
         let desc = UniformBufferDescriptor::uninitialized::<Transforms>(1);
         let transforms_buffer = self.renderer.create_resource(desc).expect("FAIL");
-        let transforms_buffer = BufferHandle::<UniformBuffer>::from_typed_buffer::<Transforms>(transforms_buffer, 0, 1);
+        let transforms_buffer =
+            BufferHandle::<UniformBuffer>::from_typed_buffer::<Transforms>(transforms_buffer, 0, 1);
 
         // TODO: Put these in the same set
-        let transforms_set = DescriptorSet::builder(&mut self.renderer, trekanten::pipeline::ShaderStage::Vertex)
-            .add_buffer(&transforms_buffer, 0)
-            .build();
+        let transforms_set =
+            DescriptorSet::builder(&mut self.renderer, trekanten::pipeline::ShaderStage::Vertex)
+                .add_buffer(&transforms_buffer, 0)
+                .build();
 
-        let light_set = DescriptorSet::builder(&mut self.renderer, trekanten::pipeline::ShaderStage::Fragment)
-            .add_buffer(&light_buffer, 0)
-            .build();
+        let light_set = DescriptorSet::builder(
+            &mut self.renderer,
+            trekanten::pipeline::ShaderStage::Fragment,
+        )
+        .add_buffer(&light_buffer, 0)
+        .build();
 
         let vertex_format = VertexFormat::builder()
             .add_attribute(util::Format::FLOAT3)
@@ -137,7 +143,7 @@ impl App {
         };
 
         let dummy_pipeline = self.renderer.create_resource(desc).expect("FAIL");
-        
+
         self.world.insert(render::FrameData {
             light_buffer,
             light_set,

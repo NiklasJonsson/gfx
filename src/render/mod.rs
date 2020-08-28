@@ -10,9 +10,9 @@ use trekanten::command;
 use trekanten::descriptor;
 use trekanten::resource::Handle;
 use trekanten::resource::ResourceManager;
-use trekanten::Renderer;
-use trekanten::BufferHandle;
 use trekanten::uniform::UniformBuffer;
+use trekanten::BufferHandle;
+use trekanten::Renderer;
 
 pub mod uniform;
 
@@ -185,14 +185,18 @@ fn draw_model(
         model: mtx.0.into(),
         model_it: glm::inverse_transpose(mtx.0).into(),
     };
-    
+
     cmd_buf
-    .bind_graphics_pipeline(&gfx_pipeline)
-    .bind_descriptor_set(1, &mat_desc_set, &gfx_pipeline)
-    .bind_index_buffer(&index_buffer, indices_index)
-    .bind_vertex_buffer(&vertex_buffer, vertex_index)
-    .bind_push_constant(&gfx_pipeline, trekanten::pipeline::ShaderStage::Vertex, &trn)
-    .draw_indexed(n_indices as u32)
+        .bind_graphics_pipeline(&gfx_pipeline)
+        .bind_descriptor_set(1, &mat_desc_set, &gfx_pipeline)
+        .bind_index_buffer(&index_buffer, indices_index)
+        .bind_vertex_buffer(&vertex_buffer, vertex_index)
+        .bind_push_constant(
+            &gfx_pipeline,
+            trekanten::pipeline::ShaderStage::Vertex,
+            &trn,
+        )
+        .draw_indexed(n_indices as u32)
 }
 
 fn draw_entities(
@@ -280,14 +284,14 @@ pub fn draw_frame(world: &mut World, renderer: &mut Renderer) {
             transforms_set,
             dummy_pipeline,
         } = &*world.read_resource::<FrameData>();
-    
+
         let (view_matrix, cam_pos) = get_view_data(world);
-        
+
         let lighting_data = uniform::LightingData {
             light_pos: [5.0f32, 5.0f32, 5.0f32, 0.0f32],
             view_pos: [cam_pos.x(), cam_pos.y(), cam_pos.z(), 0.0f32],
         };
-    
+
         let transforms = uniform::Transforms {
             view: view_matrix.into(),
             proj: get_proj_matrix(renderer.aspect_ratio()).into(),
@@ -317,7 +321,7 @@ pub fn draw_frame(world: &mut World, renderer: &mut Renderer) {
             .bind_descriptor_set(0, transforms_set, dummy_pipeline)
             .bind_descriptor_set(2, light_set, dummy_pipeline)
     };
-    
+
     cmd_buf = draw_entities(renderer, world, cmd_buf, render_mode, reload_shaders);
 
     cmd_buf = cmd_buf
