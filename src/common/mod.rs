@@ -10,8 +10,6 @@ pub use material::*;
 pub use math::*;
 pub use time::*;
 
-use std::path::PathBuf;
-
 #[derive(Copy, Clone, Debug, Default)]
 pub struct VertexPosOnly {
     pub position: [f32; 3],

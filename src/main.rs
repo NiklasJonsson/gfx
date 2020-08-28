@@ -15,7 +15,6 @@ mod render;
 mod settings;
 
 use arg_parse::Args;
-use asset::AssetDescriptor;
 use common::*;
 
 use game_state::GameState;
@@ -380,7 +379,7 @@ fn main() {
     let event_queue2 = Arc::clone(&event_queue);
 
     // Thread runs the app while main takes the event loop
-    let done = std::thread::spawn(move || {
+    std::thread::spawn(move || {
         let renderer = match trekanten::Renderer::new(&window, window_extents(&window)) {
             Err(e) => {
                 println!("Failed to create renderer: {}", e);
@@ -405,6 +404,4 @@ fn main() {
             io::windowing::EventLoopControl::Continue => (),
         }
     });
-
-    done.join();
 }

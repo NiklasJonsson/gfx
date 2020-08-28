@@ -114,7 +114,7 @@ fn create_material_descriptor_set(
             normal_map,
             base_color_texture,
             metallic_roughness_texture,
-            has_vertex_colors,
+            ..
         } => {
             let mut desc_set_builder = descriptor::DescriptorSet::builder(
                 renderer,
@@ -216,7 +216,7 @@ fn draw_entities(
         // TODO: Move to function
         let entry = renderables.entry(ent).expect("Failed to get entry!");
         cmd_buf = match entry {
-            StorageEntry::Occupied(mut occ_entry) => {
+            StorageEntry::Occupied(occ_entry) => {
                 if occ_entry.get().mode != render_mode {
                     log::trace!("Renderable did not match render mode, creating new");
                     todo!("No support for render modes yet!")
@@ -296,8 +296,8 @@ pub fn draw_frame(world: &mut World, renderer: &mut Renderer) {
             view: view_matrix.into(),
             proj: get_proj_matrix(renderer.aspect_ratio()).into(),
         };
-        renderer.update_uniform(light_buffer, &lighting_data);
-        renderer.update_uniform(transforms_buffer, &transforms);
+        renderer.update_uniform(light_buffer, &lighting_data).expect("Failed to update uniform");
+        renderer.update_uniform(transforms_buffer, &transforms).expect("Failed to update uniform");
 
         let render_pass = renderer.render_pass();
         let extent = renderer.swapchain_extent();

@@ -77,13 +77,6 @@ impl GltfMaterialBufferHandle {
     }
 }
 
-struct GltfMaterialData {
-    base_color_factor: [f32; 4],
-    metallic_factor: f32,
-    roughness_factor: f32,
-    normal_scale: f32,
-}
-
 struct GltfMaterial {
     material: GltfMaterialBufferHandle,
     normal_map: Option<GltfNormalMap>,
@@ -162,7 +155,7 @@ impl<'a> RecGltfCtx<'a> {
                     n_vertices,
                     vertex_size,
                 };
-
+                entry.insert(self.vertex_buffers.len());
                 self.vertex_buffers.push(GltfVertexBuffer { format, data });
                 h
             }
@@ -403,7 +396,7 @@ fn build_asset_graph_common<'a>(ctx: &mut RecGltfCtx, src: &gltf::Node<'a>) -> A
                 })
                 .collect::<Vec<_>>()
         })
-        .unwrap_or(Vec::new());
+        .unwrap_or_else(Vec::new);
 
     // For each child *node*, we want its entity and if it has a camera
     // attached to it.
@@ -538,10 +531,10 @@ fn upload_to_gpu<'a>(renderer: &mut trekanten::Renderer, ctx: &mut RecGltfCtx<'a
         let gltf_vh = &model.vertex;
         let gltf_ih = &model.index;
         let gltf_mat = &model.mat;
-        let gpu_vh = gpu_vert_buffers[gltf_vh.buf_idx].clone();
+        let gpu_vh = gpu_vert_buffers[gltf_vh.buf_idx];
 
-        let vertex_buffer = gltf_vh.as_gpu_handle(gpu_vh.clone());
-        let index_buffer = gltf_ih.as_gpu_handle(gpu_index_buffer.clone());
+        let vertex_buffer = gltf_vh.as_gpu_handle(gpu_vh);
+        let index_buffer = gltf_ih.as_gpu_handle(gpu_index_buffer);
         meshes
             .insert(
                 ent,
@@ -552,7 +545,7 @@ fn upload_to_gpu<'a>(renderer: &mut trekanten::Renderer, ctx: &mut RecGltfCtx<'a
             )
             .expect("Failed to insert mesh");
 
-        let material_uniforms = gltf_mat.material.as_gpu_handle(gpu_uniform_buffer.clone());
+        let material_uniforms = gltf_mat.material.as_gpu_handle(gpu_uniform_buffer);
         let normal_map = gltf_mat.normal_map.as_ref().map(|x| {
             let tex_h = renderer
                 .create_resource(trekanten::texture::TextureDescriptor::new(

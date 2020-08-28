@@ -11,7 +11,7 @@ use crate::device::Device;
 use crate::device::HasVkDevice;
 use crate::device::VkDeviceHandle;
 use crate::render_pass::RenderPass;
-use crate::resource::{CachedStorage, Handle, ResourceManager, Storage};
+use crate::resource::{CachedStorage, Handle, ResourceManager};
 use crate::spirv::{parse_descriptor_sets, DescriptorSetLayouts};
 use crate::util;
 use crate::vertex::{VertexDefinition, VertexFormat};
@@ -514,11 +514,11 @@ pub fn get_pipeline_for(
         .clone();
     match mat {
         crate::material::MaterialData::PBR {
-            material_uniforms,
             normal_map,
             base_color_texture,
             metallic_roughness_texture,
             has_vertex_colors,
+            ..
         } => {
             let has_nm = normal_map.is_some();
             let has_bc = base_color_texture.is_some();
@@ -542,7 +542,7 @@ pub fn get_pipeline_for(
                     vertex_format,
                 }
             } else {
-                unimplemented!("Support more shader variants!")
+                unimplemented!("Support more shad   er variants!")
             };
 
             renderer

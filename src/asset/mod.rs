@@ -1,15 +1,8 @@
 use crate::common::math;
 use crate::common::IndexData;
-use specs::{Entity, World};
-use std::path::PathBuf;
+use specs::Entity;
 
 pub mod gltf;
-
-// Per asset type description, generally all the files needed to load an asset
-#[derive(Debug)]
-pub enum AssetDescriptor {
-    Gltf { path: PathBuf },
-}
 
 pub struct LoadedAsset {
     pub scene_roots: Vec<Entity>,

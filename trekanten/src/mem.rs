@@ -77,6 +77,10 @@ impl<T> BufferHandle<T> {
         self.size
     }
 
+    pub fn is_empty(&self) -> bool {
+        self.size == 0
+    }
+
     pub fn idx(&self) -> u32 {
         assert!(self.offset % self.elem_size == 0);
         self.offset / self.elem_size

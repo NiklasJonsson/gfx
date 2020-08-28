@@ -134,7 +134,7 @@ pub trait VertexDefinition {
             .fold(0, |acc, d| acc + util::Format::from(d.format).size());
         VertexFormat {
             binding_description: Self::binding_description(),
-            attribute_description: attribute_description,
+            attribute_description,
             size,
         }
     }

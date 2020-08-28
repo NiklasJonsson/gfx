@@ -69,7 +69,6 @@ impl From<glm::Vec3> for Position {
 impl AddAssign<&glm::Vec3> for Position {
     fn add_assign(&mut self, other: &glm::Vec3) {
         self.0 += glm::vec4(other.x, other.y, other.z, 0.0);
-        assert!(self.0.w == 1.0f32);
     }
 }
 
