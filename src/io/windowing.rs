@@ -44,8 +44,9 @@ impl Event {
 
 #[derive(Debug)]
 pub enum EventLoopControl {
-    Done(Event),
+    SendEvent(Event),
     Continue,
+    Quit,
 }
 
 pub struct EventManager {
@@ -75,14 +76,17 @@ impl EventManager {
                 WindowEvent::CloseRequested => {
                     log::debug!("Received CloseRequested window event");
                     self.update_action(Event::Quit);
+                    resolve = true;
                 }
                 WindowEvent::Focused(false) => {
                     log::debug!("Window lost focus, ignoring input");
                     self.update_action(Event::Unfocus);
+                    resolve = true;
                 }
                 WindowEvent::Focused(true) => {
                     log::debug!("Window gained focus, accepting input");
                     self.update_action(Event::Focus);
+                    resolve = true;
                 }
                 WindowEvent::KeyboardInput {
                     device_id, input, ..
@@ -124,7 +128,8 @@ impl EventManager {
             let r = self.resolve();
             match &r {
                 Event::Input(v) if v.is_empty() => EventLoopControl::Continue,
-                _ => EventLoopControl::Done(r),
+                Event::Quit => EventLoopControl::Quit,
+                _ => EventLoopControl::SendEvent(r),
             }
         } else {
             EventLoopControl::Continue
@@ -134,9 +139,9 @@ impl EventManager {
     fn resolve(&mut self) -> Event {
         let new = match &self.action {
             Event::Input(_) => Event::Input(Vec::new()),
+            Event::Quit => Event::Quit,
             Event::Focus => Event::Focus,
             Event::Unfocus => Event::Unfocus,
-            Event::Quit => Event::Quit,
         };
 
         std::mem::replace(&mut self.action, new)
