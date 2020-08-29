@@ -28,6 +28,10 @@ impl<D: Hash + Eq, T> Cache<D, T> {
         self.cache.len()
     }
 
+    pub fn is_empty(&self) -> bool {
+        self.cache.is_empty()
+    }
+
     pub fn iter(&mut self) -> impl Iterator<Item = (&D, &Handle<T>)> {
         self.cache.iter()
     }

@@ -40,3 +40,9 @@ impl<T: std::fmt::Debug> std::fmt::Debug for LifetimeToken<T> {
             .finish()
     }
 }
+
+impl<T> Default for LifetimeToken<T> {
+    fn default() -> Self {
+        Self::new()
+    }
+}

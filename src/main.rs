@@ -2,7 +2,6 @@ use specs::prelude::*;
 
 use std::time::Instant;
 
-use std::path::PathBuf;
 use std::sync::Arc;
 
 mod arg_parse;
@@ -101,6 +100,7 @@ impl App {
         use render::uniform::Transforms;
         use trekanten::descriptor::DescriptorSet;
         use trekanten::pipeline::GraphicsPipelineDescriptor;
+        use trekanten::pipeline::ShaderDescriptor;
         use trekanten::resource::ResourceManager;
         use trekanten::uniform::UniformBuffer;
         use trekanten::uniform::UniformBufferDescriptor;
@@ -119,25 +119,27 @@ impl App {
             BufferHandle::<UniformBuffer>::from_typed_buffer::<Transforms>(transforms_buffer, 0, 1);
 
         // TODO: Put these in the same set
-        let transforms_set =
-            DescriptorSet::builder(&mut self.renderer, trekanten::pipeline::ShaderStage::Vertex)
-                .add_buffer(&transforms_buffer, 0)
-                .build();
+        let transforms_set = DescriptorSet::builder(&mut self.renderer)
+            .add_buffer(
+                &transforms_buffer,
+                0,
+                trekanten::pipeline::ShaderStage::Vertex,
+            )
+            .build();
 
-        let light_set = DescriptorSet::builder(
-            &mut self.renderer,
-            trekanten::pipeline::ShaderStage::Fragment,
-        )
-        .add_buffer(&light_buffer, 0)
-        .build();
+        let light_set = DescriptorSet::builder(&mut self.renderer)
+            .add_buffer(&light_buffer, 0, trekanten::pipeline::ShaderStage::Fragment)
+            .build();
 
         let vertex_format = VertexFormat::builder()
             .add_attribute(util::Format::FLOAT3)
             .add_attribute(util::Format::FLOAT3)
             .build();
         let desc = GraphicsPipelineDescriptor {
-            vert: PathBuf::from("vs_pbr_base.spv"),
-            frag: PathBuf::from("fs_pbr_base.spv"),
+            vert: ShaderDescriptor::precompiled("vs_pbr_base.spv")
+                .expect("Failed to get precompiled pipeline"),
+            frag: ShaderDescriptor::precompiled("fs_pbr_base.spv")
+                .expect("Failed to get precompiled pipeline"),
             vertex_format,
         };
 
@@ -406,8 +408,8 @@ fn main() {
                 log::info!("Event loop thread received quit");
                 log::info!("Sending {:?} on event queue", io::windowing::Event::Quit);
                 event_queue.push(io::windowing::Event::Quit);
-                log::info!("Event loop thread exiting") * control_flow =
-                    winit::event_loop::ControlFlow::Exit;
+                log::info!("Event loop thread exiting");
+                *control_flow = winit::event_loop::ControlFlow::Exit;
             }
         }
     });

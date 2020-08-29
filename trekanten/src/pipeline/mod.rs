@@ -14,10 +14,21 @@ use crate::render_pass::RenderPass;
 use crate::resource::{CachedStorage, Handle, ResourceManager};
 use crate::spirv::{parse_descriptor_sets, DescriptorSetLayouts};
 use crate::util;
-use crate::vertex::{VertexDefinition, VertexFormat};
+use crate::vertex::VertexFormat;
 
 mod error;
 pub use error::PipelineError;
+
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub struct ShaderPath {
+    abs_path: PathBuf,
+}
+
+impl ShaderPath {
+    pub fn path(&self) -> &Path {
+        &self.abs_path
+    }
+}
 
 pub enum ShaderStage {
     Vertex,
@@ -37,24 +48,11 @@ struct RawShader {
     pub data: Vec<u32>,
 }
 
-fn read_shader_abs<P: AsRef<Path>>(path: P) -> io::Result<RawShader> {
-    let path_ref = path.as_ref();
-    log::trace!("Reading shader from {}", path_ref.display());
-    let mut file = File::open(path_ref)?;
+fn read_shader(path: &ShaderPath) -> io::Result<RawShader> {
+    log::trace!("Reading shader from {}", path.path().display());
+    let mut file = File::open(path.path())?;
     let words = ash::util::read_spv(&mut file)?;
     Ok(RawShader { data: words })
-}
-
-fn read_shader_rel<N: AsRef<Path>>(name: N) -> io::Result<RawShader> {
-    let cd = std::env::current_dir()?;
-    let path = cd
-        .join("trekanten")
-        .join("src")
-        .join("pipeline")
-        .join("shaders")
-        .join(name);
-
-    read_shader_abs(path)
 }
 
 struct ShaderModule {
@@ -176,13 +174,23 @@ impl<'a> GraphicsPipelineBuilder<'a> {
         }
     }
 
-    fn shader<P: AsRef<Path>>(
+    fn shader(
         &mut self,
-        path: P,
+        desc: &ShaderDescriptor,
         stage: vk::ShaderStageFlags,
     ) -> Result<PipelineCreationInfo, PipelineError> {
-        log::trace!("Reading shader {}", path.as_ref().display());
-        let raw = read_shader_rel(path)?;
+        log::trace!("Creating shader for pipeline");
+        let raw = match desc {
+            ShaderDescriptor::FromRawSpirv(data) => {
+                log::trace!("from raw");
+                RawShader { data: data.clone() }
+            }
+            ShaderDescriptor::FromPath(path) => {
+                log::trace!("from path \"{}\"", path.path().display());
+                read_shader(path)?
+            }
+        };
+
         let shader_module = ShaderModule::new(self.device, &raw)?;
         let create_info = vk::PipelineShaderStageCreateInfo::builder()
             .stage(stage)
@@ -200,12 +208,12 @@ impl<'a> GraphicsPipelineBuilder<'a> {
         })
     }
 
-    pub fn vertex_shader<P: AsRef<Path>>(mut self, path: P) -> Result<Self, PipelineError> {
+    pub fn vertex_shader(mut self, path: &ShaderDescriptor) -> Result<Self, PipelineError> {
         self.vert = Some(self.shader(path, vk::ShaderStageFlags::VERTEX)?);
         Ok(self)
     }
 
-    pub fn fragment_shader<P: AsRef<Path>>(mut self, path: P) -> Result<Self, PipelineError> {
+    pub fn fragment_shader(mut self, path: &ShaderDescriptor) -> Result<Self, PipelineError> {
         self.frag = Some(self.shader(path, vk::ShaderStageFlags::FRAGMENT)?);
         Ok(self)
     }
@@ -382,64 +390,35 @@ impl<'a> GraphicsPipelineBuilder<'a> {
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
+pub enum ShaderDescriptor {
+    FromRawSpirv(Vec<u32>),
+    FromPath(ShaderPath),
+}
+
+impl ShaderDescriptor {
+    pub fn crate_relative<P: AsRef<Path>>(p: P) -> io::Result<Self> {
+        let cd = std::env::current_dir()?;
+        Ok(Self::FromPath(ShaderPath {
+            abs_path: cd.join(p),
+        }))
+    }
+
+    pub fn precompiled<P: AsRef<Path>>(p: P) -> io::Result<Self> {
+        let p = PathBuf::new()
+            .join("trekanten")
+            .join("src")
+            .join("pipeline")
+            .join("shaders")
+            .join(p);
+        Self::crate_relative(p)
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub struct GraphicsPipelineDescriptor {
-    pub vert: PathBuf,
-    pub frag: PathBuf,
+    pub vert: ShaderDescriptor,
+    pub frag: ShaderDescriptor,
     pub vertex_format: VertexFormat,
-}
-
-impl GraphicsPipelineDescriptor {
-    pub fn builder() -> GraphicsPipelineDescriptorBuilder {
-        GraphicsPipelineDescriptorBuilder {
-            vert: None,
-            frag: None,
-            vertex_format: VertexFormat::empty(),
-        }
-    }
-}
-
-pub struct GraphicsPipelineDescriptorBuilder {
-    vert: Option<PathBuf>,
-    frag: Option<PathBuf>,
-    vertex_format: VertexFormat,
-}
-
-impl GraphicsPipelineDescriptorBuilder {
-    pub fn vertex_shader<P: AsRef<Path>>(mut self, path: P) -> Self {
-        self.vert = Some(path.as_ref().to_path_buf());
-        self
-    }
-
-    pub fn fragment_shader<P: AsRef<Path>>(mut self, path: P) -> Self {
-        self.frag = Some(path.as_ref().to_path_buf());
-        self
-    }
-
-    pub fn vertex_type<V>(mut self) -> Self
-    where
-        V: VertexDefinition,
-    {
-        self.vertex_format = V::format();
-        self
-    }
-
-    pub fn build(self) -> Result<GraphicsPipelineDescriptor, PipelineError> {
-        let vert = self
-            .vert
-            .ok_or(PipelineError::MissingArg("vertex shader"))?;
-        let frag = self
-            .frag
-            .ok_or(PipelineError::MissingArg("fragment shader"))?;
-        if self.vertex_format.is_empty() {
-            return Err(PipelineError::MissingArg("vertex description"));
-        }
-
-        Ok(GraphicsPipelineDescriptor {
-            vert,
-            frag,
-            vertex_format: self.vertex_format,
-        })
-    }
 }
 
 #[derive(Default)]
@@ -502,17 +481,19 @@ impl GraphicsPipelines {
     }
 }
 
+// TODO: Move this to the renderer?
+// Rename to get_precompiled_pipeline
 pub fn get_pipeline_for(
     renderer: &mut crate::Renderer,
     mesh: &crate::mesh::Mesh,
     mat: &crate::material::MaterialData,
-) -> Handle<GraphicsPipeline> {
+) -> Result<Handle<GraphicsPipeline>, PipelineError> {
     let vertex_format = renderer
         .get_resource(&mesh.vertex_buffer.handle())
         .expect("Invalid handle")
         .format
         .clone();
-    match mat {
+    let pipe = match mat {
         crate::material::MaterialData::PBR {
             normal_map,
             base_color_texture,
@@ -525,20 +506,20 @@ pub fn get_pipeline_for(
             let has_mr = metallic_roughness_texture.is_some();
             let desc = if has_nm && has_bc && has_mr && !has_vertex_colors {
                 GraphicsPipelineDescriptor {
-                    vert: PathBuf::from("vs_pbr_uv_tan.spv"),
-                    frag: PathBuf::from("fs_pbr_bc_mr_nm_tex.spv"),
+                    vert: ShaderDescriptor::precompiled("vs_pbr_uv_tan.spv")?,
+                    frag: ShaderDescriptor::precompiled("fs_pbr_bc_mr_nm_tex.spv")?,
                     vertex_format,
                 }
             } else if has_bc && !has_nm && !has_mr && !has_vertex_colors {
                 GraphicsPipelineDescriptor {
-                    vert: PathBuf::from("vs_pbr_uv.spv"),
-                    frag: PathBuf::from("fs_pbr_bc_tex.spv"),
+                    vert: ShaderDescriptor::precompiled("vs_pbr_uv.spv")?,
+                    frag: ShaderDescriptor::precompiled("fs_pbr_bc_tex.spv")?,
                     vertex_format,
                 }
             } else if !has_nm && !has_bc && !has_mr && !has_vertex_colors {
                 GraphicsPipelineDescriptor {
-                    vert: PathBuf::from("vs_pbr_base.spv"),
-                    frag: PathBuf::from("fs_pbr_base.spv"),
+                    vert: ShaderDescriptor::precompiled("vs_pbr_base.spv")?,
+                    frag: ShaderDescriptor::precompiled("fs_pbr_base.spv")?,
                     vertex_format,
                 }
             } else {
@@ -550,5 +531,7 @@ pub fn get_pipeline_for(
                 .expect("Failed to create pipeline")
         }
         m => todo!("No support for this material yet {:?}", m),
-    }
+    };
+
+    Ok(pipe)
 }

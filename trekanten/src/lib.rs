@@ -25,7 +25,6 @@ pub mod texture;
 pub mod uniform;
 pub mod util;
 pub mod vertex;
-pub mod window;
 
 pub use error::RenderError;
 pub use error::ResizeReason;

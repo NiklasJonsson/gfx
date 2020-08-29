@@ -14,7 +14,6 @@ vk-mem = "0.2.2"
 # Windowing
 ash-window = "0.4.1"
 raw-window-handle = "0.3.3"
-glfw = {version = "0.39.0", features = ["vulkan"]}
 
 # Math
 nalgebra-glm = "0.7.0"
@@ -30,3 +29,4 @@ thiserror = "1.0.20"
 inline-spirv = "0.1.1"
 reqwest = {version = "0.10.7", features = ["blocking"]}
 tobj = "2.0.2"
+glfw = {version = "0.39.0", features = ["vulkan"]}

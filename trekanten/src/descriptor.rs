@@ -117,21 +117,15 @@ impl DescriptorPool {
 
 pub struct DescriptorSetBuilder<'a> {
     renderer: &'a mut Renderer,
-    stage: vk::ShaderStageFlags,
     bindings: Vec<(vk::DescriptorSetLayoutBinding, usize)>,
     buffer_infos: Vec<[vk::DescriptorBufferInfo; MAX_FRAMES_IN_FLIGHT]>,
     image_infos: Vec<vk::DescriptorImageInfo>,
 }
 
 impl<'a> DescriptorSetBuilder<'a> {
-    fn new(renderer: &'a mut Renderer, stage: ShaderStage) -> Self {
-        let stage = match stage {
-            ShaderStage::Vertex => vk::ShaderStageFlags::VERTEX,
-            ShaderStage::Fragment => vk::ShaderStageFlags::FRAGMENT,
-        };
+    fn new(renderer: &'a mut Renderer) -> Self {
         Self {
             renderer,
-            stage,
             bindings: Vec::new(),
             buffer_infos: Vec::new(),
             image_infos: Vec::new(),
@@ -140,7 +134,12 @@ impl<'a> DescriptorSetBuilder<'a> {
 }
 
 impl<'a> DescriptorSetBuilder<'a> {
-    fn add_binding(&mut self, ty: vk::DescriptorType, binding: u32) {
+    fn add_binding(
+        &mut self,
+        ty: vk::DescriptorType,
+        binding: u32,
+        stage_flags: vk::ShaderStageFlags,
+    ) {
         let idx = if let vk::DescriptorType::UNIFORM_BUFFER = ty {
             self.buffer_infos.len()
         } else {
@@ -152,15 +151,24 @@ impl<'a> DescriptorSetBuilder<'a> {
                 binding,
                 descriptor_type: ty,
                 descriptor_count: 1,
-                stage_flags: self.stage,
+                stage_flags,
                 ..Default::default()
             },
             idx,
         ));
     }
 
-    pub fn add_buffer(mut self, buf_h: &BufferHandle<UniformBuffer>, binding: u32) -> Self {
-        self.add_binding(vk::DescriptorType::UNIFORM_BUFFER, binding);
+    pub fn add_buffer(
+        mut self,
+        buf_h: &BufferHandle<UniformBuffer>,
+        binding: u32,
+        stage: ShaderStage,
+    ) -> Self {
+        self.add_binding(
+            vk::DescriptorType::UNIFORM_BUFFER,
+            binding,
+            vk::ShaderStageFlags::from(stage),
+        );
 
         let [buf0, buf1] = self
             .renderer
@@ -182,8 +190,17 @@ impl<'a> DescriptorSetBuilder<'a> {
         self
     }
 
-    pub fn add_texture(mut self, tex_h: &Handle<Texture>, binding: u32) -> Self {
-        self.add_binding(vk::DescriptorType::COMBINED_IMAGE_SAMPLER, binding);
+    pub fn add_texture(
+        mut self,
+        tex_h: &Handle<Texture>,
+        binding: u32,
+        stage: ShaderStage,
+    ) -> Self {
+        self.add_binding(
+            vk::DescriptorType::COMBINED_IMAGE_SAMPLER,
+            binding,
+            vk::ShaderStageFlags::from(stage),
+        );
 
         let tex = self
             .renderer
@@ -232,8 +249,8 @@ impl DescriptorSet {
         Self { vk_descriptor_set }
     }
 
-    pub fn builder(renderer: &mut crate::Renderer, stage: ShaderStage) -> DescriptorSetBuilder {
-        DescriptorSetBuilder::new(renderer, stage)
+    pub fn builder(renderer: &mut crate::Renderer) -> DescriptorSetBuilder {
+        DescriptorSetBuilder::new(renderer)
     }
 
     fn write_buffer(

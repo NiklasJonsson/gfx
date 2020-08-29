@@ -2,15 +2,102 @@ use glfw::{Action, Key};
 
 use ash::vk;
 
+use std::path::PathBuf;
+
 use nalgebra_glm as glm;
 
+use trekanten::descriptor::DescriptorSet;
 use trekanten::mesh;
 use trekanten::pipeline;
+use trekanten::pipeline::ShaderDescriptor;
+use trekanten::pipeline::ShaderStage;
 use trekanten::texture;
 use trekanten::uniform;
-use trekanten::window::Window;
+use trekanten::util;
+use trekanten::vertex::VertexDefinition;
+use trekanten::BufferHandle;
 use trekanten::Handle;
 use trekanten::ResourceManager;
+
+use std::time::Duration;
+
+const WINDOW_HEIGHT: u32 = 300;
+const WINDOW_WIDTH: u32 = 300;
+const WINDOW_TITLE: &str = "Trekanten";
+
+type GlfwWindowEvents = std::sync::mpsc::Receiver<(f64, glfw::WindowEvent)>;
+
+struct GlfwWindow {
+    pub glfw: glfw::Glfw,
+    pub window: glfw::Window,
+    pub events: GlfwWindowEvents,
+    frame_times: [std::time::Duration; 10],
+    frame_time_idx: usize,
+}
+
+impl GlfwWindow {
+    pub fn new() -> Self {
+        let mut glfw = glfw::init(glfw::FAIL_ON_ERRORS).expect("Failed to init glfw");
+        assert!(glfw.vulkan_supported(), "No vulkan!");
+
+        glfw.window_hint(glfw::WindowHint::ClientApi(glfw::ClientApiHint::NoApi));
+
+        let (mut window, events) = glfw
+            .create_window(
+                WINDOW_WIDTH,
+                WINDOW_HEIGHT,
+                WINDOW_TITLE,
+                glfw::WindowMode::Windowed,
+            )
+            .expect("Failed to create GLFW window.");
+
+        window.set_key_polling(true);
+
+        Self {
+            glfw,
+            window,
+            events,
+            frame_times: [std::time::Duration::default(); 10],
+            frame_time_idx: 0,
+        }
+    }
+
+    pub fn set_frame_ms(&mut self, time: Duration) {
+        self.frame_times[self.frame_time_idx] = time;
+
+        if self.frame_time_idx == self.frame_times.len() - 1 {
+            let avg = self
+                .frame_times
+                .iter()
+                .fold(Duration::from_secs(0), |acc, &t| acc + t)
+                / self.frame_times.len() as u32;
+            let s = format!(
+                "{} (FPS: {:.2}, {:.2} ms)",
+                WINDOW_TITLE,
+                1.0 / avg.as_secs_f32(),
+                1000.0 * avg.as_secs_f32()
+            );
+            self.window.set_title(&s);
+            self.frame_time_idx = 0;
+        } else {
+            self.frame_time_idx += 1;
+        }
+    }
+
+    fn extents(&self) -> util::Extent2D {
+        let (w, h) = self.window.get_framebuffer_size();
+        util::Extent2D {
+            width: w as u32,
+            height: h as u32,
+        }
+    }
+}
+
+unsafe impl raw_window_handle::HasRawWindowHandle for GlfwWindow {
+    fn raw_window_handle(&self) -> raw_window_handle::RawWindowHandle {
+        self.window.raw_window_handle()
+    }
+}
 
 #[repr(C, packed)]
 struct Vertex {
@@ -98,6 +185,19 @@ fn load_url(dir: &str, target: &str) -> std::io::Cursor<Vec<u8>> {
 const OBJ_URL: &str = "https://vulkan-tutorial.com/resources/viking_room.obj";
 const TEX_URL: &str = "https://vulkan-tutorial.com/resources/viking_room.png";
 
+static RAW_VERT_SPV: &'static [u32] = inline_spirv::include_spirv!(
+    "examples/shaders/shader.vert.glsl",
+    vert,
+    glsl,
+    entry = "main"
+);
+static RAW_FRAG_SPV: &'static [u32] = inline_spirv::include_spirv!(
+    "examples/shaders/shader.frag.glsl",
+    frag,
+    glsl,
+    entry = "main"
+);
+
 fn load_viking_house() -> (Vec<Vertex>, Vec<u32>) {
     let mut cursor = load_url("models", OBJ_URL);
 
@@ -134,9 +234,6 @@ fn load_viking_house() -> (Vec<Vertex>, Vec<u32>) {
     (vertices, indices)
 }
 
-// TODO:
-// * Handle window requested resize
-// * Wait while minimized
 fn handle_window_event(window: &mut glfw::Window, event: glfw::WindowEvent) {
     match event {
         glfw::WindowEvent::Key(Key::Escape, _, Action::Press, _) => window.set_should_close(true),
@@ -172,7 +269,7 @@ fn main() -> Result<(), trekanten::RenderError> {
 
     let (vertices, indices) = load_viking_house();
 
-    let mut window = trekanten::window::GlfwWindow::new();
+    let mut window = GlfwWindow::new();
     let mut renderer = trekanten::Renderer::new(&window, window.extents())?;
 
     let vertex_buffer_descriptor = mesh::VertexBufferDescriptor::from_slice(&vertices);
@@ -185,12 +282,13 @@ fn main() -> Result<(), trekanten::RenderError> {
         .create_resource(index_buffer_descriptor)
         .expect("Failed to create index buffer");
 
-    let pipeline_descriptor = pipeline::GraphicsPipelineDescriptor::builder()
-        .vertex_shader("vert.spv")
-        .fragment_shader("frag.spv")
-        .vertex_type::<Vertex>()
-        .build()
-        .expect("Failed to create graphics pipeline desc");
+    let vert = ShaderDescriptor::FromRawSpirv(RAW_VERT_SPV.to_vec());
+    let frag = ShaderDescriptor::FromRawSpirv(RAW_FRAG_SPV.to_vec());
+    let pipeline_descriptor = pipeline::GraphicsPipelineDescriptor {
+        vert,
+        frag,
+        vertex_format: Vertex::format(),
+    };
 
     let gfx_pipeline_handle = renderer
         .create_resource(pipeline_descriptor)
@@ -203,19 +301,22 @@ fn main() -> Result<(), trekanten::RenderError> {
         .create_resource(uniform_buffer_desc)
         .expect("Failed to create uniform buffer");
 
+    let uniform_buffer_handle =
+        BufferHandle::from_typed_buffer::<UniformBufferObject>(uniform_buffer_handle, 0, 1);
+
     let _ = load_url("textures", TEX_URL);
     let tex_path = get_fname("textures", TEX_URL);
     let texture_handle = renderer
-        .create_resource(texture::TextureDescriptor::new(tex_path.into()))
+        .create_resource(texture::TextureDescriptor::new(
+            tex_path.into(),
+            util::Format::RGBA_SRGB,
+        ))
         .expect("Failed to create texture");
 
-    let desc_set_handle = renderer
-        .create_descriptor_set(
-            &gfx_pipeline_handle,
-            &uniform_buffer_handle,
-            &texture_handle,
-        )
-        .expect("Failed to create descriptor set");
+    let desc_set_handle = DescriptorSet::builder(&mut renderer)
+        .add_buffer(&uniform_buffer_handle, 0, ShaderStage::Vertex)
+        .add_texture(&texture_handle, 1, ShaderStage::Fragment)
+        .build();
 
     let start = std::time::Instant::now();
     let mut last = start;
@@ -265,9 +366,9 @@ fn main() -> Result<(), trekanten::RenderError> {
             .new_command_buffer()?
             .begin_render_pass(render_pass, framebuffer, extent)
             .bind_graphics_pipeline(&gfx_pipeline)
-            .bind_descriptor_set(&desc_set, &gfx_pipeline)
-            .bind_index_buffer(&index_buffer)
-            .bind_vertex_buffer(&vertex_buffer)
+            .bind_descriptor_set(0, &desc_set, &gfx_pipeline)
+            .bind_index_buffer(&index_buffer, 0)
+            .bind_vertex_buffer(&vertex_buffer, 0)
             .draw_indexed(indices.len() as u32)
             .end_render_pass()
             .end()?;

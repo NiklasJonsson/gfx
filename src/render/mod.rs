@@ -116,23 +116,36 @@ fn create_material_descriptor_set(
             metallic_roughness_texture,
             ..
         } => {
-            let mut desc_set_builder = descriptor::DescriptorSet::builder(
-                renderer,
+            let mut desc_set_builder = descriptor::DescriptorSet::builder(renderer);
+
+            desc_set_builder = desc_set_builder.add_buffer(
+                &material_uniforms,
+                0,
                 trekanten::pipeline::ShaderStage::Fragment,
             );
 
-            desc_set_builder = desc_set_builder.add_buffer(&material_uniforms, 0);
-
             if let Some(bct) = &base_color_texture {
-                desc_set_builder = desc_set_builder.add_texture(&bct.handle, 1);
+                desc_set_builder = desc_set_builder.add_texture(
+                    &bct.handle,
+                    1,
+                    trekanten::pipeline::ShaderStage::Fragment,
+                );
             }
 
             if let Some(mrt) = &metallic_roughness_texture {
-                desc_set_builder = desc_set_builder.add_texture(&mrt.handle, 2);
+                desc_set_builder = desc_set_builder.add_texture(
+                    &mrt.handle,
+                    2,
+                    trekanten::pipeline::ShaderStage::Fragment,
+                );
             }
 
             if let Some(nm) = &normal_map {
-                desc_set_builder = desc_set_builder.add_texture(&nm.tex.handle, 3);
+                desc_set_builder = desc_set_builder.add_texture(
+                    &nm.tex.handle,
+                    3,
+                    trekanten::pipeline::ShaderStage::Fragment,
+                );
             }
 
             desc_set_builder.build()
@@ -149,7 +162,8 @@ fn create_renderable(
 ) -> RenderableMaterial {
     log::trace!("Creating renderable: {:?}, {:?}", material, render_mode);
     let material_descriptor_set = create_material_descriptor_set(renderer, material);
-    let gfx_pipeline = trekanten::pipeline::get_pipeline_for(renderer, mesh, &material.data);
+    let gfx_pipeline = trekanten::pipeline::get_pipeline_for(renderer, mesh, &material.data)
+        .expect("Failed to get pipeline");
     RenderableMaterial {
         gfx_pipeline,
         material_descriptor_set,
