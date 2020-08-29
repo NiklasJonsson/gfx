@@ -27,6 +27,8 @@ pub enum DescriptorError {
 struct DescriptorPool {
     vk_device: VkDeviceHandle,
     vk_descriptor_pool: vk::DescriptorPool,
+    // These only exist here so that we can remove them all in the constructor
+    vk_descriptor_set_layouts: Vec<vk::DescriptorSetLayout>,
     // TODO: Keep track of buffers/images as well
     max_allocatable_sets: u32,
     n_allocated_sets: u32,
@@ -37,6 +39,13 @@ impl std::ops::Drop for DescriptorPool {
         unsafe {
             self.vk_device
                 .destroy_descriptor_pool(self.vk_descriptor_pool, None);
+        }
+
+        for dset_layout in self.vk_descriptor_set_layouts.iter() {
+            unsafe {
+                self.vk_device
+                    .destroy_descriptor_set_layout(*dset_layout, None);
+            }
         }
     }
 }
@@ -70,6 +79,7 @@ impl DescriptorPool {
         Ok(Self {
             vk_device: device.vk_device(),
             vk_descriptor_pool,
+            vk_descriptor_set_layouts: Vec::new(),
             max_allocatable_sets,
             n_allocated_sets: 0,
         })
@@ -77,14 +87,14 @@ impl DescriptorPool {
 
     fn alloc(
         &mut self,
-        layout: &vk::DescriptorSetLayout,
+        layout: vk::DescriptorSetLayout,
         count: u32,
     ) -> Result<Vec<DescriptorSet>, DescriptorError> {
         assert!(
             self.n_allocated_sets + count < self.max_allocatable_sets,
             "Out of descriptor sets, time to implement dynamic creation of pools!"
         );
-        let layouts = vec![*layout; count as usize];
+        let layouts = vec![layout; count as usize];
         let info = vk::DescriptorSetAllocateInfo::builder()
             .descriptor_pool(self.vk_descriptor_pool)
             .set_layouts(&layouts);
@@ -99,6 +109,7 @@ impl DescriptorPool {
         };
 
         self.n_allocated_sets += count;
+        self.vk_descriptor_set_layouts.push(layout);
 
         Ok(desc_sets)
     }
@@ -283,6 +294,7 @@ impl DescriptorSets {
         &mut self,
         bindings: &[vk::DescriptorSetLayoutBinding],
     ) -> Result<(Handle<DescriptorSet>, &[DescriptorSet; 2]), DescriptorError> {
+        // TODO: We should not create a descriptor set layout everytime we allocate. Hash bindings instead?
         let info = vk::DescriptorSetLayoutCreateInfo::builder().bindings(&bindings);
         let dset_layout = unsafe {
             self.vk_device
@@ -292,7 +304,7 @@ impl DescriptorSets {
 
         let mut desc_sets = self
             .descriptor_pool
-            .alloc(&dset_layout, MAX_FRAMES_IN_FLIGHT as u32)?;
+            .alloc(dset_layout, MAX_FRAMES_IN_FLIGHT as u32)?;
         let set0 = desc_sets.remove(0);
         let set1 = desc_sets.remove(0);
         let handle = self.storage.add([set0, set1]);
@@ -300,6 +312,7 @@ impl DescriptorSets {
             .storage
             .get_all(&handle)
             .expect("Descriptor sets that we just added are missing...");
+
         Ok((handle, sets))
     }
 

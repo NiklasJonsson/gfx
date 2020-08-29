@@ -296,8 +296,12 @@ pub fn draw_frame(world: &mut World, renderer: &mut Renderer) {
             view: view_matrix.into(),
             proj: get_proj_matrix(renderer.aspect_ratio()).into(),
         };
-        renderer.update_uniform(light_buffer, &lighting_data).expect("Failed to update uniform");
-        renderer.update_uniform(transforms_buffer, &transforms).expect("Failed to update uniform");
+        renderer
+            .update_uniform(light_buffer, &lighting_data)
+            .expect("Failed to update uniform");
+        renderer
+            .update_uniform(transforms_buffer, &transforms)
+            .expect("Failed to update uniform");
 
         let render_pass = renderer.render_pass();
         let extent = renderer.swapchain_extent();
