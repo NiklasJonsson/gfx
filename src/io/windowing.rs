@@ -1,5 +1,6 @@
 use super::input;
 
+use std::sync::Arc;
 use winit::event::ElementState;
 use winit::event::WindowEvent;
 
@@ -145,5 +146,48 @@ impl EventManager {
         };
 
         std::mem::replace(&mut self.action, new)
+    }
+}
+
+use std::sync::mpsc;
+
+// This function signature is copied from
+pub fn event_thread_work(
+    event_manager: &mut EventManager,
+    event_queue: Arc<super::EventQueue>,
+    command_queue: &super::CommandQueue,
+    winit_event: winit::event::Event<()>,
+    control_flow: &mut winit::event_loop::ControlFlow,
+) {
+    match command_queue.try_recv() {
+        Err(mpsc::TryRecvError::Empty) => (),
+        Err(mpsc::TryRecvError::Disconnected) => {
+            log::info!("Runner thread has disconnected, event thread exiting");
+            *control_flow = winit::event_loop::ControlFlow::Exit;
+            return;
+        }
+        Ok(super::Command::Quit) => {
+            log::info!("Runner thread send quit command, event thread exiting");
+            *control_flow = winit::event_loop::ControlFlow::Exit;
+            return;
+        }
+    }
+
+    // Since this is a separate thread, it is fine to wait
+    *control_flow = winit::event_loop::ControlFlow::Wait;
+
+    match event_manager.collect_event(winit_event) {
+        EventLoopControl::SendEvent(event) => {
+            log::debug!("Sending event on queue: {:?}", event);
+            event_queue.push(event)
+        }
+        EventLoopControl::Continue => (),
+        EventLoopControl::Quit => {
+            log::info!("Event loop thread received quit");
+            log::info!("Sending {:?} on event queue", Event::Quit);
+            event_queue.push(Event::Quit);
+            log::info!("Event loop thread exiting");
+            *control_flow = winit::event_loop::ControlFlow::Exit;
+        }
     }
 }

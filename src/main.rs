@@ -380,6 +380,8 @@ fn main() {
     let event_queue = Arc::new(io::EventQueue::new());
     let event_queue2 = Arc::clone(&event_queue);
 
+    let (send, recv) = std::sync::mpsc::channel();
+
     // Thread runs the app while main takes the event loop
     // As we don't keep the join handle, this is detached from us. Still, it will be destroyed when we exit as we are the main thread.
     std::thread::spawn(move || {
@@ -390,27 +392,20 @@ fn main() {
             }
             Err(e) => log::error!("Failed to create renderer: {}", e),
         }
+        if let Err(e) = send.send(io::Command::Quit) {
+            log::error!("Failed to send quit command to event thread: {}", e);
+        }
         log::info!("Runner thread exiting");
     });
 
     let mut event_manager = io::windowing::EventManager::new();
     event_loop.run(move |winit_event, _, control_flow| {
-        // Since this is a separate thread, it is fine to wait
-        *control_flow = winit::event_loop::ControlFlow::Wait;
-
-        match event_manager.collect_event(winit_event) {
-            io::windowing::EventLoopControl::SendEvent(event) => {
-                log::debug!("Sending event on queue: {:?}", event);
-                event_queue.push(event)
-            }
-            io::windowing::EventLoopControl::Continue => (),
-            io::windowing::EventLoopControl::Quit => {
-                log::info!("Event loop thread received quit");
-                log::info!("Sending {:?} on event queue", io::windowing::Event::Quit);
-                event_queue.push(io::windowing::Event::Quit);
-                log::info!("Event loop thread exiting");
-                *control_flow = winit::event_loop::ControlFlow::Exit;
-            }
-        }
+        io::windowing::event_thread_work(
+            &mut event_manager,
+            Arc::clone(&event_queue),
+            &recv,
+            winit_event,
+            control_flow,
+        );
     });
 }

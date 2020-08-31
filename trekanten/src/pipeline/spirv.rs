@@ -125,7 +125,6 @@ pub fn parse_spirv(spv_data: &[u32]) -> Result<ReflectionData, SpirvError> {
     let pc_blocks = module
         .enumerate_push_constant_blocks(None)
         .map_err(SpirvError::Parsing)?;
-    let shader_stage = map_shader_stage_flags(&module.get_shader_stage());
 
     let mut push_constants = Vec::with_capacity(pc_blocks.len());
     for pc_block in pc_blocks.iter() {
