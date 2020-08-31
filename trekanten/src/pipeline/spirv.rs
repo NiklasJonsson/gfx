@@ -6,34 +6,24 @@ use spirv_reflect::types::descriptor::ReflectDescriptorType;
 use spirv_reflect::types::variable::ReflectShaderStageFlags;
 use spirv_reflect::ShaderModule;
 
-#[derive(Debug)]
-pub struct DescriptorSetLayoutData {
-    pub set_idx: usize,
-    pub bindings: Vec<vk::DescriptorSetLayoutBinding>,
+#[derive(Debug, Default)]
+pub struct ReflectionData {
+    pub desc_layouts: Vec<DescriptorSetLayoutData>,
+    pub push_constants: Vec<vk::PushConstantRange>,
 }
 
-#[derive(Debug)]
-pub struct DescriptorSetLayouts {
-    layouts: Vec<DescriptorSetLayoutData>,
-}
-
-impl DescriptorSetLayouts {
+impl ReflectionData {
     pub fn new() -> Self {
         Self {
-            layouts: Vec::new(),
+            desc_layouts: Vec::new(),
+            push_constants: Vec::new(),
         }
     }
 
-    pub fn with(layouts: Vec<DescriptorSetLayoutData>) -> Self {
-        Self { layouts }
-    }
-
-    pub fn append(&mut self, other: DescriptorSetLayouts) {
-        dbg!("Before append", &self);
-        dbg!("Before append", &other);
-        for mut ol in other.layouts.into_iter() {
+    pub fn merge_layouts(&mut self, other: Vec<DescriptorSetLayoutData>) {
+        for mut ol in other.into_iter() {
             let mut found = false;
-            for l in self.layouts.iter_mut() {
+            for l in self.desc_layouts.iter_mut() {
                 if ol.set_idx == l.set_idx {
                     l.bindings.append(&mut ol.bindings);
                     found = true;
@@ -42,20 +32,38 @@ impl DescriptorSetLayouts {
             }
 
             if !found {
-                self.layouts.push(ol);
+                self.desc_layouts.push(ol);
+            }
+        }
+    }
+
+    fn merge_push_constants(&mut self, mut constants: Vec<vk::PushConstantRange>) {
+        for pc_range in self.push_constants.iter() {
+            for incoming in constants.iter() {
+                if pc_range.offset + pc_range.size > incoming.offset {
+                    log::warn!("Found overlapping push constant range");
+                    log::warn!("{:?} ends after {:?} begins", pc_range, incoming);
+                }
             }
         }
 
-        dbg!("After append", self);
+        self.push_constants.append(&mut constants);
     }
 
-    pub fn layouts(&self) -> impl Iterator<Item = &DescriptorSetLayoutData> {
-        self.layouts.iter()
+    pub fn merge(&mut self, other: ReflectionData) {
+        let Self {
+            desc_layouts,
+            push_constants,
+        } = other;
+        self.merge_layouts(desc_layouts);
+        self.merge_push_constants(push_constants);
     }
+}
 
-    pub fn len(&self) -> usize {
-        self.layouts.len()
-    }
+#[derive(Debug)]
+pub struct DescriptorSetLayoutData {
+    pub set_idx: usize,
+    pub bindings: Vec<vk::DescriptorSetLayoutBinding>,
 }
 
 #[derive(Debug, Error)]
@@ -82,13 +90,13 @@ fn map_descriptor_type(refl_desc_ty: &ReflectDescriptorType) -> vk::DescriptorTy
     }
 }
 
-pub fn parse_descriptor_sets(spv_data: &[u32]) -> Result<DescriptorSetLayouts, SpirvError> {
+pub fn parse_spirv(spv_data: &[u32]) -> Result<ReflectionData, SpirvError> {
     let module = ShaderModule::load_u32_data(spv_data).map_err(SpirvError::Loading)?;
     let desc_sets = module
         .enumerate_descriptor_sets(None)
         .map_err(SpirvError::Parsing)?;
-    let shader_stage = map_shader_stage_flags(&module.get_shader_stage());
-    let mut ret = Vec::with_capacity(desc_sets.len());
+    let stage_flags = map_shader_stage_flags(&module.get_shader_stage());
+    let mut desc_layouts = Vec::with_capacity(desc_sets.len());
     for refl_desc_set in desc_sets.iter() {
         let set_idx = refl_desc_set.set;
         let bindings: Vec<vk::DescriptorSetLayoutBinding> = refl_desc_set
@@ -98,7 +106,7 @@ pub fn parse_descriptor_sets(spv_data: &[u32]) -> Result<DescriptorSetLayouts, S
                 binding: refl_binding.binding,
                 descriptor_type: map_descriptor_type(&refl_binding.descriptor_type),
                 descriptor_count: 1,
-                stage_flags: shader_stage,
+                stage_flags,
                 ..Default::default()
             })
             .collect();
@@ -108,13 +116,34 @@ pub fn parse_descriptor_sets(spv_data: &[u32]) -> Result<DescriptorSetLayouts, S
             log::trace!("\t{:?}", b);
         }
 
-        ret.push(DescriptorSetLayoutData {
+        desc_layouts.push(DescriptorSetLayoutData {
             set_idx: set_idx as usize,
             bindings,
         })
     }
 
-    Ok(DescriptorSetLayouts::with(ret))
+    let pc_blocks = module
+        .enumerate_push_constant_blocks(None)
+        .map_err(SpirvError::Parsing)?;
+    let shader_stage = map_shader_stage_flags(&module.get_shader_stage());
+
+    let mut push_constants = Vec::with_capacity(pc_blocks.len());
+    for pc_block in pc_blocks.iter() {
+        log::trace!("Found push constant block: {:#?}", pc_block);
+        assert_eq!(pc_block.size, pc_block.padded_size);
+        assert_eq!(pc_block.offset, pc_block.absolute_offset);
+
+        push_constants.push(vk::PushConstantRange {
+            stage_flags,
+            offset: pc_block.offset,
+            size: pc_block.size,
+        });
+    }
+
+    Ok(ReflectionData {
+        desc_layouts,
+        push_constants,
+    })
 }
 
 #[cfg(test)]
@@ -151,13 +180,37 @@ mod tests {
     ",
         frag
     );
+
+    static PUSH_CONSTANT_SPV_FRAG: &[u32] = inline_spirv::inline_spirv!(
+        r"
+        #version 450
+        #extension GL_ARB_separate_shader_objects : enable
+
+        layout(push_constant) uniform Model {
+            mat4 model;
+            mat4 model_it; // inverse transpose of model matrix
+        } model_ubo;
+
+        layout(location = 0) in vec3 fragColor;
+        layout(location = 1) in vec2 fragTexCoord;
+
+        layout(location = 0) out vec4 outColor;
+
+        void main() {
+            outColor = model_ubo.model * vec4(fragColor, 1.0) + model_ubo.model_it * vec4(fragTexCoord, 1.0, 0.0);
+        }
+    ",
+        frag
+    );
+
     use super::*;
 
     #[test]
     fn parse_vert_descriptor_set_layout() {
-        let res = parse_descriptor_sets(UBO_SPV_VERT)
-            .expect("Failed to parse!")
-            .layouts;
+        let refl_data = parse_spirv(UBO_SPV_VERT).expect("Failed to parse!");
+
+        assert_eq!(refl_data.push_constants.len(), 0);
+        let res = refl_data.desc_layouts;
         assert_eq!(res.len(), 1);
         assert_eq!(res[0].bindings.len(), 1);
         assert_eq!(res[0].set_idx, 0);
@@ -172,9 +225,10 @@ mod tests {
 
     #[test]
     fn parse_frag_descriptor_set_layout() {
-        let res = parse_descriptor_sets(UBO_SPV_FRAG)
-            .expect("Failed to parse!")
-            .layouts;
+        let refl_data = parse_spirv(UBO_SPV_FRAG).expect("Failed to parse!");
+
+        assert_eq!(refl_data.push_constants.len(), 0);
+        let res = refl_data.desc_layouts;
         assert_eq!(res.len(), 1);
         assert_eq!(res[0].bindings.len(), 1);
         assert_eq!(res[0].set_idx, 0);
@@ -191,11 +245,23 @@ mod tests {
     }
 
     #[test]
+    fn parse_frag_push_constant() {
+        let res = parse_spirv(PUSH_CONSTANT_SPV_FRAG).expect("Failed to parse!");
+        assert_eq!(res.desc_layouts.len(), 0);
+        assert_eq!(res.push_constants.len(), 1);
+
+        let pc0 = res.push_constants[0];
+        assert_eq!(pc0.offset, 0);
+        assert_eq!(pc0.size, 128);
+        assert_eq!(pc0.stage_flags, vk::ShaderStageFlags::FRAGMENT);
+    }
+
+    #[test]
     fn merge_descriptor_set_layout() {
-        let mut res = DescriptorSetLayouts::new();
-        res.append(parse_descriptor_sets(UBO_SPV_VERT).expect("Failed to parse!"));
-        res.append(parse_descriptor_sets(UBO_SPV_FRAG).expect("Failed to parse!"));
-        let layouts = res.layouts;
+        let mut res = ReflectionData::new();
+        res.merge(parse_spirv(UBO_SPV_VERT).expect("Failed to parse!"));
+        res.merge(parse_spirv(UBO_SPV_FRAG).expect("Failed to parse!"));
+        let layouts = res.desc_layouts;
         assert_eq!(layouts.len(), 1);
         let l = &layouts[0];
         assert_eq!(l.bindings.len(), 2);

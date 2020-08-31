@@ -12,12 +12,13 @@ use crate::device::HasVkDevice;
 use crate::device::VkDeviceHandle;
 use crate::render_pass::RenderPass;
 use crate::resource::{CachedStorage, Handle, ResourceManager};
-use crate::spirv::{parse_descriptor_sets, DescriptorSetLayouts};
 use crate::util;
 use crate::vertex::VertexFormat;
 
 mod error;
 pub use error::PipelineError;
+mod spirv;
+use spirv::{parse_spirv, ReflectionData};
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct ShaderPath {
@@ -156,7 +157,7 @@ pub struct GraphicsPipelineBuilder<'a> {
     vertex_input: Option<VertexInputDescription<'a>>,
     viewport_extent: Option<util::Extent2D>,
     render_pass: Option<&'a RenderPass>,
-    refl_descriptor_set_layouts: DescriptorSetLayouts,
+    refl_data: ReflectionData,
 }
 
 impl<'a> GraphicsPipelineBuilder<'a> {
@@ -170,7 +171,7 @@ impl<'a> GraphicsPipelineBuilder<'a> {
             vertex_input: None,
             render_pass: None,
             viewport_extent: None,
-            refl_descriptor_set_layouts: DescriptorSetLayouts::new(),
+            refl_data: ReflectionData::new(),
         }
     }
 
@@ -198,9 +199,9 @@ impl<'a> GraphicsPipelineBuilder<'a> {
             .name(&self.entry_name)
             .build();
 
-        let new_desc_sets = parse_descriptor_sets(&raw.data).map_err(PipelineError::Reflection)?;
+        let new_refl_data = parse_spirv(&raw.data).map_err(PipelineError::Reflection)?;
 
-        self.refl_descriptor_set_layouts.append(new_desc_sets);
+        self.refl_data.merge(new_refl_data);
 
         Ok(PipelineCreationInfo {
             create_info,
@@ -293,8 +294,8 @@ impl<'a> GraphicsPipelineBuilder<'a> {
             .logic_op_enable(false)
             .attachments(&attachments);
 
-        let mut descriptor_set_layouts = Vec::with_capacity(self.refl_descriptor_set_layouts.len());
-        for dset in self.refl_descriptor_set_layouts.layouts() {
+        let mut descriptor_set_layouts = Vec::with_capacity(self.refl_data.desc_layouts.len());
+        for dset in self.refl_data.desc_layouts.iter() {
             let info = vk::DescriptorSetLayoutCreateInfo::builder().bindings(&dset.bindings);
 
             let dset_layout = unsafe {
@@ -306,16 +307,9 @@ impl<'a> GraphicsPipelineBuilder<'a> {
             descriptor_set_layouts.push(dset_layout);
         }
 
-        let pces = [vk::PushConstantRange {
-            stage_flags: vk::ShaderStageFlags::VERTEX,
-            offset: 0,
-            size: 128,
-        }];
-
-        // TODO: Parse this
         let pipeline_layout_info = vk::PipelineLayoutCreateInfo::builder()
             .set_layouts(&descriptor_set_layouts)
-            .push_constant_ranges(&pces);
+            .push_constant_ranges(&self.refl_data.push_constants);
 
         let pipeline_layout = unsafe {
             vk_device

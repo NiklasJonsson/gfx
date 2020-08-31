@@ -2,7 +2,7 @@ use ash::vk;
 
 use thiserror::Error;
 
-use crate::spirv::SpirvError;
+use super::spirv::SpirvError;
 
 #[derive(Debug, Error)]
 pub enum PipelineError {

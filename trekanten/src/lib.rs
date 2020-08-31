@@ -17,7 +17,6 @@ pub mod pipeline;
 mod queue;
 mod render_pass;
 pub mod resource;
-mod spirv;
 mod surface;
 mod swapchain;
 mod sync;
