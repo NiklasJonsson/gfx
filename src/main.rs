@@ -328,13 +328,12 @@ impl App {
             // Run input manager and escape catcher here
             control_systems.dispatch(&self.world);
 
-            if let GameState::Paused = *self.world.read_resource::<GameState>() {
-                continue;
+            let state = *self.world.read_resource::<GameState>();
+            if let GameState::Running = state {
+                engine_systems.dispatch(&self.world);
+                render::draw_frame(&mut self.world, &mut self.renderer);
             }
 
-            engine_systems.dispatch(&self.world);
-
-            render::draw_frame(&mut self.world, &mut self.renderer);
             self.post_frame();
 
             frame_count += 1;

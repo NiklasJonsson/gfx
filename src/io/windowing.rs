@@ -68,7 +68,6 @@ impl EventManager {
 
     pub fn collect_event<'a>(&mut self, event: winit::event::Event<'a, ()>) -> EventLoopControl {
         log::trace!("Received event: {:?}", event);
-        let mut resolve = false;
         use winit::event::Event as WinEvent;
         match event {
             WinEvent::WindowEvent {
@@ -77,17 +76,14 @@ impl EventManager {
                 WindowEvent::CloseRequested => {
                     log::debug!("Received CloseRequested window event");
                     self.update_action(Event::Quit);
-                    resolve = true;
                 }
                 WindowEvent::Focused(false) => {
                     log::debug!("Window lost focus, ignoring input");
                     self.update_action(Event::Unfocus);
-                    resolve = true;
                 }
                 WindowEvent::Focused(true) => {
                     log::debug!("Window gained focus, accepting input");
                     self.update_action(Event::Focus);
-                    resolve = true;
                 }
                 WindowEvent::KeyboardInput {
                     device_id, input, ..
@@ -119,25 +115,13 @@ impl EventManager {
                     log::trace!("Ignoring device event {:?}", inner_event);
                 }
             }
-            WinEvent::MainEventsCleared | WinEvent::LoopDestroyed => {
-                resolve = true;
+            WinEvent::LoopDestroyed => {
+                log::debug!("Received loop destroyed window event");
+                self.update_action(Event::Quit);
             }
             e => log::debug!("Ignoring high level event {:?}", e),
         };
 
-        if resolve {
-            let r = self.resolve();
-            match &r {
-                Event::Input(v) if v.is_empty() => EventLoopControl::Continue,
-                Event::Quit => EventLoopControl::Quit,
-                _ => EventLoopControl::SendEvent(r),
-            }
-        } else {
-            EventLoopControl::Continue
-        }
-    }
-
-    fn resolve(&mut self) -> Event {
         let new = match &self.action {
             Event::Input(_) => Event::Input(Vec::new()),
             Event::Quit => Event::Quit,
@@ -145,7 +129,12 @@ impl EventManager {
             Event::Unfocus => Event::Unfocus,
         };
 
-        std::mem::replace(&mut self.action, new)
+        let old = std::mem::replace(&mut self.action, new);
+        match old {
+            Event::Input(v) if v.is_empty() => EventLoopControl::Continue,
+            Event::Quit => EventLoopControl::Quit,
+            _ => EventLoopControl::SendEvent(old),
+        }
     }
 }
 

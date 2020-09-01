@@ -167,13 +167,18 @@ impl InputManager {
     }
 
     fn register_key_press(&mut self, key: KeyCode) -> bool {
+        log::debug!("Registering key press: {:?}", key);
         self.pressed_buttons.insert(key)
     }
 
     fn register_key_release(&mut self, key: KeyCode) {
+        log::debug!("Registering key release: {:?}", key);
         let existed = self.pressed_buttons.remove(&key);
         if !existed {
-            log::warn!("Button was released, but was not registered as pressed.");
+            log::warn!(
+                "Button was released, but was not registered as pressed: {:?}",
+                key
+            );
         }
     }
 }
