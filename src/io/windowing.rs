@@ -156,7 +156,7 @@ pub fn event_thread_work(
             return;
         }
         Ok(super::Command::Quit) => {
-            log::info!("Runner thread send quit command, event thread exiting");
+            log::info!("Runner thread sent quit command, event thread exiting");
             *control_flow = winit::event_loop::ControlFlow::Exit;
             return;
         }

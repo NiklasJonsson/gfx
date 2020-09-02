@@ -37,9 +37,8 @@ impl ActiveCamera {
 #[derive(Default)]
 pub struct FrameData {
     pub light_buffer: BufferHandle<UniformBuffer>,
-    pub light_set: Handle<descriptor::DescriptorSet>,
+    pub frame_set: Handle<descriptor::DescriptorSet>,
     pub transforms_buffer: BufferHandle<UniformBuffer>,
-    pub transforms_set: Handle<descriptor::DescriptorSet>,
     pub dummy_pipeline: Handle<trekanten::pipeline::GraphicsPipeline>,
 }
 
@@ -293,9 +292,8 @@ pub fn draw_frame(world: &mut World, renderer: &mut Renderer) {
     let mut cmd_buf = {
         let FrameData {
             light_buffer,
-            light_set,
+            frame_set,
             transforms_buffer,
-            transforms_set,
             dummy_pipeline,
         } = &*world.read_resource::<FrameData>();
 
@@ -320,12 +318,8 @@ pub fn draw_frame(world: &mut World, renderer: &mut Renderer) {
         let render_pass = renderer.render_pass();
         let extent = renderer.swapchain_extent();
         let framebuffer = renderer.framebuffer(&frame);
-        let transforms_set = renderer
-            .get_descriptor_set(&transforms_set)
-            .expect("Missing descriptor set");
-
-        let light_set = renderer
-            .get_descriptor_set(&light_set)
+        let frame_set = renderer
+            .get_descriptor_set(&frame_set)
             .expect("Missing descriptor set");
 
         let dummy_pipeline = renderer
@@ -336,8 +330,7 @@ pub fn draw_frame(world: &mut World, renderer: &mut Renderer) {
             .new_command_buffer()
             .expect("Failed to create new command buffer")
             .begin_render_pass(render_pass, framebuffer, extent)
-            .bind_descriptor_set(0, transforms_set, dummy_pipeline)
-            .bind_descriptor_set(2, light_set, dummy_pipeline)
+            .bind_descriptor_set(0, frame_set, dummy_pipeline)
     };
 
     cmd_buf = draw_entities(renderer, world, cmd_buf, render_mode, reload_shaders);

@@ -118,17 +118,13 @@ impl App {
         let transforms_buffer =
             BufferHandle::<UniformBuffer>::from_typed_buffer::<Transforms>(transforms_buffer, 0, 1);
 
-        // TODO: Put these in the same set
-        let transforms_set = DescriptorSet::builder(&mut self.renderer)
+        let frame_set = DescriptorSet::builder(&mut self.renderer)
             .add_buffer(
                 &transforms_buffer,
                 0,
                 trekanten::pipeline::ShaderStage::Vertex,
             )
-            .build();
-
-        let light_set = DescriptorSet::builder(&mut self.renderer)
-            .add_buffer(&light_buffer, 0, trekanten::pipeline::ShaderStage::Fragment)
+            .add_buffer(&light_buffer, 1, trekanten::pipeline::ShaderStage::Fragment)
             .build();
 
         let vertex_format = VertexFormat::builder()
@@ -143,13 +139,13 @@ impl App {
             vertex_format,
         };
 
+        log::trace!("Creating dummy pipeline");
         let dummy_pipeline = self.renderer.create_resource(desc).expect("FAIL");
 
         self.world.insert(render::FrameData {
             light_buffer,
-            light_set,
+            frame_set,
             transforms_buffer,
-            transforms_set,
             dummy_pipeline,
         });
     }

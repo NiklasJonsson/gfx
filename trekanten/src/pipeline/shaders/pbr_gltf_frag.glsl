@@ -5,7 +5,7 @@
 
 #define M_PI (3.1415926535897932384626433832795)
 
-layout(set = 2, binding = 0) uniform LightingData {
+layout(set = 0, binding = 1) uniform LightingData {
     vec4 light_pos;
     vec4 view_pos;
 } lighting_data;

@@ -90,6 +90,21 @@ fn map_descriptor_type(refl_desc_ty: &ReflectDescriptorType) -> vk::DescriptorTy
     }
 }
 
+pub fn log_bindings(bindings: &[spirv_reflect::types::descriptor::ReflectDescriptorBinding]) {
+    log::trace!("With {} bindings", bindings.len());
+    for b in bindings.iter() {
+        log::trace!("\tname: {}", b.name);
+        log::trace!("\tbinding: {}", b.binding);
+        log::trace!("\tset: {}", b.set);
+        log::trace!("\tdescriptor type: {:?}", b.descriptor_type);
+        log::trace!("\tresource type: {:?}", b.resource_type);
+        log::trace!(
+            "\ttype name: {:?}",
+            b.type_description.as_ref().map(|x| &x.type_name)
+        );
+    }
+}
+
 pub fn parse_spirv(spv_data: &[u32]) -> Result<ReflectionData, SpirvError> {
     let module = ShaderModule::load_u32_data(spv_data).map_err(SpirvError::Loading)?;
     let desc_sets = module
@@ -99,6 +114,9 @@ pub fn parse_spirv(spv_data: &[u32]) -> Result<ReflectionData, SpirvError> {
     let mut desc_layouts = Vec::with_capacity(desc_sets.len());
     for refl_desc_set in desc_sets.iter() {
         let set_idx = refl_desc_set.set;
+        log::trace!("Found descriptor set: {}", set_idx);
+        log_bindings(&refl_desc_set.bindings);
+
         let bindings: Vec<vk::DescriptorSetLayoutBinding> = refl_desc_set
             .bindings
             .iter()
@@ -110,8 +128,8 @@ pub fn parse_spirv(spv_data: &[u32]) -> Result<ReflectionData, SpirvError> {
                 ..Default::default()
             })
             .collect();
-        log::trace!("Found descriptor set: {}", set_idx);
-        log::trace!("With {} bindings", bindings.len());
+
+        log::trace!("Created bindings:");
         for b in &bindings {
             log::trace!("\t{:?}", b);
         }
@@ -128,7 +146,10 @@ pub fn parse_spirv(spv_data: &[u32]) -> Result<ReflectionData, SpirvError> {
 
     let mut push_constants = Vec::with_capacity(pc_blocks.len());
     for pc_block in pc_blocks.iter() {
-        log::trace!("Found push constant block: {:#?}", pc_block);
+        log::trace!("Found push constant block:");
+        log::trace!("\tname: {}", pc_block.name);
+        log::trace!("\toffset: {}", pc_block.offset);
+        log::trace!("\tsize: {}", pc_block.size);
         assert_eq!(pc_block.size, pc_block.padded_size);
         assert_eq!(pc_block.offset, pc_block.absolute_offset);
 

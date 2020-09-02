@@ -317,6 +317,8 @@ impl<'a> GraphicsPipelineBuilder<'a> {
                 .map_err(|e| PipelineError::VulkanObjectCreation(e, "Pipeline layout"))?
         };
 
+        log::trace!("Created pipeline layout {:?}", pipeline_layout);
+
         let depth_stencil = vk::PipelineDepthStencilStateCreateInfo::builder()
             .depth_test_enable(true)
             .depth_write_enable(true)
