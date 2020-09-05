@@ -638,7 +638,12 @@ pub fn load_asset(
     path: &Path,
 ) -> LoadedAsset {
     log::trace!("load gltf asset {}", path.display());
+    let start = std::time::Instant::now();
     let (gltf_doc, buffers, _images) = gltf::import(path).expect("Unable to import gltf");
+    log::trace!(
+        "gltf import took {} ms",
+        start.elapsed().as_secs_f32() * 1000.0
+    );
     assert_eq!(gltf_doc.scenes().len(), 1);
     let mut rec_ctx = RecGltfCtx {
         buffers,
@@ -670,6 +675,7 @@ pub fn load_asset(
     let cam_transform = get_cam_transform(gltf_doc, rec_ctx.world, camera_ent);
 
     upload_to_gpu(renderer, &mut rec_ctx);
+    log::trace!("gltf asset done");
 
     LoadedAsset {
         scene_roots: roots,
