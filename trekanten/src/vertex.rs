@@ -125,32 +125,5 @@ impl VertexFormatBuilder {
 }
 
 pub trait VertexDefinition {
-    fn binding_description() -> Vec<vk::VertexInputBindingDescription>;
-    fn attribute_description() -> Vec<vk::VertexInputAttributeDescription>;
-    fn format() -> VertexFormat {
-        let attribute_description = Self::attribute_description();
-        let size = attribute_description
-            .iter()
-            .fold(0, |acc, d| acc + util::Format::from(d.format).size());
-        VertexFormat {
-            binding_description: Self::binding_description(),
-            attribute_description,
-            size,
-        }
-    }
-}
-
-pub trait VertexSource {
-    fn binding_description(&self) -> Vec<vk::VertexInputBindingDescription>;
-    fn attribute_description(&self) -> Vec<vk::VertexInputAttributeDescription>;
-}
-
-impl<V: VertexDefinition> VertexSource for Vec<V> {
-    fn binding_description(&self) -> Vec<vk::VertexInputBindingDescription> {
-        V::binding_description()
-    }
-
-    fn attribute_description(&self) -> Vec<vk::VertexInputAttributeDescription> {
-        V::attribute_description()
-    }
+    fn format() -> VertexFormat;
 }

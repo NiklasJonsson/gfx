@@ -1,9 +1,4 @@
 use glfw::{Action, Key};
-
-use ash::vk;
-
-use std::path::PathBuf;
-
 use nalgebra_glm as glm;
 
 use trekanten::descriptor::DescriptorSet;
@@ -107,35 +102,12 @@ struct Vertex {
 }
 
 impl trekanten::vertex::VertexDefinition for Vertex {
-    fn binding_description() -> Vec<vk::VertexInputBindingDescription> {
-        vec![vk::VertexInputBindingDescription {
-            binding: 0,
-            stride: std::mem::size_of::<Vertex>() as u32,
-            input_rate: vk::VertexInputRate::VERTEX,
-        }]
-    }
-
-    fn attribute_description() -> Vec<vk::VertexInputAttributeDescription> {
-        vec![
-            vk::VertexInputAttributeDescription {
-                binding: 0,
-                location: 0,
-                format: vk::Format::R32G32B32_SFLOAT,
-                offset: memoffset::offset_of!(Vertex, pos) as u32,
-            },
-            vk::VertexInputAttributeDescription {
-                binding: 0,
-                location: 1,
-                format: vk::Format::R32G32B32_SFLOAT,
-                offset: memoffset::offset_of!(Vertex, col) as u32,
-            },
-            vk::VertexInputAttributeDescription {
-                binding: 0,
-                location: 2,
-                format: vk::Format::R32G32_SFLOAT,
-                offset: memoffset::offset_of!(Vertex, tex_coord) as u32,
-            },
-        ]
+    fn format() -> trekanten::vertex::VertexFormat {
+        trekanten::vertex::VertexFormat::builder()
+            .add_attribute(util::Format::FLOAT3)
+            .add_attribute(util::Format::FLOAT3)
+            .add_attribute(util::Format::FLOAT2)
+            .build()
     }
 }
 
