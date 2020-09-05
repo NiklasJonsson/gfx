@@ -22,12 +22,14 @@ use trekanten::Handle;
 
 use nalgebra_glm as glm;
 // Crate gltf
+#[derive(Debug)]
 struct GltfVertexBuffer {
     data: Vec<u8>,
     format: VertexFormat,
 }
 
 // TODO: More u32 below
+#[derive(Debug)]
 struct GltfIndexBufferHandle {
     start: usize,
     size: usize,
@@ -44,6 +46,7 @@ impl GltfIndexBufferHandle {
     }
 }
 
+#[derive(Debug)]
 struct GltfVertexBufferHandle {
     buf_idx: usize,
     start_vertex: u32,
@@ -62,6 +65,7 @@ impl GltfVertexBufferHandle {
     }
 }
 
+#[derive(Debug)]
 struct GltfMaterialBufferHandle {
     idx: usize,
 }
@@ -77,6 +81,7 @@ impl GltfMaterialBufferHandle {
     }
 }
 
+#[derive(Debug)]
 struct GltfMaterial {
     material: GltfMaterialBufferHandle,
     normal_map: Option<GltfNormalMap>,
@@ -93,11 +98,13 @@ struct GltfModel {
     vertex: GltfVertexBufferHandle,
 }
 
+#[derive(Debug)]
 struct GltfTexture {
     path: PathBuf,
     format: util::Format,
 }
 
+#[derive(Debug)]
 struct GltfNormalMap {
     tex: GltfTexture,
     scale: f32,
@@ -276,6 +283,7 @@ fn interleave_vertex_buffer<'a>(
     let mut data = Vec::new();
     let has_vertex_colors = colors.is_some();
 
+    // TODO: How to map this to shader layout?
     let it = positions.zip(normals);
     match (colors, tex_coords, tangents) {
         (None, Some(tex_coords), Some(tangents)) => {
@@ -495,16 +503,30 @@ fn get_cam_transform(
     cam_transform
 }
 
+fn log_asset_upload<'a>(ctx: &RecGltfCtx<'a>) {
+    log::info!("Uploading gltf asset to gpu");
+    log::info!("# vertex_buffers: {}", ctx.vertex_buffers.len());
+    for (i, vb) in ctx.vertex_buffers.iter().enumerate() {
+        log::info!("vertex buffer {}:", i);
+        log::info!("format: {:#?}", vb.format);
+        log::info!(
+            "n vertices: {} ({} / {})",
+            vb.data.len() / vb.format.size() as usize,
+            vb.data.len(),
+            vb.format.size()
+        );
+    }
+    log::info!("index_buffer len: {}", ctx.all_index_buffers.len());
+    log::info!("# materials: {}", ctx.material_buffer.len());
+}
+
 fn upload_to_gpu<'a>(renderer: &mut trekanten::Renderer, ctx: &mut RecGltfCtx<'a>) {
     let mut meshes = ctx.world.write_storage::<Mesh>();
     let mut materials = ctx.world.write_storage::<Material>();
     let mut gltf_models = ctx.world.write_storage::<GltfModel>();
     let entities = ctx.world.read_resource::<EntitiesRes>();
 
-    log::info!("Uploading gltf asset to gpu");
-    log::info!("\t# vertex_buffers: {}", ctx.vertex_buffers.len());
-    log::info!("\tindex_buffer len: {}", ctx.all_index_buffers.len());
-    log::info!("\t# materials: {}", ctx.material_buffer.len());
+    log_asset_upload(ctx);
 
     let gpu_vert_buffers: Vec<Handle<VertexBuffer>> = ctx
         .vertex_buffers

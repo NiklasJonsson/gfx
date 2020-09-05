@@ -16,8 +16,10 @@ use crate::util;
 use crate::vertex::VertexFormat;
 
 mod error;
-pub use error::PipelineError;
+pub mod generated;
 mod spirv;
+
+pub use error::PipelineError;
 use spirv::{parse_spirv, ReflectionData};
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
@@ -392,7 +394,7 @@ pub enum ShaderDescriptor {
 }
 
 impl ShaderDescriptor {
-    pub fn crate_relative<P: AsRef<Path>>(p: P) -> io::Result<Self> {
+    pub fn cwd_relative<P: AsRef<Path>>(p: P) -> io::Result<Self> {
         let cd = std::env::current_dir()?;
         Ok(Self::FromPath(ShaderPath {
             abs_path: cd.join(p),
@@ -400,13 +402,9 @@ impl ShaderDescriptor {
     }
 
     pub fn precompiled<P: AsRef<Path>>(p: P) -> io::Result<Self> {
-        let p = PathBuf::new()
-            .join("trekanten")
-            .join("src")
-            .join("pipeline")
-            .join("shaders")
-            .join(p);
-        Self::crate_relative(p)
+        Ok(Self::FromPath(ShaderPath {
+            abs_path: PathBuf::new().join(p),
+        }))
     }
 }
 
@@ -477,7 +475,9 @@ impl GraphicsPipelines {
     }
 }
 
-// TODO: Move this to the renderer?
+// TODO:
+// * Move this to the renderer?
+// * This is "frontend" and should be separated
 // Rename to get_precompiled_pipeline
 pub fn get_pipeline_for(
     renderer: &mut crate::Renderer,
@@ -497,29 +497,23 @@ pub fn get_pipeline_for(
             has_vertex_colors,
             ..
         } => {
+            // TODO: Normal map does not infer tangents
             let has_nm = normal_map.is_some();
             let has_bc = base_color_texture.is_some();
             let has_mr = metallic_roughness_texture.is_some();
-            let desc = if has_nm && has_bc && has_mr && !has_vertex_colors {
-                GraphicsPipelineDescriptor {
-                    vert: ShaderDescriptor::precompiled("vs_pbr_uv_tan.spv")?,
-                    frag: ShaderDescriptor::precompiled("fs_pbr_bc_mr_nm_tex.spv")?,
-                    vertex_format,
-                }
-            } else if has_bc && !has_nm && !has_mr && !has_vertex_colors {
-                GraphicsPipelineDescriptor {
-                    vert: ShaderDescriptor::precompiled("vs_pbr_uv.spv")?,
-                    frag: ShaderDescriptor::precompiled("fs_pbr_bc_tex.spv")?,
-                    vertex_format,
-                }
-            } else if !has_nm && !has_bc && !has_mr && !has_vertex_colors {
-                GraphicsPipelineDescriptor {
-                    vert: ShaderDescriptor::precompiled("vs_pbr_base.spv")?,
-                    frag: ShaderDescriptor::precompiled("fs_pbr_base.spv")?,
-                    vertex_format,
-                }
-            } else {
-                unimplemented!("Support more shad   er variants!")
+            let def = generated::ShaderDefinition {
+                has_tex_coords: has_nm || has_bc || has_mr,
+                has_vertex_colors: *has_vertex_colors,
+                has_tangents: has_nm,
+                has_base_color_texture: has_bc,
+                has_metallic_roughness_texture: has_mr,
+                has_normal_map: has_nm,
+            };
+            let (vert, frag) = renderer.get_precompiled_shaders(&def);
+            let desc = GraphicsPipelineDescriptor {
+                vert: ShaderDescriptor::precompiled(vert)?,
+                frag: ShaderDescriptor::precompiled(frag)?,
+                vertex_format,
             };
 
             renderer

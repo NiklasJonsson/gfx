@@ -11,6 +11,7 @@ pub fn clamp<T: Ord>(v: T, min: T, max: T) -> T {
     std::cmp::max(min, std::cmp::min(v, max))
 }
 
+// TODO: Put some bounds on T
 pub fn as_byte_slice<T>(slice: &[T]) -> &[u8] {
     let ptr = slice.as_ptr() as *const u8;
     let size = std::mem::size_of::<T>() * slice.len();

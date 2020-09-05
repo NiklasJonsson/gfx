@@ -131,11 +131,11 @@ impl App {
             .add_attribute(util::Format::FLOAT3)
             .add_attribute(util::Format::FLOAT3)
             .build();
+
+        let (vert, frag) = self.renderer.get_default_precompiled();
         let desc = GraphicsPipelineDescriptor {
-            vert: ShaderDescriptor::precompiled("vs_pbr_base.spv")
-                .expect("Failed to get precompiled pipeline"),
-            frag: ShaderDescriptor::precompiled("fs_pbr_base.spv")
-                .expect("Failed to get precompiled pipeline"),
+            vert: ShaderDescriptor::precompiled(vert).expect("Failed to get precompiled pipeline"),
+            frag: ShaderDescriptor::precompiled(frag).expect("Failed to get precompiled pipeline"),
             vertex_format,
         };
 
