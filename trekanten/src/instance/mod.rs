@@ -101,35 +101,19 @@ pub fn choose_validation_layers(entry: &Entry) -> Vec<CString> {
     }
 }
 
-#[cfg(all(unix, not(target_os = "android"), not(target_os = "macos")))]
-fn required_window_extensions() -> Vec<&'static CStr> {
-    vec![
-        ash::extensions::khr::Surface::name(),
-        ash::extensions::khr::XlibSurface::name(),
-    ]
-}
-
-#[cfg(target_os = "macos")]
-fn required_window_extensions() -> Vec<&'static CStr> {
-    vec![
-        ash::extensions::khr::Surface::name(),
-        ash::extensions::mvk::MacOSSurface::name(),
-    ]
-}
-
-#[cfg(all(windows))]
-fn required_window_extensions() -> Vec<&'static CStr> {
-    vec![
-        ash::extensions::khr::Surface::name(),
-        ash::extensions::khr::Win32Surface::name(),
-    ]
-}
-
-fn choose_instance_extensions(entry: &Entry) -> Result<Vec<*const c_char>, InstanceError> {
+fn choose_instance_extensions<W: raw_window_handle::HasRawWindowHandle>(
+    entry: &Entry,
+    window: &W,
+) -> Result<Vec<*const c_char>, InstanceError> {
     let available = entry
         .enumerate_instance_extension_properties()
         .map_err(|e| InstanceError::InternalVulkan(e, "Instance extension enumeration"))?;
-    let mut required = required_window_extensions();
+    let mut required = ash_window::enumerate_required_extensions(window).map_err(|e| {
+        InstanceError::InternalVulkan(
+            e,
+            "Couldn't infer required window/surface extensions from window handle",
+        )
+    })?;
 
     if use_vk_validation() {
         required.push(ash::extensions::ext::DebugUtils::name());
@@ -144,7 +128,9 @@ fn choose_instance_extensions(entry: &Entry) -> Result<Vec<*const c_char>, Insta
 }
 
 impl Instance {
-    pub fn new() -> Result<Self, InstanceError> {
+    pub fn new<W: raw_window_handle::HasRawWindowHandle>(
+        window: &W,
+    ) -> Result<Self, InstanceError> {
         let entry = Entry::new().expect("Failed to create Entry!");
 
         let app_info = vk::ApplicationInfo {
@@ -152,7 +138,7 @@ impl Instance {
             ..Default::default()
         };
 
-        let extensions_ptrs = choose_instance_extensions(&entry)?;
+        let extensions_ptrs = choose_instance_extensions(&entry, window)?;
 
         let validation_layers = choose_validation_layers(&entry);
         let layers_ptrs = vec_cstring_to_raw(validation_layers);

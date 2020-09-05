@@ -171,7 +171,7 @@ impl Renderer {
     where
         W: raw_window_handle::HasRawWindowHandle,
     {
-        let instance = instance::Instance::new()?;
+        let instance = instance::Instance::new(window)?;
         let _debug_utils = util::vk_debug::DebugUtils::new(&instance)?;
         let surface = surface::Surface::new(&instance, window)?;
         let device = device::Device::new(&instance, &surface)?;
