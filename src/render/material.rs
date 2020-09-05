@@ -1,7 +1,7 @@
-use crate::mem::BufferHandle;
-use crate::resource::Handle;
-use crate::texture::Texture;
-use crate::uniform::UniformBuffer;
+use trekanten::texture::Texture;
+use trekanten::uniform::UniformBuffer;
+use trekanten::BufferHandle;
+use trekanten::Handle;
 
 #[derive(Debug, Clone)]
 pub struct TextureUse {

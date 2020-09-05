@@ -11,27 +11,15 @@ use crate::device::Device;
 use crate::device::HasVkDevice;
 use crate::device::VkDeviceHandle;
 use crate::render_pass::RenderPass;
-use crate::resource::{CachedStorage, Handle, ResourceManager};
+use crate::resource::{CachedStorage, Handle};
 use crate::util;
 use crate::vertex::VertexFormat;
 
 mod error;
-pub mod generated;
 mod spirv;
 
 pub use error::PipelineError;
 use spirv::{parse_spirv, ReflectionData};
-
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
-pub struct ShaderPath {
-    abs_path: PathBuf,
-}
-
-impl ShaderPath {
-    pub fn path(&self) -> &Path {
-        &self.abs_path
-    }
-}
 
 pub enum ShaderStage {
     Vertex,
@@ -51,9 +39,9 @@ struct RawShader {
     pub data: Vec<u32>,
 }
 
-fn read_shader(path: &ShaderPath) -> io::Result<RawShader> {
-    log::trace!("Reading shader from {}", path.path().display());
-    let mut file = File::open(path.path())?;
+fn read_shader(path: &Path) -> io::Result<RawShader> {
+    log::trace!("Reading shader from {}", path.display());
+    let mut file = File::open(path)?;
     let words = ash::util::read_spv(&mut file)?;
     Ok(RawShader { data: words })
 }
@@ -189,7 +177,7 @@ impl<'a> GraphicsPipelineBuilder<'a> {
                 RawShader { data: data.clone() }
             }
             ShaderDescriptor::FromPath(path) => {
-                log::trace!("from path \"{}\"", path.path().display());
+                log::trace!("from path \"{}\"", path.display());
                 read_shader(path)?
             }
         };
@@ -390,22 +378,7 @@ impl<'a> GraphicsPipelineBuilder<'a> {
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub enum ShaderDescriptor {
     FromRawSpirv(Vec<u32>),
-    FromPath(ShaderPath),
-}
-
-impl ShaderDescriptor {
-    pub fn cwd_relative<P: AsRef<Path>>(p: P) -> io::Result<Self> {
-        let cd = std::env::current_dir()?;
-        Ok(Self::FromPath(ShaderPath {
-            abs_path: cd.join(p),
-        }))
-    }
-
-    pub fn precompiled<P: AsRef<Path>>(p: P) -> io::Result<Self> {
-        Ok(Self::FromPath(ShaderPath {
-            abs_path: PathBuf::new().join(p),
-        }))
-    }
+    FromPath(PathBuf),
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
@@ -473,55 +446,4 @@ impl GraphicsPipelines {
     pub fn get(&self, h: &Handle<GraphicsPipeline>) -> Option<&GraphicsPipeline> {
         self.mat_storage.get(h)
     }
-}
-
-// TODO:
-// * Move this to the renderer?
-// * This is "frontend" and should be separated
-// Rename to get_precompiled_pipeline
-pub fn get_pipeline_for(
-    renderer: &mut crate::Renderer,
-    mesh: &crate::mesh::Mesh,
-    mat: &crate::material::MaterialData,
-) -> Result<Handle<GraphicsPipeline>, PipelineError> {
-    let vertex_format = renderer
-        .get_resource(&mesh.vertex_buffer.handle())
-        .expect("Invalid handle")
-        .format
-        .clone();
-    let pipe = match mat {
-        crate::material::MaterialData::PBR {
-            normal_map,
-            base_color_texture,
-            metallic_roughness_texture,
-            has_vertex_colors,
-            ..
-        } => {
-            // TODO: Normal map does not infer tangents
-            let has_nm = normal_map.is_some();
-            let has_bc = base_color_texture.is_some();
-            let has_mr = metallic_roughness_texture.is_some();
-            let def = generated::ShaderDefinition {
-                has_tex_coords: has_nm || has_bc || has_mr,
-                has_vertex_colors: *has_vertex_colors,
-                has_tangents: has_nm,
-                has_base_color_texture: has_bc,
-                has_metallic_roughness_texture: has_mr,
-                has_normal_map: has_nm,
-            };
-            let (vert, frag) = renderer.get_precompiled_shaders(&def);
-            let desc = GraphicsPipelineDescriptor {
-                vert: ShaderDescriptor::precompiled(vert)?,
-                frag: ShaderDescriptor::precompiled(frag)?,
-                vertex_format,
-            };
-
-            renderer
-                .create_resource(desc)
-                .expect("Failed to create pipeline")
-        }
-        m => todo!("No support for this material yet {:?}", m),
-    };
-
-    Ok(pipe)
 }

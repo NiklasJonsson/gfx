@@ -94,60 +94,7 @@ impl App {
             .insert(io::input::CurrentFrameExternalInputs(Vec::new()));
         self.world.insert(render::ActiveCamera::empty());
         self.world.insert(DeltaTime::zero());
-
-        // TODO: Move
-        use render::uniform::LightingData;
-        use render::uniform::Transforms;
-        use trekanten::descriptor::DescriptorSet;
-        use trekanten::pipeline::GraphicsPipelineDescriptor;
-        use trekanten::pipeline::ShaderDescriptor;
-        use trekanten::resource::ResourceManager;
-        use trekanten::uniform::UniformBuffer;
-        use trekanten::uniform::UniformBufferDescriptor;
-        use trekanten::util;
-        use trekanten::vertex::VertexFormat;
-        use trekanten::BufferHandle;
-
-        let desc = UniformBufferDescriptor::uninitialized::<LightingData>(1);
-        let light_buffer = self.renderer.create_resource(desc).expect("FAIL");
-        let light_buffer =
-            BufferHandle::<UniformBuffer>::from_typed_buffer::<LightingData>(light_buffer, 0, 1);
-
-        let desc = UniformBufferDescriptor::uninitialized::<Transforms>(1);
-        let transforms_buffer = self.renderer.create_resource(desc).expect("FAIL");
-        let transforms_buffer =
-            BufferHandle::<UniformBuffer>::from_typed_buffer::<Transforms>(transforms_buffer, 0, 1);
-
-        let frame_set = DescriptorSet::builder(&mut self.renderer)
-            .add_buffer(
-                &transforms_buffer,
-                0,
-                trekanten::pipeline::ShaderStage::Vertex,
-            )
-            .add_buffer(&light_buffer, 1, trekanten::pipeline::ShaderStage::Fragment)
-            .build();
-
-        let vertex_format = VertexFormat::builder()
-            .add_attribute(util::Format::FLOAT3)
-            .add_attribute(util::Format::FLOAT3)
-            .build();
-
-        let (vert, frag) = self.renderer.get_default_precompiled();
-        let desc = GraphicsPipelineDescriptor {
-            vert: ShaderDescriptor::precompiled(vert).expect("Failed to get precompiled pipeline"),
-            frag: ShaderDescriptor::precompiled(frag).expect("Failed to get precompiled pipeline"),
-            vertex_format,
-        };
-
-        log::trace!("Creating dummy pipeline");
-        let dummy_pipeline = self.renderer.create_resource(desc).expect("FAIL");
-
-        self.world.insert(render::FrameData {
-            light_buffer,
-            frame_set,
-            transforms_buffer,
-            dummy_pipeline,
-        });
+        render::setup_resources(&mut self.world, &mut self.renderer);
     }
 
     pub fn get_entity_with_marker<C>(w: &World) -> Entity

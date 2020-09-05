@@ -1,19 +1,28 @@
 use specs::world::EntitiesRes;
 use specs::Component;
 
+use std::path::PathBuf;
+
 use nalgebra_glm as glm;
 
 use specs::prelude::*;
 use specs::storage::StorageEntry;
 
 use trekanten::command;
-use trekanten::descriptor;
+use trekanten::descriptor::DescriptorSet;
+use trekanten::pipeline::{
+    GraphicsPipeline, GraphicsPipelineDescriptor, PipelineError, ShaderDescriptor,
+};
 use trekanten::resource::Handle;
 use trekanten::resource::ResourceManager;
-use trekanten::uniform::UniformBuffer;
+use trekanten::uniform::{UniformBuffer, UniformBufferDescriptor};
+use trekanten::util;
+use trekanten::vertex::VertexFormat;
 use trekanten::BufferHandle;
 use trekanten::Renderer;
 
+pub mod material;
+pub mod pipeline;
 pub mod uniform;
 
 use crate::camera::*;
@@ -37,9 +46,9 @@ impl ActiveCamera {
 #[derive(Default)]
 pub struct FrameData {
     pub light_buffer: BufferHandle<UniformBuffer>,
-    pub frame_set: Handle<descriptor::DescriptorSet>,
+    pub frame_set: Handle<DescriptorSet>,
     pub transforms_buffer: BufferHandle<UniformBuffer>,
-    pub dummy_pipeline: Handle<trekanten::pipeline::GraphicsPipeline>,
+    pub dummy_pipeline: Handle<GraphicsPipeline>,
 }
 
 fn get_view_data(world: &World) -> (glm::Mat4, Position) {
@@ -97,8 +106,8 @@ impl Into<Mesh> for trekanten::mesh::Mesh {
 #[derive(Component)]
 #[storage(VecStorage)]
 pub struct RenderableMaterial {
-    gfx_pipeline: Handle<trekanten::pipeline::GraphicsPipeline>,
-    material_descriptor_set: Handle<descriptor::DescriptorSet>,
+    gfx_pipeline: Handle<GraphicsPipeline>,
+    material_descriptor_set: Handle<DescriptorSet>,
     mode: RenderMode,
 }
 
@@ -106,16 +115,16 @@ pub struct RenderableMaterial {
 fn create_material_descriptor_set(
     renderer: &mut Renderer,
     material: &Material,
-) -> Handle<descriptor::DescriptorSet> {
+) -> Handle<DescriptorSet> {
     match &material.data {
-        trekanten::material::MaterialData::PBR {
+        material::MaterialData::PBR {
             material_uniforms,
             normal_map,
             base_color_texture,
             metallic_roughness_texture,
             ..
         } => {
-            let mut desc_set_builder = descriptor::DescriptorSet::builder(renderer);
+            let mut desc_set_builder = DescriptorSet::builder(renderer);
 
             desc_set_builder = desc_set_builder.add_buffer(
                 &material_uniforms,
@@ -153,16 +162,66 @@ fn create_material_descriptor_set(
     }
 }
 
+pub fn get_pipeline_for(
+    renderer: &mut Renderer,
+    world: &World,
+    mesh: &Mesh,
+    mat: &material::MaterialData,
+) -> Result<Handle<GraphicsPipeline>, PipelineError> {
+    let vertex_format = renderer
+        .get_resource(&mesh.vertex_buffer.handle())
+        .expect("Invalid handle")
+        .format
+        .clone();
+    let shaders = world.read_resource::<pipeline::PrecompiledShaders>();
+    let pipe = match mat {
+        material::MaterialData::PBR {
+            normal_map,
+            base_color_texture,
+            metallic_roughness_texture,
+            has_vertex_colors,
+            ..
+        } => {
+            // TODO: Normal map does not infer tangents at all times
+            let has_nm = normal_map.is_some();
+            let has_bc = base_color_texture.is_some();
+            let has_mr = metallic_roughness_texture.is_some();
+            let def = pipeline::ShaderDefinition {
+                has_tex_coords: has_nm || has_bc || has_mr,
+                has_vertex_colors: *has_vertex_colors,
+                has_tangents: has_nm,
+                has_base_color_texture: has_bc,
+                has_metallic_roughness_texture: has_mr,
+                has_normal_map: has_nm,
+            };
+            let (vert, frag) = (shaders.get_vert(&def), shaders.get_frag(&def));
+            let desc = GraphicsPipelineDescriptor {
+                vert: ShaderDescriptor::FromPath(PathBuf::from(vert)),
+                frag: ShaderDescriptor::FromPath(PathBuf::from(frag)),
+                vertex_format,
+            };
+
+            renderer
+                .create_resource(desc)
+                .expect("Failed to create pipeline")
+        }
+        m => todo!("No support for this material yet {:?}", m),
+    };
+
+    Ok(pipe)
+}
+
 fn create_renderable(
     renderer: &mut Renderer,
+    world: &World,
     mesh: &Mesh,
     material: &Material,
     render_mode: RenderMode,
 ) -> RenderableMaterial {
     log::trace!("Creating renderable: {:?}, {:?}", material, render_mode);
     let material_descriptor_set = create_material_descriptor_set(renderer, material);
-    let gfx_pipeline = trekanten::pipeline::get_pipeline_for(renderer, mesh, &material.data)
-        .expect("Failed to get pipeline");
+    let gfx_pipeline =
+        get_pipeline_for(renderer, world, mesh, &material.data).expect("Failed to get pipeline");
     RenderableMaterial {
         gfx_pipeline,
         material_descriptor_set,
@@ -234,7 +293,7 @@ fn draw_entities(
                     log::trace!("Renderable did not match render mode, creating new");
                     todo!("No support for render modes yet!")
                 /*
-                let rend = create_renderable(&renderer, mat, render_mode);
+                let rend = create_renderable(&renderer, world, mat, render_mode);
                 occ_entry.insert(rend)
                 */
                 } else {
@@ -261,7 +320,7 @@ fn draw_entities(
             }
             StorageEntry::Vacant(vac_entry) => {
                 log::trace!("No Renderable found, creating new");
-                let rend = create_renderable(renderer, mesh, mat, render_mode);
+                let rend = create_renderable(renderer, world, mesh, mat, render_mode);
                 let cmd_buf = draw_model(renderer, cmd_buf, &rend, mesh, mtx);
                 vac_entry.insert(rend);
                 cmd_buf
@@ -345,4 +404,57 @@ pub fn draw_frame(world: &mut World, renderer: &mut Renderer) {
     world
         .write_resource::<RenderSettings>()
         .reload_runtime_shaders = false;
+}
+
+pub fn setup_resources(world: &mut World, mut renderer: &mut Renderer) {
+    let shaders = pipeline::PrecompiledShaders::new();
+
+    log::trace!("Creating dummy pipeline");
+    let desc = UniformBufferDescriptor::uninitialized::<uniform::LightingData>(1);
+    let light_buffer = renderer.create_resource(desc).expect("FAIL");
+    let light_buffer = BufferHandle::<UniformBuffer>::from_typed_buffer::<uniform::LightingData>(
+        light_buffer,
+        0,
+        1,
+    );
+
+    let desc = UniformBufferDescriptor::uninitialized::<uniform::Transforms>(1);
+    let transforms_buffer = renderer.create_resource(desc).expect("FAIL");
+    let transforms_buffer = BufferHandle::<UniformBuffer>::from_typed_buffer::<uniform::Transforms>(
+        transforms_buffer,
+        0,
+        1,
+    );
+
+    let frame_set = DescriptorSet::builder(&mut renderer)
+        .add_buffer(
+            &transforms_buffer,
+            0,
+            trekanten::pipeline::ShaderStage::Vertex,
+        )
+        .add_buffer(&light_buffer, 1, trekanten::pipeline::ShaderStage::Fragment)
+        .build();
+
+    let vertex_format = VertexFormat::builder()
+        .add_attribute(util::Format::FLOAT3)
+        .add_attribute(util::Format::FLOAT3)
+        .build();
+
+    let (vert, frag) = shaders.get_default();
+    let desc = GraphicsPipelineDescriptor {
+        vert: ShaderDescriptor::FromPath(PathBuf::from(vert)),
+        frag: ShaderDescriptor::FromPath(PathBuf::from(frag)),
+        vertex_format,
+    };
+
+    let dummy_pipeline = renderer.create_resource(desc).expect("FAIL");
+
+    world.insert(FrameData {
+        light_buffer,
+        frame_set,
+        transforms_buffer,
+        dummy_pipeline,
+    });
+
+    world.insert(shaders);
 }

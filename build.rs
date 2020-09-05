@@ -3,8 +3,7 @@ use std::path::Path;
 use std::path::PathBuf;
 
 fn print_change_detection_files() {
-    let dir_contents =
-        std::fs::read_dir("src/pipeline/shaders").expect("Failed to read shader dir");
+    let dir_contents = std::fs::read_dir("src/render/shaders").expect("Failed to read shader dir");
     for dir_entry in dir_contents {
         let path = dir_entry.expect("Failed to read file").path();
         let is_glsl = path.extension().map(|x| x == "glsl").unwrap_or(false);
@@ -213,11 +212,11 @@ fn compile(compiler: &mut shaderc::Compiler, shader: &str, defines: &Defines, re
 
     let path = PathBuf::new()
         .join("src")
-        .join("pipeline")
+        .join("render")
         .join("shaders")
         .join(shader);
     let source = std::fs::read_to_string(path)
-        .expect(format!("Failed to read shader source: {}", shader).as_str());
+        .unwrap_or_else(|_| panic!("Failed to read shader source: {}", shader));
 
     let text_result = compiler
         .preprocess(&source, result_fname, "main", Some(&options))
@@ -233,7 +232,7 @@ fn compile(compiler: &mut shaderc::Compiler, shader: &str, defines: &Defines, re
 
 fn all_combinations() -> Vec<ShaderDefinition> {
     (0..ShaderDefinition::max_bits_value())
-        .map(|bits| ShaderDefinition::from_bits(bits))
+        .map(ShaderDefinition::from_bits)
         .filter(|def| def.is_valid())
         .collect::<Vec<_>>()
 }

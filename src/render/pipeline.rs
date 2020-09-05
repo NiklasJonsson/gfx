@@ -1,5 +1,3 @@
-use crate::util;
-
 // TODO: Platform independent paths (look at ash)
 macro_rules! GENERATED_BASE_PATH {
     () => {

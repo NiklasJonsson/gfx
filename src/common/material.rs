@@ -1,6 +1,6 @@
 use std::path::PathBuf;
 
-use trekanten::material::MaterialData;
+use crate::render::material::MaterialData;
 
 use specs::prelude::*;
 use specs::Component;

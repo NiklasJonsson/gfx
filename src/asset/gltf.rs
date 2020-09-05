@@ -14,6 +14,7 @@ use crate::render::uniform::PBRMaterialData;
 use crate::render::Mesh;
 use trekanten::mesh::{IndexBuffer, IndexBufferDescriptor, VertexBuffer, VertexBufferDescriptor};
 use trekanten::resource::ResourceManager;
+use trekanten::texture::TextureDescriptor;
 use trekanten::uniform::{UniformBuffer, UniformBufferDescriptor};
 use trekanten::util;
 use trekanten::vertex::VertexFormat;
@@ -570,18 +571,15 @@ fn upload_to_gpu<'a>(renderer: &mut trekanten::Renderer, ctx: &mut RecGltfCtx<'a
         let material_uniforms = gltf_mat.material.as_gpu_handle(gpu_uniform_buffer);
         let normal_map = gltf_mat.normal_map.as_ref().map(|x| {
             let tex_h = renderer
-                .create_resource(trekanten::texture::TextureDescriptor::new(
-                    x.tex.path.clone(),
-                    x.tex.format,
-                ))
+                .create_resource(TextureDescriptor::new(x.tex.path.clone(), x.tex.format))
                 .expect("Failed to create texture handle for normal map");
 
-            let tex_use = trekanten::material::TextureUse {
+            let tex_use = crate::render::material::TextureUse {
                 handle: tex_h,
                 coord_set: 0,
             };
 
-            trekanten::material::NormalMap {
+            crate::render::material::NormalMap {
                 tex: tex_use,
                 scale: x.scale,
             }
@@ -594,7 +592,7 @@ fn upload_to_gpu<'a>(renderer: &mut trekanten::Renderer, ctx: &mut RecGltfCtx<'a
                     t.format,
                 ))
                 .expect("Failed to create texture handle for normal map");
-            trekanten::material::TextureUse {
+            crate::render::material::TextureUse {
                 handle: tex_h,
                 coord_set: 0,
             }
@@ -607,12 +605,12 @@ fn upload_to_gpu<'a>(renderer: &mut trekanten::Renderer, ctx: &mut RecGltfCtx<'a
                     t.format,
                 ))
                 .expect("Failed to create texture handle for normal map");
-            trekanten::material::TextureUse {
+            crate::render::material::TextureUse {
                 handle: tex_h,
                 coord_set: 0,
             }
         });
-        let mat_data = trekanten::material::MaterialData::PBR {
+        let mat_data = crate::render::material::MaterialData::PBR {
             material_uniforms,
             normal_map,
             base_color_texture,

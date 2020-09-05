@@ -10,7 +10,6 @@ mod error;
 mod framebuffer;
 mod image;
 mod instance;
-pub mod material;
 mod mem;
 pub mod mesh;
 pub mod pipeline;
@@ -83,10 +82,6 @@ impl Frame {
 }
 
 pub struct Renderer {
-    // gltf-specific
-    // TODO: Move this
-    precompiled_shaders: pipeline::generated::PrecompiledShaders,
-
     // Resources
     graphics_pipelines: pipeline::GraphicsPipelines,
     vertex_buffers: resource::Storage<mesh::VertexBuffer>,
@@ -221,9 +216,6 @@ impl Renderer {
             textures: Default::default(),
             descriptor_sets,
             util_command_pool,
-
-            // TODO: Temporary
-            precompiled_shaders: Default::default(),
         })
     }
 
@@ -384,17 +376,6 @@ impl Renderer {
         let util::Extent2D { width, height } = self.swapchain_extent();
 
         width as f32 / height as f32
-    }
-
-    fn get_precompiled_shaders(&self, d: &pipeline::generated::ShaderDefinition) -> (&str, &str) {
-        (
-            self.precompiled_shaders.get_vert(d),
-            self.precompiled_shaders.get_frag(d),
-        )
-    }
-
-    pub fn get_default_precompiled(&self) -> (&str, &str) {
-        self.precompiled_shaders.get_default()
     }
 }
 

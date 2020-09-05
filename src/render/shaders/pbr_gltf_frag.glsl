@@ -5,9 +5,9 @@
 
 #define M_PI (3.1415926535897932384626433832795)
 
-layout(set = 0, binding = 2) uniform LightingData {
-    vec3 light_pos;
-    vec3 view_pos;
+layout(set = 0, binding = 1) uniform LightingData {
+    vec4 light_pos;
+    vec4 view_pos;
 } lighting_data;
 
 layout(location = 0) in vec3 world_normal;
@@ -39,6 +39,7 @@ layout(set = 1, binding = 0) uniform PBRMaterialData {
     float roughness_factor;
     // For the normal map, 1.0 if there is no map
     float normal_scale;
+    float _padding;
 } material_data;
 
 #if HAS_BASE_COLOR_TEXTURE
@@ -79,8 +80,8 @@ void main() {
     normal = normalize(tbn * tex_normal);
 #endif
 
-    vec3 light_dir = normalize(lighting_data.light_pos - world_pos);
-    vec3 view_dir = normalize(lighting_data.view_pos - world_pos);
+    vec3 light_dir = normalize(lighting_data.light_pos.xyz - world_pos);
+    vec3 view_dir = normalize(lighting_data.view_pos.xyz - world_pos);
     vec3 bisect_light_view = normalize(view_dir + light_dir);
 
     // NdotL is frequently used to determine if light can directly hit this point
