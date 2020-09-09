@@ -38,6 +38,7 @@ impl<'a> IndexBufferDescriptor<'a> {
     }
 }
 
+#[derive(Debug)]
 pub struct IndexBuffer {
     pub buffer: mem::DeviceBuffer,
     pub index_type: vk::IndexType,
@@ -50,6 +51,10 @@ impl IndexBuffer {
         command_pool: &CommandPool,
         descriptor: &IndexBufferDescriptor<'a>,
     ) -> Result<Self, mem::MemoryError> {
+        let size = match descriptor.index_size {
+            IndexSize::Size16 => 2,
+            IndexSize::Size32 => 4,
+        };
         log::trace!("Creating index buffer");
         let buffer = mem::DeviceBuffer::device_local_by_staging(
             device,
@@ -57,6 +62,8 @@ impl IndexBuffer {
             command_pool,
             vk::BufferUsageFlags::INDEX_BUFFER,
             descriptor.data,
+            size,
+            size,
         )?;
 
         let index_type = match descriptor.index_size {
@@ -95,6 +102,7 @@ impl<'a> VertexBufferDescriptor<'a> {
     }
 }
 
+#[derive(Debug)]
 pub struct VertexBuffer {
     pub buffer: mem::DeviceBuffer,
     pub format: VertexFormat,
@@ -114,12 +122,15 @@ impl VertexBuffer {
             descriptor.data.len()
         );
         log::trace!("\tformat: {:#?}", descriptor.format);
+        let size = descriptor.format.size() as usize;
         let buffer = mem::DeviceBuffer::device_local_by_staging(
             device,
             queue,
             command_pool,
             vk::BufferUsageFlags::VERTEX_BUFFER,
             descriptor.data,
+            size,
+            size,
         )?;
 
         Ok(Self {

@@ -16,7 +16,6 @@ ash-window = "0.4.1"
 raw-window-handle = "0.3.3"
 
 # Util
-memoffset = "0.5.5"
 log = "0.4.8"
 env_logger = "0.7.1"
 image = "0.23.8"

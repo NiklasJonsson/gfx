@@ -34,6 +34,7 @@ impl HasVkDevice for VkDeviceHandle {
 
 struct PhysicalDeviceProperties {
     memory_properties: vk::PhysicalDeviceMemoryProperties,
+    vk_device_properties: vk::PhysicalDeviceProperties,
     depth_buffer_format: vk::Format,
     _supported_msaa_sample_counts: vk::SampleCountFlags,
     max_supported_msaa_sample_count: vk::SampleCountFlags,
@@ -178,6 +179,7 @@ impl Device {
 
             PhysicalDeviceProperties {
                 memory_properties,
+                vk_device_properties: vk_props,
                 depth_buffer_format,
                 _supported_msaa_sample_counts,
                 max_supported_msaa_sample_count,
@@ -260,6 +262,13 @@ impl Device {
     pub fn max_msaa_sample_count(&self) -> vk::SampleCountFlags {
         self.physical_device_properties
             .max_supported_msaa_sample_count
+    }
+
+    pub fn uniform_buffer_offset_alignment(&self) -> u64 {
+        self.physical_device_properties
+            .vk_device_properties
+            .limits
+            .min_uniform_buffer_offset_alignment
     }
 
     pub fn allocator(&self) -> AllocatorHandle {

@@ -156,6 +156,11 @@ impl<'a> DescriptorSetBuilder<'a> {
             },
             idx,
         ));
+
+        log::trace!(
+            "Added descriptor binding {:?}",
+            self.bindings.last().unwrap()
+        );
     }
 
     pub fn add_buffer(
@@ -174,6 +179,8 @@ impl<'a> DescriptorSetBuilder<'a> {
             .renderer
             .get_uniform_buffers(buf_h.handle())
             .expect("Failed to get buffer");
+
+        // VMA allocator creates vk::Buffer from the device memory + offset so the offset from the buffer handle is enough here
         self.buffer_infos.push([
             vk::DescriptorBufferInfo {
                 buffer: *buf0.vk_buffer(),
@@ -187,6 +194,7 @@ impl<'a> DescriptorSetBuilder<'a> {
             },
         ]);
 
+        log::trace!("Added buffer info {:?}", self.buffer_infos.last().unwrap());
         self
     }
 
@@ -202,7 +210,7 @@ impl<'a> DescriptorSetBuilder<'a> {
             vk::ShaderStageFlags::from(stage),
         );
 
-        let tex = self
+        let tex: &Texture = self
             .renderer
             .get_resource(tex_h)
             .expect("Failed to get texture");
@@ -212,6 +220,7 @@ impl<'a> DescriptorSetBuilder<'a> {
             image_view: *tex.vk_image_view(),
             sampler: *tex.vk_sampler(),
         });
+        log::trace!("Added texture info {:?}", self.image_infos.last().unwrap());
 
         self
     }

@@ -414,17 +414,16 @@ impl
         pipeline::PipelineError,
     > for Renderer
 {
-    fn get_resource(
-        &self,
-        handle: &Handle<pipeline::GraphicsPipeline>,
-    ) -> Option<&pipeline::GraphicsPipeline> {
+    type Handle = resource::Handle<pipeline::GraphicsPipeline>;
+
+    fn get_resource(&self, handle: &Self::Handle) -> Option<&pipeline::GraphicsPipeline> {
         self.graphics_pipelines.get(handle)
     }
 
     fn create_resource(
         &mut self,
         descriptor: pipeline::GraphicsPipelineDescriptor,
-    ) -> Result<Handle<pipeline::GraphicsPipeline>, pipeline::PipelineError> {
+    ) -> Result<Self::Handle, pipeline::PipelineError> {
         self.graphics_pipelines.create(
             &self.device,
             descriptor,
@@ -441,14 +440,16 @@ impl<'a>
         mem::MemoryError,
     > for Renderer
 {
-    fn get_resource(&self, handle: &Handle<mesh::VertexBuffer>) -> Option<&mesh::VertexBuffer> {
+    type Handle = resource::Handle<mesh::VertexBuffer>;
+
+    fn get_resource(&self, handle: &Self::Handle) -> Option<&mesh::VertexBuffer> {
         self.vertex_buffers.get(handle)
     }
 
     fn create_resource(
         &mut self,
         descriptor: mesh::VertexBufferDescriptor<'a>,
-    ) -> Result<Handle<mesh::VertexBuffer>, mem::MemoryError> {
+    ) -> Result<Self::Handle, mem::MemoryError> {
         let queue = self.device.util_queue();
         let new =
             mesh::VertexBuffer::create(&self.device, queue, &self.util_command_pool, &descriptor)?;
@@ -461,14 +462,16 @@ impl<'a>
     resource::ResourceManager<mesh::IndexBufferDescriptor<'a>, mesh::IndexBuffer, mem::MemoryError>
     for Renderer
 {
-    fn get_resource(&self, handle: &Handle<mesh::IndexBuffer>) -> Option<&mesh::IndexBuffer> {
+    type Handle = resource::Handle<mesh::IndexBuffer>;
+
+    fn get_resource(&self, handle: &Self::Handle) -> Option<&mesh::IndexBuffer> {
         self.index_buffers.get(handle)
     }
 
     fn create_resource(
         &mut self,
         descriptor: mesh::IndexBufferDescriptor<'a>,
-    ) -> Result<Handle<mesh::IndexBuffer>, mem::MemoryError> {
+    ) -> Result<Self::Handle, mem::MemoryError> {
         let queue = self.device.util_queue();
         let new =
             mesh::IndexBuffer::create(&self.device, queue, &self.util_command_pool, &descriptor)?;
@@ -477,27 +480,45 @@ impl<'a>
     }
 }
 
-impl<'a>
+impl<'a, T>
     resource::ResourceManager<
-        uniform::UniformBufferDescriptor<'a>,
+        uniform::UniformBufferDescriptor<'a, T>,
         uniform::UniformBuffer,
         mem::MemoryError,
     > for Renderer
 {
-    fn get_resource(
-        &self,
-        handle: &Handle<uniform::UniformBuffer>,
-    ) -> Option<&uniform::UniformBuffer> {
-        self.uniform_buffers.get(handle, self.frame_idx as usize)
+    type Handle = mem::BufferHandle<uniform::UniformBuffer>;
+    fn get_resource(&self, handle: &Self::Handle) -> Option<&uniform::UniformBuffer> {
+        self.uniform_buffers
+            .get(handle.handle(), self.frame_idx as usize)
     }
 
     fn create_resource(
         &mut self,
-        descriptor: uniform::UniformBufferDescriptor<'a>,
-    ) -> Result<Handle<uniform::UniformBuffer>, mem::MemoryError> {
+        descriptor: uniform::UniformBufferDescriptor<'a, T>,
+    ) -> Result<Self::Handle, mem::MemoryError> {
         let queue = self.device.util_queue();
-        self.uniform_buffers
-            .create(&self.device, queue, &self.util_command_pool, &descriptor)
+        let resource_handle = self.uniform_buffers.create(
+            &self.device,
+            queue,
+            &self.util_command_pool,
+            &descriptor,
+        )?;
+
+        // Frame index doesn't matter, stats are the same
+        let buf = self
+            .uniform_buffers
+            .get(&resource_handle, 0)
+            .expect("Just added this...");
+        unsafe {
+            Ok(Self::Handle::from_strided_buffer(
+                resource_handle,
+                0,
+                buf.n_elems(),
+                buf.elem_size(),
+                buf.stride(),
+            ))
+        }
     }
 }
 
@@ -505,14 +526,15 @@ impl<'a>
     resource::ResourceManager<texture::TextureDescriptor, texture::Texture, texture::TextureError>
     for Renderer
 {
-    fn get_resource(&self, handle: &Handle<texture::Texture>) -> Option<&texture::Texture> {
+    type Handle = resource::Handle<texture::Texture>;
+    fn get_resource(&self, handle: &Self::Handle) -> Option<&texture::Texture> {
         self.textures.get(handle)
     }
 
     fn create_resource(
         &mut self,
         descriptor: texture::TextureDescriptor,
-    ) -> Result<Handle<texture::Texture>, texture::TextureError> {
+    ) -> Result<Self::Handle, texture::TextureError> {
         let queue = self.device.util_queue();
         self.textures
             .create(&self.device, queue, &self.util_command_pool, descriptor)

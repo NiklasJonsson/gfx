@@ -4,7 +4,6 @@ use specs::Component;
 use specs::prelude::*;
 use specs::world::EntitiesRes;
 use specs::{Entity, World};
-use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
 use super::LoadedAsset;
@@ -15,7 +14,7 @@ use crate::render::Mesh;
 use trekanten::mesh::{IndexBuffer, IndexBufferDescriptor, VertexBuffer, VertexBufferDescriptor};
 use trekanten::resource::ResourceManager;
 use trekanten::texture::TextureDescriptor;
-use trekanten::uniform::{UniformBuffer, UniformBufferDescriptor};
+use trekanten::uniform::UniformBufferDescriptor;
 use trekanten::util;
 use trekanten::vertex::VertexFormat;
 use trekanten::BufferHandle;
@@ -29,57 +28,36 @@ struct GltfVertexBuffer {
     format: VertexFormat,
 }
 
-// TODO: More u32 below
 #[derive(Debug)]
 struct GltfIndexBufferHandle {
-    start: usize,
-    size: usize,
+    buf_idx: usize,
+    len: u32,
 }
 
 impl GltfIndexBufferHandle {
     fn as_gpu_handle(&self, h: Handle<IndexBuffer>) -> BufferHandle<IndexBuffer> {
-        BufferHandle::from_buffer(
-            h,
-            (self.start * std::mem::size_of::<u32>()) as u32,
-            (self.size * std::mem::size_of::<u32>()) as u32,
-            std::mem::size_of::<u32>() as u32,
-        )
+        unsafe {
+            BufferHandle::from_buffer(h, 0, self.len as u64, std::mem::size_of::<u32>() as u64)
+        }
     }
 }
 
 #[derive(Debug)]
 struct GltfVertexBufferHandle {
     buf_idx: usize,
-    start_vertex: u32,
     n_vertices: u32,
     vertex_size: u32,
 }
 
 impl GltfVertexBufferHandle {
     fn as_gpu_handle(&self, h: Handle<VertexBuffer>) -> BufferHandle<VertexBuffer> {
-        BufferHandle::from_buffer(
-            h,
-            self.start_vertex * self.vertex_size,
-            self.n_vertices * self.vertex_size,
-            self.vertex_size,
-        )
+        unsafe { BufferHandle::from_buffer(h, 0, self.n_vertices as u64, self.vertex_size as u64) }
     }
 }
 
 #[derive(Debug)]
 struct GltfMaterialBufferHandle {
-    idx: usize,
-}
-
-impl GltfMaterialBufferHandle {
-    fn as_gpu_handle(&self, h: Handle<UniformBuffer>) -> BufferHandle<UniformBuffer> {
-        BufferHandle::from_buffer(
-            h,
-            (self.idx * std::mem::size_of::<PBRMaterialData>()) as u32,
-            std::mem::size_of::<PBRMaterialData>() as u32,
-            std::mem::size_of::<PBRMaterialData>() as u32,
-        )
-    }
+    buf_idx: usize,
 }
 
 #[derive(Debug)]
@@ -115,65 +93,41 @@ struct RecGltfCtx<'a> {
     pub buffers: Vec<gltf::buffer::Data>,
     pub path: PathBuf,
     pub world: &'a mut World,
-    pub all_index_buffers: Vec<u32>,
+    pub index_buffers: Vec<Vec<u32>>,
     pub vertex_buffers: Vec<GltfVertexBuffer>,
-    pub format_to_idx: HashMap<VertexFormat, usize>,
     pub material_buffer: Vec<PBRMaterialData>,
 }
 
 impl<'a> RecGltfCtx<'a> {
-    fn add_index_buffer(&mut self, mut v: Vec<u32>) -> GltfIndexBufferHandle {
+    fn add_index_buffer(&mut self, v: Vec<u32>) -> GltfIndexBufferHandle {
         let handle = GltfIndexBufferHandle {
-            start: self.all_index_buffers.len(),
-            size: v.len(),
+            buf_idx: self.index_buffers.len(),
+            len: v.len() as u32,
         };
 
-        self.all_index_buffers.append(&mut v);
+        self.index_buffers.push(v);
 
         handle
     }
 
     fn add_vertex_buffer(&mut self, v: GltfVertexBuffer) -> GltfVertexBufferHandle {
-        use std::collections::hash_map::Entry;
-        let GltfVertexBuffer { mut data, format } = v;
+        let GltfVertexBuffer { data, format } = v;
         let vertex_size = format.size();
         let n_vertices = data.len() as u32 / vertex_size;
+        let h = GltfVertexBufferHandle {
+            buf_idx: self.vertex_buffers.len(),
+            n_vertices,
+            vertex_size,
+        };
+        self.vertex_buffers.push(GltfVertexBuffer { format, data });
 
-        // TODO: Refactor with or_insert()?
-        match self.format_to_idx.entry(format.clone()) {
-            Entry::Occupied(entry) => {
-                let idx = entry.get();
-                let entry = &mut self.vertex_buffers[*idx];
-                assert_eq!(entry.data.len() % entry.format.size() as usize, 0);
-                assert_eq!(vertex_size, entry.format.size());
-
-                let h = GltfVertexBufferHandle {
-                    buf_idx: *idx,
-                    start_vertex: entry.data.len() as u32 / vertex_size,
-                    n_vertices,
-                    vertex_size,
-                };
-                entry.data.append(&mut data);
-                h
-            }
-            Entry::Vacant(entry) => {
-                let h = GltfVertexBufferHandle {
-                    buf_idx: self.vertex_buffers.len(),
-                    start_vertex: 0,
-                    n_vertices,
-                    vertex_size,
-                };
-                entry.insert(self.vertex_buffers.len());
-                self.vertex_buffers.push(GltfVertexBuffer { format, data });
-                h
-            }
-        }
+        h
     }
 
     fn add_material_data(&mut self, data: PBRMaterialData) -> GltfMaterialBufferHandle {
         self.material_buffer.push(data);
         GltfMaterialBufferHandle {
-            idx: self.material_buffer.len() - 1,
+            buf_idx: self.material_buffer.len() - 1,
         }
     }
 }
@@ -517,7 +471,7 @@ fn log_asset_upload<'a>(ctx: &RecGltfCtx<'a>) {
             vb.format.size()
         );
     }
-    log::info!("index_buffer len: {}", ctx.all_index_buffers.len());
+    log::info!("# index_buffers: {}", ctx.index_buffers.len());
     log::info!("# materials: {}", ctx.material_buffer.len());
 }
 
@@ -542,22 +496,32 @@ fn upload_to_gpu<'a>(renderer: &mut trekanten::Renderer, ctx: &mut RecGltfCtx<'a
         })
         .collect();
 
-    let gpu_index_buffer: Handle<IndexBuffer> = renderer
-        .create_resource(IndexBufferDescriptor::from_slice(&ctx.all_index_buffers))
-        .expect("Failed to create index buffer");
+    let gpu_index_buffers: Vec<Handle<IndexBuffer>> = ctx
+        .index_buffers
+        .iter()
+        .map(|idx_buf| {
+            renderer
+                .create_resource(IndexBufferDescriptor::from_slice(&idx_buf))
+                .expect("Failed to create index buffer")
+        })
+        .collect();
 
-    let gpu_uniform_buffer = renderer
-        .create_resource(UniformBufferDescriptor::from_slice(&ctx.material_buffer))
-        .expect("Failed to create uniform buffer for materials");
+    let gpu_uniform_buffer_handles = renderer
+        .create_resource(UniformBufferDescriptor::Immutable {
+            data: &ctx.material_buffer,
+        })
+        .expect("Failed to create uniform buffer for materials")
+        .split();
 
     for (ent, model) in (&entities, &gltf_models).join() {
         let gltf_vh = &model.vertex;
         let gltf_ih = &model.index;
         let gltf_mat = &model.mat;
         let gpu_vh = gpu_vert_buffers[gltf_vh.buf_idx];
+        let gpu_ih = gpu_index_buffers[gltf_ih.buf_idx];
 
         let vertex_buffer = gltf_vh.as_gpu_handle(gpu_vh);
-        let index_buffer = gltf_ih.as_gpu_handle(gpu_index_buffer);
+        let index_buffer = gltf_ih.as_gpu_handle(gpu_ih);
         meshes
             .insert(
                 ent,
@@ -568,7 +532,6 @@ fn upload_to_gpu<'a>(renderer: &mut trekanten::Renderer, ctx: &mut RecGltfCtx<'a
             )
             .expect("Failed to insert mesh");
 
-        let material_uniforms = gltf_mat.material.as_gpu_handle(gpu_uniform_buffer);
         let normal_map = gltf_mat.normal_map.as_ref().map(|x| {
             let tex_h = renderer
                 .create_resource(TextureDescriptor::new(x.tex.path.clone(), x.tex.format))
@@ -610,6 +573,7 @@ fn upload_to_gpu<'a>(renderer: &mut trekanten::Renderer, ctx: &mut RecGltfCtx<'a
                 coord_set: 0,
             }
         });
+        let material_uniforms = gpu_uniform_buffer_handles[gltf_mat.material.buf_idx];
         let mat_data = crate::render::material::MaterialData::PBR {
             material_uniforms,
             normal_map,
@@ -649,9 +613,8 @@ pub fn load_asset(
         buffers,
         path: path.into(),
         world,
-        all_index_buffers: Vec::new(),
+        index_buffers: Vec::new(),
         vertex_buffers: Vec::new(),
-        format_to_idx: HashMap::new(),
         material_buffer: Vec::new(),
     };
 

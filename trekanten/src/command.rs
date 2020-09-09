@@ -231,6 +231,7 @@ impl CommandBuffer {
 
     pub fn bind_vertex_buffer(self, buffer: &VertexBuffer, offset: u64) -> Self {
         assert!(self.queue_flags.contains(vk::QueueFlags::GRAPHICS));
+        log::trace!("binding vertex buffer {:?} at {}", buffer, offset);
 
         unsafe {
             self.vk_device.cmd_bind_vertex_buffers(
@@ -246,6 +247,7 @@ impl CommandBuffer {
 
     pub fn bind_index_buffer(self, buffer: &IndexBuffer, offset: u64) -> Self {
         assert!(self.queue_flags.contains(vk::QueueFlags::GRAPHICS));
+        log::trace!("binding index buffer {:?} at {}", buffer, offset);
 
         unsafe {
             self.vk_device.cmd_bind_index_buffer(

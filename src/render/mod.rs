@@ -10,6 +10,7 @@ use specs::storage::StorageEntry;
 
 use trekanten::command;
 use trekanten::descriptor::DescriptorSet;
+use trekanten::mesh::VertexBuffer;
 use trekanten::pipeline::{
     GraphicsPipeline, GraphicsPipelineDescriptor, PipelineError, ShaderDescriptor,
 };
@@ -168,11 +169,10 @@ pub fn get_pipeline_for(
     mesh: &Mesh,
     mat: &material::MaterialData,
 ) -> Result<Handle<GraphicsPipeline>, PipelineError> {
-    let vertex_format = renderer
-        .get_resource(&mesh.vertex_buffer.handle())
-        .expect("Invalid handle")
-        .format
-        .clone();
+    let vbuf: &VertexBuffer = renderer
+        .get_resource(mesh.vertex_buffer.handle())
+        .expect("Invalid handle");
+    let vertex_format = vbuf.format.clone();
     let shaders = world.read_resource::<pipeline::PrecompiledShaders>();
     let pipe = match mat {
         material::MaterialData::PBR {
@@ -240,17 +240,17 @@ fn draw_model(
         .get_resource(&renderable.gfx_pipeline)
         .expect("Missing graphics pipeline");
     let index_buffer = renderer
-        .get_resource(&mesh.index_buffer.handle())
+        .get_resource(mesh.index_buffer.handle())
         .expect("Missing index buffer");
     let vertex_buffer = renderer
-        .get_resource(&mesh.vertex_buffer.handle())
+        .get_resource(mesh.vertex_buffer.handle())
         .expect("Missing vertex buffer");
     let mat_desc_set = renderer
         .get_descriptor_set(&renderable.material_descriptor_set)
         .expect("Missing descriptor set");
 
-    let vertex_index = mesh.vertex_buffer.idx() as u64;
-    let indices_index = mesh.index_buffer.idx() as u64;
+    let vertex_index = mesh.vertex_buffer.idx();
+    let indices_index = mesh.index_buffer.idx();
     let n_indices = mesh.index_buffer.len();
 
     let trn = uniform::Model {
@@ -382,7 +382,7 @@ pub fn draw_frame(world: &mut World, renderer: &mut Renderer) {
             .expect("Missing descriptor set");
 
         let dummy_pipeline = renderer
-            .get_resource(&dummy_pipeline)
+            .get_resource(dummy_pipeline)
             .expect("Missing pipeline!");
 
         frame
@@ -410,21 +410,11 @@ pub fn setup_resources(world: &mut World, mut renderer: &mut Renderer) {
     let shaders = pipeline::PrecompiledShaders::new();
 
     log::trace!("Creating dummy pipeline");
-    let desc = UniformBufferDescriptor::uninitialized::<uniform::LightingData>(1);
+    let desc = UniformBufferDescriptor::Uninitialized::<uniform::LightingData> { n_elems: 1 };
     let light_buffer = renderer.create_resource(desc).expect("FAIL");
-    let light_buffer = BufferHandle::<UniformBuffer>::from_typed_buffer::<uniform::LightingData>(
-        light_buffer,
-        0,
-        1,
-    );
 
-    let desc = UniformBufferDescriptor::uninitialized::<uniform::Transforms>(1);
+    let desc = UniformBufferDescriptor::Uninitialized::<uniform::Transforms> { n_elems: 1 };
     let transforms_buffer = renderer.create_resource(desc).expect("FAIL");
-    let transforms_buffer = BufferHandle::<UniformBuffer>::from_typed_buffer::<uniform::Transforms>(
-        transforms_buffer,
-        0,
-        1,
-    );
 
     let frame_set = DescriptorSet::builder(&mut renderer)
         .add_buffer(

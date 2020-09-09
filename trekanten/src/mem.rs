@@ -14,17 +14,13 @@ use crate::queue::QueueError;
 use crate::resource::Handle;
 use crate::util;
 
-// TODO: Buffer handle should store offset and size in terms of elements instead of bytes,
-// as this is what is used when passing data to vulkan (for vbuf & ibuf atleast, what about ubuf?)
-// TODO: Call this buffer slice instead?
-// TODO: Vulkan takes u64 generally
 #[derive(Debug, PartialEq, Eq, Hash)]
 pub struct BufferHandle<T> {
     h: Handle<T>,
-    // Units are bytes for all
-    offset: u32,
-    size: u32,
-    elem_size: u32,
+    idx: u64,
+    len: u64,
+    elem_size: u64,
+    stride: u64,
 }
 
 // TODO: Fix these
@@ -38,30 +34,38 @@ impl<T> Default for BufferHandle<T> {
     fn default() -> Self {
         Self {
             h: Handle::<T>::default(),
-            offset: 0,
-            size: 0,
+            idx: 0,
+            len: 0,
+            stride: 0,
             elem_size: 0,
         }
     }
 }
 
 impl<T> BufferHandle<T> {
-    pub fn from_buffer(h: Handle<T>, offset: u32, size: u32, elem_size: u32) -> Self {
+    pub unsafe fn from_buffer(h: Handle<T>, idx: u64, len: u64, elem_size: u64) -> Self {
         Self {
             h,
-            offset,
-            size,
+            idx,
+            len,
             elem_size,
+            stride: elem_size,
         }
     }
 
-    pub fn from_typed_buffer<V>(h: Handle<T>, idx: u32, len: u32) -> Self {
-        let elem_size = std::mem::size_of::<V>() as u32;
+    pub unsafe fn from_strided_buffer(
+        h: Handle<T>,
+        idx: u64,
+        len: u64,
+        elem_size: u64,
+        stride: u64,
+    ) -> Self {
         Self {
             h,
-            offset: idx * elem_size,
-            size: len * elem_size,
+            idx,
+            len,
             elem_size,
+            stride,
         }
     }
 
@@ -69,26 +73,41 @@ impl<T> BufferHandle<T> {
         &self.h
     }
 
-    pub fn offset(&self) -> u32 {
-        self.offset
+    pub fn split(&self) -> Vec<Self> {
+        (0..self.len)
+            .map(|i| Self {
+                h: self.h,
+                idx: self.idx + i,
+                len: 1,
+                elem_size: self.elem_size,
+                stride: self.stride,
+            })
+            .collect::<Vec<_>>()
     }
 
-    pub fn size(&self) -> u32 {
-        self.size
+    pub fn offset(&self) -> u64 {
+        self.idx * self.stride
+    }
+
+    pub fn size(&self) -> u64 {
+        let s = if self.len > 1 {
+            (self.len - 1) * self.stride
+        } else {
+            0
+        };
+        s + self.elem_size
     }
 
     pub fn is_empty(&self) -> bool {
-        self.size == 0
+        self.len == 0
     }
 
-    pub fn idx(&self) -> u32 {
-        assert!(self.offset % self.elem_size == 0);
-        self.offset / self.elem_size
+    pub fn idx(&self) -> u64 {
+        self.idx
     }
 
-    pub fn len(&self) -> u32 {
-        assert!(self.size % self.elem_size == 0);
-        self.size / self.elem_size
+    pub fn len(&self) -> u64 {
+        self.len
     }
 }
 
@@ -111,9 +130,19 @@ pub struct DeviceBuffer {
     vk_buffer: vk::Buffer,
     allocation: Allocation,
     size: usize,
-    _allocation_info: AllocationInfo,
+    allcation_info: AllocationInfo,
 }
 
+impl std::fmt::Debug for DeviceBuffer {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("DeviceBuffer")
+            .field("vk_buffer", &self.vk_buffer)
+            .field("allocation", &self.allocation)
+            .field("size", &self.size)
+            .field("allcation_info", &self.allcation_info)
+            .finish()
+    }
+}
 impl DeviceBuffer {
     pub fn empty(
         device: &Device,
@@ -138,16 +167,17 @@ impl DeviceBuffer {
         };
         let allocator = device.allocator();
 
-        let (vk_buffer, allocation, _allocation_info) = allocator
+        let (vk_buffer, allocation, allcation_info) = allocator
             .create_buffer(&buffer_info, &allocation_create_info)
             .map_err(MemoryError::BufferCreation)?;
-        log::trace!("Allocation succeeded: {:?}", &_allocation_info);
+        log::trace!("Allocation succeeded: {:?}", &allcation_info);
+        log::trace!("Created buffer: {:?}", vk_buffer);
 
         Ok(Self {
             allocator,
             vk_buffer,
             allocation,
-            _allocation_info,
+            allcation_info,
             size,
         })
     }
@@ -162,21 +192,55 @@ impl DeviceBuffer {
         )
     }
 
-    pub fn staging_with_data(device: &Device, data: &[u8]) -> Result<Self, MemoryError> {
+    // TODO: Bake elem_size/stride into another function/make optional?
+    pub fn staging_with_data(
+        device: &Device,
+        data: &[u8],
+        elem_size: usize,
+        stride: usize,
+    ) -> Result<Self, MemoryError> {
         log::trace!("Creating device buffer, staging with data");
+        assert!(data.len() % elem_size == 0);
+        let n_elems = data.len() / elem_size;
+        log::trace!(
+            "n_elems: {}, elem_size: {}, stride: {}",
+            n_elems,
+            elem_size,
+            stride
+        );
         let allocator = device.allocator();
-        let size = data.len();
+        let size = if stride == elem_size {
+            log::trace!("No special alignment requirement");
+            data.len()
+        } else {
+            assert!(elem_size <= stride);
+            log::trace!("stride != elem_size, allocating larger buffer");
+            n_elems * stride
+        };
+        log::trace!("Total buffer size: {}", size);
 
         let staging = DeviceBuffer::staging_empty(device, size)?;
 
         let dst = allocator
             .map_memory(&staging.allocation)
             .map_err(MemoryError::MemoryMapping)?;
-        unsafe {
-            let src = data.as_ptr() as *const u8;
-            log::trace!("Copy from {:?} to {:?}, size: {}", src, dst, size);
-            std::ptr::copy_nonoverlapping::<u8>(src, dst, size);
+        let src = data.as_ptr() as *const u8;
+        if elem_size == stride {
+            log::trace!("Straight copy from {:?} to {:?}, size: {}", src, dst, size);
+            unsafe {
+                std::ptr::copy_nonoverlapping::<u8>(src, dst, size);
+            }
+        } else {
+            log::trace!("Strided copy from {:?} to {:?}, size: {}", src, dst, size);
+            for i in 0..n_elems {
+                unsafe {
+                    let src = src.add(i * elem_size);
+                    let dst = dst.add(i * stride);
+                    std::ptr::copy_nonoverlapping::<u8>(src, dst, elem_size);
+                }
+            }
         }
+
         allocator
             .unmap_memory(&staging.allocation)
             .map_err(MemoryError::MemoryMapping)?;
@@ -190,9 +254,11 @@ impl DeviceBuffer {
         command_pool: &CommandPool,
         usage: vk::BufferUsageFlags,
         data: &[u8],
+        elem_size: usize,
+        stride: usize,
     ) -> Result<Self, MemoryError> {
         log::trace!("Creating device buffer, local by staging");
-        let staging = Self::staging_with_data(device, data)?;
+        let staging = Self::staging_with_data(device, data, elem_size, stride)?;
 
         let dst_buffer = Self::empty(
             device,
@@ -433,7 +499,7 @@ pub struct DeviceImage {
     allocator: AllocatorHandle,
     vk_image: vk::Image,
     allocation: Allocation,
-    _allocation_info: AllocationInfo,
+    allcation_info: AllocationInfo,
 }
 
 impl DeviceImage {
@@ -473,7 +539,7 @@ impl DeviceImage {
             ..Default::default()
         };
         let allocator = device.allocator();
-        let (vk_image, allocation, _allocation_info) = allocator
+        let (vk_image, allocation, allcation_info) = allocator
             .create_image(&info, &allocation_create_info)
             .map_err(MemoryError::ImageCreation)?;
 
@@ -481,7 +547,7 @@ impl DeviceImage {
             allocator,
             vk_image,
             allocation,
-            _allocation_info,
+            allcation_info,
         })
     }
 
@@ -495,7 +561,9 @@ impl DeviceImage {
         mip_levels: u32,
         data: &[u8],
     ) -> Result<Self, MemoryError> {
-        let staging = DeviceBuffer::staging_with_data(device, data)?;
+        // stride & alignment does not matter as long as they are the same.
+        let staging =
+            DeviceBuffer::staging_with_data(device, data, 1 /*elem_size*/, 1 /*stride*/)?;
         // Both src & dst as we use one mip level to create the next
         let usage = vk::ImageUsageFlags::TRANSFER_SRC
             | vk::ImageUsageFlags::TRANSFER_DST

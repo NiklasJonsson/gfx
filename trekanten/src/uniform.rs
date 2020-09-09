@@ -11,62 +11,47 @@ use crate::common::MAX_FRAMES_IN_FLIGHT;
 
 use crate::util;
 
-pub enum UniformBufferDescriptor<'a> {
-    Initialized { data: &'a [u8], elem_size: usize },
-    Uninitialized { elem_size: usize, n_elems: usize },
-}
-
-impl<'a> UniformBufferDescriptor<'a> {
-    pub fn from_slice<V>(slice: &'a [V]) -> Self {
-        let data = util::as_byte_slice(slice);
-
-        Self::Initialized {
-            elem_size: std::mem::size_of::<V>(),
-            data,
-        }
-    }
-
-    pub fn uninitialized<V>(n_elems: usize) -> Self {
-        Self::Uninitialized {
-            elem_size: std::mem::size_of::<V>(),
-            n_elems,
-        }
-    }
+pub enum UniformBufferDescriptor<'a, T> {
+    Immutable { data: &'a [T] },
+    Uninitialized { n_elems: u64 },
 }
 
 pub struct UniformBuffer {
     buffer: DeviceBuffer,
-    elem_size: usize,
-    n_elems: usize,
+    elem_size: u64,
+    stride: u64,
+    n_elems: u64,
 }
 
 impl UniformBuffer {
-    pub fn create<'a>(
+    pub fn create<'a, T>(
         device: &Device,
         queue: &Queue,
         command_pool: &CommandPool,
-        descriptor: &UniformBufferDescriptor<'a>,
+        descriptor: &UniformBufferDescriptor<'a, T>,
     ) -> Result<Self, MemoryError> {
-        let (buffer, elem_size, n_elems) = match descriptor {
-            UniformBufferDescriptor::Initialized { data, elem_size } => (
+        let elem_size = std::mem::size_of::<T>() as u64;
+        let stride = device.uniform_buffer_offset_alignment();
+        let (buffer, n_elems) = match descriptor {
+            UniformBufferDescriptor::Immutable { data } => (
                 DeviceBuffer::device_local_by_staging(
                     device,
                     queue,
                     command_pool,
                     vk::BufferUsageFlags::UNIFORM_BUFFER,
-                    data,
+                    util::as_byte_slice(data),
+                    elem_size as usize,
+                    stride as usize,
                 )?,
-                *elem_size,
-                data.len() / elem_size,
+                data.len() as u64,
             ),
-            UniformBufferDescriptor::Uninitialized { elem_size, n_elems } => (
+            UniformBufferDescriptor::Uninitialized { n_elems } => (
                 DeviceBuffer::empty(
                     device,
-                    elem_size * n_elems,
+                    (elem_size * n_elems) as usize,
                     vk::BufferUsageFlags::UNIFORM_BUFFER,
                     vk_mem::MemoryUsage::CpuToGpu,
                 )?,
-                *elem_size,
                 *n_elems,
             ),
         };
@@ -74,11 +59,12 @@ impl UniformBuffer {
         Ok(Self {
             buffer,
             elem_size,
+            stride,
             n_elems,
         })
     }
 
-    pub fn update_with<T>(&mut self, data: &T, offset: u32) -> Result<(), MemoryError> {
+    pub fn update_with<T>(&mut self, data: &T, offset: u64) -> Result<(), MemoryError> {
         let raw_data = util::as_bytes(data);
         self.buffer.update_data_at(raw_data, offset as usize)
     }
@@ -87,16 +73,21 @@ impl UniformBuffer {
         &self.buffer.vk_buffer()
     }
 
-    pub fn elem_size(&self) -> usize {
+    pub fn stride(&self) -> u64 {
+        self.stride
+    }
+
+    pub fn elem_size(&self) -> u64 {
         self.elem_size
     }
 
-    pub fn n_elems(&self) -> usize {
+    pub fn n_elems(&self) -> u64 {
         self.n_elems
     }
 
-    pub fn size(&self) -> usize {
-        self.n_elems * self.elem_size
+    pub fn size(&self) -> u64 {
+        assert!(self.elem_size <= self.stride);
+        self.stride * self.n_elems
     }
 }
 
@@ -124,12 +115,12 @@ impl UniformBuffers {
         }
     }
 
-    pub fn create<'a>(
+    pub fn create<'a, T>(
         &mut self,
         device: &Device,
         queue: &Queue,
         command_pool: &CommandPool,
-        descriptor: &UniformBufferDescriptor<'a>,
+        descriptor: &UniformBufferDescriptor<'a, T>,
     ) -> Result<Handle<UniformBuffer>, MemoryError> {
         let u_buffer0 = UniformBuffer::create(device, queue, command_pool, descriptor)?;
         let u_buffer1 = UniformBuffer::create(device, queue, command_pool, descriptor)?;
