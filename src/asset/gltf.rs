@@ -381,7 +381,9 @@ fn build_asset_graph_common<'a>(ctx: &mut RecGltfCtx, src: &gltf::Node<'a>) -> A
     // more than 1 camera per scene.
     let camera: Option<Entity> = cameras.iter().fold(this_node_cam, |acc, &x| acc.or(x));
 
-    let mut nodes = ctx.world.write_storage::<transform_graph::RenderGraphNode>();
+    let mut nodes = ctx
+        .world
+        .write_storage::<transform_graph::RenderGraphNode>();
     nodes
         .insert(node, transform_graph::node(children))
         .expect("Could not insert render graph node!");
@@ -396,7 +398,9 @@ fn build_asset_graph_rec<'a>(
 ) -> AssetGraphResult {
     let result = build_asset_graph_common(ctx, src);
 
-    let mut nodes = ctx.world.write_storage::<transform_graph::RenderGraphChild>();
+    let mut nodes = ctx
+        .world
+        .write_storage::<transform_graph::RenderGraphChild>();
     nodes
         .insert(result.node, transform_graph::child(parent))
         .expect("Could not insert render graph node!");
@@ -406,7 +410,9 @@ fn build_asset_graph_rec<'a>(
 fn build_asset_graph(ctx: &mut RecGltfCtx, src_root: &gltf::Node) -> AssetGraphResult {
     let result = build_asset_graph_common(ctx, src_root);
 
-    let mut roots = ctx.world.write_storage::<transform_graph::RenderGraphRoot>();
+    let mut roots = ctx
+        .world
+        .write_storage::<transform_graph::RenderGraphRoot>();
     roots
         .insert(result.node, transform_graph::root())
         .expect("Could not insert render graph root!");

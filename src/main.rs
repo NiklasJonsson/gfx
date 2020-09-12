@@ -1,7 +1,4 @@
 use specs::prelude::*;
-
-use std::time::Instant;
-
 use std::sync::Arc;
 
 mod arg_parse;
@@ -29,6 +26,13 @@ enum AppState {
     Unfocused,
 }
 
+#[derive(Debug, PartialEq, Eq)]
+enum AppAction {
+    Quit,
+    SkipFrame,
+    ContinueFrame,
+}
+
 struct App {
     world: World,
     window: winit::window::Window,
@@ -37,6 +41,8 @@ struct App {
     state: AppState,
     control_systems: Dispatcher<'static, 'static>,
     engine_systems: Dispatcher<'static, 'static>,
+    frame_count: usize,
+    timer: time::Timer,
 }
 
 impl App {
@@ -57,12 +63,6 @@ impl App {
 }
 
 impl App {
-    // FIXME: This lives here only because the lifetime parameters are a pain.
-    // The whole App struct would need to be templated if this was included.
-    // Maybe this can be solved in another way...
-    // TODO: Add a dispatcher with <'static, 'static> to app (or two)
-    /// Return two dispatchers, one for systems that run regardless if the game is paused
-    /// or not and one that is is not run when paused.
     fn init_dispatchers<'a, 'b>() -> (Dispatcher<'a, 'b>, Dispatcher<'a, 'b>) {
         let control_builder = DispatcherBuilder::new();
         // Input needs to go before as most systems depends on it
@@ -193,88 +193,83 @@ impl App {
         self.event_queue.pop().ok()
     }
 
-    fn post_frame(&mut self) {
+    fn post_frame(&mut self, args: &arg_parse::Args) -> AppAction {
         self.world.maintain();
 
         let mut cur_inputs = self
             .world
             .write_resource::<io::input::CurrentFrameExternalInputs>();
         cur_inputs.0.clear();
+
+        self.frame_count += 1;
+        if let Some(n_frames) = args.run_n_frames {
+            assert!(self.frame_count <= n_frames);
+            if self.frame_count == n_frames {
+                return AppAction::Quit;
+            }
+        }
+
+        AppAction::ContinueFrame
+    }
+
+    fn pre_frame(&mut self) -> AppAction {
+        self.timer.tick();
+        *self.world.write_resource::<DeltaTime>() = self.timer.delta();
+
+        match self.next_event() {
+            Some(Event::Quit) => return AppAction::Quit,
+            Some(Event::Focus) => self.state = AppState::Focused,
+            Some(Event::Unfocus) => {
+                self.state = AppState::Unfocused;
+                *self.world.write_resource::<GameState>() = GameState::Paused;
+            }
+            Some(Event::Input(input)) => {
+                let mut cur_inputs = self
+                    .world
+                    .write_resource::<io::input::CurrentFrameExternalInputs>();
+                *cur_inputs = io::input::CurrentFrameExternalInputs(input);
+            }
+            None => (),
+        }
+
+        let running = *self.world.read_resource::<GameState>() == GameState::Running;
+        let focused = self.state == AppState::Focused;
+
+        if running {
+            assert!(focused, "Can't be running but not be in focus!");
+            self.take_cursor();
+        } else {
+            self.release_cursor();
+        }
+
+        if focused {
+            AppAction::ContinueFrame
+        } else {
+            AppAction::SkipFrame
+        }
     }
 
     fn run(&mut self, args: arg_parse::Args) {
         // Setup world objects, e.g. camera and model from cmdline
         self.populate_world(&args);
+        self.timer.start();
 
-        // Collects events and resolves to AppAction
-        let _start_time = Instant::now();
-        let mut prev_frame = Instant::now();
-
-        let mut frame_count = 0;
-
-        // Main loop is structured like:
-        // 1. Poll events
-        // 2. Resolve events
-        // 3. Grab/release cursor
-        // 4. Acquire swapchain image
-        // 5. Wait for previous frame
-        // 6. Run logic systems
-        // 7. Render
         loop {
-            // Update global delta time
-            let now = Instant::now();
-            let diff = now - prev_frame;
-            prev_frame = now;
-
-            *self.world.write_resource::<DeltaTime>() = diff.into();
-
-            match self.next_event() {
-                Some(Event::Quit) => return,
-                Some(Event::Focus) => self.state = AppState::Focused,
-                Some(Event::Unfocus) => {
-                    self.state = AppState::Unfocused;
-                    *self.world.write_resource::<GameState>() = GameState::Paused;
-                }
-                Some(Event::Input(input)) => {
-                    let mut cur_inputs = self
-                        .world
-                        .write_resource::<io::input::CurrentFrameExternalInputs>();
-                    *cur_inputs = io::input::CurrentFrameExternalInputs(input);
-                }
-                None => (),
+            match self.pre_frame() {
+                AppAction::Quit => return,
+                AppAction::SkipFrame => continue,
+                AppAction::ContinueFrame => (),
             }
 
-            let running = *self.world.read_resource::<GameState>() == GameState::Running;
-            let focused = self.state == AppState::Focused;
-
-            if running {
-                assert!(focused, "Can't be running but not be in focus!");
-                self.take_cursor();
-            } else {
-                self.release_cursor();
-            }
-
-            if !focused {
-                continue;
-            }
-
-            // Run input manager and escape catcher here
             self.control_systems.dispatch(&self.world);
-
             let state = *self.world.read_resource::<GameState>();
             if let GameState::Running = state {
                 self.engine_systems.dispatch(&self.world);
                 render::draw_frame(&mut self.world, &mut self.renderer);
             }
 
-            self.post_frame();
-
-            frame_count += 1;
-            if let Some(n_frames) = args.run_n_frames {
-                assert!(frame_count <= n_frames);
-                if frame_count == n_frames {
-                    break;
-                }
+            if let AppAction::Quit = self.post_frame(&args) {
+                return;
             }
         }
     }
@@ -299,6 +294,8 @@ impl App {
             state: AppState::Focused,
             control_systems,
             engine_systems,
+            frame_count: 0,
+            timer: time::Timer::default(),
         }
     }
 }

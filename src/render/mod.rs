@@ -27,7 +27,7 @@ pub mod pipeline;
 pub mod uniform;
 
 use crate::camera::*;
-use crate::common::{ModelMatrix, Position}; 
+use crate::common::{ModelMatrix, Position};
 use material::{Material, ShaderUse};
 
 use crate::settings::{RenderMode, RenderSettings};

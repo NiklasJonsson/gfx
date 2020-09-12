@@ -79,7 +79,6 @@ impl Mul<Position> for ModelMatrix {
     }
 }
 
-// TODO: Alias this?
 #[derive(Debug, Component, Copy, Clone)]
 #[storage(DenseVecStorage)]
 pub struct Transform(Mat4);
