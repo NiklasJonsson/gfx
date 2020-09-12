@@ -46,11 +46,11 @@ struct App {
 }
 
 impl App {
-    pub fn take_cursor(&mut self) {
+    fn take_cursor(&mut self) {
         self.cursor_grab(true);
     }
 
-    pub fn release_cursor(&mut self) {
+    fn release_cursor(&mut self) {
         self.cursor_grab(false);
     }
 
@@ -59,6 +59,13 @@ impl App {
             .set_cursor_grab(cursor_grab)
             .expect("Unable to grab cursor");
         self.window.set_cursor_visible(!cursor_grab);
+    }
+
+    fn write_fps(&self, d: DeltaTime) {
+        if self.frame_count % 10 == 0 {
+            let s = format!("Ramneryd {:.4} ({:.4} ms)", d.as_fps(), d.as_ms());
+            self.window.set_title(s.as_str());
+        }
     }
 }
 
@@ -215,6 +222,7 @@ impl App {
     fn pre_frame(&mut self) -> AppAction {
         self.timer.tick();
         *self.world.write_resource::<DeltaTime>() = self.timer.delta();
+        self.write_fps(self.timer.delta());
 
         match self.next_event() {
             Some(Event::Quit) => return AppAction::Quit,
@@ -250,7 +258,6 @@ impl App {
     }
 
     fn run(&mut self, args: arg_parse::Args) {
-        // Setup world objects, e.g. camera and model from cmdline
         self.populate_world(&args);
         self.timer.start();
 
