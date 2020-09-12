@@ -470,7 +470,7 @@ fn log_asset_upload<'a>(ctx: &RecGltfCtx<'a>) {
     log::info!("# vertex_buffers: {}", ctx.vertex_buffers.len());
     for (i, vb) in ctx.vertex_buffers.iter().enumerate() {
         log::info!("vertex buffer {}:", i);
-        log::info!("format: {:#?}", vb.format);
+        log::info!("format: {}", vb.format);
         log::info!(
             "n vertices: {} ({} / {})",
             vb.data.len() / vb.format.size() as usize,

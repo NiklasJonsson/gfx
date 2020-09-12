@@ -9,6 +9,30 @@ pub struct VertexFormat {
     size: u32,
 }
 
+impl std::fmt::Display for VertexFormat {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        writeln!(f, "VertexFormat (size: {}) {{", self.size)?;
+        for (i, b) in self.binding_description.iter().enumerate() {
+            writeln!(
+                f,
+                "\tbindings[{}] = (binding: {}, rate: {:?}, stride: {})",
+                i, b.binding, b.input_rate, b.stride
+            )?;
+        }
+        for a in self.attribute_description.iter() {
+            let s = match a.format {
+                vk::Format::R32G32B32A32_SFLOAT => "vec4",
+                vk::Format::R32G32B32_SFLOAT => "vec3",
+                vk::Format::R32G32_SFLOAT => "vec2",
+                vk::Format::R32_SFLOAT => "float",
+                _ => unimplemented!("Unsupported vertex format"),
+            };
+            writeln!(f, "\t[{}][{}](+{}) {}", a.binding, a.location, a.offset, s)?;
+        }
+        writeln!(f, "}}")
+    }
+}
+
 // TODO: Autogen eq/hash
 impl Eq for VertexFormat {}
 impl PartialEq for VertexFormat {
