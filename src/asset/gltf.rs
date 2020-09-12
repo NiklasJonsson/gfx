@@ -1,4 +1,4 @@
-use crate::common::render_graph;
+use crate::transform_graph;
 use specs::Component;
 
 use specs::prelude::*;
@@ -355,7 +355,7 @@ fn build_asset_graph_common<'a>(ctx: &mut RecGltfCtx, src: &gltf::Node<'a>) -> A
                     ctx.world
                         .create_entity()
                         .with(gltf_model)
-                        .with(render_graph::leaf(node))
+                        .with(transform_graph::leaf(node))
                         .build()
                 })
                 .collect::<Vec<_>>()
@@ -381,9 +381,9 @@ fn build_asset_graph_common<'a>(ctx: &mut RecGltfCtx, src: &gltf::Node<'a>) -> A
     // more than 1 camera per scene.
     let camera: Option<Entity> = cameras.iter().fold(this_node_cam, |acc, &x| acc.or(x));
 
-    let mut nodes = ctx.world.write_storage::<render_graph::RenderGraphNode>();
+    let mut nodes = ctx.world.write_storage::<transform_graph::RenderGraphNode>();
     nodes
-        .insert(node, render_graph::node(children))
+        .insert(node, transform_graph::node(children))
         .expect("Could not insert render graph node!");
 
     AssetGraphResult { node, camera }
@@ -396,9 +396,9 @@ fn build_asset_graph_rec<'a>(
 ) -> AssetGraphResult {
     let result = build_asset_graph_common(ctx, src);
 
-    let mut nodes = ctx.world.write_storage::<render_graph::RenderGraphChild>();
+    let mut nodes = ctx.world.write_storage::<transform_graph::RenderGraphChild>();
     nodes
-        .insert(result.node, render_graph::child(parent))
+        .insert(result.node, transform_graph::child(parent))
         .expect("Could not insert render graph node!");
     result
 }
@@ -406,9 +406,9 @@ fn build_asset_graph_rec<'a>(
 fn build_asset_graph(ctx: &mut RecGltfCtx, src_root: &gltf::Node) -> AssetGraphResult {
     let result = build_asset_graph_common(ctx, src_root);
 
-    let mut roots = ctx.world.write_storage::<render_graph::RenderGraphRoot>();
+    let mut roots = ctx.world.write_storage::<transform_graph::RenderGraphRoot>();
     roots
-        .insert(result.node, render_graph::root())
+        .insert(result.node, transform_graph::root())
         .expect("Could not insert render graph root!");
 
     result
@@ -431,7 +431,7 @@ fn get_cam_transform(
         if let Some(cam) = camera_ent {
             log::info!("Found camera in scene graph.");
             log::info!("Concatenating transforms.");
-            let path = render_graph::root_to_node_path(world, cam);
+            let path = transform_graph::root_to_node_path(world, cam);
             let mut transform: glm::Mat4 = glm::identity::<f32, glm::U4>();
             for ent in path {
                 let transforms = world.read_storage::<Transform>();

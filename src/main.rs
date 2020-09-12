@@ -13,6 +13,7 @@ mod io;
 mod render;
 mod settings;
 mod time;
+mod transform_graph;
 
 use arg_parse::Args;
 use common::*;
@@ -77,15 +78,15 @@ impl App {
         let engine = engine_builder
             .with_barrier()
             .with(
-                render_graph::TransformPropagation,
-                render_graph::TRANSFORM_PROPAGATION_SYSTEM_ID,
+                transform_graph::TransformPropagation,
+                transform_graph::TRANSFORM_PROPAGATION_SYSTEM_ID,
                 &[],
             )
             /* TODO: TREKANTEN
             .with(
-                render_graph::RenderedBoundingBoxes,
-                render_graph::RENDERED_BOUNDING_BOXES_SYSTEM_ID,
-                &[render_graph::TRANSFORM_PROPAGATION_SYSTEM_ID],
+                transform_graph::RenderedBoundingBoxes,
+                transform_graph::RENDERED_BOUNDING_BOXES_SYSTEM_ID,
+                &[transform_graph::TRANSFORM_PROPAGATION_SYSTEM_ID],
             )
             */
             .build();
@@ -140,7 +141,7 @@ impl App {
             // TODO: Base this into print_graph_to_dot?
             match std::fs::File::create(path) {
                 Ok(file) => {
-                    let result = render_graph::print_graph_to_dot(
+                    let result = transform_graph::print_graph_to_dot(
                         &self.world,
                         loaded_asset.scene_roots.iter().cloned(),
                         file,

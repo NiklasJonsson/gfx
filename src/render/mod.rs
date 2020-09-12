@@ -27,7 +27,7 @@ pub mod pipeline;
 pub mod uniform;
 
 use crate::camera::*;
-use crate::common::{ModelMatrix, Position};
+use crate::common::{ModelMatrix, Position}; 
 use material::{Material, ShaderUse};
 
 use crate::settings::{RenderMode, RenderSettings};
@@ -423,8 +423,8 @@ pub fn register_components(world: &mut World) {
     world.register::<RenderableMaterial>();
     world.register::<Mesh>();
     world.register::<Material>();
-    world.register::<crate::common::render_graph::RenderGraphNode>();
-    world.register::<crate::common::render_graph::RenderGraphRoot>();
-    world.register::<crate::common::render_graph::RenderGraphChild>();
+    world.register::<crate::transform_graph::RenderGraphNode>();
+    world.register::<crate::transform_graph::RenderGraphRoot>();
+    world.register::<crate::transform_graph::RenderGraphChild>();
     world.register::<crate::camera::Camera>();
 }
