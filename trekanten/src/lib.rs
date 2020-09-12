@@ -43,9 +43,10 @@ use device::HasVkDevice;
 // All rendering in that frame will be done on that swapchain image/framebuffer.
 
 pub struct FrameSynchronization {
-    pub image_available: sync::Semaphore,
-    pub render_done: sync::Semaphore,
-    pub in_flight: sync::Fence,
+    image_available: sync::Semaphore,
+    render_done: sync::Semaphore,
+    in_flight: sync::Fence,
+    command_pool: Option<command::CommandPool>,
 }
 
 impl FrameSynchronization {
@@ -58,26 +59,79 @@ impl FrameSynchronization {
             image_available: image_avail,
             render_done,
             in_flight,
+            command_pool: None,
         })
     }
 }
 
-pub struct Frame {
-    frame_idx: u32,
-    swapchain_image_idx: u32,
+pub struct Frame<'a> {
+    renderer: &'a mut Renderer,
     recorded_command_buffers: Vec<vk::CommandBuffer>,
     gfx_command_pool: command::CommandPool,
 }
 
-impl Frame {
-    pub fn new_command_buffer(&self) -> Result<command::CommandBuffer, command::CommandError> {
+pub struct FinishedFrame {
+    recorded_command_buffers: Vec<vk::CommandBuffer>,
+    gfx_command_pool: command::CommandPool,
+}
+
+impl<'a> Frame<'a> {
+    pub fn new_raw_command_buffer(&self) -> Result<command::CommandBuffer, command::CommandError> {
         self.gfx_command_pool
             .create_command_buffer(command::CommandBufferSubmission::Single)
     }
 
-    pub fn add_command_buffer(&mut self, cmd_buffer: command::CommandBuffer) {
+    pub fn add_raw_command_buffer(&mut self, cmd_buffer: command::CommandBuffer) {
         self.recorded_command_buffers
             .push(*cmd_buffer.vk_command_buffer());
+    }
+
+    // TODO: Could we use vkCmdUpdateBuffer instead? Note that it can't be inside a render pass
+    pub fn update_uniform_blocking<T>(
+        &mut self,
+        h: &BufferHandle<uniform::UniformBuffer>,
+        data: &T,
+    ) -> Result<(), RenderError> {
+        self.renderer.update_uniform(h, data)
+    }
+
+    pub fn begin_render_pass(
+        &'a self,
+    ) -> Result<command::CommandBufferBuilder<'a>, command::CommandError> {
+        let mut buf = self.new_raw_command_buffer()?;
+        buf.begin_render_pass(
+            self.renderer.render_pass(),
+            self.renderer.framebuffer(),
+            self.renderer.swapchain_extent(),
+        );
+
+        // TODO: RenderPassBuilder!!!!
+        Ok(command::CommandBufferBuilder::new(self.renderer, buf))
+    }
+
+    pub fn render_pass(&self) -> &render_pass::RenderPass {
+        self.renderer.render_pass()
+    }
+
+    pub fn swapchain_extent(&self) -> util::Extent2D {
+        self.renderer.swapchain_extent()
+    }
+
+    pub fn framebuffer(&self, _frame: &Frame) -> &framebuffer::Framebuffer {
+        self.renderer.framebuffer()
+    }
+
+    pub fn finish(self) -> FinishedFrame {
+        let Frame {
+            recorded_command_buffers,
+            gfx_command_pool,
+            ..
+        } = self;
+
+        FinishedFrame {
+            recorded_command_buffers,
+            gfx_command_pool,
+        }
     }
 }
 
@@ -107,7 +161,6 @@ pub struct Renderer {
 
     frame_synchronization: [FrameSynchronization; MAX_FRAMES_IN_FLIGHT],
     frame_idx: u32,
-    frames: [Option<Frame>; MAX_FRAMES_IN_FLIGHT],
 
     device: device::Device,
     surface: surface::Surface,
@@ -185,7 +238,6 @@ impl Renderer {
             render_pass,
         } = create_swapchain_and_co(&instance, &device, &surface, &window_extent, None)?;
 
-        let frames = [None, None];
         let frame_synchronization = [
             FrameSynchronization::new(&device)?,
             FrameSynchronization::new(&device)?,
@@ -206,7 +258,6 @@ impl Renderer {
             color_buffer,
             frame_synchronization,
             frame_idx: 0,
-            frames,
             swapchain_image_idx: 0,
             _debug_utils,
             graphics_pipelines: Default::default(),
@@ -219,46 +270,50 @@ impl Renderer {
         })
     }
 
-    pub fn next_frame(&mut self) -> Result<Frame, RenderError> {
-        let frame_sync = &self.frame_synchronization[self.frame_idx as usize];
-        frame_sync.in_flight.blocking_wait()?;
+    pub fn next_frame<'a, 'b: 'a>(&'b mut self) -> Result<Frame<'a>, RenderError> {
+        {
+            let frame_sync = &mut self.frame_synchronization[self.frame_idx as usize];
+            frame_sync.in_flight.blocking_wait()?;
 
-        self.swapchain_image_idx = self
-            .swapchain
-            .acquire_next_image(Some(&frame_sync.image_available))?;
+            self.swapchain_image_idx = self
+                .swapchain
+                .acquire_next_image(Some(&frame_sync.image_available))?;
+        }
 
         // This means that we received an image that might be in the process of rendering
-        if let Some(frame_idx) = self.image_to_frame_idx[self.swapchain_image_idx as usize] {
-            self.frame_synchronization[frame_idx as usize]
+        if let Some(mapped_frame_idx) = self.image_to_frame_idx[self.swapchain_image_idx as usize] {
+            self.frame_synchronization[mapped_frame_idx as usize]
                 .in_flight
                 .blocking_wait()?;
         }
 
-        // This will drop the frame that resided here previously
-        let _ = std::mem::replace(&mut self.frames[self.frame_idx as usize], None);
-
+        let frame_sync = &mut self.frame_synchronization[self.frame_idx as usize];
+        let _ = std::mem::replace(&mut frame_sync.command_pool, None);
         let gfx_command_pool = command::CommandPool::graphics(&self.device)?;
 
         self.image_to_frame_idx[self.swapchain_image_idx as usize] = Some(self.frame_idx);
 
-        Ok(Frame {
-            frame_idx: self.frame_idx,
-            swapchain_image_idx: self.swapchain_image_idx,
+        Ok(Frame::<'a> {
+            renderer: self,
             recorded_command_buffers: Vec::new(),
             gfx_command_pool,
         })
     }
 
-    pub fn submit(&mut self, frame: Frame) -> Result<(), RenderError> {
-        assert_eq!(frame.frame_idx, self.frame_idx, "Mismatching frame indexes");
+    pub fn submit(&mut self, frame: FinishedFrame) -> Result<(), RenderError> {
+        let frame_sync = &mut self.frame_synchronization[self.frame_idx as usize];
+        assert!(
+            frame_sync.command_pool.is_none(),
+            "There should be no in-flight command buffers for this frame"
+        );
+        // It's fine to "drop" the command buffers, they will be all be destroyed/recycled with reset() when they are done
+        // Their handles are passed submit info and stored in the driver before we deallocate the Vec holding them.
+        let FinishedFrame {
+            gfx_command_pool,
+            recorded_command_buffers,
+        } = frame;
+        frame_sync.command_pool = Some(gfx_command_pool);
 
-        // Make sure that this is captured before any early returns. If this function returns
-        // without having extended the lifetime of frame, it might be dropped while it's command
-        // buffers are still in use.
-        self.frames[self.frame_idx as usize] = Some(frame);
-        let frame = self.frames[self.frame_idx as usize].as_ref().unwrap();
-
-        let frame_sync = &self.frame_synchronization[self.frame_idx as usize];
         let vk_wait_sems = [*frame_sync.image_available.vk_semaphore()];
         let wait_dst_mask = [vk::PipelineStageFlags::COLOR_ATTACHMENT_OUTPUT];
         let vk_sig_sems = [*frame_sync.render_done.vk_semaphore()];
@@ -267,7 +322,7 @@ impl Renderer {
             .wait_semaphores(&vk_wait_sems)
             .wait_dst_stage_mask(&wait_dst_mask)
             .signal_semaphores(&vk_sig_sems)
-            .command_buffers(&frame.recorded_command_buffers);
+            .command_buffers(&recorded_command_buffers);
 
         let gfx_queue = self.device.graphics_queue();
         frame_sync.in_flight.reset()?;
@@ -292,18 +347,6 @@ impl Renderer {
         self.frame_idx = (self.frame_idx + 1) % MAX_FRAMES_IN_FLIGHT as u32;
 
         Ok(())
-    }
-
-    pub fn render_pass(&self) -> &render_pass::RenderPass {
-        &self.render_pass
-    }
-
-    pub fn swapchain_extent(&self) -> util::Extent2D {
-        self.swapchain.info().extent
-    }
-
-    pub fn framebuffer(&self, frame: &Frame) -> &framebuffer::Framebuffer {
-        &self.swapchain_framebuffers[frame.swapchain_image_idx as usize]
     }
 
     fn recreate_pipelines(&mut self) -> Result<(), RenderError> {
@@ -351,7 +394,23 @@ impl Renderer {
         Ok(())
     }
 
-    pub fn update_uniform<T>(
+    pub fn get_descriptor_set(
+        &self,
+        handle: &Handle<descriptor::DescriptorSet>,
+    ) -> Option<&descriptor::DescriptorSet> {
+        self.descriptor_sets.get(handle, self.frame_idx as usize)
+    }
+
+    pub fn aspect_ratio(&self) -> f32 {
+        let util::Extent2D { width, height } = self.swapchain_extent();
+
+        width as f32 / height as f32
+    }
+}
+
+/// These are functions only used by Frame
+impl Renderer {
+    fn update_uniform<T>(
         &mut self,
         h: &BufferHandle<uniform::UniformBuffer>,
         data: &T,
@@ -365,17 +424,16 @@ impl Renderer {
             .map_err(RenderError::UniformBuffer)
     }
 
-    pub fn get_descriptor_set(
-        &self,
-        handle: &Handle<descriptor::DescriptorSet>,
-    ) -> Option<&descriptor::DescriptorSet> {
-        self.descriptor_sets.get(handle, self.frame_idx as usize)
+    fn render_pass(&self) -> &render_pass::RenderPass {
+        &self.render_pass
     }
 
-    pub fn aspect_ratio(&self) -> f32 {
-        let util::Extent2D { width, height } = self.swapchain_extent();
+    fn swapchain_extent(&self) -> util::Extent2D {
+        self.swapchain.info().extent
+    }
 
-        width as f32 / height as f32
+    fn framebuffer(&self) -> &framebuffer::Framebuffer {
+        &self.swapchain_framebuffers[self.swapchain_image_idx as usize]
     }
 }
 

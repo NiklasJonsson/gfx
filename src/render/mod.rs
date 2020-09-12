@@ -229,65 +229,21 @@ fn create_renderable(
     }
 }
 
-fn draw_model(
-    renderer: &Renderer,
-    cmd_buf: command::CommandBuffer,
-    renderable: &RenderableMaterial,
-    mesh: &Mesh,
-    mtx: &ModelMatrix,
-) -> command::CommandBuffer {
-    let gfx_pipeline = renderer
-        .get_resource(&renderable.gfx_pipeline)
-        .expect("Missing graphics pipeline");
-    let index_buffer = renderer
-        .get_resource(mesh.index_buffer.handle())
-        .expect("Missing index buffer");
-    let vertex_buffer = renderer
-        .get_resource(mesh.vertex_buffer.handle())
-        .expect("Missing vertex buffer");
-    let mat_desc_set = renderer
-        .get_descriptor_set(&renderable.material_descriptor_set)
-        .expect("Missing descriptor set");
-
-    let vertex_index = mesh.vertex_buffer.idx();
-    let indices_index = mesh.index_buffer.idx();
-    let n_indices = mesh.index_buffer.len();
-
-    let trn = uniform::Model {
-        model: mtx.0.into(),
-        model_it: glm::inverse_transpose(mtx.0).into(),
-    };
-
-    cmd_buf
-        .bind_graphics_pipeline(&gfx_pipeline)
-        .bind_descriptor_set(1, &mat_desc_set, &gfx_pipeline)
-        .bind_index_buffer(&index_buffer, indices_index)
-        .bind_vertex_buffer(&vertex_buffer, vertex_index)
-        .bind_push_constant(
-            &gfx_pipeline,
-            trekanten::pipeline::ShaderStage::Vertex,
-            &trn,
-        )
-        .draw_indexed(n_indices as u32)
-}
-
-fn draw_entities(
+fn create_renderables(
     renderer: &mut Renderer,
     world: &mut World,
-    mut cmd_buf: command::CommandBuffer,
     render_mode: RenderMode,
     reload_shaders: bool,
-) -> command::CommandBuffer {
-    let model_matrices = world.read_storage::<ModelMatrix>();
+) {
     let meshes = world.read_storage::<Mesh>();
     let materials = world.read_storage::<Material>();
     let mut renderables = world.write_storage::<RenderableMaterial>();
     let entities = world.read_resource::<EntitiesRes>();
 
-    for (ent, mesh, mat, mtx) in (&entities, &meshes, &materials, &model_matrices).join() {
+    for (ent, mesh, mat) in (&entities, &meshes, &materials).join() {
         // TODO: Move to function
         let entry = renderables.entry(ent).expect("Failed to get entry!");
-        cmd_buf = match entry {
+        match entry {
             StorageEntry::Occupied(occ_entry) => {
                 if occ_entry.get().mode != render_mode {
                     log::trace!("Renderable did not match render mode, creating new");
@@ -316,19 +272,41 @@ fn draw_entities(
                         }
                     }
                 }
-                draw_model(renderer, cmd_buf, occ_entry.get(), mesh, mtx)
             }
             StorageEntry::Vacant(vac_entry) => {
                 log::trace!("No Renderable found, creating new");
                 let rend = create_renderable(renderer, world, mesh, mat, render_mode);
-                let cmd_buf = draw_model(renderer, cmd_buf, &rend, mesh, mtx);
                 vac_entry.insert(rend);
-                cmd_buf
             }
-        };
+        }
     }
+}
 
-    cmd_buf
+fn draw_entities<'a>(world: &World, cmd_buf: &mut command::CommandBufferBuilder<'a>) {
+    let model_matrices = world.read_storage::<ModelMatrix>();
+    let meshes = world.read_storage::<Mesh>();
+    let renderables = world.read_storage::<RenderableMaterial>();
+
+    for (mesh, renderable, mtx) in (&meshes, &renderables, &model_matrices).join() {
+        let trn = uniform::Model {
+            model: mtx.0.into(),
+            model_it: glm::inverse_transpose(mtx.0).into(),
+        };
+
+        cmd_buf
+            .bind_graphics_pipeline(&renderable.gfx_pipeline)
+            .bind_shader_resource_group(
+                1,
+                &renderable.material_descriptor_set,
+                &renderable.gfx_pipeline,
+            )
+            .bind_push_constant(
+                &renderable.gfx_pipeline,
+                trekanten::pipeline::ShaderStage::Vertex,
+                &trn,
+            )
+            .draw_mesh(&mesh);
+    }
 }
 
 pub fn draw_frame(world: &mut World, renderer: &mut Renderer) {
@@ -343,12 +321,23 @@ pub fn draw_frame(world: &mut World, renderer: &mut Renderer) {
     if reload_shaders {
         log::debug!("Shader reload requested");
     }
-    // Note: Don't do any rendering related stuff before this.
-    // TODO: Move functions from renderer to frame to ensure ordering.
+
+    create_renderables(renderer, world, render_mode, reload_shaders);
+
+    let aspect_ratio = renderer.aspect_ratio();
     let mut frame = renderer.next_frame().expect("Failed to get frame");
 
-    // Per-frame data
-    let mut cmd_buf = {
+    {
+        let (view_matrix, cam_pos) = get_view_data(world);
+        let lighting_data = uniform::LightingData {
+            light_pos: [5.0f32, 5.0f32, 5.0f32, 0.0f32],
+            view_pos: [cam_pos.x(), cam_pos.y(), cam_pos.z(), 0.0f32],
+        };
+        let transforms = uniform::Transforms {
+            view: view_matrix.into(),
+            proj: get_proj_matrix(aspect_ratio).into(),
+        };
+
         let FrameData {
             light_buffer,
             frame_set,
@@ -356,50 +345,29 @@ pub fn draw_frame(world: &mut World, renderer: &mut Renderer) {
             dummy_pipeline,
         } = &*world.read_resource::<FrameData>();
 
-        let (view_matrix, cam_pos) = get_view_data(world);
-
-        let lighting_data = uniform::LightingData {
-            light_pos: [5.0f32, 5.0f32, 5.0f32, 0.0f32],
-            view_pos: [cam_pos.x(), cam_pos.y(), cam_pos.z(), 0.0f32],
-        };
-
-        let transforms = uniform::Transforms {
-            view: view_matrix.into(),
-            proj: get_proj_matrix(renderer.aspect_ratio()).into(),
-        };
-        renderer
-            .update_uniform(light_buffer, &lighting_data)
-            .expect("Failed to update uniform");
-        renderer
-            .update_uniform(transforms_buffer, &transforms)
-            .expect("Failed to update uniform");
-
-        let render_pass = renderer.render_pass();
-        let extent = renderer.swapchain_extent();
-        let framebuffer = renderer.framebuffer(&frame);
-        let frame_set = renderer
-            .get_descriptor_set(&frame_set)
-            .expect("Missing descriptor set");
-
-        let dummy_pipeline = renderer
-            .get_resource(dummy_pipeline)
-            .expect("Missing pipeline!");
-
         frame
-            .new_command_buffer()
-            .expect("Failed to create new command buffer")
-            .begin_render_pass(render_pass, framebuffer, extent)
-            .bind_descriptor_set(0, frame_set, dummy_pipeline)
-    };
+            .update_uniform_blocking(light_buffer, &lighting_data)
+            .expect("Failed to update uniform");
+        frame
+            .update_uniform_blocking(transforms_buffer, &transforms)
+            .expect("Failed to update uniform");
 
-    cmd_buf = draw_entities(renderer, world, cmd_buf, render_mode, reload_shaders);
+        let mut builder = frame
+            .begin_render_pass()
+            .expect("Failed to begin render pass");
 
-    cmd_buf = cmd_buf
-        .end_render_pass()
-        .end()
-        .expect("Failed to end command buffer");
+        builder
+            .bind_graphics_pipeline(dummy_pipeline)
+            .bind_shader_resource_group(0, frame_set, dummy_pipeline);
 
-    frame.add_command_buffer(cmd_buf);
+        draw_entities(world, &mut builder);
+
+        let buf = builder
+            .build()
+            .expect("Failed to create render pass command buffer");
+        frame.add_raw_command_buffer(buf);
+    }
+    let frame = frame.finish();
     renderer.submit(frame).expect("Failed to submit frame");
     world
         .write_resource::<RenderSettings>()

@@ -17,10 +17,18 @@ use crate::queue::QueueFamily;
 use crate::render_pass::RenderPass;
 use crate::util;
 
+// TODO: Temporary
+use crate::mesh::Mesh;
+use crate::resource::Handle;
+use crate::resource::ResourceManager;
+use crate::Renderer;
+
 #[derive(Debug, Error)]
 pub enum CommandError {
     #[error("Command pool creation failed: {0}")]
     PoolCreation(vk::Result),
+    #[error("Command pool reset failed: {0}")]
+    PoolReset(vk::Result),
     #[error("Command buffer allocation failed: {0}")]
     BufferAlloc(vk::Result),
     #[error("Command buffer begin() failed: {0}")]
@@ -68,6 +76,14 @@ impl CommandPool {
 
     pub fn graphics(device: &Device) -> Result<Self, CommandError> {
         Self::new(device, device.graphics_queue_family().clone())
+    }
+
+    pub fn reset(&mut self) -> Result<(), CommandError> {
+        unsafe {
+            self.vk_device
+                .reset_command_pool(self.vk_command_pool, vk::CommandPoolResetFlags::empty())
+                .map_err(CommandError::PoolReset)
+        }
     }
 
     pub fn util(device: &Device) -> Result<Self, CommandError> {
@@ -123,9 +139,6 @@ pub enum CommandBufferSubmission {
     Multi,
 }
 
-// TODO: That we have to call all of these through a device means that might mean that we can't
-// "easily" record command buffers on other threads?
-// TODO: Builder pattern?
 pub struct CommandBuffer {
     queue_flags: vk::QueueFlags,
     vk_cmd_buffer: vk::CommandBuffer,
@@ -172,7 +185,7 @@ impl CommandBuffer {
         self.is_started
     }
 
-    pub fn end(self) -> Result<Self, CommandError> {
+    pub fn end(&mut self) -> Result<&mut Self, CommandError> {
         unsafe {
             self.vk_device
                 .end_command_buffer(self.vk_cmd_buffer)
@@ -182,11 +195,11 @@ impl CommandBuffer {
     }
 
     pub fn begin_render_pass(
-        self,
+        &mut self,
         render_pass: &RenderPass,
         framebuffer: &Framebuffer,
         extent: util::Extent2D,
-    ) -> Self {
+    ) -> &mut Self {
         let info = vk::RenderPassBeginInfo::builder()
             .render_pass(*render_pass.vk_render_pass())
             .framebuffer(*framebuffer.vk_framebuffer())
@@ -207,7 +220,7 @@ impl CommandBuffer {
         self
     }
 
-    pub fn end_render_pass(self) -> Self {
+    pub fn end_render_pass(&mut self) -> &mut Self {
         unsafe {
             self.vk_device.cmd_end_render_pass(self.vk_cmd_buffer);
         }
@@ -215,7 +228,7 @@ impl CommandBuffer {
         self
     }
 
-    pub fn bind_graphics_pipeline(self, graphics_pipeline: &GraphicsPipeline) -> Self {
+    pub fn bind_graphics_pipeline(&mut self, graphics_pipeline: &GraphicsPipeline) -> &mut Self {
         assert!(self.queue_flags.contains(vk::QueueFlags::GRAPHICS));
 
         unsafe {
@@ -229,7 +242,7 @@ impl CommandBuffer {
         self
     }
 
-    pub fn bind_vertex_buffer(self, buffer: &VertexBuffer, offset: u64) -> Self {
+    pub fn bind_vertex_buffer(&mut self, buffer: &VertexBuffer, offset: u64) -> &mut Self {
         assert!(self.queue_flags.contains(vk::QueueFlags::GRAPHICS));
         log::trace!("binding vertex buffer {:?} at {}", buffer, offset);
 
@@ -245,7 +258,7 @@ impl CommandBuffer {
         self
     }
 
-    pub fn bind_index_buffer(self, buffer: &IndexBuffer, offset: u64) -> Self {
+    pub fn bind_index_buffer(&mut self, buffer: &IndexBuffer, offset: u64) -> &mut Self {
         assert!(self.queue_flags.contains(vk::QueueFlags::GRAPHICS));
         log::trace!("binding index buffer {:?} at {}", buffer, offset);
 
@@ -262,11 +275,11 @@ impl CommandBuffer {
     }
 
     pub fn bind_descriptor_set(
-        self,
+        &mut self,
         idx: u32,
         set: &DescriptorSet,
         pipeline: &GraphicsPipeline,
-    ) -> Self {
+    ) -> &mut Self {
         assert!(self.queue_flags.contains(vk::QueueFlags::GRAPHICS));
 
         let sets = [*set.vk_descriptor_set()];
@@ -284,7 +297,7 @@ impl CommandBuffer {
         self
     }
 
-    pub fn draw_indexed(self, n_vertices: u32) -> Self {
+    pub fn draw_indexed(&mut self, n_vertices: u32) -> &mut Self {
         assert!(self.queue_flags.contains(vk::QueueFlags::GRAPHICS));
 
         unsafe {
@@ -295,7 +308,7 @@ impl CommandBuffer {
         self
     }
 
-    pub fn copy_buffer(self, src: &vk::Buffer, dst: &vk::Buffer, size: usize) -> Self {
+    pub fn copy_buffer(&mut self, src: &vk::Buffer, dst: &vk::Buffer, size: usize) -> &mut Self {
         let info = vk::BufferCopy {
             src_offset: 0,
             dst_offset: 0,
@@ -311,11 +324,11 @@ impl CommandBuffer {
     }
 
     pub fn copy_buffer_to_image(
-        self,
+        &mut self,
         src: &vk::Buffer,
         dst: &vk::Image,
         extent: &util::Extent2D,
-    ) -> Self {
+    ) -> &mut Self {
         // TODO: Read this info from dst (by passing not just the vk::Image)
         let info = vk::BufferImageCopy {
             buffer_offset: 0,
@@ -350,11 +363,11 @@ impl CommandBuffer {
     }
 
     pub fn pipeline_barrier(
-        self,
+        &mut self,
         barrier: &vk::ImageMemoryBarrier,
         src_stage: vk::PipelineStageFlags,
         dst_stage: vk::PipelineStageFlags,
-    ) -> Self {
+    ) -> &mut Self {
         unsafe {
             self.vk_device.cmd_pipeline_barrier(
                 self.vk_cmd_buffer,
@@ -371,11 +384,11 @@ impl CommandBuffer {
     }
 
     pub fn blit_image(
-        self,
+        &mut self,
         src: &vk::Image,
         dst: &vk::Image,
         vk_image_blit: &vk::ImageBlit,
-    ) -> Self {
+    ) -> &mut Self {
         unsafe {
             self.vk_device.cmd_blit_image(
                 self.vk_cmd_buffer,
@@ -392,11 +405,11 @@ impl CommandBuffer {
     }
 
     pub fn bind_push_constant<V>(
-        self,
+        &mut self,
         pipeline: &GraphicsPipeline,
         stage: ShaderStage,
         v: &V,
-    ) -> Self {
+    ) -> &mut Self {
         let bytes = util::as_bytes(v);
         assert!(bytes.len() <= 128);
         unsafe {
@@ -410,5 +423,96 @@ impl CommandBuffer {
         }
 
         self
+    }
+}
+
+// TODO: Rename RenderPassBuilder?
+pub struct CommandBufferBuilder<'a> {
+    renderer: &'a Renderer,
+    command_buffer: CommandBuffer,
+}
+
+impl<'a> CommandBufferBuilder<'a> {
+    pub fn bind_shader_resource_group(
+        &mut self,
+        idx: u32,
+        dset: &Handle<DescriptorSet>,
+        pipeline: &Handle<GraphicsPipeline>,
+    ) -> &mut Self {
+        let dset = self
+            .renderer
+            .get_descriptor_set(dset)
+            .expect("Failed to find descriptor set");
+        let pipeline = self
+            .renderer
+            .get_resource(pipeline)
+            .expect("Failed to find pipeline");
+        self.command_buffer.bind_descriptor_set(idx, dset, pipeline);
+
+        self
+    }
+
+    pub fn bind_graphics_pipeline(&mut self, gfx_pipeline: &Handle<GraphicsPipeline>) -> &mut Self {
+        let p = self
+            .renderer
+            .get_resource(gfx_pipeline)
+            .expect("Failed to get pipeline");
+        self.command_buffer.bind_graphics_pipeline(p);
+
+        self
+    }
+
+    pub fn draw_mesh(&mut self, mesh: &Mesh) -> &mut Self {
+        let vertex_index = mesh.vertex_buffer.idx();
+        let indices_index = mesh.index_buffer.idx();
+        let n_indices = mesh.index_buffer.len();
+
+        let ib = self
+            .renderer
+            .get_resource(mesh.index_buffer.handle())
+            .expect("Failed to get index buffer");
+        let vb = self
+            .renderer
+            .get_resource(mesh.vertex_buffer.handle())
+            .expect("Failed to get vertex buffer");
+
+        self.command_buffer
+            .bind_index_buffer(ib, indices_index)
+            .bind_vertex_buffer(vb, vertex_index)
+            .draw_indexed(n_indices as u32);
+
+        self
+    }
+
+    pub fn bind_push_constant<V>(
+        &mut self,
+        pipeline: &Handle<GraphicsPipeline>,
+        stage: ShaderStage,
+        v: &V,
+    ) -> &mut Self {
+        let p = self
+            .renderer
+            .get_resource(pipeline)
+            .expect("Failed to get pipeline");
+        self.command_buffer.bind_push_constant(p, stage, v);
+
+        self
+    }
+
+    pub fn new(renderer: &'a Renderer, command_buffer: CommandBuffer) -> Self {
+        Self {
+            renderer,
+            command_buffer,
+        }
+    }
+
+    pub fn build(mut self) -> Result<CommandBuffer, CommandError> {
+        self.command_buffer.end_render_pass().end()?;
+        Ok(self.command_buffer)
+    }
+
+    pub fn inner(self) -> CommandBuffer {
+        let Self { command_buffer, .. } = self;
+        command_buffer
     }
 }

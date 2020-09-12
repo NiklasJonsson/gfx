@@ -267,8 +267,9 @@ impl DeviceBuffer {
             MemoryUsage::GpuOnly,
         )?;
 
-        let cmd_buf = command_pool
-            .begin_single_submit()?
+        let mut cmd_buf = command_pool.begin_single_submit()?;
+
+        cmd_buf
             .copy_buffer(staging.vk_buffer(), dst_buffer.vk_buffer(), staging.size())
             .end()?;
 
@@ -320,13 +321,13 @@ impl std::ops::Drop for DeviceBuffer {
 }
 
 fn transition_image_layout(
-    cmd_buf: CommandBuffer,
+    cmd_buf: &mut CommandBuffer,
     vk_image: &vk::Image,
     mip_levels: u32,
     _vk_format: vk::Format,
     old_layout: vk::ImageLayout,
     new_layout: vk::ImageLayout,
-) -> CommandBuffer {
+) {
     // Note: The barrier below does not really matter at the moment as we wait on the fence
     // directly after submitting. If the code is used elsewhere, it makes the following
     // assumptions:
@@ -368,17 +369,17 @@ fn transition_image_layout(
         ..Default::default()
     };
 
-    cmd_buf.pipeline_barrier(&barrier, src_stage, dst_stage)
+    cmd_buf.pipeline_barrier(&barrier, src_stage, dst_stage);
 }
 
 // TODO: This code depends on vk_image being TRANSfER_DST_OPTIMAL. We should track this together
 // with the image.
 fn generate_mipmaps(
-    mut cmd_buf: CommandBuffer,
+    cmd_buf: &mut CommandBuffer,
     vk_image: &vk::Image,
     extent: &util::Extent2D,
     mip_levels: u32,
-) -> CommandBuffer {
+) {
     assert!(cmd_buf.is_started());
     let aspect_mask = vk::ImageAspectFlags::COLOR;
 
@@ -451,7 +452,7 @@ fn generate_mipmaps(
             ..barrier
         };
 
-        cmd_buf = cmd_buf
+        cmd_buf
             .pipeline_barrier(
                 &barrier,
                 vk::PipelineStageFlags::TRANSFER,
@@ -492,14 +493,14 @@ fn generate_mipmaps(
         &last_mip_level_transition,
         vk::PipelineStageFlags::TRANSFER,
         vk::PipelineStageFlags::FRAGMENT_SHADER,
-    )
+    );
 }
 
 pub struct DeviceImage {
     allocator: AllocatorHandle,
     vk_image: vk::Image,
     allocation: Allocation,
-    allcation_info: AllocationInfo,
+    _allcation_info: AllocationInfo,
 }
 
 impl DeviceImage {
@@ -539,7 +540,7 @@ impl DeviceImage {
             ..Default::default()
         };
         let allocator = device.allocator();
-        let (vk_image, allocation, allcation_info) = allocator
+        let (vk_image, allocation, _allcation_info) = allocator
             .create_image(&info, &allocation_create_info)
             .map_err(MemoryError::ImageCreation)?;
 
@@ -547,7 +548,7 @@ impl DeviceImage {
             allocator,
             vk_image,
             allocation,
-            allcation_info,
+            _allcation_info,
         })
     }
 
@@ -579,19 +580,21 @@ impl DeviceImage {
         )?;
 
         // Transitioned to SHADER_READ_ONLY_OPTIMAL during mipmap generation
-        let cmd_buf = command_pool.begin_single_submit()?;
+        let mut cmd_buf = command_pool.begin_single_submit()?;
 
-        let cmd_buf = transition_image_layout(
-            cmd_buf,
+        transition_image_layout(
+            &mut cmd_buf,
             &dst_image.vk_image,
             mip_levels,
             format.into(),
             vk::ImageLayout::UNDEFINED,
             vk::ImageLayout::TRANSFER_DST_OPTIMAL,
-        )
-        .copy_buffer_to_image(&staging.vk_buffer, dst_image.vk_image(), &extent);
+        );
+        cmd_buf.copy_buffer_to_image(&staging.vk_buffer, dst_image.vk_image(), &extent);
 
-        let cmd_buf = generate_mipmaps(cmd_buf, dst_image.vk_image(), &extent, mip_levels).end()?;
+        generate_mipmaps(&mut cmd_buf, dst_image.vk_image(), &extent, mip_levels);
+
+        cmd_buf.end()?;
 
         queue.submit_and_wait(&cmd_buf)?;
 

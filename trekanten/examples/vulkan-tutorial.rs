@@ -254,6 +254,29 @@ fn main() -> Result<(), trekanten::RenderError> {
         .create_resource(index_buffer_descriptor)
         .expect("Failed to create index buffer");
 
+    let vertex_buffer = unsafe {
+        BufferHandle::from_buffer(
+            vertex_buffer_handle,
+            0,
+            vertices.len() as u64,
+            std::mem::size_of::<Vertex>() as u64,
+        )
+    };
+
+    let index_buffer = unsafe {
+        BufferHandle::from_buffer(
+            index_buffer_handle,
+            0,
+            indices.len() as u64,
+            std::mem::size_of::<u32>() as u64,
+        )
+    };
+
+    let mesh = mesh::Mesh {
+        vertex_buffer,
+        index_buffer,
+    };
+
     let vert = ShaderDescriptor::FromRawSpirv(RAW_VERT_SPV.to_vec());
     let frag = ShaderDescriptor::FromRawSpirv(RAW_FRAG_SPV.to_vec());
     let pipeline_descriptor = pipeline::GraphicsPipelineDescriptor {
@@ -267,14 +290,11 @@ fn main() -> Result<(), trekanten::RenderError> {
         .expect("Failed to create graphics pipeline");
 
     let uniform_buffer_desc =
-        uniform::UniformBufferDescriptor::uninitialized::<UniformBufferObject>(1);
+        uniform::UniformBufferDescriptor::Uninitialized::<UniformBufferObject> { n_elems: 1 };
 
     let uniform_buffer_handle = renderer
         .create_resource(uniform_buffer_desc)
         .expect("Failed to create uniform buffer");
-
-    let uniform_buffer_handle =
-        BufferHandle::from_typed_buffer::<UniformBufferObject>(uniform_buffer_handle, 0, 1);
 
     let _ = load_url("textures", TEX_URL);
     let tex_path = get_fname("textures", TEX_URL);
@@ -303,6 +323,8 @@ fn main() -> Result<(), trekanten::RenderError> {
             handle_window_event(&mut window.window, event);
         }
 
+        let aspect_ratio = renderer.aspect_ratio();
+
         let mut frame = match renderer.next_frame() {
             Err(trekanten::RenderError::NeedsResize(reason)) => {
                 log::info!("Resize reason: {:?}", reason);
@@ -312,41 +334,26 @@ fn main() -> Result<(), trekanten::RenderError> {
             x => x,
         }?;
 
-        let next_mvp = get_next_mvp(&start, renderer.aspect_ratio());
-        renderer
-            .update_uniform(&uniform_buffer_handle, &next_mvp)
+        let next_mvp = get_next_mvp(&start, aspect_ratio);
+        frame
+            .update_uniform_blocking(&uniform_buffer_handle, &next_mvp)
             .expect("Failed to update uniform buffer!");
 
-        let render_pass = renderer.render_pass();
-        let extent = renderer.swapchain_extent();
-        let framebuffer = renderer.framebuffer(&frame);
+        let mut builder = frame
+            .begin_render_pass()
+            .expect("Failed to begin render pass");
 
-        let gfx_pipeline = renderer
-            .get_resource(&gfx_pipeline_handle)
-            .expect("Missing graphics pipeline");
-        let index_buffer = renderer
-            .get_resource(&index_buffer_handle)
-            .expect("Missing index buffer");
-        let vertex_buffer = renderer
-            .get_resource(&vertex_buffer_handle)
-            .expect("Missing vertex buffer");
-        let desc_set = renderer
-            .get_descriptor_set(&desc_set_handle)
-            .expect("Missing descriptor set");
+        builder
+            .bind_graphics_pipeline(&gfx_pipeline_handle)
+            .bind_shader_resource_group(0, &desc_set_handle, &gfx_pipeline_handle)
+            .draw_mesh(&mesh);
 
-        let cmd_buf = frame
-            .new_command_buffer()?
-            .begin_render_pass(render_pass, framebuffer, extent)
-            .bind_graphics_pipeline(&gfx_pipeline)
-            .bind_descriptor_set(0, &desc_set, &gfx_pipeline)
-            .bind_index_buffer(&index_buffer, 0)
-            .bind_vertex_buffer(&vertex_buffer, 0)
-            .draw_indexed(indices.len() as u32)
-            .end_render_pass()
-            .end()?;
+        let cmd_buf = builder
+            .build()
+            .expect("Failed to build render command buffer");
+        frame.add_raw_command_buffer(cmd_buf);
 
-        frame.add_command_buffer(cmd_buf);
-
+        let frame = frame.finish();
         renderer.submit(frame).or_else(|e| {
             if let trekanten::RenderError::NeedsResize(reason) = e {
                 log::info!("Resize reason: {:?}", reason);
