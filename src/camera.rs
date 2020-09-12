@@ -7,7 +7,7 @@ use crate::io::input::{
     DeviceAxis, Input, InputContext, InputContextError, MappedInput, RangeId, Sensitivity, StateId,
 };
 
-use crate::DeltaTime;
+use crate::time::DeltaTime;
 use crate::GameState;
 
 use glm::Vec3;
@@ -254,7 +254,6 @@ impl<'a> System<'a> for FreeFlyCameraController {
     );
 
     fn run(&mut self, data: Self::SystemData) {
-        log::trace!("FreeFlyCameraController: run");
         let (
             mut mapped_inputs,
             mut positions,

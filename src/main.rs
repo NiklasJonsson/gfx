@@ -12,9 +12,11 @@ mod game_state;
 mod io;
 mod render;
 mod settings;
+mod time;
 
 use arg_parse::Args;
 use common::*;
+use time::DeltaTime;
 
 use game_state::GameState;
 
@@ -32,6 +34,8 @@ struct App {
     event_queue: Arc<io::EventQueue>,
     renderer: trekanten::Renderer,
     state: AppState,
+    control_systems: Dispatcher<'static, 'static>,
+    engine_systems: Dispatcher<'static, 'static>,
 }
 
 impl App {
@@ -153,7 +157,6 @@ impl App {
             }
         }
 
-        // REFACTOR: Flatten this when support for && and if-let is on stable
         if let (Some(transform), true) = (loaded_asset.camera, args.use_scene_camera) {
             camera::Camera::set_camera_state(&mut self.world, cam_entity, &transform);
         }
@@ -199,20 +202,6 @@ impl App {
     }
 
     fn run(&mut self, args: arg_parse::Args) {
-        let (mut control_systems, mut engine_systems) = Self::init_dispatchers();
-
-        // Register all component types
-        self.world.register::<render::RenderableMaterial>();
-        self.world.register::<render::Mesh>();
-        self.world.register::<Material>();
-        self.world.register::<render_graph::RenderGraphNode>();
-        self.world.register::<render_graph::RenderGraphRoot>();
-        self.world.register::<render_graph::RenderGraphChild>();
-        self.world.register::<camera::Camera>();
-        asset::gltf::register_components(&mut self.world);
-        control_systems.setup(&mut self.world);
-        engine_systems.setup(&mut self.world);
-
         // Setup world objects, e.g. camera and model from cmdline
         self.populate_world(&args);
 
@@ -269,11 +258,11 @@ impl App {
             }
 
             // Run input manager and escape catcher here
-            control_systems.dispatch(&self.world);
+            self.control_systems.dispatch(&self.world);
 
             let state = *self.world.read_resource::<GameState>();
             if let GameState::Running = state {
-                engine_systems.dispatch(&self.world);
+                self.engine_systems.dispatch(&self.world);
                 render::draw_frame(&mut self.world, &mut self.renderer);
             }
 
@@ -294,12 +283,21 @@ impl App {
         window: winit::window::Window,
         event_queue: Arc<io::EventQueue>,
     ) -> Self {
+        let mut world = World::new();
+        let (mut control_systems, mut engine_systems) = Self::init_dispatchers();
+        asset::gltf::register_components(&mut world);
+        render::register_components(&mut world);
+        control_systems.setup(&mut world);
+        engine_systems.setup(&mut world);
+
         App {
-            world: World::new(),
+            world,
             window,
             renderer,
             event_queue,
             state: AppState::Focused,
+            control_systems,
+            engine_systems,
         }
     }
 }

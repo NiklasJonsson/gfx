@@ -1,14 +1,10 @@
-pub mod material;
 pub mod math;
 pub mod render_graph;
-pub mod time;
 
 use specs::prelude::*;
 use specs::Component;
 
-pub use material::*;
 pub use math::*;
-pub use time::*;
 
 #[derive(Copy, Clone, Debug, Default)]
 pub struct VertexPosOnly {

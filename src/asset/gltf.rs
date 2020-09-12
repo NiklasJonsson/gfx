@@ -8,7 +8,8 @@ use std::path::{Path, PathBuf};
 
 use super::LoadedAsset;
 
-use crate::common::{Material, ShaderUse, Transform};
+use crate::common::Transform;
+use crate::render::material::{Material, ShaderUse};
 use crate::render::uniform::PBRMaterialData;
 use crate::render::Mesh;
 use trekanten::mesh::{IndexBuffer, IndexBufferDescriptor, VertexBuffer, VertexBufferDescriptor};
