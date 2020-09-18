@@ -4,14 +4,12 @@ use specs::prelude::*;
 use specs::Component;
 use specs_hierarchy::Parent as HParent;
 
-use super::*;
-
 use std::collections::VecDeque;
 use std::io::Write;
 
 use specs::storage::StorageEntry;
 
-use crate::settings::RenderSettings;
+use crate::math::{ModelMatrix, Transform};
 
 /// Components for defining a node in a render graph
 /// Useful when representing 3d models comprised of
@@ -560,9 +558,9 @@ mod tests {
     fn setup_world() -> World {
         let mut world = World::new();
 
-        world.register::<transform_graph::RenderGraphNode>();
-        world.register::<transform_graph::RenderGraphRoot>();
-        world.register::<transform_graph::RenderGraphChild>();
+        world.register::<RenderGraphNode>();
+        world.register::<RenderGraphRoot>();
+        world.register::<RenderGraphChild>();
         world.register::<ID>();
 
         world
@@ -579,7 +577,7 @@ mod tests {
     fn add_parent_for(w: &mut World, child: Entity, parent: Entity) {
         let mut children = w.write_storage::<RenderGraphChild>();
         children
-            .insert(child, transform_graph::child(parent))
+            .insert(child, super::child(parent))
             .expect("Failed!");
     }
 
@@ -627,7 +625,7 @@ mod tests {
             order.push(ids.get(x).expect("No id!").0);
         };
 
-        transform_graph::breadth_first(&w, root, visit_node);
+        breadth_first(&w, root, visit_node);
         assert_eq!(order, vec![1, 2, 3, 4, 5, 6, 7]);
     }
 
@@ -643,7 +641,7 @@ mod tests {
             order.push(ids.get(x).expect("No id!").0);
         };
 
-        transform_graph::depth_first(&w, root, visit_node);
+        depth_first(&w, root, visit_node);
         assert_eq!(order, vec![1, 4, 7, 3, 2, 6, 5]);
     }
 
@@ -658,7 +656,7 @@ mod tests {
     }
 
     #[test]
-    fn node_to_root_path() {
+    fn node_to_root() {
         let mut w = setup_world();
         let root = setup_graph(&mut w);
 
@@ -677,43 +675,43 @@ mod tests {
 
         assert!(verify_it(
             &id2ent,
-            transform_graph::node_to_root_path(&w, id2ent[2]),
+            node_to_root_path(&w, id2ent[2]),
             vec![2, 1]
         ));
         assert!(verify_it(
             &id2ent,
-            transform_graph::node_to_root_path(&w, id2ent[5]),
+            node_to_root_path(&w, id2ent[5]),
             vec![5, 2, 1]
         ));
         assert!(verify_it(
             &id2ent,
-            transform_graph::node_to_root_path(&w, id2ent[3]),
+            node_to_root_path(&w, id2ent[3]),
             vec![3, 1]
         ));
         assert!(verify_it(
             &id2ent,
-            transform_graph::node_to_root_path(&w, id2ent[6]),
+            node_to_root_path(&w, id2ent[6]),
             vec![6, 2, 1]
         ));
         assert!(verify_it(
             &id2ent,
-            transform_graph::node_to_root_path(&w, id2ent[4]),
+            node_to_root_path(&w, id2ent[4]),
             vec![4, 1]
         ));
         assert!(verify_it(
             &id2ent,
-            transform_graph::node_to_root_path(&w, id2ent[7]),
+            node_to_root_path(&w, id2ent[7]),
             vec![7, 4, 1]
         ));
         assert!(verify_it(
             &id2ent,
-            transform_graph::node_to_root_path(&w, id2ent[1]),
+            node_to_root_path(&w, id2ent[1]),
             vec![1]
         ));
     }
 
     #[test]
-    fn root_to_node_path() {
+    fn root_to_node() {
         let mut w = setup_world();
         let root = setup_graph(&mut w);
 
@@ -732,37 +730,37 @@ mod tests {
 
         assert!(verify_it(
             &id2ent,
-            transform_graph::root_to_node_path(&w, id2ent[2]),
+            root_to_node_path(&w, id2ent[2]),
             vec![1, 2]
         ));
         assert!(verify_it(
             &id2ent,
-            transform_graph::root_to_node_path(&w, id2ent[5]),
+            root_to_node_path(&w, id2ent[5]),
             vec![1, 2, 5]
         ));
         assert!(verify_it(
             &id2ent,
-            transform_graph::root_to_node_path(&w, id2ent[3]),
+            root_to_node_path(&w, id2ent[3]),
             vec![1, 3]
         ));
         assert!(verify_it(
             &id2ent,
-            transform_graph::root_to_node_path(&w, id2ent[6]),
+            root_to_node_path(&w, id2ent[6]),
             vec![1, 2, 6]
         ));
         assert!(verify_it(
             &id2ent,
-            transform_graph::root_to_node_path(&w, id2ent[4]),
+            root_to_node_path(&w, id2ent[4]),
             vec![1, 4]
         ));
         assert!(verify_it(
             &id2ent,
-            transform_graph::root_to_node_path(&w, id2ent[7]),
+            root_to_node_path(&w, id2ent[7]),
             vec![1, 4, 7]
         ));
         assert!(verify_it(
             &id2ent,
-            transform_graph::root_to_node_path(&w, id2ent[1]),
+            root_to_node_path(&w, id2ent[1]),
             vec![1]
         ));
     }
@@ -785,16 +783,16 @@ mod tests {
         let expected = vec![0, 1, 2, 2, 2, 3, 3, 3];
         for (ent, ID(id)) in joined {
             let e = expected[*id];
-            assert_eq!(transform_graph::root_to_node_path(&w, ent).len(), e);
-            assert_eq!(transform_graph::root_to_node_path(&w, ent).size_hint().0, e);
+            assert_eq!(root_to_node_path(&w, ent).len(), e);
+            assert_eq!(root_to_node_path(&w, ent).size_hint().0, e);
             assert_eq!(
-                transform_graph::root_to_node_path(&w, ent).size_hint().1,
+                root_to_node_path(&w, ent).size_hint().1,
                 Some(e)
             );
-            assert_eq!(transform_graph::node_to_root_path(&w, ent).len(), e);
-            assert_eq!(transform_graph::node_to_root_path(&w, ent).size_hint().0, e);
+            assert_eq!(node_to_root_path(&w, ent).len(), e);
+            assert_eq!(node_to_root_path(&w, ent).size_hint().0, e);
             assert_eq!(
-                transform_graph::node_to_root_path(&w, ent).size_hint().1,
+                node_to_root_path(&w, ent).size_hint().1,
                 Some(e)
             );
         }

@@ -2,10 +2,10 @@ use specs::Component;
 
 use num_derive::FromPrimitive;
 
-use crate::common::*;
 use crate::io::input::{
     DeviceAxis, Input, InputContext, InputContextError, MappedInput, RangeId, Sensitivity, StateId,
 };
+use crate::math::{Position, Transform};
 
 use crate::time::DeltaTime;
 use crate::GameState;
@@ -164,7 +164,7 @@ impl FreeFlyCameraController {
         */
 
         // This is the code from the opengl tutorial
-        let translation_inv = glm::translate(&glm::identity(), &-(pos.xyz()));
+        let translation_inv = glm::translate(&glm::identity(), &-(pos.0));
 
         let rotation_inv = glm::mat4(
             cam_right.x,

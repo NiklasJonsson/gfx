@@ -7,13 +7,13 @@ mod camera;
 mod common;
 mod game_state;
 mod io;
+mod math;
 mod render;
 mod settings;
 mod time;
 mod transform_graph;
 
 use arg_parse::Args;
-use common::*;
 use time::DeltaTime;
 
 use game_state::GameState;

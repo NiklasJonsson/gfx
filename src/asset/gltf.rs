@@ -8,7 +8,7 @@ use std::path::{Path, PathBuf};
 
 use super::LoadedAsset;
 
-use crate::common::Transform;
+use crate::math::Transform;
 use crate::render::material::{Material, ShaderUse};
 use crate::render::uniform::PBRMaterialData;
 use crate::render::Mesh;

@@ -48,8 +48,9 @@ impl Timer {
     }
 
     pub fn tick(&mut self) {
-        self.delta = DeltaTime(self.prev.elapsed());
-        self.prev = Instant::now();
+        let now = Instant::now();
+        self.delta = DeltaTime(now - self.prev);
+        self.prev = now;
     }
 
     pub fn delta(&self) -> DeltaTime {

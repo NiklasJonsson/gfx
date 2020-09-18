@@ -27,7 +27,7 @@ pub mod pipeline;
 pub mod uniform;
 
 use crate::camera::*;
-use crate::common::{ModelMatrix, Position};
+use crate::math::{ModelMatrix, Position};
 use material::{Material, ShaderUse};
 
 use crate::settings::{RenderMode, RenderSettings};
@@ -79,7 +79,7 @@ fn get_view_data(world: &World) -> (glm::Mat4, Position) {
 }
 
 fn get_proj_matrix(aspect_ratio: f32) -> glm::Mat4 {
-    let mut proj = glm::perspective(aspect_ratio, std::f32::consts::FRAC_PI_4, 0.1, 10.0);
+    let mut proj = glm::perspective(aspect_ratio, std::f32::consts::FRAC_PI_4, 0.05, 1000000.0);
 
     // glm::perspective is based on opengl left-handed coordinate system, vulkan has the y-axis
     // inverted (right-handed upside-down).
