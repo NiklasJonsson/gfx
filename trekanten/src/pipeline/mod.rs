@@ -1,7 +1,9 @@
 use ash::version::DeviceV1_0;
 use ash::vk;
 
-use std::ffi::CString;
+use derive_builder::Builder;
+
+use std::ffi::CStr;
 use std::fs::File;
 use std::io;
 use std::path::Path;
@@ -12,7 +14,6 @@ use crate::device::HasVkDevice;
 use crate::device::VkDeviceHandle;
 use crate::render_pass::RenderPass;
 use crate::resource::{CachedStorage, Handle};
-use crate::util;
 use crate::vertex::VertexFormat;
 
 mod error;
@@ -85,6 +86,74 @@ pub trait Pipeline {
     fn vk_pipeline(&self) -> &vk::Pipeline;
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum TriangleCulling {
+    Front,
+    Back,
+    None,
+}
+
+impl Default for TriangleCulling {
+    fn default() -> Self {
+        Self::Back
+    }
+}
+
+impl From<TriangleCulling> for vk::CullModeFlags {
+    fn from(tc: TriangleCulling) -> Self {
+        match tc {
+            TriangleCulling::Front => Self::FRONT,
+            TriangleCulling::Back => Self::BACK,
+            TriangleCulling::None => Self::NONE,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum TriangleWinding {
+    Clockwise,
+    CounterClockwise,
+}
+
+impl Default for TriangleWinding {
+    fn default() -> Self {
+        Self::CounterClockwise
+    }
+}
+
+impl From<TriangleWinding> for vk::FrontFace {
+    fn from(tw: TriangleWinding) -> Self {
+        match tw {
+            TriangleWinding::Clockwise => Self::CLOCKWISE,
+            TriangleWinding::CounterClockwise => Self::COUNTER_CLOCKWISE,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum BlendState {
+    Enabled,
+    Disabled,
+}
+
+impl Default for BlendState {
+    fn default() -> Self {
+        Self::Disabled
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum DepthTest {
+    Enabled,
+    Disabled,
+}
+
+impl Default for DepthTest {
+    fn default() -> Self {
+        Self::Enabled
+    }
+}
+
 pub struct GraphicsPipeline {
     vk_device: VkDeviceHandle,
     vk_pipeline: vk::Pipeline,
@@ -115,11 +184,14 @@ impl std::ops::Drop for GraphicsPipeline {
     }
 }
 
-impl GraphicsPipeline {
-    pub fn builder(device: &Device) -> GraphicsPipelineBuilder {
-        GraphicsPipelineBuilder::new(device)
-    }
+struct PipelineCreationInfo {
+    create_info: vk::PipelineShaderStageCreateInfo,
+    _shader_module: ShaderModule,
+}
 
+const DEFAULT_SPV_ENTRY_NAME_NULLED: &[u8] = b"main\0";
+
+impl GraphicsPipeline {
     pub fn vk_descriptor_set_layouts(&self) -> &[vk::DescriptorSetLayout] {
         &self.vk_descriptor_set_layouts
     }
@@ -127,46 +199,10 @@ impl GraphicsPipeline {
     pub fn vk_pipeline_layout(&self) -> &vk::PipelineLayout {
         &self.vk_pipeline_layout
     }
-}
-
-struct PipelineCreationInfo {
-    create_info: vk::PipelineShaderStageCreateInfo,
-    _shader_module: ShaderModule,
-}
-
-struct VertexInputDescription<'a> {
-    _binding_description: &'a [vk::VertexInputBindingDescription],
-    _attribute_description: &'a [vk::VertexInputAttributeDescription],
-    create_info: vk::PipelineVertexInputStateCreateInfo,
-}
-pub struct GraphicsPipelineBuilder<'a> {
-    device: &'a Device,
-    entry_name: CString,
-    vert: Option<PipelineCreationInfo>,
-    frag: Option<PipelineCreationInfo>,
-    vertex_input: Option<VertexInputDescription<'a>>,
-    viewport_extent: Option<util::Extent2D>,
-    render_pass: Option<&'a RenderPass>,
-    refl_data: ReflectionData,
-}
-
-impl<'a> GraphicsPipelineBuilder<'a> {
-    pub fn new(device: &'a Device) -> Self {
-        let entry_name = CString::new("main").expect("CString failed!");
-        Self {
-            device,
-            entry_name,
-            vert: None,
-            frag: None,
-            vertex_input: None,
-            render_pass: None,
-            viewport_extent: None,
-            refl_data: ReflectionData::new(),
-        }
-    }
 
     fn shader(
-        &mut self,
+        device: &Device,
+        refl_data: &mut ReflectionData,
         desc: &ShaderDescriptor,
         stage: vk::ShaderStageFlags,
     ) -> Result<PipelineCreationInfo, PipelineError> {
@@ -182,16 +218,18 @@ impl<'a> GraphicsPipelineBuilder<'a> {
             }
         };
 
-        let shader_module = ShaderModule::new(self.device, &raw)?;
+        let name = CStr::from_bytes_with_nul(DEFAULT_SPV_ENTRY_NAME_NULLED).unwrap();
+
+        let shader_module = ShaderModule::new(device, &raw)?;
         let create_info = vk::PipelineShaderStageCreateInfo::builder()
             .stage(stage)
             .module(shader_module.vk_shader_module)
-            .name(&self.entry_name)
+            .name(name)
             .build();
 
         let new_refl_data = parse_spirv(&raw.data).map_err(PipelineError::Reflection)?;
 
-        self.refl_data.merge(new_refl_data);
+        refl_data.merge(new_refl_data);
 
         Ok(PipelineCreationInfo {
             create_info,
@@ -199,63 +237,29 @@ impl<'a> GraphicsPipelineBuilder<'a> {
         })
     }
 
-    pub fn vertex_shader(mut self, path: &ShaderDescriptor) -> Result<Self, PipelineError> {
-        self.vert = Some(self.shader(path, vk::ShaderStageFlags::VERTEX)?);
-        Ok(self)
-    }
+    fn create(
+        device: &Device,
+        render_pass: &RenderPass,
+        desc: &GraphicsPipelineDescriptor,
+    ) -> Result<Self, PipelineError> {
+        let mut reflection_data = ReflectionData::new();
+        let vert = Self::shader(
+            device,
+            &mut reflection_data,
+            &desc.vert,
+            vk::ShaderStageFlags::VERTEX,
+        )?;
+        let frag = Self::shader(
+            device,
+            &mut reflection_data,
+            &desc.frag,
+            vk::ShaderStageFlags::FRAGMENT,
+        )?;
+        let vertex_input_state = vk::PipelineVertexInputStateCreateInfo::builder()
+            .vertex_binding_descriptions(&desc.vertex_format.vk_binding_description())
+            .vertex_attribute_descriptions(&desc.vertex_format.vk_attribute_description());
 
-    pub fn fragment_shader(mut self, path: &ShaderDescriptor) -> Result<Self, PipelineError> {
-        self.frag = Some(self.shader(path, vk::ShaderStageFlags::FRAGMENT)?);
-        Ok(self)
-    }
-
-    pub fn vertex_input(
-        mut self,
-        attribute_description: &'a [vk::VertexInputAttributeDescription],
-        binding_description: &'a [vk::VertexInputBindingDescription],
-    ) -> Self {
-        let create_info = vk::PipelineVertexInputStateCreateInfo::builder()
-            .vertex_binding_descriptions(&binding_description)
-            .vertex_attribute_descriptions(&attribute_description)
-            .build();
-
-        self.vertex_input = Some(VertexInputDescription {
-            _attribute_description: attribute_description,
-            _binding_description: binding_description,
-            create_info,
-        });
-
-        self
-    }
-
-    pub fn viewport_extent(mut self, extent: util::Extent2D) -> Self {
-        self.viewport_extent = Some(extent);
-        self
-    }
-
-    pub fn render_pass(mut self, render_pass: &'a RenderPass) -> Self {
-        self.render_pass = Some(render_pass);
-        self
-    }
-
-    pub fn build(self) -> Result<GraphicsPipeline, PipelineError> {
-        let vert = self
-            .vert
-            .ok_or(PipelineError::MissingArg("vertex shader"))?;
-        let frag = self
-            .frag
-            .ok_or(PipelineError::MissingArg("fragment shader"))?;
-        let vertex_input = self
-            .vertex_input
-            .ok_or(PipelineError::MissingArg("vertex description"))?;
-        let viewport_extent = self
-            .viewport_extent
-            .ok_or(PipelineError::MissingArg("viewport extent"))?;
-        let render_pass = self
-            .render_pass
-            .ok_or(PipelineError::MissingArg("render pass"))?;
-
-        let vk_device = self.device.vk_device();
+        let vk_device = device.vk_device();
         let stages = [vert.create_info, frag.create_info];
 
         let input_assembly_info = vk::PipelineInputAssemblyStateCreateInfo::builder()
@@ -267,8 +271,8 @@ impl<'a> GraphicsPipelineBuilder<'a> {
             .rasterizer_discard_enable(false)
             .polygon_mode(vk::PolygonMode::FILL)
             .line_width(1.0)
-            .cull_mode(vk::CullModeFlags::BACK)
-            .front_face(vk::FrontFace::COUNTER_CLOCKWISE)
+            .cull_mode(desc.culling.into())
+            .front_face(desc.winding.into())
             .depth_bias_enable(false);
 
         let msaa_info = vk::PipelineMultisampleStateCreateInfo::builder()
@@ -276,16 +280,27 @@ impl<'a> GraphicsPipelineBuilder<'a> {
             .rasterization_samples(render_pass.msaa_sample_count());
 
         let color_blend_attach_info = vk::PipelineColorBlendAttachmentState::builder()
-            .color_write_mask(vk::ColorComponentFlags::all())
-            .blend_enable(false);
+            .color_write_mask(vk::ColorComponentFlags::all());
+
+        let color_blend_attach_info = match desc.blend_state {
+            BlendState::Disabled => color_blend_attach_info.blend_enable(false),
+            BlendState::Enabled => color_blend_attach_info
+                .blend_enable(true)
+                .src_color_blend_factor(vk::BlendFactor::SRC_ALPHA)
+                .dst_color_blend_factor(vk::BlendFactor::ONE_MINUS_SRC_ALPHA)
+                .color_blend_op(vk::BlendOp::ADD)
+                .src_alpha_blend_factor(vk::BlendFactor::ONE_MINUS_SRC_ALPHA)
+                .dst_alpha_blend_factor(vk::BlendFactor::ZERO)
+                .alpha_blend_op(vk::BlendOp::ADD),
+        };
 
         let attachments = [*color_blend_attach_info];
         let color_blend_state_info = vk::PipelineColorBlendStateCreateInfo::builder()
             .logic_op_enable(false)
             .attachments(&attachments);
 
-        let mut descriptor_set_layouts = Vec::with_capacity(self.refl_data.desc_layouts.len());
-        for dset in self.refl_data.desc_layouts.iter() {
+        let mut descriptor_set_layouts = Vec::with_capacity(reflection_data.desc_layouts.len());
+        for dset in reflection_data.desc_layouts.iter() {
             let info = vk::DescriptorSetLayoutCreateInfo::builder().bindings(&dset.bindings);
 
             let dset_layout = unsafe {
@@ -299,7 +314,7 @@ impl<'a> GraphicsPipelineBuilder<'a> {
 
         let pipeline_layout_info = vk::PipelineLayoutCreateInfo::builder()
             .set_layouts(&descriptor_set_layouts)
-            .push_constant_ranges(&self.refl_data.push_constants);
+            .push_constant_ranges(&reflection_data.push_constants);
 
         let pipeline_layout = unsafe {
             vk_device
@@ -309,22 +324,30 @@ impl<'a> GraphicsPipelineBuilder<'a> {
 
         log::trace!("Created pipeline layout {:?}", pipeline_layout);
 
-        let depth_stencil = vk::PipelineDepthStencilStateCreateInfo::builder()
-            .depth_test_enable(true)
-            .depth_write_enable(true)
-            .depth_compare_op(vk::CompareOp::LESS)
-            .depth_bounds_test_enable(false)
-            .stencil_test_enable(false);
+        let depth_stencil = match desc.depth_testing {
+            DepthTest::Disabled => vk::PipelineDepthStencilStateCreateInfo::builder()
+                .depth_test_enable(false)
+                .depth_write_enable(false),
+            DepthTest::Enabled => vk::PipelineDepthStencilStateCreateInfo::builder()
+                .depth_test_enable(true)
+                .depth_write_enable(true)
+                .depth_compare_op(vk::CompareOp::LESS)
+                .depth_bounds_test_enable(false)
+                .stencil_test_enable(false),
+        };
 
         let viewport = vk::Viewport::builder()
             .x(0.0)
             .y(0.0)
-            .width(viewport_extent.width as f32)
-            .height(viewport_extent.height as f32)
+            .width(0.0)
+            .height(0.0)
             .min_depth(0.0)
             .max_depth(1.0);
 
-        let scissor_extent: vk::Extent2D = viewport_extent.into();
+        let scissor_extent = vk::Extent2D {
+            width: 0,
+            height: 0,
+        };
 
         let scissor = vk::Rect2D {
             offset: vk::Offset2D { x: 0, y: 0 },
@@ -337,15 +360,19 @@ impl<'a> GraphicsPipelineBuilder<'a> {
             .viewports(&viewports)
             .scissors(&scissors);
 
+        let dynamic_state = vk::PipelineDynamicStateCreateInfo::builder()
+            .dynamic_states(&[vk::DynamicState::VIEWPORT, vk::DynamicState::SCISSOR]);
+
         let g_pipeline_info = vk::GraphicsPipelineCreateInfo::builder()
             .stages(&stages)
-            .vertex_input_state(&vertex_input.create_info)
+            .vertex_input_state(&vertex_input_state)
             .input_assembly_state(&input_assembly_info)
             .viewport_state(&viewport_state_info)
             .rasterization_state(&raster_state_info)
             .multisample_state(&msaa_info)
             .color_blend_state(&color_blend_state_info)
             .depth_stencil_state(&depth_stencil)
+            .dynamic_state(&dynamic_state)
             .layout(pipeline_layout)
             .render_pass(*render_pass.vk_render_pass())
             .subpass(0);
@@ -381,11 +408,26 @@ pub enum ShaderDescriptor {
     FromPath(PathBuf),
 }
 
-#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+#[derive(Clone, Debug, PartialEq, Eq, Hash, Builder)]
+#[builder(pattern = "owned")]
 pub struct GraphicsPipelineDescriptor {
     pub vert: ShaderDescriptor,
     pub frag: ShaderDescriptor,
     pub vertex_format: VertexFormat,
+    #[builder(default)]
+    pub culling: TriangleCulling,
+    #[builder(default)]
+    pub winding: TriangleWinding,
+    #[builder(default)]
+    pub blend_state: BlendState,
+    #[builder(default)]
+    pub depth_testing: DepthTest,
+}
+
+impl GraphicsPipelineDescriptor {
+    pub fn builder() -> GraphicsPipelineDescriptorBuilder {
+        GraphicsPipelineDescriptorBuilder::default()
+    }
 }
 
 #[derive(Default)]
@@ -402,30 +444,19 @@ impl GraphicsPipelines {
 
     fn create_pipeline(
         device: &Device,
-        viewport_extent: util::Extent2D,
         render_pass: &RenderPass,
         descriptor: &GraphicsPipelineDescriptor,
     ) -> Result<GraphicsPipeline, PipelineError> {
-        GraphicsPipeline::builder(device)
-            .vertex_shader(&descriptor.vert)?
-            .fragment_shader(&descriptor.frag)?
-            .vertex_input(
-                &descriptor.vertex_format.vk_attribute_description(),
-                descriptor.vertex_format.vk_binding_description(),
-            )
-            .viewport_extent(viewport_extent)
-            .render_pass(render_pass)
-            .build()
+        GraphicsPipeline::create(device, render_pass, descriptor)
     }
 
     pub fn recreate_all(
         &mut self,
         device: &Device,
-        viewport_extent: util::Extent2D,
         render_pass: &RenderPass,
     ) -> Result<(), PipelineError> {
         for (desc, pipe) in self.mat_storage.iter_mut() {
-            *pipe = Self::create_pipeline(device, viewport_extent, render_pass, desc)?;
+            *pipe = Self::create_pipeline(device, render_pass, desc)?;
         }
 
         Ok(())
@@ -435,11 +466,10 @@ impl GraphicsPipelines {
         &mut self,
         device: &Device,
         descriptor: GraphicsPipelineDescriptor,
-        viewport_extent: util::Extent2D,
         render_pass: &RenderPass,
     ) -> Result<Handle<GraphicsPipeline>, PipelineError> {
         self.mat_storage.create_or_add(descriptor, |desc| {
-            Self::create_pipeline(device, viewport_extent, render_pass, &desc)
+            Self::create_pipeline(device, render_pass, &desc)
         })
     }
 

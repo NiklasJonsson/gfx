@@ -299,9 +299,18 @@ impl DeviceImage {
             vk::ImageLayout::UNDEFINED,
             vk::ImageLayout::TRANSFER_DST_OPTIMAL,
         );
-        cmd_buf
-            .copy_buffer_to_image(&staging.vk_buffer(), dst_image.vk_image(), &extent)
-            .end()?;
+        cmd_buf.copy_buffer_to_image(&staging.vk_buffer(), dst_image.vk_image(), &extent);
+
+        transition_image_layout(
+            &mut cmd_buf,
+            &dst_image.vk_image,
+            1,
+            format.into(),
+            vk::ImageLayout::TRANSFER_DST_OPTIMAL,
+            vk::ImageLayout::SHADER_READ_ONLY_OPTIMAL,
+        );
+
+        cmd_buf.end()?;
         queue.submit_and_wait(&cmd_buf)?;
 
         Ok(dst_image)

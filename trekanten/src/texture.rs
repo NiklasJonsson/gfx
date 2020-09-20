@@ -96,6 +96,7 @@ pub struct Sampler {
     vk_sampler: vk::Sampler,
 }
 
+// TODO: Support other border color/address mode
 impl Sampler {
     pub fn new(device: &Device) -> Result<Self, TextureError> {
         let info = vk::SamplerCreateInfo::builder()

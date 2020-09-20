@@ -218,6 +218,19 @@ impl CommandBuffer {
             );
         }
 
+        self.set_viewport(util::Viewport {
+            x: 0.0,
+            y: 0.0,
+            width: extent.width as f32,
+            height: extent.height as f32,
+            min_depth: 0.0,
+            max_depth: 1.0,
+        });
+        self.set_scissor(util::Rect2D {
+            offset: util::Offset2D { x: 0, y: 0 },
+            extent,
+        });
+
         self
     }
 

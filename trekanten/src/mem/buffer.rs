@@ -216,7 +216,7 @@ impl DeviceBuffer {
         stride: usize,
         buffer_usage: vk::BufferUsageFlags,
         mem_usage: MemoryUsage,
-        do_unmap: bool,
+        _do_unmap: bool, // TODO
     ) -> Result<Self, MemoryError> {
         log::trace!("Creating device buffer with data");
         assert!(data.len() % elem_size == 0);
@@ -253,11 +253,9 @@ impl DeviceBuffer {
             }
         }
 
-        if do_unmap {
-            allocator
-                .unmap_memory(&staging.allocation)
-                .map_err(MemoryError::MemoryMapping)?;
-        }
+        allocator
+            .unmap_memory(&staging.allocation)
+            .map_err(MemoryError::MemoryMapping)?;
 
         Ok(staging)
     }

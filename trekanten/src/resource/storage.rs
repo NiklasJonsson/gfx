@@ -7,11 +7,18 @@ pub struct ID {
 
 // Can't derive things on Handle because of PhantomData + generic
 // https://github.com/rust-lang/rust/issues/26925
-#[derive(Debug)]
 pub struct Handle<T> {
     id: ID,
     ty: PhantomData<T>,
 }
+
+impl<T> std::fmt::Debug for Handle<T> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "Handle<{}>", std::any::type_name::<T>())?;
+        f.debug_struct("").field("id", &self.id).finish()
+    }
+}
+
 impl<T> Default for Handle<T> {
     fn default() -> Self {
         Self {

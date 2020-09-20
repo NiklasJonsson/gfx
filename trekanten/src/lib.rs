@@ -422,11 +422,8 @@ impl Renderer {
 
     fn recreate_pipelines(&mut self) -> Result<(), RenderError> {
         log::trace!("Recreating pipelines with {}", self.swapchain_extent());
-        self.graphics_pipelines.recreate_all(
-            &self.device,
-            self.swapchain_extent(),
-            &self.render_pass,
-        )?;
+        self.graphics_pipelines
+            .recreate_all(&self.device, &self.render_pass)?;
         Ok(())
     }
 
@@ -477,6 +474,10 @@ impl Renderer {
 
         width as f32 / height as f32
     }
+
+    pub fn swapchain_extent(&self) -> util::Extent2D {
+        self.swapchain.info().extent
+    }
 }
 
 /// These are functions only used by Frame
@@ -497,10 +498,6 @@ impl Renderer {
 
     fn render_pass(&self) -> &render_pass::RenderPass {
         &self.render_pass
-    }
-
-    fn swapchain_extent(&self) -> util::Extent2D {
-        self.swapchain.info().extent
     }
 
     fn framebuffer(&self) -> &framebuffer::Framebuffer {
@@ -556,12 +553,8 @@ impl
         &mut self,
         descriptor: pipeline::GraphicsPipelineDescriptor,
     ) -> Result<Handle<pipeline::GraphicsPipeline>, pipeline::PipelineError> {
-        self.graphics_pipelines.create(
-            &self.device,
-            descriptor,
-            self.swapchain_extent(),
-            &self.render_pass,
-        )
+        self.graphics_pipelines
+            .create(&self.device, descriptor, &self.render_pass)
     }
 }
 

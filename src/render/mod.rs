@@ -24,6 +24,7 @@ use trekanten::Renderer;
 
 pub mod material;
 pub mod pipeline;
+mod ui;
 pub mod uniform;
 
 use crate::camera::*;
@@ -196,11 +197,12 @@ pub fn get_pipeline_for(
                 has_normal_map: has_nm,
             };
             let (vert, frag) = (shaders.get_vert(&def), shaders.get_frag(&def));
-            let desc = GraphicsPipelineDescriptor {
-                vert: ShaderDescriptor::FromPath(PathBuf::from(vert)),
-                frag: ShaderDescriptor::FromPath(PathBuf::from(frag)),
-                vertex_format,
-            };
+            let desc = GraphicsPipelineDescriptor::builder()
+                .vert(ShaderDescriptor::FromPath(PathBuf::from(vert)))
+                .frag(ShaderDescriptor::FromPath(PathBuf::from(frag)))
+                .vertex_format(vertex_format)
+                .build()
+                .expect("Failed to build graphics pipeline descriptor");
 
             renderer
                 .create_resource(desc)
@@ -328,46 +330,50 @@ pub fn draw_frame(world: &mut World, renderer: &mut Renderer) {
     let aspect_ratio = renderer.aspect_ratio();
     let mut frame = renderer.next_frame().expect("Failed to get frame");
 
-    {
-        let (view_matrix, cam_pos) = get_view_data(world);
-        let lighting_data = uniform::LightingData {
-            light_pos: [5.0f32, 5.0f32, 5.0f32, 0.0f32],
-            view_pos: [cam_pos.x(), cam_pos.y(), cam_pos.z(), 0.0f32],
-        };
-        let transforms = uniform::Transforms {
-            view: view_matrix.into(),
-            proj: get_proj_matrix(aspect_ratio).into(),
-        };
+    let (view_matrix, cam_pos) = get_view_data(world);
+    let lighting_data = uniform::LightingData {
+        light_pos: [5.0f32, 5.0f32, 5.0f32, 0.0f32],
+        view_pos: [cam_pos.x(), cam_pos.y(), cam_pos.z(), 0.0f32],
+    };
+    let transforms = uniform::Transforms {
+        view: view_matrix.into(),
+        proj: get_proj_matrix(aspect_ratio).into(),
+    };
 
-        let FrameData {
-            light_buffer,
-            frame_set,
-            transforms_buffer,
-            dummy_pipeline,
-        } = &*world.read_resource::<FrameData>();
+    let FrameData {
+        light_buffer,
+        frame_set,
+        transforms_buffer,
+        dummy_pipeline,
+    } = &*world.read_resource::<FrameData>();
 
-        frame
-            .update_uniform_blocking(light_buffer, &lighting_data)
-            .expect("Failed to update uniform");
-        frame
-            .update_uniform_blocking(transforms_buffer, &transforms)
-            .expect("Failed to update uniform");
+    frame
+        .update_uniform_blocking(light_buffer, &lighting_data)
+        .expect("Failed to update uniform");
+    frame
+        .update_uniform_blocking(transforms_buffer, &transforms)
+        .expect("Failed to update uniform");
 
-        let mut builder = frame
-            .begin_render_pass()
-            .expect("Failed to begin render pass");
+    let ui_draw_commands = ui::generate_draw_commands(world, &mut frame);
 
-        builder
-            .bind_graphics_pipeline(dummy_pipeline)
-            .bind_shader_resource_group(0, frame_set, dummy_pipeline);
+    let mut builder = frame
+        .begin_render_pass()
+        .expect("Failed to begin render pass");
 
-        draw_entities(world, &mut builder);
+    builder
+        .bind_graphics_pipeline(dummy_pipeline)
+        .bind_shader_resource_group(0, frame_set, dummy_pipeline);
 
-        let buf = builder
-            .build()
-            .expect("Failed to create render pass command buffer");
-        frame.add_raw_command_buffer(buf);
+    draw_entities(world, &mut builder);
+    if let Some(ui_draw_commands) = ui_draw_commands {
+        ui_draw_commands.record_draw_commands(&mut builder);
     }
+
+    let buf = builder
+        .build()
+        .expect("Failed to create render pass command buffer");
+    frame.add_raw_command_buffer(buf);
+
     let frame = frame.finish();
     renderer.submit(frame).expect("Failed to submit frame");
     world
@@ -400,11 +406,12 @@ pub fn setup_resources(world: &mut World, mut renderer: &mut Renderer) {
         .build();
 
     let (vert, frag) = shaders.get_default();
-    let desc = GraphicsPipelineDescriptor {
-        vert: ShaderDescriptor::FromPath(PathBuf::from(vert)),
-        frag: ShaderDescriptor::FromPath(PathBuf::from(frag)),
-        vertex_format,
-    };
+    let desc = GraphicsPipelineDescriptor::builder()
+        .vert(ShaderDescriptor::FromPath(PathBuf::from(vert)))
+        .frag(ShaderDescriptor::FromPath(PathBuf::from(frag)))
+        .vertex_format(vertex_format)
+        .build()
+        .expect("Failed to build graphics pipeline descriptor");
 
     let dummy_pipeline = renderer.create_resource(desc).expect("FAIL");
 
@@ -416,6 +423,9 @@ pub fn setup_resources(world: &mut World, mut renderer: &mut Renderer) {
     });
 
     world.insert(shaders);
+    log::trace!("Done");
+
+    ui::setup_resources(world, renderer);
 }
 
 pub fn register_components(world: &mut World) {

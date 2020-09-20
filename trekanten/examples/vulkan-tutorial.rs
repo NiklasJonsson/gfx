@@ -261,11 +261,12 @@ fn main() -> Result<(), trekanten::RenderError> {
 
     let vert = ShaderDescriptor::FromRawSpirv(RAW_VERT_SPV.to_vec());
     let frag = ShaderDescriptor::FromRawSpirv(RAW_FRAG_SPV.to_vec());
-    let pipeline_descriptor = pipeline::GraphicsPipelineDescriptor {
-        vert,
-        frag,
-        vertex_format: Vertex::format(),
-    };
+    let pipeline_descriptor = pipeline::GraphicsPipelineDescriptor::builder()
+        .vert(vert)
+        .frag(frag)
+        .vertex_format(Vertex::format())
+        .build()
+        .expect("Failed to build graphics pipeline descriptor");
 
     let gfx_pipeline_handle = renderer
         .create_resource(pipeline_descriptor)

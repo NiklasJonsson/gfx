@@ -18,6 +18,8 @@ specs = { version = "0.16.1", features = ["specs-derive"] }
 # Rendering/Graphics
 winit = "0.22.2"
 trekanten = {path = "trekanten" }
+imgui = "0.4.0"
+inline-spirv = "0.1.1"
 
 # Math/Physics
 nalgebra-glm = "0.4.0"

@@ -12,6 +12,10 @@ impl DeltaTime {
         1000.0 * self.0.as_secs_f32()
     }
 
+    pub fn as_secs(&self) -> f32 {
+        self.0.as_secs_f32()
+    }
+
     pub fn as_fps(&self) -> f32 {
         1.0 / self.0.as_secs_f32()
     }

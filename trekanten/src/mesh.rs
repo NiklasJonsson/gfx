@@ -89,7 +89,6 @@ impl<'a> BufferDescriptor for IndexBufferDescriptor<'a> {
     }
 }
 
-
 // TODO?: Merge index, vertex & uniform buffers into one Buffer<Ty>. Ty holds variant info. impl<Concrete> for special functions
 
 #[derive(Debug)]
