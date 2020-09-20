@@ -785,16 +785,10 @@ mod tests {
             let e = expected[*id];
             assert_eq!(root_to_node_path(&w, ent).len(), e);
             assert_eq!(root_to_node_path(&w, ent).size_hint().0, e);
-            assert_eq!(
-                root_to_node_path(&w, ent).size_hint().1,
-                Some(e)
-            );
+            assert_eq!(root_to_node_path(&w, ent).size_hint().1, Some(e));
             assert_eq!(node_to_root_path(&w, ent).len(), e);
             assert_eq!(node_to_root_path(&w, ent).size_hint().0, e);
-            assert_eq!(
-                node_to_root_path(&w, ent).size_hint().1,
-                Some(e)
-            );
+            assert_eq!(node_to_root_path(&w, ent).size_hint().1, Some(e));
         }
     }
 }

@@ -12,6 +12,7 @@ use crate::math::Transform;
 use crate::render::material::{Material, ShaderUse};
 use crate::render::uniform::PBRMaterialData;
 use crate::render::Mesh;
+use trekanten::mesh::BufferMutability;
 use trekanten::mesh::{IndexBuffer, IndexBufferDescriptor, VertexBuffer, VertexBufferDescriptor};
 use trekanten::resource::ResourceManager;
 use trekanten::texture::TextureDescriptor;
@@ -19,7 +20,6 @@ use trekanten::uniform::UniformBufferDescriptor;
 use trekanten::util;
 use trekanten::vertex::VertexFormat;
 use trekanten::BufferHandle;
-use trekanten::Handle;
 
 use nalgebra_glm as glm;
 // Crate gltf
@@ -36,10 +36,8 @@ struct GltfIndexBufferHandle {
 }
 
 impl GltfIndexBufferHandle {
-    fn as_gpu_handle(&self, h: Handle<IndexBuffer>) -> BufferHandle<IndexBuffer> {
-        unsafe {
-            BufferHandle::from_buffer(h, 0, self.len as u64, std::mem::size_of::<u32>() as u64)
-        }
+    fn as_gpu_handle(&self, h: BufferHandle<IndexBuffer>) -> BufferHandle<IndexBuffer> {
+        BufferHandle::sub_buffer(h, 0, self.len)
     }
 }
 
@@ -51,8 +49,8 @@ struct GltfVertexBufferHandle {
 }
 
 impl GltfVertexBufferHandle {
-    fn as_gpu_handle(&self, h: Handle<VertexBuffer>) -> BufferHandle<VertexBuffer> {
-        unsafe { BufferHandle::from_buffer(h, 0, self.n_vertices as u64, self.vertex_size as u64) }
+    fn as_gpu_handle(&self, h: BufferHandle<VertexBuffer>) -> BufferHandle<VertexBuffer> {
+        BufferHandle::sub_buffer(h, 0, self.n_vertices)
     }
 }
 
@@ -490,7 +488,7 @@ fn upload_to_gpu<'a>(renderer: &mut trekanten::Renderer, ctx: &mut RecGltfCtx<'a
 
     log_asset_upload(ctx);
 
-    let gpu_vert_buffers: Vec<Handle<VertexBuffer>> = ctx
+    let gpu_vert_buffers: Vec<BufferHandle<VertexBuffer>> = ctx
         .vertex_buffers
         .iter()
         .map(|vert_buf| {
@@ -498,17 +496,21 @@ fn upload_to_gpu<'a>(renderer: &mut trekanten::Renderer, ctx: &mut RecGltfCtx<'a
                 .create_resource(VertexBufferDescriptor::from_raw(
                     &vert_buf.data,
                     vert_buf.format.clone(),
+                    BufferMutability::Immutable,
                 ))
                 .expect("Failed to create vertex buffer")
         })
         .collect();
 
-    let gpu_index_buffers: Vec<Handle<IndexBuffer>> = ctx
+    let gpu_index_buffers: Vec<BufferHandle<IndexBuffer>> = ctx
         .index_buffers
         .iter()
         .map(|idx_buf| {
             renderer
-                .create_resource(IndexBufferDescriptor::from_slice(&idx_buf))
+                .create_resource(IndexBufferDescriptor::from_slice(
+                    &idx_buf,
+                    BufferMutability::Immutable,
+                ))
                 .expect("Failed to create index buffer")
         })
         .collect();

@@ -18,6 +18,7 @@ use crate::render_pass::RenderPass;
 use crate::util;
 
 // TODO: Temporary
+use crate::mem::BufferHandle;
 use crate::mesh::Mesh;
 use crate::resource::Handle;
 use crate::resource::ResourceManager;
@@ -258,6 +259,24 @@ impl CommandBuffer {
         self
     }
 
+    pub fn set_scissor(&mut self, scissor: util::Rect2D) -> &mut Self {
+        unsafe {
+            self.vk_device
+                .cmd_set_scissor(self.vk_cmd_buffer, 0, &[vk::Rect2D::from(scissor)]);
+        }
+
+        self
+    }
+
+    pub fn set_viewport(&mut self, viewport: util::Viewport) -> &mut Self {
+        unsafe {
+            self.vk_device
+                .cmd_set_viewport(self.vk_cmd_buffer, 0, &[vk::Viewport::from(viewport)]);
+        }
+
+        self
+    }
+
     pub fn bind_index_buffer(&mut self, buffer: &IndexBuffer, offset: u64) -> &mut Self {
         assert!(self.queue_flags.contains(vk::QueueFlags::GRAPHICS));
         log::trace!("binding index buffer {:?} at {}", buffer, offset);
@@ -297,12 +316,23 @@ impl CommandBuffer {
         self
     }
 
-    pub fn draw_indexed(&mut self, n_vertices: u32) -> &mut Self {
+    pub fn draw_indexed(
+        &mut self,
+        n_vertices: u32,
+        indices_index: u32,
+        vertices_index: i32,
+    ) -> &mut Self {
         assert!(self.queue_flags.contains(vk::QueueFlags::GRAPHICS));
 
         unsafe {
-            self.vk_device
-                .cmd_draw_indexed(self.vk_cmd_buffer, n_vertices, 1, 0, 0, 0);
+            self.vk_device.cmd_draw_indexed(
+                self.vk_cmd_buffer,
+                n_vertices,
+                1,
+                indices_index,
+                vertices_index,
+                0,
+            );
         }
 
         self
@@ -462,24 +492,71 @@ impl<'a> CommandBufferBuilder<'a> {
         self
     }
 
+    pub fn bind_index_buffer(&mut self, handle: &BufferHandle<IndexBuffer>) -> &mut Self {
+        let ib = self
+            .renderer
+            .get_resource(handle)
+            .expect("Failed to get index buffer");
+
+        self.command_buffer.bind_index_buffer(ib, 0);
+
+        self
+    }
+
+    pub fn bind_vertex_buffer(&mut self, handle: &BufferHandle<VertexBuffer>) -> &mut Self {
+        let vb = self
+            .renderer
+            .get_resource(handle)
+            .expect("Failed to get vertex buffer");
+
+        self.command_buffer.bind_vertex_buffer(vb, 0);
+
+        self
+    }
+
     pub fn draw_mesh(&mut self, mesh: &Mesh) -> &mut Self {
-        let vertex_index = mesh.vertex_buffer.idx();
+        let vertex_index = mesh.vertex_buffer.idx() as i32;
         let indices_index = mesh.index_buffer.idx();
-        let n_indices = mesh.index_buffer.len();
+        let n_indices = mesh.index_buffer.n_elems();
 
         let ib = self
             .renderer
-            .get_resource(mesh.index_buffer.handle())
+            .get_resource(&mesh.index_buffer)
             .expect("Failed to get index buffer");
+
         let vb = self
             .renderer
-            .get_resource(mesh.vertex_buffer.handle())
+            .get_resource(&mesh.vertex_buffer)
             .expect("Failed to get vertex buffer");
 
         self.command_buffer
-            .bind_index_buffer(ib, indices_index)
-            .bind_vertex_buffer(vb, vertex_index)
-            .draw_indexed(n_indices as u32);
+            .bind_index_buffer(ib, 0)
+            .bind_vertex_buffer(vb, 0)
+            .draw_indexed(n_indices, indices_index, vertex_index);
+
+        self
+    }
+
+    pub fn draw_indexed(
+        &mut self,
+        n_indices: u32,
+        indices_index: u32,
+        vertices_index: i32,
+    ) -> &mut Self {
+        self.command_buffer
+            .draw_indexed(n_indices, indices_index, vertices_index);
+
+        self
+    }
+
+    pub fn set_scissor(&mut self, scissor: util::Rect2D) -> &mut Self {
+        self.command_buffer.set_scissor(scissor);
+
+        self
+    }
+
+    pub fn set_viewport(&mut self, viewport: util::Viewport) -> &mut Self {
+        self.command_buffer.set_viewport(viewport);
 
         self
     }

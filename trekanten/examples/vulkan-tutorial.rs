@@ -10,8 +10,6 @@ use trekanten::texture;
 use trekanten::uniform;
 use trekanten::util;
 use trekanten::vertex::VertexDefinition;
-use trekanten::BufferHandle;
-use trekanten::Handle;
 use trekanten::ResourceManager;
 
 use std::time::Duration;
@@ -244,33 +242,17 @@ fn main() -> Result<(), trekanten::RenderError> {
     let mut window = GlfwWindow::new();
     let mut renderer = trekanten::Renderer::new(&window, window.extents())?;
 
-    let vertex_buffer_descriptor = mesh::VertexBufferDescriptor::from_slice(&vertices);
-    let vertex_buffer_handle: Handle<mesh::VertexBuffer> = renderer
+    let vertex_buffer_descriptor =
+        mesh::VertexBufferDescriptor::from_slice(&vertices, mesh::BufferMutability::Immutable);
+    let vertex_buffer = renderer
         .create_resource(vertex_buffer_descriptor)
         .expect("Failed to create vertex buffer");
 
-    let index_buffer_descriptor = mesh::IndexBufferDescriptor::from_slice(&indices);
-    let index_buffer_handle = renderer
+    let index_buffer_descriptor =
+        mesh::IndexBufferDescriptor::from_slice(&indices, mesh::BufferMutability::Immutable);
+    let index_buffer = renderer
         .create_resource(index_buffer_descriptor)
         .expect("Failed to create index buffer");
-
-    let vertex_buffer = unsafe {
-        BufferHandle::from_buffer(
-            vertex_buffer_handle,
-            0,
-            vertices.len() as u64,
-            std::mem::size_of::<Vertex>() as u64,
-        )
-    };
-
-    let index_buffer = unsafe {
-        BufferHandle::from_buffer(
-            index_buffer_handle,
-            0,
-            indices.len() as u64,
-            std::mem::size_of::<u32>() as u64,
-        )
-    };
 
     let mesh = mesh::Mesh {
         vertex_buffer,

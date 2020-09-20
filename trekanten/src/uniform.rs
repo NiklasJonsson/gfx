@@ -2,8 +2,7 @@ use ash::vk;
 
 use crate::command::CommandPool;
 use crate::device::Device;
-use crate::mem::DeviceBuffer;
-use crate::mem::MemoryError;
+use crate::mem::{Buffer, BufferDescriptor, BufferMutability, DeviceBuffer, MemoryError};
 use crate::queue::Queue;
 use crate::resource::{BufferedStorage, Handle};
 
@@ -13,14 +12,50 @@ use crate::util;
 
 pub enum UniformBufferDescriptor<'a, T> {
     Immutable { data: &'a [T] },
-    Uninitialized { n_elems: u64 },
+    Uninitialized { n_elems: u32 },
+}
+
+impl<'a, T> BufferDescriptor for UniformBufferDescriptor<'a, T> {
+    type Buffer = UniformBuffer;
+    fn mutability(&self) -> BufferMutability {
+        match self {
+            UniformBufferDescriptor::Immutable { .. } => BufferMutability::Immutable,
+            UniformBufferDescriptor::Uninitialized { .. } => BufferMutability::Mutable,
+        }
+    }
+
+    fn elem_size(&self) -> u16 {
+        std::mem::size_of::<T>() as u16
+    }
+
+    fn n_elems(&self) -> u32 {
+        match self {
+            UniformBufferDescriptor::Immutable { data } => data.len() as u32,
+            UniformBufferDescriptor::Uninitialized { n_elems } => *n_elems,
+        }
+    }
+
+    fn create(
+        &self,
+        device: &Device,
+        queue: &Queue,
+        command_pool: &CommandPool,
+    ) -> Result<Self::Buffer, MemoryError> {
+        UniformBuffer::create(device, queue, command_pool, self)
+    }
 }
 
 pub struct UniformBuffer {
     buffer: DeviceBuffer,
-    elem_size: u64,
-    stride: u64,
-    n_elems: u64,
+    elem_size: u16,
+    stride: u16,
+    n_elems: u32,
+}
+
+impl Buffer for UniformBuffer {
+    fn stride(&self) -> u16 {
+        self.stride
+    }
 }
 
 impl UniformBuffer {
@@ -30,8 +65,8 @@ impl UniformBuffer {
         command_pool: &CommandPool,
         descriptor: &UniformBufferDescriptor<'a, T>,
     ) -> Result<Self, MemoryError> {
-        let elem_size = std::mem::size_of::<T>() as u64;
-        let stride = device.uniform_buffer_offset_alignment();
+        let elem_size = std::mem::size_of::<T>() as u16;
+        let stride = device.uniform_buffer_offset_alignment() as u16;
         let (buffer, n_elems) = match descriptor {
             UniformBufferDescriptor::Immutable { data } => (
                 DeviceBuffer::device_local_by_staging(
@@ -43,12 +78,12 @@ impl UniformBuffer {
                     elem_size as usize,
                     stride as usize,
                 )?,
-                data.len() as u64,
+                data.len() as u32,
             ),
             UniformBufferDescriptor::Uninitialized { n_elems } => (
                 DeviceBuffer::empty(
                     device,
-                    (elem_size * n_elems) as usize,
+                    elem_size as usize * *n_elems as usize,
                     vk::BufferUsageFlags::UNIFORM_BUFFER,
                     vk_mem::MemoryUsage::CpuToGpu,
                 )?,
@@ -73,21 +108,21 @@ impl UniformBuffer {
         &self.buffer.vk_buffer()
     }
 
-    pub fn stride(&self) -> u64 {
+    pub fn stride(&self) -> u16 {
         self.stride
     }
 
-    pub fn elem_size(&self) -> u64 {
+    pub fn elem_size(&self) -> u16 {
         self.elem_size
     }
 
-    pub fn n_elems(&self) -> u64 {
+    pub fn n_elems(&self) -> u32 {
         self.n_elems
     }
 
     pub fn size(&self) -> u64 {
         assert!(self.elem_size <= self.stride);
-        self.stride * self.n_elems
+        self.stride as u64 * self.n_elems as u64
     }
 }
 

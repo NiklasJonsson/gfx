@@ -2,10 +2,16 @@ pub mod extent;
 pub mod ffi;
 pub mod format;
 pub mod lifetime;
+pub mod offset;
+pub mod rect;
+pub mod viewport;
 pub mod vk_debug;
 
 pub use extent::*;
 pub use format::*;
+pub use offset::*;
+pub use rect::*;
+pub use viewport::*;
 
 pub fn clamp<T: Ord>(v: T, min: T, max: T) -> T {
     std::cmp::max(min, std::cmp::min(v, max))

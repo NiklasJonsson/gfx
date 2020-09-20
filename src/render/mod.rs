@@ -171,7 +171,7 @@ pub fn get_pipeline_for(
     mat: &material::MaterialData,
 ) -> Result<Handle<GraphicsPipeline>, PipelineError> {
     let vbuf: &VertexBuffer = renderer
-        .get_resource(mesh.vertex_buffer.handle())
+        .get_resource(&mesh.vertex_buffer)
         .expect("Invalid handle");
     let vertex_format = vbuf.format.clone();
     let shaders = world.read_resource::<pipeline::PrecompiledShaders>();
