@@ -15,7 +15,7 @@ use crate::render::Mesh;
 use trekanten::mesh::BufferMutability;
 use trekanten::mesh::{IndexBuffer, IndexBufferDescriptor, VertexBuffer, VertexBufferDescriptor};
 use trekanten::resource::ResourceManager;
-use trekanten::texture::TextureDescriptor;
+use trekanten::texture::{MipMaps, TextureDescriptor};
 use trekanten::uniform::UniformBufferDescriptor;
 use trekanten::util;
 use trekanten::vertex::VertexFormat;
@@ -541,9 +541,14 @@ fn upload_to_gpu<'a>(renderer: &mut trekanten::Renderer, ctx: &mut RecGltfCtx<'a
             )
             .expect("Failed to insert mesh");
 
+        // TODO: Which of these textures should actually have mipmaps...
         let normal_map = gltf_mat.normal_map.as_ref().map(|x| {
             let tex_h = renderer
-                .create_resource(TextureDescriptor::new(x.tex.path.clone(), x.tex.format))
+                .create_resource(TextureDescriptor::file(
+                    x.tex.path.clone(),
+                    x.tex.format,
+                    MipMaps::Generate,
+                ))
                 .expect("Failed to create texture handle for normal map");
 
             let tex_use = crate::render::material::TextureUse {
@@ -559,9 +564,10 @@ fn upload_to_gpu<'a>(renderer: &mut trekanten::Renderer, ctx: &mut RecGltfCtx<'a
 
         let base_color_texture = gltf_mat.base_color.as_ref().map(|t| {
             let tex_h = renderer
-                .create_resource(trekanten::texture::TextureDescriptor::new(
+                .create_resource(trekanten::texture::TextureDescriptor::file(
                     t.path.clone(),
                     t.format,
+                    MipMaps::Generate,
                 ))
                 .expect("Failed to create texture handle for normal map");
             crate::render::material::TextureUse {
@@ -572,9 +578,10 @@ fn upload_to_gpu<'a>(renderer: &mut trekanten::Renderer, ctx: &mut RecGltfCtx<'a
 
         let metallic_roughness_texture = gltf_mat.metallic_roughness.as_ref().map(|t| {
             let tex_h = renderer
-                .create_resource(trekanten::texture::TextureDescriptor::new(
+                .create_resource(trekanten::texture::TextureDescriptor::file(
                     t.path.clone(),
                     t.format,
+                    MipMaps::Generate,
                 ))
                 .expect("Failed to create texture handle for normal map");
             crate::render::material::TextureUse {

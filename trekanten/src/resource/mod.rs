@@ -4,6 +4,7 @@ pub mod cached_storage;
 pub mod storage;
 
 pub use buffered_storage::BufferedStorage;
+pub use cache::Cache;
 pub use cached_storage::CachedStorage;
 pub use storage::Handle;
 pub use storage::Storage;

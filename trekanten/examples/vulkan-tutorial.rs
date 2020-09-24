@@ -281,9 +281,10 @@ fn main() -> Result<(), trekanten::RenderError> {
     let _ = load_url("textures", TEX_URL);
     let tex_path = get_fname("textures", TEX_URL);
     let texture_handle = renderer
-        .create_resource(texture::TextureDescriptor::new(
+        .create_resource(texture::TextureDescriptor::file(
             tex_path.into(),
             util::Format::RGBA_SRGB,
+            texture::MipMaps::Generate,
         ))
         .expect("Failed to create texture");
 

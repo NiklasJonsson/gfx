@@ -664,9 +664,9 @@ impl<'a, T>
     }
 }
 
-impl
+impl<'a>
     resource::ResourceManager<
-        texture::TextureDescriptor,
+        texture::TextureDescriptor<'a>,
         texture::Texture,
         Handle<texture::Texture>,
     > for Renderer

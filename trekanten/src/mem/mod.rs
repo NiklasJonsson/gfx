@@ -85,7 +85,7 @@ fn transition_image_layout(
     cmd_buf.pipeline_barrier(&barrier, src_stage, dst_stage);
 }
 
-// TODO: This code depends on vk_image being TRANSfER_DST_OPTIMAL. We should track this together
+// TODO: This code depends on vk_image being TRANSFER_DST_OPTIMAL. We should track this together
 // with the image.
 fn generate_mipmaps(
     cmd_buf: &mut CommandBuffer,
@@ -263,6 +263,48 @@ impl DeviceImage {
             allocation,
             _allcation_info,
         })
+    }
+
+    pub fn device_local(
+        device: &Device,
+        queue: &Queue,
+        command_pool: &CommandPool,
+        extent: util::Extent2D,
+        format: util::Format,
+        data: &[u8],
+    ) -> Result<Self, MemoryError> {
+        // stride & alignment does not matter as long as they are the same.
+        let staging =
+            DeviceBuffer::staging_with_data(device, data, 1 /*elem_size*/, 1 /*stride*/)?;
+        // Both src & dst as we use one mip level to create the next
+        let usage = vk::ImageUsageFlags::TRANSFER_DST | vk::ImageUsageFlags::SAMPLED;
+        let dst_image = Self::empty_2d(
+            device,
+            extent,
+            format,
+            usage,
+            MemoryUsage::GpuOnly,
+            1,
+            vk::SampleCountFlags::TYPE_1,
+        )?;
+
+        // Transitioned to SHADER_READ_ONLY_OPTIMAL during mipmap generation
+        let mut cmd_buf = command_pool.begin_single_submit()?;
+
+        transition_image_layout(
+            &mut cmd_buf,
+            &dst_image.vk_image,
+            1,
+            format.into(),
+            vk::ImageLayout::UNDEFINED,
+            vk::ImageLayout::TRANSFER_DST_OPTIMAL,
+        );
+        cmd_buf
+            .copy_buffer_to_image(&staging.vk_buffer(), dst_image.vk_image(), &extent)
+            .end()?;
+        queue.submit_and_wait(&cmd_buf)?;
+
+        Ok(dst_image)
     }
 
     /// Create a device local image, generating mipmaps in the process
