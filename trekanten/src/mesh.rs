@@ -89,6 +89,9 @@ impl<'a> BufferDescriptor for IndexBufferDescriptor<'a> {
     }
 }
 
+
+// TODO?: Merge index, vertex & uniform buffers into one Buffer<Ty>. Ty holds variant info. impl<Concrete> for special functions
+
 #[derive(Debug)]
 pub struct IndexBuffer {
     buffer: mem::DeviceBuffer,
@@ -113,15 +116,24 @@ impl IndexBuffer {
             IndexSize::Size32 => 4,
         };
         log::trace!("Creating index buffer");
-        let buffer = mem::DeviceBuffer::device_local_by_staging(
-            device,
-            queue,
-            command_pool,
-            vk::BufferUsageFlags::INDEX_BUFFER,
-            descriptor.data,
-            size,
-            size,
-        )?;
+        let buffer = match descriptor.mutability() {
+            BufferMutability::Immutable => mem::DeviceBuffer::device_local(
+                device,
+                queue,
+                command_pool,
+                vk::BufferUsageFlags::INDEX_BUFFER,
+                descriptor.data,
+                size,
+                size,
+            ),
+            BufferMutability::Mutable => mem::DeviceBuffer::persistent_mapped(
+                device,
+                vk::BufferUsageFlags::INDEX_BUFFER,
+                descriptor.data,
+                size,
+                size,
+            ),
+        }?;
 
         Ok(Self {
             buffer,
@@ -215,15 +227,24 @@ impl VertexBuffer {
         );
         log::trace!("\tformat: {:#?}", descriptor.format);
         let size = descriptor.format.size() as usize;
-        let buffer = mem::DeviceBuffer::device_local_by_staging(
-            device,
-            queue,
-            command_pool,
-            vk::BufferUsageFlags::VERTEX_BUFFER,
-            descriptor.data,
-            size,
-            size,
-        )?;
+        let buffer = match descriptor.mutability() {
+            BufferMutability::Immutable => mem::DeviceBuffer::device_local(
+                device,
+                queue,
+                command_pool,
+                vk::BufferUsageFlags::VERTEX_BUFFER,
+                descriptor.data,
+                size,
+                size,
+            ),
+            BufferMutability::Mutable => mem::DeviceBuffer::persistent_mapped(
+                device,
+                vk::BufferUsageFlags::VERTEX_BUFFER,
+                descriptor.data,
+                size,
+                size,
+            ),
+        }?;
 
         Ok(Self {
             buffer,

@@ -68,8 +68,9 @@ impl UniformBuffer {
         let elem_size = std::mem::size_of::<T>() as u16;
         let stride = device.uniform_buffer_offset_alignment() as u16;
         let (buffer, n_elems) = match descriptor {
+            // TODO: Immutable doesn't really need to be double buffered
             UniformBufferDescriptor::Immutable { data } => (
-                DeviceBuffer::device_local_by_staging(
+                DeviceBuffer::device_local(
                     device,
                     queue,
                     command_pool,

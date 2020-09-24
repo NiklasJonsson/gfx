@@ -132,6 +132,16 @@ impl<T> BufferHandle<T> {
     }
 }
 
+fn get_aligned_size(n_bytes: usize, elem_size: usize, stride: usize) -> usize {
+    let n_elems = n_bytes / elem_size;
+    if stride == elem_size {
+        n_bytes
+    } else {
+        assert!(elem_size <= stride);
+        n_elems * stride
+    }
+}
+
 pub struct DeviceBuffer {
     allocator: AllocatorHandle,
     vk_buffer: vk::Buffer,
@@ -199,14 +209,16 @@ impl DeviceBuffer {
         )
     }
 
-    // TODO: Bake elem_size/stride into another function/make optional?
-    pub fn staging_with_data(
+    fn with_data(
         device: &Device,
         data: &[u8],
         elem_size: usize,
         stride: usize,
+        buffer_usage: vk::BufferUsageFlags,
+        mem_usage: MemoryUsage,
+        do_unmap: bool,
     ) -> Result<Self, MemoryError> {
-        log::trace!("Creating device buffer, staging with data");
+        log::trace!("Creating device buffer with data");
         assert!(data.len() % elem_size == 0);
         let n_elems = data.len() / elem_size;
         log::trace!(
@@ -216,17 +228,10 @@ impl DeviceBuffer {
             stride
         );
         let allocator = device.allocator();
-        let size = if stride == elem_size {
-            log::trace!("No special alignment requirement");
-            data.len()
-        } else {
-            assert!(elem_size <= stride);
-            log::trace!("stride != elem_size, allocating larger buffer");
-            n_elems * stride
-        };
+        let size = get_aligned_size(data.len(), elem_size, stride);
         log::trace!("Total buffer size: {}", size);
 
-        let staging = DeviceBuffer::staging_empty(device, size)?;
+        let staging = DeviceBuffer::empty(device, size, buffer_usage, mem_usage)?;
 
         let dst = allocator
             .map_memory(&staging.allocation)
@@ -248,14 +253,53 @@ impl DeviceBuffer {
             }
         }
 
-        allocator
-            .unmap_memory(&staging.allocation)
-            .map_err(MemoryError::MemoryMapping)?;
+        if do_unmap {
+            allocator
+                .unmap_memory(&staging.allocation)
+                .map_err(MemoryError::MemoryMapping)?;
+        }
 
         Ok(staging)
     }
 
-    pub fn device_local_by_staging(
+    pub fn staging_with_data(
+        device: &Device,
+        data: &[u8],
+        elem_size: usize,
+        stride: usize,
+    ) -> Result<Self, MemoryError> {
+        log::trace!("Creating staging buffer");
+        Self::with_data(
+            device,
+            data,
+            elem_size,
+            stride,
+            vk::BufferUsageFlags::TRANSFER_SRC,
+            MemoryUsage::CpuOnly,
+            true,
+        )
+    }
+
+    pub fn persistent_mapped(
+        device: &Device,
+        usage: vk::BufferUsageFlags,
+        data: &[u8],
+        elem_size: usize,
+        stride: usize,
+    ) -> Result<Self, MemoryError> {
+        log::trace!("Creating persistent mapped buffer");
+        Self::with_data(
+            device,
+            data,
+            elem_size,
+            stride,
+            usage,
+            MemoryUsage::CpuToGpu,
+            false,
+        )
+    }
+
+    pub fn device_local(
         device: &Device,
         queue: &Queue,
         command_pool: &CommandPool,
@@ -264,7 +308,7 @@ impl DeviceBuffer {
         elem_size: usize,
         stride: usize,
     ) -> Result<Self, MemoryError> {
-        log::trace!("Creating device buffer, local by staging");
+        log::trace!("Creating device local buffer (with data from staging)");
         let staging = Self::staging_with_data(device, data, elem_size, stride)?;
 
         let dst_buffer = Self::empty(
