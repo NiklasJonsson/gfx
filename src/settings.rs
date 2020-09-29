@@ -100,3 +100,26 @@ impl<'a> System<'a> for RenderSettingsSys {
 pub fn register_systems<'a, 'b>(builder: DispatcherBuilder<'a, 'b>) -> DispatcherBuilder<'a, 'b> {
     builder.with(RenderSettingsSys, "rendering_settings_sys", &[])
 }
+
+pub fn build_ui<'a>(world: &World, ui: &imgui::Ui<'a>, pos: [f32; 2]) -> [f32; 2] {
+    let settings = world.read_resource::<RenderSettings>();
+
+    let size = [300.0, 85.0];
+
+    imgui::Window::new(imgui::im_str!("Render settings"))
+        .position(pos, imgui::Condition::FirstUseEver)
+        .size(size, imgui::Condition::FirstUseEver)
+        .build(&ui, || {
+            ui.text(imgui::im_str!("render mode: {:?}", settings.render_mode));
+            ui.text(imgui::im_str!(
+                "bounding box: {}",
+                settings.render_bounding_box
+            ));
+            ui.text(imgui::im_str!(
+                "reload shaders: {}",
+                settings.reload_runtime_shaders
+            ));
+        });
+
+    size
+}

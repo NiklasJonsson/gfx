@@ -206,19 +206,40 @@ impl UIDrawCommands {
     }
 }
 
+pub fn build_ui<'a>(world: &World, ui: &imgui::Ui<'a>) {
+    let dt = world.read_resource::<crate::time::DeltaTime>();
+
+    let size = [300.0, 65.0];
+    imgui::Window::new(im_str!("Global stats"))
+        .size(size, imgui::Condition::FirstUseEver)
+        .position([0.0; 2], imgui::Condition::FirstUseEver)
+        .build(&ui, || {
+            ui.text(im_str!("FPS: {:.3}", dt.as_fps()));
+            ui.text(im_str!(
+                "Cam pos: {}",
+                super::ActiveCamera::camera_pos(world)
+            ));
+        });
+
+    let mut y_offset = size[1];
+    let funcs = [
+        crate::settings::build_ui,
+        crate::game_state::build_ui,
+        crate::io::input::build_ui,
+    ];
+    for func in funcs.iter() {
+        let size = func(world, ui, [0.0, y_offset]);
+        y_offset += size[1];
+    }
+}
+
 pub fn generate_draw_commands<'a>(world: &World, frame: &mut Frame<'a>) -> Option<UIDrawCommands> {
     log::trace!("Generating ui draw commands");
     let mut context = &mut *world.write_resource::<UIContext>();
     let mut imgui = context.imgui.lock().expect("Failed to lock context!");
     let ui = imgui.frame();
 
-    imgui::Window::new(im_str!("Hello world"))
-        .size([300.0, 110.0], imgui::Condition::FirstUseEver)
-        .build(&ui, || {
-            ui.text(im_str!("Hello world!"));
-            ui.text(im_str!("こんにちは世界！"));
-            ui.text(im_str!("This...is...imgui-rs!"));
-        });
+    build_ui(world, &ui);
 
     let draw_data = ui.render();
     let fb_width = draw_data.display_size[0] * draw_data.framebuffer_scale[0];

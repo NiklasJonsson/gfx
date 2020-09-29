@@ -78,3 +78,18 @@ pub fn register_systems<'a, 'b>(builder: DispatcherBuilder<'a, 'b>) -> Dispatche
         &[input::INPUT_MANAGER_SYSTEM_ID],
     )
 }
+
+pub fn build_ui<'a>(world: &World, ui: &imgui::Ui<'a>, pos: [f32; 2]) -> [f32; 2] {
+    let state = world.read_resource::<GameState>();
+
+    let size = [300.0, 50.0];
+
+    imgui::Window::new(imgui::im_str!("Game state"))
+        .position(pos, imgui::Condition::FirstUseEver)
+        .size(size, imgui::Condition::FirstUseEver)
+        .build(&ui, || {
+            ui.text(imgui::im_str!("Game state: {:?}", *state));
+        });
+
+    size
+}

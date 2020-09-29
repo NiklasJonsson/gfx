@@ -44,6 +44,19 @@ impl ActiveCamera {
     pub fn with_entity(entity: Entity) -> Self {
         ActiveCamera(Some(entity))
     }
+
+    pub fn camera_pos(world: &World) -> Position {
+        let camera_entity = world
+            .read_resource::<ActiveCamera>()
+            .0
+            .expect("No active camera!");
+
+        let positions = world.read_storage::<Position>();
+
+        *positions
+            .get(camera_entity)
+            .expect("Could not get position component for camera")
+    }
 }
 
 #[derive(Default)]
@@ -55,17 +68,12 @@ pub struct FrameData {
 }
 
 fn get_view_data(world: &World) -> (glm::Mat4, Position) {
+    let cam_pos = ActiveCamera::camera_pos(world);
+
     let camera_entity = world
         .read_resource::<ActiveCamera>()
         .0
         .expect("No active camera!");
-
-    let positions = world.read_storage::<Position>();
-
-    let cam_pos = positions
-        .get(camera_entity)
-        .expect("Could not get position component for camera");
-
     let rots = world.read_storage::<CameraRotationState>();
     let cam_rotation_state = rots
         .get(camera_entity)
@@ -73,10 +81,10 @@ fn get_view_data(world: &World) -> (glm::Mat4, Position) {
 
     // TODO: Camera system should write to ViewMatrixResource at the end of system
     // and we should read it here.
-    let view = FreeFlyCameraController::get_view_matrix_from(cam_pos, cam_rotation_state);
+    let view = FreeFlyCameraController::get_view_matrix_from(&cam_pos, cam_rotation_state);
     log::trace!("View matrix: {:#?}", view);
 
-    (view, *cam_pos)
+    (view, cam_pos)
 }
 
 fn get_proj_matrix(aspect_ratio: f32) -> glm::Mat4 {

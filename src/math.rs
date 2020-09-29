@@ -53,6 +53,12 @@ impl AddAssign<&Vec3> for Position {
     }
 }
 
+impl std::fmt::Display for Position {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        writeln!(f, "({:.2}, {:.2}, {:.2})", self.x(), self.y(), self.z())
+    }
+}
+
 impl Mul<Position> for ModelMatrix {
     type Output = Position;
     fn mul(self, pos: Position) -> Position {
