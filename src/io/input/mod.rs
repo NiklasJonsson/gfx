@@ -210,7 +210,7 @@ impl<'a> System<'a> for InputManager {
                 }
                 ExternalInput::KeyRelease(key) => self.register_key_release(*key),
                 ExternalInput::MouseDelta { x, y } => {
-                    log::trace!("Captured mouse delta ({}, {})", x, y);
+                    log::debug!("Captured mouse delta ({}, {})", x, y);
                     axes.push_back((DeviceAxis::MouseX, x));
                     axes.push_back((DeviceAxis::MouseY, y));
                 }
@@ -275,4 +275,8 @@ pub const INPUT_MANAGER_SYSTEM_ID: &str = "input_manager_sys";
 
 pub fn register_systems<'a, 'b>(builder: DispatcherBuilder<'a, 'b>) -> DispatcherBuilder<'a, 'b> {
     builder.with(InputManager::new(), INPUT_MANAGER_SYSTEM_ID, &[])
+}
+
+pub fn build_ui<'a>(_world: &World, ui: &imgui::Ui<'a>, pos: [f32; 2]) -> [f32; 2] {
+    [0.0, 0.0]
 }

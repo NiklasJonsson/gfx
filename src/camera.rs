@@ -227,7 +227,7 @@ impl FreeFlyCameraController {
 
 // Default input mapping for camera
 fn get_input_context() -> Result<InputContext, InputContextError> {
-    let sens = 0.0005 as Sensitivity;
+    let sens = 0.005 as Sensitivity;
     use CameraMovement::*;
     Ok(InputContext::start("CameraInputContext")
         .with_description("Input mapping for untethered, 3D camera")
@@ -248,26 +248,12 @@ impl<'a> System<'a> for FreeFlyCameraController {
         WriteStorage<'a, MappedInput>,
         WriteStorage<'a, Position>,
         WriteStorage<'a, CameraRotationState>,
-        Read<'a, GameState>,
         Read<'a, DeltaTime>,
         ReadStorage<'a, Self>,
     );
 
     fn run(&mut self, data: Self::SystemData) {
-        let (
-            mut mapped_inputs,
-            mut positions,
-            mut cam_rot_state,
-            game_state,
-            delta_time,
-            unique_id,
-        ) = data;
-
-        // TODO: Can this be removed?
-        if *game_state == GameState::Paused {
-            log::trace!("Game is paused, camera won't be moved");
-            return;
-        }
+        let (mut mapped_inputs, mut positions, mut cam_rot_state, delta_time, unique_id) = data;
 
         for (mi, pos, rotation_state, _id) in (
             &mut mapped_inputs,

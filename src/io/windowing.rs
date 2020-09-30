@@ -69,41 +69,53 @@ impl EventManager {
     pub fn collect_event<'a>(&mut self, event: winit::event::Event<'a, ()>) -> EventLoopControl {
         log::trace!("Received event: {:?}", event);
         use winit::event::Event as WinEvent;
+        let mut resolve = false;
         match event {
+            WinEvent::MainEventsCleared => {
+                log::info!("Received MainEventsClear, resolving current event");
+                resolve = true;
+            }
+            WinEvent::LoopDestroyed
+            | WinEvent::WindowEvent {
+                event: WindowEvent::CloseRequested,
+                ..
+            } => {
+                log::debug!("Received {:?}, quitting", event);
+                self.update_action(Event::Quit);
+            }
             WinEvent::WindowEvent {
-                event: inner_event, ..
-            } => match inner_event {
-                WindowEvent::CloseRequested => {
-                    log::debug!("Received CloseRequested window event");
-                    self.update_action(Event::Quit);
-                }
-                WindowEvent::Focused(false) => {
-                    log::debug!("Window lost focus, ignoring input");
-                    self.update_action(Event::Unfocus);
-                }
-                WindowEvent::Focused(true) => {
-                    log::debug!("Window gained focus, accepting input");
-                    self.update_action(Event::Focus);
-                }
-                WindowEvent::KeyboardInput {
-                    device_id, input, ..
-                } => {
-                    log::debug!("Captured key: {:?} from {:?}", input, device_id);
-                    let is_pressed = input.state == ElementState::Pressed;
-                    if let Some(key) = input.virtual_keycode {
-                        let ei = if is_pressed {
-                            input::ExternalInput::KeyPress(key)
-                        } else {
-                            input::ExternalInput::KeyRelease(key)
-                        };
-
-                        self.update_action(Event::Input(vec![ei]));
+                event: WindowEvent::Focused(is_focused),
+                ..
+            } => {
+                log::debug!("Window focus: {}", is_focused);
+                let action = if is_focused {
+                    Event::Focus
+                } else {
+                    Event::Unfocus
+                };
+                self.update_action(action);
+            }
+            WinEvent::WindowEvent {
+                event:
+                    WindowEvent::KeyboardInput {
+                        device_id, input, ..
+                    },
+                ..
+            } => {
+                log::debug!("Captured key: {:?} from {:?}", input, device_id);
+                let is_pressed = input.state == ElementState::Pressed;
+                if let Some(key) = input.virtual_keycode {
+                    let ei = if is_pressed {
+                        input::ExternalInput::KeyPress(key)
                     } else {
-                        log::warn!("Key clicked but no virtual key mapped!");
-                    }
+                        input::ExternalInput::KeyRelease(key)
+                    };
+
+                    self.update_action(Event::Input(vec![ei]));
+                } else {
+                    log::warn!("Key clicked but no virtual key mapped!");
                 }
-                _ => log::trace!("... ignoring"),
-            },
+            }
             WinEvent::DeviceEvent {
                 event: inner_event, ..
             } => {
@@ -115,25 +127,25 @@ impl EventManager {
                     log::trace!("Ignoring device event {:?}", inner_event);
                 }
             }
-            WinEvent::LoopDestroyed => {
-                log::debug!("Received loop destroyed window event");
-                self.update_action(Event::Quit);
-            }
             e => log::debug!("Ignoring high level event {:?}", e),
         };
 
-        let new = match &self.action {
-            Event::Input(_) => Event::Input(Vec::new()),
-            Event::Quit => Event::Quit,
-            Event::Focus => Event::Focus,
-            Event::Unfocus => Event::Unfocus,
-        };
+        if resolve {
+            let new = match &self.action {
+                Event::Input(_) => Event::Input(Vec::new()),
+                Event::Quit => Event::Quit,
+                Event::Focus => Event::Focus,
+                Event::Unfocus => Event::Unfocus,
+            };
 
-        let old = std::mem::replace(&mut self.action, new);
-        match old {
-            Event::Input(v) if v.is_empty() => EventLoopControl::Continue,
-            Event::Quit => EventLoopControl::Quit,
-            _ => EventLoopControl::SendEvent(old),
+            let old = std::mem::replace(&mut self.action, new);
+            match old {
+                Event::Input(v) if v.is_empty() => EventLoopControl::Continue,
+                Event::Quit => EventLoopControl::Quit,
+                _ => EventLoopControl::SendEvent(old),
+            }
+        } else {
+            EventLoopControl::Continue
         }
     }
 }
@@ -167,7 +179,7 @@ pub fn event_thread_work(
 
     match event_manager.collect_event(winit_event) {
         EventLoopControl::SendEvent(event) => {
-            log::debug!("Sending event on queue: {:?}", event);
+            log::info!("Sending event on queue: {:?}", event);
             event_queue.push(event)
         }
         EventLoopControl::Continue => (),

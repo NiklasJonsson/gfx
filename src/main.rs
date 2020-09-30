@@ -197,7 +197,19 @@ impl App {
     }
 
     fn next_event(&self) -> Option<Event> {
-        self.event_queue.pop().ok()
+        let mut all_inputs = Vec::with_capacity(self.event_queue.len());
+        while let Ok(event) = self.event_queue.pop() {
+            match event {
+                Event::Input(mut inputs) => all_inputs.append(&mut inputs),
+                e => return Some(e),
+            }
+        }
+
+        if all_inputs.is_empty() {
+            None
+        } else {
+            Some(Event::Input(all_inputs))
+        }
     }
 
     fn post_frame(&mut self, args: &arg_parse::Args) -> AppAction {
