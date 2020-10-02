@@ -9,7 +9,7 @@ impl DeltaTime {
     }
 
     pub fn as_ms(&self) -> f32 {
-        1000.0 * self.0.as_secs_f32()
+        1000.0 * self.as_secs()
     }
 
     pub fn as_secs(&self) -> f32 {

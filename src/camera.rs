@@ -8,7 +8,6 @@ use crate::io::input::{
 use crate::math::{Position, Transform};
 
 use crate::time::DeltaTime;
-use crate::GameState;
 
 use glm::Vec3;
 use nalgebra_glm as glm;

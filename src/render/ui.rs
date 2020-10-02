@@ -22,9 +22,9 @@ use imgui::im_str;
 use std::sync::{Arc, Mutex};
 
 struct ImGuiVertex {
-    pos: [f32; 2],
-    uv: [f32; 2],
-    col: [u8; 4],
+    _pos: [f32; 2],
+    _uv: [f32; 2],
+    _col: [u8; 4],
 }
 
 impl VertexDefinition for ImGuiVertex {

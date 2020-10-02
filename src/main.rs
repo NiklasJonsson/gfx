@@ -197,6 +197,9 @@ impl App {
     }
 
     fn next_event(&self) -> Option<Event> {
+        // TODO:
+        // * Can we move this to the event thread
+        // * Merge mouse deltas?
         let mut all_inputs = Vec::with_capacity(self.event_queue.len());
         while let Ok(event) = self.event_queue.pop() {
             match event {

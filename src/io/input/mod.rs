@@ -277,6 +277,6 @@ pub fn register_systems<'a, 'b>(builder: DispatcherBuilder<'a, 'b>) -> Dispatche
     builder.with(InputManager::new(), INPUT_MANAGER_SYSTEM_ID, &[])
 }
 
-pub fn build_ui<'a>(_world: &World, ui: &imgui::Ui<'a>, pos: [f32; 2]) -> [f32; 2] {
+pub fn build_ui<'a>(_world: &World, _ui: &imgui::Ui<'a>, _pos: [f32; 2]) -> [f32; 2] {
     [0.0, 0.0]
 }
