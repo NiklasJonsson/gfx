@@ -336,7 +336,18 @@ pub fn draw_frame(world: &mut World, renderer: &mut Renderer) {
     create_renderables(renderer, world, render_mode, reload_shaders);
 
     let aspect_ratio = renderer.aspect_ratio();
-    let mut frame = renderer.next_frame().expect("Failed to get frame");
+    let mut frame = match renderer.next_frame() {
+        frame @ Ok(_) => frame,
+        Err(trekanten::RenderError::NeedsResize(reason)) => {
+            log::debug!("Resize reason: {:?}", reason);
+            renderer
+                .resize(world.read_resource::<crate::io::MainWindow>().extents())
+                .expect("Failed to resize renderer");
+            renderer.next_frame()
+        }
+        e => e,
+    }
+    .expect("Failed to get next frame");
 
     let (view_matrix, cam_pos) = get_view_data(world);
     let lighting_data = uniform::LightingData {
@@ -370,7 +381,7 @@ pub fn draw_frame(world: &mut World, renderer: &mut Renderer) {
 
     builder
         .bind_graphics_pipeline(dummy_pipeline)
-        .bind_shader_resource_group(0, frame_set, dummy_pipeline);
+        .bind_shader_resource_group(0u32, frame_set, dummy_pipeline);
 
     draw_entities(world, &mut builder);
     if let Some(ui_draw_commands) = ui_draw_commands {
@@ -383,7 +394,14 @@ pub fn draw_frame(world: &mut World, renderer: &mut Renderer) {
     frame.add_raw_command_buffer(buf);
 
     let frame = frame.finish();
-    renderer.submit(frame).expect("Failed to submit frame");
+    renderer.submit(frame).or_else(|e| {
+        if let trekanten::RenderError::NeedsResize(reason) = e {
+            log::info!("Resize reason: {:?}", reason);
+            renderer.resize(world.read_resource::<crate::io::MainWindow>().extents())
+        } else {
+            Err(e)
+        }
+    }).expect("Failed to submit frame");
     world
         .write_resource::<RenderSettings>()
         .reload_runtime_shaders = false;

@@ -10,6 +10,7 @@ pub enum Event {
     Quit,
     Focus,
     Unfocus,
+    Resize(trekanten::util::Extent2D),
     Input(Vec<input::ExternalInput>),
 }
 
@@ -28,15 +29,19 @@ impl Event {
             (Unfocus, _) => Unfocus,
             (Focus, Unfocus) => Focus,
             (_, Unfocus) => Unfocus,
+            (Resize(e), _) => Resize(e),
             (Input(mut new), Input(mut old)) => Input({
                 old.append(&mut new);
                 old
             }),
+            (Input(vec), Resize(_)) => Input(vec),
             (Input(vec), Focus) => Input(vec),
             (Focus, Input(v)) => {
                 log::warn!("Spurios focus event received, ignoring");
                 Input(v)
             }
+            // Ignore resize
+            (Focus, Resize(_)) => Focus,
             // Sometimes there are several focus events in a row
             (Focus, Focus) => Focus,
         }
@@ -83,6 +88,10 @@ impl EventManager {
                 log::debug!("Received {:?}, quitting", event);
                 self.update_action(Event::Quit);
             }
+            WinEvent::WindowEvent {
+                event: WindowEvent::Resized(winit::dpi::PhysicalSize { width, height }),
+                ..
+            } => self.update_action(Event::Resize(trekanten::util::Extent2D { width, height })),
             WinEvent::WindowEvent {
                 event: WindowEvent::Focused(is_focused),
                 ..
@@ -136,6 +145,7 @@ impl EventManager {
                 Event::Quit => Event::Quit,
                 Event::Focus => Event::Focus,
                 Event::Unfocus => Event::Unfocus,
+                Event::Resize(e) => Event::Resize(*e),
             };
 
             let old = std::mem::replace(&mut self.action, new);

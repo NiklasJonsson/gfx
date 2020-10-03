@@ -420,13 +420,6 @@ impl Renderer {
         Ok(())
     }
 
-    fn recreate_pipelines(&mut self) -> Result<(), RenderError> {
-        log::trace!("Recreating pipelines with {}", self.swapchain_extent());
-        self.graphics_pipelines
-            .recreate_all(&self.device, &self.render_pass)?;
-        Ok(())
-    }
-
     pub fn resize(&mut self, new_extent: util::Extent2D) -> Result<(), RenderError> {
         log::trace!(
             "Resizing from {} to {}",
@@ -456,8 +449,6 @@ impl Renderer {
         self.color_buffer = color_buffer;
         self.image_to_frame_idx = image_to_frame_idx;
         self.render_pass = render_pass;
-
-        self.recreate_pipelines()?;
 
         Ok(())
     }

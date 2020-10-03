@@ -12,13 +12,14 @@ mod render;
 mod settings;
 mod time;
 mod transform_graph;
+mod world;
 
 use arg_parse::Args;
 use time::DeltaTime;
 
 use game_state::GameState;
 
-use io::windowing::Event;
+use io::event::Event;
 
 #[derive(Debug, PartialEq, Eq)]
 enum AppState {
@@ -35,7 +36,6 @@ enum AppAction {
 
 struct App {
     world: World,
-    window: winit::window::Window,
     event_queue: Arc<io::EventQueue>,
     renderer: trekanten::Renderer,
     state: AppState,
@@ -55,17 +55,9 @@ impl App {
     }
 
     fn cursor_grab(&mut self, cursor_grab: bool) {
-        self.window
-            .set_cursor_grab(cursor_grab)
-            .expect("Unable to grab cursor");
-        self.window.set_cursor_visible(!cursor_grab);
-    }
-
-    fn write_fps(&self, d: DeltaTime) {
-        if self.frame_count % 10 == 0 {
-            let s = format!("Ramneryd {:.4} ({:.4} ms)", d.as_fps(), d.as_ms());
-            self.window.set_title(s.as_str());
-        }
+        self.world
+            .write_resource::<io::MainWindow>()
+            .cursor_grab(cursor_grab);
     }
 }
 
@@ -102,29 +94,9 @@ impl App {
     }
 
     fn setup_resources(&mut self) {
-        self.world
-            .insert(io::input::CurrentFrameExternalInputs(Vec::new()));
         self.world.insert(render::ActiveCamera::empty());
         self.world.insert(DeltaTime::zero());
         render::setup_resources(&mut self.world, &mut self.renderer);
-    }
-
-    pub fn get_entity_with_marker<C>(w: &World) -> Entity
-    where
-        C: specs::Component,
-    {
-        let markers = w.read_storage::<C>();
-        let entities = w.read_resource::<specs::world::EntitiesRes>();
-
-        let mut joined = (&entities, &markers).join();
-        let item = joined.next();
-        assert!(
-            joined.next().is_none(),
-            "Expected only one entity with marker component!"
-        );
-        let (ent, _) = item.expect("Expected an entity!");
-
-        ent
     }
 
     // TODO: Move this
@@ -138,7 +110,7 @@ impl App {
     fn populate_world(&mut self, args: &Args) {
         self.setup_resources();
 
-        let cam_entity = Self::get_entity_with_marker::<camera::Camera>(&self.world);
+        let cam_entity = world::get_singleton_entity::<camera::Camera>(&self.world);
         *self.world.write_resource::<render::ActiveCamera>() =
             render::ActiveCamera::with_entity(cam_entity);
 
@@ -237,7 +209,6 @@ impl App {
     fn pre_frame(&mut self) -> AppAction {
         self.timer.tick();
         *self.world.write_resource::<DeltaTime>() = self.timer.delta();
-        self.write_fps(self.timer.delta());
 
         match self.next_event() {
             Some(Event::Quit) => return AppAction::Quit,
@@ -245,6 +216,9 @@ impl App {
             Some(Event::Unfocus) => {
                 self.state = AppState::Unfocused;
                 *self.world.write_resource::<GameState>() = GameState::Paused;
+            }
+            Some(Event::Resize(extents)) => {
+                self.renderer.resize(extents).expect("Failed to resize");
             }
             Some(Event::Input(input)) => {
                 let mut cur_inputs = self
@@ -287,8 +261,8 @@ impl App {
             let state = *self.world.read_resource::<GameState>();
             if let GameState::Running = state {
                 self.engine_systems.dispatch(&self.world);
-                render::draw_frame(&mut self.world, &mut self.renderer);
             }
+            render::draw_frame(&mut self.world, &mut self.renderer);
 
             if let AppAction::Quit = self.post_frame(&args) {
                 return;
@@ -307,10 +281,10 @@ impl App {
         render::register_components(&mut world);
         control_systems.setup(&mut world);
         engine_systems.setup(&mut world);
+        io::setup(&mut world, window);
 
         App {
             world,
-            window,
             renderer,
             event_queue,
             state: AppState::Focused,
@@ -320,11 +294,6 @@ impl App {
             timer: time::Timer::default(),
         }
     }
-}
-
-fn window_extents(window: &winit::window::Window) -> trekanten::util::Extent2D {
-    let winit::dpi::PhysicalSize { width, height } = window.inner_size();
-    trekanten::util::Extent2D { width, height }
 }
 
 fn main() {
@@ -345,7 +314,7 @@ fn main() {
     // Thread runs the app while main takes the event loop
     // As we don't keep the join handle, this is detached from us. Still, it will be destroyed when we exit as we are the main thread.
     std::thread::spawn(move || {
-        match trekanten::Renderer::new(&window, window_extents(&window)) {
+        match trekanten::Renderer::new(&window, io::window_extents(&window)) {
             Ok(renderer) => {
                 let mut app = App::new(renderer, window, event_queue2);
                 app.run(args);
@@ -358,9 +327,9 @@ fn main() {
         log::info!("Runner thread exiting");
     });
 
-    let mut event_manager = io::windowing::EventManager::new();
+    let mut event_manager = io::event::EventManager::new();
     event_loop.run(move |winit_event, _, control_flow| {
-        io::windowing::event_thread_work(
+        io::event::event_thread_work(
             &mut event_manager,
             Arc::clone(&event_queue),
             &recv,
