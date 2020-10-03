@@ -1,13 +1,13 @@
 // TODO: Platform independent paths (look at ash)
 macro_rules! GENERATED_BASE_PATH {
     () => {
-        concat!(env!("OUT_DIR"), "\\generated")
+        concat!(env!("OUT_DIR"), "/generated")
     };
 }
 
 macro_rules! GENERATED_CODE_PATH {
     () => {
-        concat!(GENERATED_BASE_PATH!(), "\\code")
+        concat!(GENERATED_BASE_PATH!(), "/code")
     };
 }
 
@@ -23,7 +23,7 @@ pub struct ShaderDefinition {
 
 mod pbr_gltf {
     use super::ShaderDefinition;
-    include! {concat!(GENERATED_CODE_PATH!(), "\\gltf_pbr_shader_mapping.rs")}
+    include! {concat!(GENERATED_CODE_PATH!(), "/gltf_pbr_shader_mapping.rs")}
 }
 
 pub struct PrecompiledShaders {
