@@ -24,7 +24,7 @@ use trekanten::Renderer;
 
 pub mod material;
 pub mod pipeline;
-mod ui;
+pub mod ui;
 pub mod uniform;
 
 use crate::camera::*;
@@ -320,7 +320,7 @@ fn draw_entities<'a>(world: &World, cmd_buf: &mut command::CommandBufferBuilder<
     }
 }
 
-pub fn draw_frame(world: &mut World, renderer: &mut Renderer) {
+pub fn draw_frame(world: &mut World, ui: &mut ui::UIContext, renderer: &mut Renderer) {
     let (render_mode, reload_shaders) = {
         let render_settings = world.read_resource::<RenderSettings>();
         (
@@ -373,7 +373,7 @@ pub fn draw_frame(world: &mut World, renderer: &mut Renderer) {
         .update_uniform_blocking(transforms_buffer, &transforms)
         .expect("Failed to update uniform");
 
-    let ui_draw_commands = ui::generate_draw_commands(world, &mut frame);
+    let ui_draw_commands = ui.build_ui(world, &mut frame);
 
     let mut builder = frame
         .begin_render_pass()
@@ -394,14 +394,17 @@ pub fn draw_frame(world: &mut World, renderer: &mut Renderer) {
     frame.add_raw_command_buffer(buf);
 
     let frame = frame.finish();
-    renderer.submit(frame).or_else(|e| {
-        if let trekanten::RenderError::NeedsResize(reason) = e {
-            log::info!("Resize reason: {:?}", reason);
-            renderer.resize(world.read_resource::<crate::io::MainWindow>().extents())
-        } else {
-            Err(e)
-        }
-    }).expect("Failed to submit frame");
+    renderer
+        .submit(frame)
+        .or_else(|e| {
+            if let trekanten::RenderError::NeedsResize(reason) = e {
+                log::info!("Resize reason: {:?}", reason);
+                renderer.resize(world.read_resource::<crate::io::MainWindow>().extents())
+            } else {
+                Err(e)
+            }
+        })
+        .expect("Failed to submit frame");
     world
         .write_resource::<RenderSettings>()
         .reload_runtime_shaders = false;
@@ -450,8 +453,6 @@ pub fn setup_resources(world: &mut World, mut renderer: &mut Renderer) {
 
     world.insert(shaders);
     log::trace!("Done");
-
-    ui::setup_resources(world, renderer);
 }
 
 pub fn register_components(world: &mut World) {

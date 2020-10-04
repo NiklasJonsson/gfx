@@ -19,8 +19,6 @@ use specs::World;
 
 use imgui::im_str;
 
-use std::sync::{Arc, Mutex};
-
 struct ImGuiVertex {
     _pos: [f32; 2],
     _uv: [f32; 2],
@@ -59,84 +57,272 @@ struct PerFrameData {
 }
 
 // TODO: Move this to app?
-struct UIContext {
-    imgui: Arc<Mutex<imgui::Context>>,
+pub struct UIContext {
+    imgui: imgui::Context,
     _font_texture: Handle<Texture>,
-    per_frame_data: Option<PerFrameData>,
     pipeline: Handle<GraphicsPipeline>,
     desc_set: Handle<DescriptorSet>,
+    per_frame_data: Option<PerFrameData>,
 }
 
-// This is fine as we've wrapped the imgui context in Arc<Mutex> and it will only be used
-// by one thread at a time.
-unsafe impl Send for UIContext {}
-unsafe impl Sync for UIContext {}
+fn build_ui<'a>(world: &World, ui: &imgui::Ui<'a>, pos: [f32; 2]) -> [f32; 2] {
+    let dt = world.read_resource::<crate::time::DeltaTime>();
 
-pub fn setup_resources(world: &mut World, renderer: &mut Renderer) {
-    log::trace!("Setup ui resources");
+    let size = [300.0, 65.0];
+    imgui::Window::new(im_str!("Global stats"))
+        .size(size, imgui::Condition::FirstUseEver)
+        .position(pos, imgui::Condition::FirstUseEver)
+        .build(&ui, || {
+            ui.text(im_str!("FPS: {:.3}", dt.as_fps()));
+            ui.text(im_str!(
+                "Cam pos: {}",
+                super::ActiveCamera::camera_pos(world)
+            ));
+        });
+    size
+}
 
-    let mut ctx = imgui::Context::create();
-    ctx.set_renderer_name(Some(imgui::ImString::from(format!(
-        "ramneryd {}",
-        env!("CARGO_PKG_VERSION")
-    ))));
-    ctx.io_mut()
-        .backend_flags
-        .insert(imgui::BackendFlags::RENDERER_HAS_VTX_OFFSET);
-    let extent = renderer.swapchain_extent();
-    ctx.io_mut().display_size = [extent.width as f32, extent.height as f32];
+impl UIContext {
+    pub fn new(renderer: &mut Renderer) -> Self {
+        log::trace!("Setup ui resources");
 
-    let font_texture = {
-        let mut fonts = ctx.fonts();
-        let atlas_texture = fonts.build_rgba32_texture();
+        let mut ctx = imgui::Context::create();
+        ctx.set_renderer_name(Some(imgui::ImString::from(format!(
+            "ramneryd {}",
+            env!("CARGO_PKG_VERSION")
+        ))));
+        ctx.io_mut()
+            .backend_flags
+            .insert(imgui::BackendFlags::RENDERER_HAS_VTX_OFFSET);
+        let extent = renderer.swapchain_extent();
+        ctx.io_mut().display_size = [extent.width as f32, extent.height as f32];
 
-        let tex_desc = TextureDescriptor::raw(
-            atlas_texture.data,
-            Extent2D {
-                width: atlas_texture.width,
-                height: atlas_texture.height,
-            },
-            Format::RGBA_UNORM,
-            MipMaps::None,
+        let font_texture = {
+            let mut fonts = ctx.fonts();
+            let atlas_texture = fonts.build_rgba32_texture();
+
+            let tex_desc = TextureDescriptor::raw(
+                atlas_texture.data,
+                Extent2D {
+                    width: atlas_texture.width,
+                    height: atlas_texture.height,
+                },
+                Format::RGBA_UNORM,
+                MipMaps::None,
+            );
+            renderer
+                .create_resource(tex_desc)
+                .expect("Failed to create font texture")
+        };
+
+        let vert = ShaderDescriptor::FromRawSpirv(RAW_VERT_SPV.to_vec());
+        let frag = ShaderDescriptor::FromRawSpirv(RAW_FRAG_SPV.to_vec());
+        let pipeline_descriptor = GraphicsPipelineDescriptor::builder()
+            .vert(vert)
+            .frag(frag)
+            .vertex_format(ImGuiVertex::format())
+            .culling(TriangleCulling::None)
+            .blend_state(BlendState::Enabled)
+            .depth_testing(DepthTest::Disabled)
+            .build()
+            .expect("Failed to builder graphics pipeline descriptor");
+
+        let pipeline = renderer
+            .create_resource(pipeline_descriptor)
+            .expect("Failed to create graphics pipeline");
+
+        let desc_set = DescriptorSet::builder(renderer)
+            .add_texture(&font_texture, 0, ShaderStage::Fragment)
+            .build();
+
+        log::trace!("Done");
+        UIContext {
+            imgui: ctx,
+            pipeline,
+            desc_set,
+            _font_texture: font_texture,
+            per_frame_data: None,
+        }
+    }
+
+    pub fn build_ui<'a>(&mut self, world: &World, frame: &mut Frame<'a>) -> Option<UIDrawCommands> {
+        log::trace!("Building ui");
+        let ui = self.imgui.frame();
+
+        let mut y_offset = 0.0;
+        let funcs = [
+            build_ui,
+            crate::settings::build_ui,
+            crate::game_state::build_ui,
+            crate::io::input::build_ui,
+        ];
+        for func in funcs.iter() {
+            let size = func(world, &ui, [0.0, y_offset]);
+            y_offset += size[1];
+        }
+
+        let draw_data = ui.render();
+        let fb_width = draw_data.display_size[0] * draw_data.framebuffer_scale[0];
+        let fb_height = draw_data.display_size[1] * draw_data.framebuffer_scale[1];
+
+        if fb_width <= 0.0 || fb_height <= 0.0 {
+            return None;
+        }
+
+        let scale = [
+            2.0 / draw_data.display_size[0],
+            2.0 / draw_data.display_size[1],
+        ];
+
+        let vertex_shader_data = VertexShaderData {
+            scale_translate: [
+                scale[0],
+                scale[1],
+                -1.0 - draw_data.display_pos[0] * scale[0],
+                -1.0 - draw_data.display_pos[1] * scale[1],
+            ],
+        };
+
+        if draw_data.total_idx_count == 0 || draw_data.total_vtx_count == 0 {
+            log::trace!("No vertices or indices to render");
+            return None;
+        }
+
+        // TODO: This is extra copies + allocation, avoid this by exposing nicer creation tools from VertexBufferDescriptor
+        let mut vertices = Vec::with_capacity(draw_data.total_vtx_count as usize);
+        let mut indices = Vec::with_capacity(draw_data.total_idx_count as usize);
+
+        let mut commands = Vec::new();
+
+        // Will project scissor/clipping rectangles into framebuffer space
+        let clip_offset = draw_data.display_pos;
+        let clip_scale = draw_data.framebuffer_scale;
+
+        // Render command lists
+        // (Because we merged all buffers into a single one, we maintain our own offset into them)
+        let mut global_vertices_idx = 0;
+        let mut global_indices_idx = 0;
+        for draw_list in draw_data.draw_lists() {
+            vertices.extend_from_slice(trekanten::util::as_byte_slice(draw_list.vtx_buffer()));
+            indices.extend_from_slice(draw_list.idx_buffer());
+            for cmd in draw_list.commands() {
+                use imgui::DrawCmd;
+                use imgui::DrawCmdParams;
+                match cmd {
+                    DrawCmd::Elements {
+                        count,
+                        cmd_params:
+                            DrawCmdParams {
+                                clip_rect,
+                                vtx_offset,
+                                idx_offset,
+                                ..
+                            },
+                    } => {
+                        // Project scissor/clipping rectangles into framebuffer space
+                        let mut clip_rect = [
+                            (clip_rect[0] - clip_offset[0]) * clip_scale[0],
+                            (clip_rect[1] - clip_offset[1]) * clip_scale[1],
+                            (clip_rect[2] - clip_offset[0]) * clip_scale[0],
+                            (clip_rect[3] - clip_offset[1]) * clip_scale[1],
+                        ];
+
+                        if clip_rect[0] < fb_width
+                            && clip_rect[1] < fb_height
+                            && clip_rect[2] >= 0.0
+                            && clip_rect[3] >= 0.0
+                        {
+                            // Negative offsets are illegal for vkCmdSetScissor
+                            if clip_rect[0] < 0.0 {
+                                clip_rect[0] = 0.0;
+                            }
+
+                            if clip_rect[1] < 0.0 {
+                                clip_rect[1] = 0.0;
+                            }
+
+                            let scissor = Rect2D {
+                                offset: Offset2D {
+                                    x: clip_rect[0] as i32,
+                                    y: clip_rect[1] as i32,
+                                },
+                                extent: Extent2D {
+                                    width: (clip_rect[2] - clip_rect[0]) as u32,
+                                    height: (clip_rect[3] - clip_rect[1]) as u32,
+                                },
+                            };
+
+                            commands.push(UIDrawCommand {
+                                scissor,
+                                vertices_idx: (vtx_offset + global_vertices_idx) as i32,
+                                indices_idx: (idx_offset + global_indices_idx) as u32,
+                                count: count as u32,
+                            });
+                        }
+                    }
+                    DrawCmd::ResetRenderState => {
+                        unimplemented!("Dear ImGui ResetRenderState is not supported!")
+                    }
+                    DrawCmd::RawCallback { callback, raw_cmd } => unsafe {
+                        use imgui::internal::RawWrapper;
+                        callback(draw_list.raw(), raw_cmd)
+                    },
+                }
+            }
+
+            global_vertices_idx += draw_list.vtx_buffer().len();
+            global_indices_idx += draw_list.idx_buffer().len();
+        }
+
+        assert_eq!(
+            std::mem::size_of::<imgui::DrawVert>(),
+            std::mem::size_of::<ImGuiVertex>(),
+            "Mismatch in imgui vertex type"
         );
-        renderer
-            .create_resource(tex_desc)
-            .expect("Failed to create font texture")
-    };
+        let vbuf_desc = VertexBufferDescriptor::from_raw(
+            &vertices,
+            ImGuiVertex::format(),
+            BufferMutability::Mutable,
+        );
+        let ibuf_desc = IndexBufferDescriptor::from_slice(&indices, BufferMutability::Mutable);
 
-    let vert = ShaderDescriptor::FromRawSpirv(RAW_VERT_SPV.to_vec());
-    let frag = ShaderDescriptor::FromRawSpirv(RAW_FRAG_SPV.to_vec());
-    let pipeline_descriptor = GraphicsPipelineDescriptor::builder()
-        .vert(vert)
-        .frag(frag)
-        .vertex_format(ImGuiVertex::format())
-        .culling(TriangleCulling::None)
-        .blend_state(BlendState::Enabled)
-        .depth_testing(DepthTest::Disabled)
-        .build()
-        .expect("Failed to builder graphics pipeline descriptor");
+        let (vertex_buffer, index_buffer) = if world.has_value::<UIDrawCommands>() {
+            let per_frame_data = world.read_resource::<UIDrawCommands>().per_frame_data;
+            let vertex_buffer = frame
+                .recreate_resource(per_frame_data.vertex_buffer, vbuf_desc)
+                .expect("Bad vbuf handle");
+            let index_buffer = frame
+                .recreate_resource(per_frame_data.index_buffer, ibuf_desc)
+                .expect("Bad ibuf handle");
+            (vertex_buffer, index_buffer)
+        } else {
+            let vh = frame
+                .renderer()
+                .create_resource(vbuf_desc)
+                .expect("Failed to create vertex buffer");
+            let ih = frame
+                .renderer()
+                .create_resource(ibuf_desc)
+                .expect("Failed to create index buffer");
 
-    // TODO: Verify pipeline settings
-    let pipeline = renderer
-        .create_resource(pipeline_descriptor)
-        .expect("Failed to create graphics pipeline");
+            (vh, ih)
+        };
 
-    let desc_set = DescriptorSet::builder(renderer)
-        .add_texture(&font_texture, 0, ShaderStage::Fragment)
-        .build();
+        let per_frame_data = PerFrameData {
+            vertex_buffer,
+            index_buffer,
+            fb_width,
+            fb_height,
+        };
 
-    let imgui = Arc::new(Mutex::new(ctx));
-
-    log::trace!("Done");
-    let ctx = UIContext {
-        imgui,
-        per_frame_data: None,
-        pipeline,
-        desc_set,
-        _font_texture: font_texture,
-    };
-
-    world.insert(ctx);
+        Some(UIDrawCommands {
+            per_frame_data,
+            pipeline: self.pipeline,
+            desc_set: self.desc_set,
+            vertex_shader_data,
+            commands,
+        })
+    }
 }
 
 #[derive(Debug)]
@@ -204,206 +390,4 @@ impl UIDrawCommands {
             );
         }
     }
-}
-
-pub fn build_ui<'a>(world: &World, ui: &imgui::Ui<'a>) {
-    let dt = world.read_resource::<crate::time::DeltaTime>();
-
-    let size = [300.0, 65.0];
-    imgui::Window::new(im_str!("Global stats"))
-        .size(size, imgui::Condition::FirstUseEver)
-        .position([0.0; 2], imgui::Condition::FirstUseEver)
-        .build(&ui, || {
-            ui.text(im_str!("FPS: {:.3}", dt.as_fps()));
-            ui.text(im_str!(
-                "Cam pos: {}",
-                super::ActiveCamera::camera_pos(world)
-            ));
-        });
-
-    let mut y_offset = size[1];
-    let funcs = [
-        crate::settings::build_ui,
-        crate::game_state::build_ui,
-        crate::io::input::build_ui,
-    ];
-    for func in funcs.iter() {
-        let size = func(world, ui, [0.0, y_offset]);
-        y_offset += size[1];
-    }
-}
-
-pub fn generate_draw_commands<'a>(world: &World, frame: &mut Frame<'a>) -> Option<UIDrawCommands> {
-    log::trace!("Generating ui draw commands");
-    let mut context = &mut *world.write_resource::<UIContext>();
-    let mut imgui = context.imgui.lock().expect("Failed to lock context!");
-    let ui = imgui.frame();
-
-    build_ui(world, &ui);
-
-    let draw_data = ui.render();
-    let fb_width = draw_data.display_size[0] * draw_data.framebuffer_scale[0];
-    let fb_height = draw_data.display_size[1] * draw_data.framebuffer_scale[1];
-
-    if fb_width <= 0.0 || fb_height <= 0.0 {
-        unreachable!("This should not have been run if we are minimized");
-    }
-
-    let scale = [
-        2.0 / draw_data.display_size[0],
-        2.0 / draw_data.display_size[1],
-    ];
-
-    let vertex_shader_data = VertexShaderData {
-        scale_translate: [
-            scale[0],
-            scale[1],
-            -1.0 - draw_data.display_pos[0] * scale[0],
-            -1.0 - draw_data.display_pos[1] * scale[1],
-        ],
-    };
-
-    if draw_data.total_idx_count == 0 || draw_data.total_vtx_count == 0 {
-        log::trace!("No vertices or indices to render");
-        return None;
-    }
-
-    // TODO: This is extra copies + allocation, avoid this by exposing nicer creation tools from VertexBufferDescriptor
-    let mut vertices = Vec::with_capacity(draw_data.total_vtx_count as usize);
-    let mut indices = Vec::with_capacity(draw_data.total_idx_count as usize);
-
-    let mut commands = Vec::new();
-
-    // Will project scissor/clipping rectangles into framebuffer space
-    let clip_offset = draw_data.display_pos;
-    let clip_scale = draw_data.framebuffer_scale;
-
-    // Render command lists
-    // (Because we merged all buffers into a single one, we maintain our own offset into them)
-    let mut global_vertices_idx = 0;
-    let mut global_indices_idx = 0;
-    for draw_list in draw_data.draw_lists() {
-        vertices.extend_from_slice(trekanten::util::as_byte_slice(draw_list.vtx_buffer()));
-        indices.extend_from_slice(draw_list.idx_buffer());
-        for cmd in draw_list.commands() {
-            use imgui::DrawCmd;
-            use imgui::DrawCmdParams;
-            match cmd {
-                DrawCmd::Elements {
-                    count,
-                    cmd_params:
-                        DrawCmdParams {
-                            clip_rect,
-                            vtx_offset,
-                            idx_offset,
-                            ..
-                        },
-                } => {
-                    // Project scissor/clipping rectangles into framebuffer space
-                    let mut clip_rect = [
-                        (clip_rect[0] - clip_offset[0]) * clip_scale[0],
-                        (clip_rect[1] - clip_offset[1]) * clip_scale[1],
-                        (clip_rect[2] - clip_offset[0]) * clip_scale[0],
-                        (clip_rect[3] - clip_offset[1]) * clip_scale[1],
-                    ];
-
-                    if clip_rect[0] < fb_width
-                        && clip_rect[1] < fb_height
-                        && clip_rect[2] >= 0.0
-                        && clip_rect[3] >= 0.0
-                    {
-                        // Negative offsets are illegal for vkCmdSetScissor
-                        if clip_rect[0] < 0.0 {
-                            clip_rect[0] = 0.0;
-                        }
-
-                        if clip_rect[1] < 0.0 {
-                            clip_rect[1] = 0.0;
-                        }
-
-                        let scissor = Rect2D {
-                            offset: Offset2D {
-                                x: clip_rect[0] as i32,
-                                y: clip_rect[1] as i32,
-                            },
-                            extent: Extent2D {
-                                width: (clip_rect[2] - clip_rect[0]) as u32,
-                                height: (clip_rect[3] - clip_rect[1]) as u32,
-                            },
-                        };
-
-                        commands.push(UIDrawCommand {
-                            scissor,
-                            vertices_idx: (vtx_offset + global_vertices_idx) as i32,
-                            indices_idx: (idx_offset + global_indices_idx) as u32,
-                            count: count as u32,
-                        });
-                    }
-                }
-                DrawCmd::ResetRenderState => {
-                    unimplemented!("Dear ImGui ResetRenderState is not supported!")
-                }
-                DrawCmd::RawCallback { callback, raw_cmd } => unsafe {
-                    use imgui::internal::RawWrapper;
-                    callback(draw_list.raw(), raw_cmd)
-                },
-            }
-        }
-
-        global_vertices_idx += draw_list.vtx_buffer().len();
-        global_indices_idx += draw_list.idx_buffer().len();
-    }
-
-    assert_eq!(
-        std::mem::size_of::<imgui::DrawVert>(),
-        std::mem::size_of::<ImGuiVertex>(),
-        "Mismatch in imgui vertex type"
-    );
-    let vbuf_desc = VertexBufferDescriptor::from_raw(
-        &vertices,
-        ImGuiVertex::format(),
-        BufferMutability::Mutable,
-    );
-    let ibuf_desc = IndexBufferDescriptor::from_slice(&indices, BufferMutability::Mutable);
-
-    let (vertex_buffer, index_buffer) = match std::mem::replace(&mut context.per_frame_data, None) {
-        Some(per_frame_data) => {
-            let vertex_buffer = frame
-                .recreate_resource(per_frame_data.vertex_buffer, vbuf_desc)
-                .expect("Bad vbuf handle");
-            let index_buffer = frame
-                .recreate_resource(per_frame_data.index_buffer, ibuf_desc)
-                .expect("Bad ibuf handle");
-            (vertex_buffer, index_buffer)
-        }
-        None => {
-            let vh = frame
-                .renderer()
-                .create_resource(vbuf_desc)
-                .expect("Failed to create vertex buffer");
-            let ih = frame
-                .renderer()
-                .create_resource(ibuf_desc)
-                .expect("Failed to create index buffer");
-
-            (vh, ih)
-        }
-    };
-
-    let per_frame_data = PerFrameData {
-        vertex_buffer,
-        index_buffer,
-        fb_width,
-        fb_height,
-    };
-
-    context.per_frame_data = Some(per_frame_data);
-
-    Some(UIDrawCommands {
-        per_frame_data,
-        pipeline: context.pipeline,
-        desc_set: context.desc_set,
-        vertex_shader_data,
-        commands,
-    })
 }

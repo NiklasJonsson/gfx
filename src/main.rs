@@ -38,6 +38,7 @@ struct App {
     world: World,
     event_queue: Arc<io::EventQueue>,
     renderer: trekanten::Renderer,
+    ui: render::ui::UIContext,
     state: AppState,
     control_systems: Dispatcher<'static, 'static>,
     engine_systems: Dispatcher<'static, 'static>,
@@ -262,7 +263,7 @@ impl App {
             if let GameState::Running = state {
                 self.engine_systems.dispatch(&self.world);
             }
-            render::draw_frame(&mut self.world, &mut self.renderer);
+            render::draw_frame(&mut self.world, &mut self.ui, &mut self.renderer);
 
             if let AppAction::Quit = self.post_frame(&args) {
                 return;
@@ -271,7 +272,7 @@ impl App {
     }
 
     fn new(
-        renderer: trekanten::Renderer,
+        mut renderer: trekanten::Renderer,
         window: winit::window::Window,
         event_queue: Arc<io::EventQueue>,
     ) -> Self {
@@ -282,10 +283,12 @@ impl App {
         control_systems.setup(&mut world);
         engine_systems.setup(&mut world);
         io::setup(&mut world, window);
+        let ui = render::ui::UIContext::new(&mut renderer);
 
         App {
             world,
             renderer,
+            ui,
             event_queue,
             state: AppState::Focused,
             control_systems,
