@@ -59,6 +59,11 @@ pub struct EventManager {
     action: Event,
 }
 
+// TODO:
+// * Don't send resize events as soon as we get them but combine them and send when we don't get any further ones
+// * Inputs should be appended if there is already an input in the queue
+// * Quit/focus/unfocus should be pushed as fast as possible
+
 impl EventManager {
     pub fn new() -> Self {
         Self {

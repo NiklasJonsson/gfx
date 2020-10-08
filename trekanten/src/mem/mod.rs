@@ -214,12 +214,13 @@ pub struct DeviceImage {
     vk_image: vk::Image,
     allocation: Allocation,
     _allcation_info: AllocationInfo,
+    _extent: util::Extent2D,
 }
 
 impl DeviceImage {
     pub fn empty_2d(
         device: &Device,
-        extents: util::Extent2D,
+        extent: util::Extent2D,
         format: util::Format,
         image_usage: vk::ImageUsageFlags,
         mem_usage: MemoryUsage,
@@ -227,7 +228,7 @@ impl DeviceImage {
         sample_count: vk::SampleCountFlags,
     ) -> Result<Self, MemoryError> {
         log::trace!("Creating empty 2D DeviceImage with:");
-        log::trace!("\textents: {}", extents);
+        log::trace!("\textent: {}", extent);
         log::trace!("\tformat: {:?}", format);
         log::trace!("\tusage: {:?}", image_usage);
         log::trace!("\tmemory properties: {:?}", mem_usage);
@@ -235,10 +236,10 @@ impl DeviceImage {
         log::trace!("\tsample count: {:?}", sample_count);
         log::trace!("\timage tiling {:?}", vk::ImageTiling::OPTIMAL);
 
-        let extents3d = util::Extent3D::from_2d(extents, 1);
+        let extent3d = util::Extent3D::from_2d(extent, 1);
         let info = vk::ImageCreateInfo::builder()
             .image_type(vk::ImageType::TYPE_2D)
-            .extent(extents3d.into())
+            .extent(extent3d.into())
             .mip_levels(mip_levels)
             .array_layers(1)
             .format(format.into())
@@ -262,6 +263,7 @@ impl DeviceImage {
             vk_image,
             allocation,
             _allcation_info,
+            _extent: extent,
         })
     }
 

@@ -261,20 +261,22 @@ fn create_swapchain_and_co(
     instance: &instance::Instance,
     device: &device::Device,
     surface: &surface::Surface,
-    extent: &util::Extent2D,
+    requested_extent: &util::Extent2D,
     old: Option<&swapchain::Swapchain>,
 ) -> Result<SwapchainAndCo, RenderError> {
     let msaa_sample_count = device.max_msaa_sample_count();
-    let swapchain = swapchain::Swapchain::new(&instance, &device, &surface, &extent, old)?;
+    let swapchain =
+        swapchain::Swapchain::new(&instance, &device, &surface, &requested_extent, old)?;
     let render_pass =
         render_pass::RenderPass::new(&device, swapchain.info().format, msaa_sample_count)?;
 
     let image_to_frame_idx: Vec<Option<u32>> = (0..swapchain.num_images()).map(|_| None).collect();
-    let depth_buffer = depth_buffer::DepthBuffer::new(device, extent, msaa_sample_count)?;
+    let depth_buffer =
+        depth_buffer::DepthBuffer::new(device, &swapchain.info().extent, msaa_sample_count)?;
     let color_buffer = color_buffer::ColorBuffer::new(
         device,
         swapchain.info().format.into(),
-        extent,
+        &swapchain.info().extent,
         msaa_sample_count,
     )?;
     let swapchain_framebuffers =

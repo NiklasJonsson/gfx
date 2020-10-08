@@ -116,8 +116,8 @@ impl Swapchain {
         old: Option<&Self>,
     ) -> Result<Self, SwapchainError> {
         let query = surface.query_swapchain_support(device.vk_phys_device())?;
-        log::trace!("Creating swapchain");
-        log::trace!("Available: {:#?}", query);
+        log::debug!("Creating swapchain");
+        log::debug!("Available: {:#?}", query);
         let format = choose_swapchain_surface_format(&query.formats);
         let present_mode = choose_swapchain_surface_present_mode(&query.present_modes);
         let extent = choose_swapchain_extent(&query.capabilites, extent);
@@ -163,7 +163,7 @@ impl Swapchain {
             .old_swapchain(old_handle)
             .build();
 
-        log::trace!("Creating swapchain with info: {:#?}", info);
+        log::debug!("Creating swapchain with info: {:#?}", info);
         let vk_device = device.vk_device();
         let loader = ash::extensions::khr::Swapchain::new(instance.vk_instance(), &*vk_device);
 

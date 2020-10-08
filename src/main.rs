@@ -218,16 +218,14 @@ impl App {
                 self.state = AppState::Unfocused;
                 *self.world.write_resource::<GameState>() = GameState::Paused;
             }
-            Some(Event::Resize(extents)) => {
-                self.renderer.resize(extents).expect("Failed to resize");
-            }
             Some(Event::Input(input)) => {
                 let mut cur_inputs = self
                     .world
                     .write_resource::<io::input::CurrentFrameExternalInputs>();
                 *cur_inputs = io::input::CurrentFrameExternalInputs(input);
             }
-            None => (),
+            // TODO: Don't ignore resizes
+            None | Some(Event::Resize(_)) => (),
         }
 
         let running = *self.world.read_resource::<GameState>() == GameState::Running;
