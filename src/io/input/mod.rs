@@ -125,7 +125,7 @@ impl MappedInput {
 
     fn set_range_delta(&mut self, id: RangeId, value: RangeValue) {
         // If we get the same id again for this mapped input, just sum the deltas
-        // This is fairly unlikely, but lets say the used "moves" the mouse twice during a frame.
+        // Let's say the user "moves" the mouse twice during a frame.
         // Then this function will be called twice, and the total movement delta should be passed
         // on to whatever system that wants it.
         let input = Input::Range(id, value);

@@ -248,19 +248,13 @@ impl<'a> System<'a> for FreeFlyCameraController {
         WriteStorage<'a, Position>,
         WriteStorage<'a, CameraRotationState>,
         Read<'a, DeltaTime>,
-        ReadStorage<'a, Self>,
     );
 
     fn run(&mut self, data: Self::SystemData) {
-        let (mut mapped_inputs, mut positions, mut cam_rot_state, delta_time, unique_id) = data;
+        let (mut mapped_inputs, mut positions, mut cam_rot_state, delta_time) = data;
 
-        for (mi, pos, rotation_state, _id) in (
-            &mut mapped_inputs,
-            &mut positions,
-            &mut cam_rot_state,
-            &unique_id,
-        )
-            .join()
+        for (mi, pos, rotation_state) in
+            (&mut mapped_inputs, &mut positions, &mut cam_rot_state).join()
         {
             for input in mi.iter() {
                 match input {
@@ -308,7 +302,7 @@ impl<'a> System<'a> for FreeFlyCameraController {
 
     fn setup(&mut self, world: &mut World) {
         Self::SystemData::setup(world);
-        let start_pos = glm::vec3(2.0, 2.0, 2.0);
+        let start_pos = Position::new(2.0, 2.0, 2.0);
         // TODO: Compute from bounding box
         let rot_state = CameraRotationState {
             yaw: 4.0,
@@ -321,13 +315,11 @@ impl<'a> System<'a> for FreeFlyCameraController {
 
         world
             .create_entity()
-            .with::<Position>(start_pos.into())
+            .with(start_pos)
             .with(input_context)
             .with(mapped_input)
             // Camera marker component means for the ActiveCamera resource
             .with(Camera)
-            // To ensure we get the right mapped input
-            .with(Self)
             .with(rot_state)
             .build();
     }
