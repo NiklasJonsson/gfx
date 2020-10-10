@@ -11,8 +11,8 @@ use specs::prelude::*;
 use specs::world::EntitiesRes;
 use specs::Component;
 
-use std::collections::{HashMap, HashSet, VecDeque};
-use std::hash::{Hash, Hasher};
+use std::collections::{HashMap, HashSet};
+use std::hash::Hash;
 use winit::{event::AxisId, event::DeviceId};
 // Based primarily on https://www.gamedev.net/articles/programming/general-and-gameplay-programming/designing-a-robust-input-handling-system-for-games-r2975
 
@@ -20,7 +20,9 @@ mod input_context;
 pub use input_context::InputContext;
 pub use input_context::InputContextError;
 pub use input_context::InputContextPriority;
+pub use input_context::InputPassthrough;
 
+pub use winit::event::MouseButton;
 pub use winit::event::VirtualKeyCode as KeyCode;
 
 #[derive(Default, Debug)]
@@ -36,11 +38,11 @@ impl CurrentFrameExternalInputs {
     }
 }
 
-#[derive(Debug, Clone, Copy, Hash, PartialEq)]
+#[derive(Debug, Clone, Copy, Hash, PartialEq, Eq)]
 pub struct ActionId(pub u32);
-#[derive(Debug, Clone, Copy, Hash, PartialEq)]
+#[derive(Debug, Clone, Copy, Hash, PartialEq, Eq)]
 pub struct StateId(pub u32);
-#[derive(Debug, Clone, Copy, Hash, PartialEq)]
+#[derive(Debug, Clone, Copy, Hash, PartialEq, Eq)]
 pub struct RangeId(pub u32);
 
 pub type RangeValue = f64;
@@ -49,138 +51,131 @@ pub type Sensitivity = f64;
 /// Action: Single input, e.g. open door, cast spell
 /// State: Continous input, e.g. run forward
 /// Range: Movement along axis, e.g. mouse
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone)]
 pub enum Input {
     Action(ActionId),
     State(StateId),
     Range(RangeId, RangeValue),
-}
-
-// For PartialEq, Eq and Hash we ignore the RangeValue field for Range.
-// This is fine since only the RangeId is required to be unique for each
-// input context
-impl Hash for Input {
-    fn hash<H: Hasher>(&self, state: &mut H) {
-        use Input::*;
-        match self {
-            Action(id) => id.hash(state),
-            State(id) => id.hash(state),
-            Range(id, _) => id.hash(state),
-        }
-    }
-}
-
-impl Eq for Input {}
-impl PartialEq for Input {
-    fn eq(&self, other: &Self) -> bool {
-        use Input::*;
-        match (self, other) {
-            (Action(id0), Action(id1)) => id0 == id1,
-            (State(id0), State(id1)) => id0 == id1,
-            (Range(id0, _), Range(id1, _)) => id0 == id1,
-            (_, _) => false,
-        }
-    }
+    CursorPos(CursorPos),
+    Text(Vec<char>),
 }
 
 #[derive(Debug, Clone, Copy, Hash, PartialEq, Eq)]
 pub enum DeviceAxis {
     MouseX,
     MouseY,
+    MouseWheel,
+}
+
+#[derive(Debug, Clone, Copy, Hash, PartialEq, Eq)]
+pub enum Button {
+    Key(KeyCode),
+    Mouse(MouseButton),
+}
+
+impl From<KeyCode> for Button {
+    fn from(kc: KeyCode) -> Self {
+        Self::Key(kc)
+    }
+}
+
+impl From<MouseButton> for Button {
+    fn from(mb: MouseButton) -> Self {
+        Self::Mouse(mb)
+    }
 }
 
 #[derive(Default, Component, Debug)]
 #[storage(HashMapStorage)]
 pub struct MappedInput {
-    contents: HashSet<Input>, // TODO: Should this be a vector instead (to not lose duplicates)?
+    contents: Vec<Input>,
 }
 
 // Public api
 impl MappedInput {
-    pub fn new() -> Self {
-        Self {
-            contents: HashSet::new(),
-        }
-    }
-
-    pub fn clear(&mut self) {
-        *self = Self::new();
-    }
-
-    pub fn contains_action(&self, id: ActionId) -> bool {
-        self.contents.contains(&Input::Action(id))
-    }
-
     pub fn iter(&self) -> impl Iterator<Item = &Input> {
         self.contents.iter()
+    }
+
+    pub fn drain(&mut self) -> Vec<Input> {
+        std::mem::replace(&mut self.contents, Vec::new())
     }
 }
 
 // Private api
 impl MappedInput {
-    fn add_mapped_action(&mut self, id: ActionId) {
-        self.contents.insert(Input::Action(id));
+    fn clear(&mut self) {
+        self.contents.clear();
     }
 
-    fn add_mapped_state(&mut self, id: StateId) {
-        self.contents.insert(Input::State(id));
+    fn add_action(&mut self, id: ActionId) {
+        self.contents.push(Input::Action(id));
     }
 
-    fn set_range_delta(&mut self, id: RangeId, value: RangeValue) {
-        // If we get the same id again for this mapped input, just sum the deltas
-        // Let's say the user "moves" the mouse twice during a frame.
-        // Then this function will be called twice, and the total movement delta should be passed
-        // on to whatever system that wants it.
-        let input = Input::Range(id, value);
-        // PartialEq for Input is implemented to only look at the id, thus, a Range with
-        // another value but the same Id will be found
-        let cur = self.contents.get(&input);
-        let new = cur.map_or(Input::Range(id, value), |old| match old {
-            Input::Range(old_id, old_value) => {
-                assert_eq!(old_id, &id);
-                Input::Range(id, old_value + value)
-            }
-            _ => unreachable!("Found something other than Range when using RangeId!"),
-        });
-        self.contents.insert(new);
+    fn add_state(&mut self, id: StateId) {
+        self.contents.push(Input::State(id));
+    }
+
+    fn add_range_delta(&mut self, id: RangeId, value: RangeValue) {
+        self.contents.push(Input::Range(id, value));
+    }
+
+    fn add_cursor_pos(&mut self, pos: CursorPos) {
+        self.contents.push(Input::CursorPos(pos));
+    }
+
+    fn add_text(&mut self, text: Vec<char>) {
+        self.contents.push(Input::Text(text));
     }
 }
 
 pub type AxisValue = f64;
 
-#[derive(Debug)]
-pub enum ExternalInput {
-    KeyPress(KeyCode),
-    KeyRelease(KeyCode),
-    MouseDelta { x: AxisValue, y: AxisValue },
+#[derive(Debug, Clone, Copy, Default, PartialEq)]
+pub struct CursorPos(pub [AxisValue; 2]);
+
+impl CursorPos {
+    pub fn x(&self) -> AxisValue {
+        self.0[0]
+    }
+
+    pub fn y(&self) -> AxisValue {
+        self.0[1]
+    }
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone, Copy)]
+pub enum ExternalInput {
+    Press(Button),
+    Release(Button),
+    MouseDelta { x: AxisValue, y: AxisValue },
+    CursorPos(CursorPos),
+    RawChar(char),
+}
+
+#[derive(Debug, Default)]
 struct InputManager {
-    pressed_buttons: HashSet<KeyCode>,
+    pressed_buttons: HashSet<Button>,
     axis_movement: HashMap<(DeviceId, AxisId), AxisValue>,
 }
 
 impl InputManager {
     fn new() -> Self {
-        Self {
-            pressed_buttons: HashSet::new(),
-            axis_movement: HashMap::new(),
-        }
+        Self::default()
     }
 
-    fn register_key_press(&mut self, key: KeyCode) -> bool {
-        log::debug!("Registering key press: {:?}", key);
-        self.pressed_buttons.insert(key)
+    fn register_key_press(&mut self, button: Button) -> bool {
+        log::debug!("Registering press: {:?}", button);
+        self.pressed_buttons.insert(button)
     }
 
-    fn register_key_release(&mut self, key: KeyCode) {
-        log::debug!("Registering key release: {:?}", key);
-        let existed = self.pressed_buttons.remove(&key);
+    fn register_key_release(&mut self, button: Button) {
+        log::debug!("Registering release: {:?}", button);
+        let existed = self.pressed_buttons.remove(&button);
         if !existed {
             log::warn!(
                 "Button was released, but was not registered as pressed: {:?}",
-                key
+                button
             );
         }
     }
@@ -200,37 +195,45 @@ impl<'a> System<'a> for InputManager {
 
     fn run(&mut self, (contexts, inputs, entities, mut mapped): Self::SystemData) {
         log::trace!("InputManager: run");
-        let mut action_keys = VecDeque::with_capacity(inputs.len());
-        let mut axes = VecDeque::with_capacity(inputs.len());
+        let mut action_keys = Vec::with_capacity(inputs.len());
+        let mut axes = Vec::with_capacity(inputs.len());
+        let mut chars: Vec<char> = Vec::with_capacity(inputs.len());
+        let mut cursor_positions = Vec::with_capacity(inputs.len());
 
         for (_ctx, ent) in (&contexts, &entities).join() {
-            if let None = mapped.get(ent) {
-                mapped.insert(ent, MappedInput::default()).unwrap();
-            }
+            use specs::storage::StorageEntry;
+            match mapped.entry(ent).unwrap() {
+                StorageEntry::Occupied(mut entry) => entry.get_mut().clear(),
+                StorageEntry::Vacant(entry) => {
+                    entry.insert(MappedInput::default());
+                }
+            };
         }
 
         for input in inputs.iter() {
             match input {
-                ExternalInput::KeyPress(key) => {
-                    let is_new_press = self.register_key_press(*key);
+                ExternalInput::Press(button) => {
+                    let is_new_press = self.register_key_press(*button);
                     if is_new_press {
-                        log::debug!("New key ({:?}) is an action!", key);
-                        action_keys.push_back(key);
+                        log::debug!("New button ({:?}) is an action!", button);
+                        action_keys.push(button);
                     }
                 }
-                ExternalInput::KeyRelease(key) => self.register_key_release(*key),
+                ExternalInput::Release(button) => self.register_key_release(*button),
                 ExternalInput::MouseDelta { x, y } => {
                     log::debug!("Captured mouse delta ({}, {})", x, y);
-                    axes.push_back((DeviceAxis::MouseX, x));
-                    axes.push_back((DeviceAxis::MouseY, y));
+                    axes.push((DeviceAxis::MouseX, x));
+                    axes.push((DeviceAxis::MouseY, y));
                 }
+                ExternalInput::RawChar(ch) => chars.push(*ch),
+                ExternalInput::CursorPos(pos) => cursor_positions.push(*pos),
             }
         }
 
-        let mut state_keys = VecDeque::with_capacity(inputs.len());
+        let mut state_keys = Vec::with_capacity(inputs.len());
         for key in self.pressed_buttons.iter() {
             log::debug!("Key ({:?}) is pressed and will generate a state!", key);
-            state_keys.push_back(key);
+            state_keys.push(key);
         }
 
         let mut joined = (&contexts, &mut mapped).join().collect::<Vec<_>>();
@@ -239,10 +242,12 @@ impl<'a> System<'a> for InputManager {
         log::trace!("Mapping actions");
         for key in action_keys {
             for (ctx, mi) in &mut joined {
-                if let Some(&action_id) = ctx.get_action_for(*key) {
+                if let Some((action_id, passthrough)) = ctx.get_action_for(*key) {
                     log::debug!("Mapped to action: {:?}", action_id);
-                    mi.add_mapped_action(action_id);
-                    break;
+                    mi.add_action(*action_id);
+                    if let InputPassthrough::Consume = passthrough {
+                        break;
+                    }
                 }
 
                 if ctx.consume_all() {
@@ -254,9 +259,11 @@ impl<'a> System<'a> for InputManager {
         log::trace!("Mapping states");
         for key in state_keys {
             for (ctx, mi) in &mut joined {
-                if let Some(&id) = ctx.get_state_for(*key) {
-                    mi.add_mapped_state(id);
-                    break;
+                if let Some((id, passthrough)) = ctx.get_state_for(*key) {
+                    mi.add_state(*id);
+                    if let InputPassthrough::Consume = passthrough {
+                        break;
+                    }
                 }
 
                 if ctx.consume_all() {
@@ -268,14 +275,50 @@ impl<'a> System<'a> for InputManager {
         log::trace!("Mapping ranges");
         for (axis, &axis_delta) in axes {
             for (ctx, mi) in &mut joined {
-                if let Some((range_id, range_delta)) = ctx.register_axis_delta(axis, axis_delta) {
-                    mi.set_range_delta(range_id, range_delta);
-                    break;
+                if let Some((range_id, range_delta, passthrough)) =
+                    ctx.register_axis_delta(axis, axis_delta)
+                {
+                    mi.add_range_delta(range_id, range_delta);
+                    if let InputPassthrough::Consume = passthrough {
+                        break;
+                    }
                 }
 
                 if ctx.consume_all() {
                     break;
                 }
+            }
+        }
+
+        log::trace!("Mapping text");
+        for (ctx, mi) in &mut joined {
+            let (wants_text, passthrough) = ctx.wants_text();
+            if wants_text {
+                mi.add_text(chars.clone());
+                if let InputPassthrough::Consume = passthrough {
+                    break;
+                }
+            }
+
+            if ctx.consume_all() {
+                break;
+            }
+        }
+
+        log::trace!("Mapping cursor positions");
+        for (ctx, mi) in &mut joined {
+            let (wants_cursor_pos, passthrough) = ctx.wants_cursor_pos();
+            if wants_cursor_pos {
+                for p in cursor_positions.iter() {
+                    mi.add_cursor_pos(*p);
+                }
+                if let InputPassthrough::Consume = passthrough {
+                    break;
+                }
+            }
+
+            if ctx.consume_all() {
+                break;
             }
         }
     }
@@ -289,4 +332,153 @@ pub fn register_systems<'a, 'b>(builder: DispatcherBuilder<'a, 'b>) -> Dispatche
 
 pub fn build_ui<'a>(_world: &World, _ui: &imgui::Ui<'a>, _pos: [f32; 2]) -> [f32; 2] {
     [0.0, 0.0]
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // TODO Test:
+    // * Key release/press interaction with action/state
+    // * Consume all
+    // * Ranges
+    // * Ordering of external input vs action/state
+    // * Duplicates of mapped input
+
+    #[derive(Debug, Clone, Copy)]
+    enum TestState {
+        State0,
+        State1,
+        State2,
+    }
+
+    impl From<TestState> for StateId {
+        fn from(s: TestState) -> StateId {
+            StateId(s as u32)
+        }
+    }
+
+    #[derive(Debug, Clone, Copy)]
+    enum TestAction {
+        Action0,
+        Action1,
+        Action2,
+    }
+
+    impl From<TestAction> for ActionId {
+        fn from(a: TestAction) -> ActionId {
+            ActionId(a as u32)
+        }
+    }
+
+    /*
+    #[derive(Debug, Clone, Copy)]
+    enum TestRange {
+        DeltaX,
+        DeltaY,
+    }
+
+    impl From<TestRange> for RangeId {
+        fn from(r: TestRange) -> RangeId {
+            RangeId(r as u32)
+        }
+    }
+    */
+
+    fn verify_count(world: &World, ent: specs::Entity, i: Input, count: usize) {
+        let mapped_inputs = world.write_storage::<MappedInput>();
+        let mapped_input = mapped_inputs
+            .get(ent)
+            .expect("Did not find a mapped input for the ui entity");
+
+        assert!(mapped_input.len() >= count);
+        assert_eq!(
+            mapped_input
+                .iter()
+                .filter(|&&inp| inp == i)
+                .collect::<Vec<&Input>>()
+                .len(),
+            count
+        );
+    }
+
+    fn verify_action_count<A: Into<ActionId> + Copy>(
+        world: &World,
+        ent: specs::Entity,
+        a: A,
+        count: usize,
+    ) {
+        verify_count(world, ent, Input::Action(a.into()), count);
+    }
+
+    fn verify_state_count<A: Into<StateId> + Copy>(
+        world: &World,
+        ent: specs::Entity,
+        a: A,
+        count: usize,
+    ) {
+        verify_count(world, ent, Input::State(a.into()), count);
+    }
+
+    #[test]
+    fn input_ctx_sorting() {
+        let ctx0 = InputContext::builder("Ctx0")
+            .with_action(KeyCode::O, TestAction::Action0)
+            .expect("Fail")
+            .with_state(KeyCode::X, TestState::State0)
+            .expect("Fail")
+            .build();
+
+        let ctx1 = InputContext::builder("Ctx1")
+            .with_action(KeyCode::O, TestAction::Action1)
+            .expect("Fail")
+            .with_state(KeyCode::X, TestState::State1)
+            .expect("Fail")
+            .with_priority(InputContextPriority::First)
+            .build();
+
+        let ctx2 = InputContext::builder("Ctx2")
+            .with_action(KeyCode::O, TestAction::Action2)
+            .expect("Fail")
+            .with_state(KeyCode::X, TestState::State2)
+            .expect("Fail")
+            .with_priority(InputContextPriority::Ui)
+            .build();
+
+        let contexts = vec![ctx0, ctx1, ctx2];
+
+        let mut world = World::new();
+        let mut dispatcher = register_systems(DispatcherBuilder::new()).build();
+
+        let external_inputs = vec![
+            ExternalInput::KeyPress(KeyCode::O),
+            ExternalInput::KeyPress(KeyCode::X),
+        ];
+
+        dispatcher.setup(&mut world);
+
+        world.insert(CurrentFrameExternalInputs(external_inputs.clone()));
+
+        let entities: Vec<specs::Entity> = contexts
+            .into_iter()
+            .map(|ctx| world.create_entity().with(ctx).build())
+            .collect();
+
+        dispatcher.dispatch(&mut world);
+        verify_action_count(&world, entities[0], TestAction::Action0, 0);
+        verify_action_count(&world, entities[1], TestAction::Action1, 1);
+        verify_action_count(&world, entities[2], TestAction::Action2, 0);
+        verify_state_count(&world, entities[0], TestState::State0, 0);
+        verify_state_count(&world, entities[1], TestState::State1, 1);
+        verify_state_count(&world, entities[2], TestState::State2, 0);
+
+        world.insert(CurrentFrameExternalInputs(external_inputs.clone()));
+        world.delete_entity(entities[1]).expect("Fail");
+
+        dispatcher.dispatch(&mut world);
+        verify_action_count(&world, entities[0], TestAction::Action0, 0);
+        verify_action_count(&world, entities[2], TestAction::Action2, 0);
+        verify_state_count(&world, entities[0], TestState::State0, 0);
+        verify_state_count(&world, entities[2], TestState::State2, 1);
+    }
 }

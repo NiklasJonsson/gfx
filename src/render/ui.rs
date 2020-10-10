@@ -19,6 +19,10 @@ use specs::World;
 
 use imgui::im_str;
 
+use crate::io::input;
+use crate::time::DeltaTime;
+use input::KeyCode;
+
 struct ImGuiVertex {
     _pos: [f32; 2],
     _uv: [f32; 2],
@@ -62,13 +66,61 @@ pub struct UIContext {
     _font_texture: Handle<Texture>,
     pipeline: Handle<GraphicsPipeline>,
     desc_set: Handle<DescriptorSet>,
-    per_frame_data: Option<PerFrameData>,
+    input_entity: specs::Entity,
+}
+
+fn query_mouse_state<'a>(
+    ui: &imgui::Ui<'a>,
+    query: fn(ui: &imgui::Ui<'a>, imgui::MouseButton) -> bool,
+) -> [bool; 5] {
+    [
+        query(ui, imgui::MouseButton::Left),
+        query(ui, imgui::MouseButton::Right),
+        query(ui, imgui::MouseButton::Middle),
+        query(ui, imgui::MouseButton::Extra1),
+        query(ui, imgui::MouseButton::Extra2),
+    ]
+}
+
+fn imgui_debug_ui_mouse_state<'a>(
+    ui: &imgui::Ui<'a>,
+    prefix: &str,
+    query: fn(ui: &imgui::Ui<'a>, imgui::MouseButton) -> bool,
+) {
+    let query = query_mouse_state(ui, query);
+    ui.text(im_str!(
+        "{0: <10} | {1: <10} | {2: <10} | {3: <10} | {4: <10} | {5: <10}",
+        prefix,
+        query[0],
+        query[1],
+        query[2],
+        query[3],
+        query[4]
+    ));
+}
+
+fn imgui_debug_ui<'a>(ui: &imgui::Ui<'a>) {
+    ui.text(im_str!("Mouse button"));
+    ui.text(im_str!(
+        "{0: <10} | {1: <10} | {2: <10} | {3: <10} | {4: <10} | {5: <10}",
+        "",
+        "left",
+        "right",
+        "middle",
+        "extra1",
+        "extra2"
+    ));
+    imgui_debug_ui_mouse_state(ui, "down", imgui::Ui::is_mouse_down);
+    imgui_debug_ui_mouse_state(ui, "clicked", imgui::Ui::is_mouse_clicked);
+    imgui_debug_ui_mouse_state(ui, "double", imgui::Ui::is_mouse_double_clicked);
+    imgui_debug_ui_mouse_state(ui, "released", imgui::Ui::is_mouse_released);
+    imgui_debug_ui_mouse_state(ui, "dragging", imgui::Ui::is_mouse_dragging);
 }
 
 fn build_ui<'a>(world: &World, ui: &imgui::Ui<'a>, pos: [f32; 2]) -> [f32; 2] {
-    let dt = world.read_resource::<crate::time::DeltaTime>();
+    let dt = world.read_resource::<DeltaTime>();
 
-    let size = [300.0, 65.0];
+    let size = [400.0, 300.0];
     imgui::Window::new(im_str!("Global stats"))
         .size(size, imgui::Condition::FirstUseEver)
         .position(pos, imgui::Condition::FirstUseEver)
@@ -78,27 +130,221 @@ fn build_ui<'a>(world: &World, ui: &imgui::Ui<'a>, pos: [f32; 2]) -> [f32; 2] {
                 "Cam pos: {}",
                 super::ActiveCamera::camera_pos(world)
             ));
+            ui.separator();
+            imgui_debug_ui(ui);
         });
     size
 }
 
+/* TODO:
+    /// Render preparation callback.
+    ///
+    /// Call this before calling the imgui-rs UI `render_with`/`render` function.
+    /// This function performs the following actions:
+    ///
+    /// * mouse cursor is changed and/or hidden (if requested by imgui-rs)
+    pub fn prepare_render(&mut self, ui: &Ui, window: &Window) {
+        let io = ui.io();
+        if !io
+            .config_flags
+            .contains(ConfigFlags::NO_MOUSE_CURSOR_CHANGE)
+        {
+            let cursor = CursorSettings {
+                cursor: ui.mouse_cursor(),
+                draw_cursor: io.mouse_draw_cursor,
+            };
+            if self.cursor_cache != Some(cursor) {
+                cursor.apply(window);
+                self.cursor_cache = Some(cursor);
+            }
+        }
+    }
+}
+*/
+
+const MOUSE_WHEEL_DELTA: input::RangeId = input::RangeId(0);
+
+const MOUSE_BUTTON_SEPARATOR: u32 = 1 << 16;
+fn is_mouse_button(state_id: input::StateId) -> bool {
+    state_id.0 >= MOUSE_BUTTON_SEPARATOR && (state_id.0 < (MOUSE_BUTTON_SEPARATOR + 5))
+}
+
+const fn is_keyboard_button(key: u32) -> bool {
+    key < MOUSE_BUTTON_SEPARATOR
+}
+
+fn mouse_button_stateid(btn: input::MouseButton) -> input::StateId {
+    let i = match btn {
+        input::MouseButton::Left => 0,
+        input::MouseButton::Right => 1,
+        input::MouseButton::Middle => 2,
+        input::MouseButton::Other(idx) => 3 + idx,
+    };
+
+    input::StateId(i as u32 + MOUSE_BUTTON_SEPARATOR)
+}
+
+const fn mouse_stateid_idx(s: input::StateId) -> u32 {
+    s.0 - MOUSE_BUTTON_SEPARATOR
+}
+
 impl UIContext {
-    pub fn new(renderer: &mut Renderer) -> Self {
+    fn init_imgui_ctx() -> imgui::Context {
+        let mut ctx = imgui::Context::create();
+
+        ctx.set_renderer_name(Some(im_str!(
+            "ramneryd-trekanten {}",
+            env!("CARGO_PKG_VERSION")
+        )));
+        ctx.set_platform_name(Some(im_str!(
+            "ramneryd-winit {}",
+            env!("CARGO_PKG_VERSION")
+        )));
+
+        let io = ctx.io_mut();
+
+        io.backend_flags
+            .insert(imgui::BackendFlags::RENDERER_HAS_VTX_OFFSET);
+        io.backend_flags
+            .insert(imgui::BackendFlags::HAS_MOUSE_CURSORS);
+        io[imgui::Key::Tab] = KeyCode::Tab as _;
+        io[imgui::Key::LeftArrow] = KeyCode::Left as _;
+        io[imgui::Key::RightArrow] = KeyCode::Right as _;
+        io[imgui::Key::UpArrow] = KeyCode::Up as _;
+        io[imgui::Key::DownArrow] = KeyCode::Down as _;
+        io[imgui::Key::PageUp] = KeyCode::PageUp as _;
+        io[imgui::Key::PageDown] = KeyCode::PageDown as _;
+        io[imgui::Key::Home] = KeyCode::Home as _;
+        io[imgui::Key::End] = KeyCode::End as _;
+        io[imgui::Key::Insert] = KeyCode::Insert as _;
+        io[imgui::Key::Delete] = KeyCode::Delete as _;
+        io[imgui::Key::Backspace] = KeyCode::Back as _;
+        io[imgui::Key::Space] = KeyCode::Space as _;
+        io[imgui::Key::Enter] = KeyCode::Return as _;
+        io[imgui::Key::Escape] = KeyCode::Escape as _;
+        io[imgui::Key::KeyPadEnter] = KeyCode::NumpadEnter as _;
+        io[imgui::Key::A] = KeyCode::A as _;
+        io[imgui::Key::C] = KeyCode::C as _;
+        io[imgui::Key::V] = KeyCode::V as _;
+        io[imgui::Key::X] = KeyCode::X as _;
+        io[imgui::Key::Y] = KeyCode::Y as _;
+        io[imgui::Key::Z] = KeyCode::Z as _;
+
+        ctx
+    }
+
+    fn resize(&mut self, extent: Extent2D) {
+        self.imgui.io_mut().display_size = [extent.width as f32, extent.height as f32];
+    }
+
+    fn create_input_context(
+        wants_mouse: bool,
+        wants_keyboard: bool,
+        wants_text: bool,
+    ) -> Result<input::InputContext, input::InputContextError> {
+        use input::MouseButton;
+        use input::{DeviceAxis, InputContextPriority, StateId};
+        let mouse = if wants_mouse {
+            input::InputPassthrough::Consume
+        } else {
+            input::InputPassthrough::Passthrough
+        };
+        let keyboard = if wants_keyboard {
+            input::InputPassthrough::Consume
+        } else {
+            input::InputPassthrough::Passthrough
+        };
+        let text = if wants_text {
+            input::InputPassthrough::Consume
+        } else {
+            input::InputPassthrough::Passthrough
+        };
+
+        log::trace!(
+            "Creating input context for ui. mouse: {}, keyboard: {}, text: {}",
+            wants_mouse,
+            wants_keyboard,
+            wants_text
+        );
+
+        let b = input::InputContext::builder("UIInputContext")
+            .description("Input mapping for the dear imgui ui context")
+            .priority(InputContextPriority::Ui)
+            .with_state_passthrough(KeyCode::Tab, StateId(KeyCode::Tab as _), keyboard)?
+            .with_state_passthrough(KeyCode::Left, StateId(KeyCode::Left as _), keyboard)?
+            .with_state_passthrough(KeyCode::Right, StateId(KeyCode::Right as _), keyboard)?
+            .with_state_passthrough(KeyCode::Up, StateId(KeyCode::Up as _), keyboard)?
+            .with_state_passthrough(KeyCode::Down, StateId(KeyCode::Down as _), keyboard)?
+            .with_state_passthrough(KeyCode::PageUp, StateId(KeyCode::PageUp as _), keyboard)?
+            .with_state_passthrough(KeyCode::PageDown, StateId(KeyCode::PageDown as _), keyboard)?
+            .with_state_passthrough(KeyCode::Home, StateId(KeyCode::Home as _), keyboard)?
+            .with_state_passthrough(KeyCode::End, StateId(KeyCode::End as _), keyboard)?
+            .with_state_passthrough(KeyCode::Insert, StateId(KeyCode::Insert as _), keyboard)?
+            .with_state_passthrough(KeyCode::Delete, StateId(KeyCode::Delete as _), keyboard)?
+            .with_state_passthrough(KeyCode::Back, StateId(KeyCode::Back as _), keyboard)?
+            .with_state_passthrough(KeyCode::Space, StateId(KeyCode::Space as _), keyboard)?
+            .with_state_passthrough(KeyCode::Return, StateId(KeyCode::Return as _), keyboard)?
+            .with_state_passthrough(KeyCode::Escape, StateId(KeyCode::Escape as _), keyboard)?
+            .with_state_passthrough(
+                KeyCode::NumpadEnter,
+                StateId(KeyCode::NumpadEnter as _),
+                keyboard,
+            )?
+            .with_state_passthrough(KeyCode::A, StateId(KeyCode::A as _), keyboard)?
+            .with_state_passthrough(KeyCode::C, StateId(KeyCode::C as _), keyboard)?
+            .with_state_passthrough(KeyCode::V, StateId(KeyCode::V as _), keyboard)?
+            .with_state_passthrough(KeyCode::X, StateId(KeyCode::X as _), keyboard)?
+            .with_state_passthrough(KeyCode::Y, StateId(KeyCode::Y as _), keyboard)?
+            .with_state_passthrough(KeyCode::Z, StateId(KeyCode::Z as _), keyboard)?
+            .wants_cursor_pos(true, mouse)
+            .with_range_passthrough(DeviceAxis::MouseWheel, MOUSE_WHEEL_DELTA, 1.0, mouse)?
+            .with_state_passthrough(
+                MouseButton::Left,
+                mouse_button_stateid(MouseButton::Left),
+                mouse,
+            )?
+            .with_state_passthrough(
+                MouseButton::Right,
+                mouse_button_stateid(MouseButton::Right),
+                mouse,
+            )?
+            .with_state_passthrough(
+                MouseButton::Middle,
+                mouse_button_stateid(MouseButton::Middle),
+                mouse,
+            )?
+            .with_state_passthrough(
+                MouseButton::Other(0),
+                mouse_button_stateid(MouseButton::Other(0)),
+                mouse,
+            )?
+            .with_state_passthrough(
+                MouseButton::Other(1),
+                mouse_button_stateid(MouseButton::Other(1)),
+                mouse,
+            )?
+            .wants_text(true, text)
+            .build();
+
+        Ok(b)
+    }
+
+    fn init_entity(world: &mut World) -> specs::Entity {
+        use specs::world::Builder as _;
+
+        let input_ctx = Self::create_input_context(false, false, false)
+            .expect("Failed to create inputo context for ui");
+
+        world.create_entity().with(input_ctx).build()
+    }
+
+    pub fn new(renderer: &mut Renderer, world: &mut World) -> Self {
         log::trace!("Setup ui resources");
 
-        let mut ctx = imgui::Context::create();
-        ctx.set_renderer_name(Some(imgui::ImString::from(format!(
-            "ramneryd {}",
-            env!("CARGO_PKG_VERSION")
-        ))));
-        ctx.io_mut()
-            .backend_flags
-            .insert(imgui::BackendFlags::RENDERER_HAS_VTX_OFFSET);
-        let extent = renderer.swapchain_extent();
-        ctx.io_mut().display_size = [extent.width as f32, extent.height as f32];
+        let mut imgui_ctx = Self::init_imgui_ctx();
 
         let font_texture = {
-            let mut fonts = ctx.fonts();
+            let mut fonts = imgui_ctx.fonts();
             let atlas_texture = fonts.build_rgba32_texture();
 
             let tex_desc = TextureDescriptor::raw(
@@ -135,18 +381,96 @@ impl UIContext {
             .add_texture(&font_texture, 0, ShaderStage::Fragment)
             .build();
 
-        log::trace!("Done");
-        UIContext {
-            imgui: ctx,
+        let input_entity = Self::init_entity(world);
+
+        let mut ui_ctx = UIContext {
+            imgui: imgui_ctx,
             pipeline,
             desc_set,
             _font_texture: font_texture,
-            per_frame_data: None,
+            input_entity,
+        };
+
+        ui_ctx.resize(renderer.swapchain_extent());
+
+        log::trace!("Done");
+
+        ui_ctx
+    }
+
+    pub fn pre_frame(&mut self, world: &World) {
+        let dt = *world.read_resource::<DeltaTime>();
+        self.imgui
+            .io_mut()
+            .update_delta_time(std::time::Duration::from(dt));
+
+        let mouse = self.imgui.io().want_capture_mouse;
+        let keyboard = self.imgui.io().want_capture_keyboard;
+        let text = self.imgui.io().want_text_input;
+
+        let input_ctx = Self::create_input_context(mouse, keyboard, text)
+            .expect("Failed to create inputo context for ui");
+
+        *world
+            .write_storage::<input::InputContext>()
+            .get_mut(self.input_entity)
+            .unwrap() = input_ctx;
+    }
+
+    fn forward_input(&mut self, world: &World) {
+        use crate::io::input::{Input, MappedInput, StateId};
+
+        let mut mapped_inputs = world.write_storage::<MappedInput>();
+        let mapped_input = mapped_inputs
+            .get_mut(self.input_entity)
+            .expect("Did not find a mapped input for the ui entity");
+
+        assert!(
+            !self.imgui.io().want_set_mouse_pos,
+            "Dear imgui wants to set mouse pos but this is not honored!"
+        );
+
+        let io = self.imgui.io_mut();
+        io.keys_down = [false; 512];
+        io.key_shift = false;
+        io.key_ctrl = false;
+        io.key_alt = false;
+        io.key_super = false;
+        io.mouse_down = [false; 5];
+        for inp in mapped_input.drain().into_iter() {
+            match inp {
+                Input::State(state_id) if is_mouse_button(state_id) => {
+                    log::debug!("imgui mouse button: {}", mouse_stateid_idx(state_id));
+                    io.mouse_down[mouse_stateid_idx(state_id) as usize] = true
+                }
+                Input::State(StateId(key)) if is_keyboard_button(key) => {
+                    use KeyCode::*;
+                    io.keys_down[key as usize] = true;
+                    io.key_shift = key == LShift as u32 || key == RShift as u32;
+                    io.key_ctrl = key == LControl as u32 || key == RControl as u32;
+                    io.key_alt = key == LAlt as u32 || key == RAlt as u32;
+                    io.key_super = key == LWin as u32 || key == RWin as u32;
+                }
+                Input::Range(MOUSE_WHEEL_DELTA, val) => io.mouse_wheel += val as f32,
+                Input::Text(chars) => {
+                    for c in chars.iter() {
+                        io.add_input_character(*c);
+                    }
+                }
+                Input::CursorPos(pos) => {
+                    log::debug!("imgui got cursor pos: {:?}", pos.0);
+                    io.mouse_pos = [pos.x() as f32, pos.y() as f32];
+                }
+                i => unreachable!("{:?}", i),
+            }
         }
     }
 
     pub fn build_ui<'a>(&mut self, world: &World, frame: &mut Frame<'a>) -> Option<UIDrawCommands> {
         log::trace!("Building ui");
+        self.resize(frame.extent());
+        self.forward_input(world);
+
         let ui = self.imgui.frame();
 
         let mut y_offset = 0.0;

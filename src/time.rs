@@ -21,9 +21,9 @@ impl DeltaTime {
     }
 }
 
-impl Into<Duration> for DeltaTime {
-    fn into(self) -> Duration {
-        self.0
+impl From<DeltaTime> for Duration {
+    fn from(dt: DeltaTime) -> Duration {
+        dt.0
     }
 }
 

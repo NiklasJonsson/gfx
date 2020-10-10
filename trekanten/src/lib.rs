@@ -112,7 +112,7 @@ impl<'a> Frame<'a> {
         self.renderer.render_pass()
     }
 
-    pub fn swapchain_extent(&self) -> util::Extent2D {
+    pub fn extent(&self) -> util::Extent2D {
         self.renderer.swapchain_extent()
     }
 

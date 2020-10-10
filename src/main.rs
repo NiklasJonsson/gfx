@@ -5,6 +5,7 @@ mod arg_parse;
 mod asset;
 mod camera;
 mod common;
+mod ecs;
 mod game_state;
 mod io;
 mod math;
@@ -12,7 +13,6 @@ mod render;
 mod settings;
 mod time;
 mod transform_graph;
-mod world;
 
 use arg_parse::Args;
 use time::DeltaTime;
@@ -111,7 +111,7 @@ impl App {
     fn populate_world(&mut self, args: &Args) {
         self.setup_resources();
 
-        let cam_entity = world::get_singleton_entity::<camera::Camera>(&self.world);
+        let cam_entity = ecs::get_singleton_entity::<camera::Camera>(&self.world);
         *self.world.write_resource::<render::ActiveCamera>() =
             render::ActiveCamera::with_entity(cam_entity);
 
@@ -238,11 +238,13 @@ impl App {
             self.release_cursor();
         }
 
-        if focused {
-            AppAction::ContinueFrame
-        } else {
-            AppAction::SkipFrame
+        if !focused {
+            return AppAction::SkipFrame;
         }
+
+        self.ui.pre_frame(&self.world);
+
+        AppAction::ContinueFrame
     }
 
     fn run(&mut self, args: arg_parse::Args) {
@@ -281,7 +283,7 @@ impl App {
         control_systems.setup(&mut world);
         engine_systems.setup(&mut world);
         io::setup(&mut world, window);
-        let ui = render::ui::UIContext::new(&mut renderer);
+        let ui = render::ui::UIContext::new(&mut renderer, &mut world);
 
         App {
             world,

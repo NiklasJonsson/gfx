@@ -120,15 +120,49 @@ impl EventManager {
                 let is_pressed = input.state == ElementState::Pressed;
                 if let Some(key) = input.virtual_keycode {
                     let ei = if is_pressed {
-                        input::ExternalInput::KeyPress(key)
+                        input::ExternalInput::Press(input::Button::Key(key))
                     } else {
-                        input::ExternalInput::KeyRelease(key)
+                        input::ExternalInput::Release(input::Button::Key(key))
                     };
 
                     self.update_action(Event::Input(vec![ei]));
                 } else {
                     log::warn!("Key clicked but no virtual key mapped!");
                 }
+            }
+            WinEvent::WindowEvent {
+                event: WindowEvent::MouseInput { state, button, .. },
+                ..
+            } => {
+                log::debug!("Captured mouse button: {:?}", button);
+                let is_pressed = state == ElementState::Pressed;
+                let ei = if is_pressed {
+                    input::ExternalInput::Press(input::Button::Mouse(button))
+                } else {
+                    input::ExternalInput::Release(input::Button::Mouse(button))
+                };
+
+                self.update_action(Event::Input(vec![ei]));
+            }
+            WinEvent::WindowEvent {
+                event: WindowEvent::ReceivedCharacter(ch),
+                ..
+            } => {
+                log::debug!("Received character: {:?}", ch);
+                // Exclude the backspace key ('\u{7f}'). Otherwise we will insert this char and then
+                // delete it.
+                if ch != '\u{7f}' {
+                    self.update_action(Event::Input(vec![input::ExternalInput::RawChar(ch)]));
+                }
+            }
+            WinEvent::WindowEvent {
+                event: WindowEvent::CursorMoved { position, .. },
+                ..
+            } => {
+                log::debug!("Received cursor moved: {:?}", position);
+                self.update_action(Event::Input(vec![input::ExternalInput::CursorPos(
+                    input::CursorPos([position.x, position.y]),
+                )]));
             }
             WinEvent::DeviceEvent {
                 event: inner_event, ..

@@ -228,8 +228,8 @@ impl FreeFlyCameraController {
 fn get_input_context() -> Result<InputContext, InputContextError> {
     let sens = 0.005 as Sensitivity;
     use CameraMovement::*;
-    Ok(InputContext::start("CameraInputContext")
-        .with_description("Input mapping for untethered, 3D camera")
+    Ok(InputContext::builder("CameraInputContext")
+        .description("Input mapping for untethered, 3D camera")
         .with_state(VirtualKeyCode::W, Forward)?
         .with_state(VirtualKeyCode::S, Backward)?
         .with_state(VirtualKeyCode::A, Left)?
@@ -296,7 +296,6 @@ impl<'a> System<'a> for FreeFlyCameraController {
                     _ => unreachable!("No actions for FreeFlyCamera!"),
                 }
             }
-            mi.clear();
         }
     }
 
@@ -311,13 +310,10 @@ impl<'a> System<'a> for FreeFlyCameraController {
 
         let input_context = get_input_context().expect("Unable to create input context");
 
-        let mapped_input = MappedInput::new();
-
         world
             .create_entity()
             .with(start_pos)
             .with(input_context)
-            .with(mapped_input)
             // Camera marker component means for the ActiveCamera resource
             .with(Camera)
             .with(rot_state)

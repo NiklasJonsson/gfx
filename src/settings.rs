@@ -1,4 +1,4 @@
-use crate::io::input::{ActionId, InputContext, MappedInput};
+use crate::io::input::{ActionId, InputContext, InputContextError, KeyCode, MappedInput};
 
 use num_derive::FromPrimitive;
 
@@ -28,18 +28,13 @@ impl Default for RenderSettings {
     }
 }
 
-fn get_input_context() -> InputContext {
-    use winit::event::VirtualKeyCode;
-
-    InputContext::start("RenderSettingsSys")
-        .with_description("Input for changing render settings")
-        .with_action(VirtualKeyCode::O, RENDER_MODE_SWITCH)
-        .unwrap()
-        .with_action(VirtualKeyCode::P, RENDER_BOUNDING_BOX_SWITCH)
-        .unwrap()
-        .with_action(VirtualKeyCode::R, RELOAD_RUNTIME_SHADERS)
-        .unwrap()
-        .build()
+fn get_input_context() -> Result<InputContext, InputContextError> {
+    Ok(InputContext::builder("RenderSettingsSys")
+        .description("Input for changing render settings")
+        .with_action(KeyCode::O, RENDER_MODE_SWITCH)?
+        .with_action(KeyCode::P, RENDER_BOUNDING_BOX_SWITCH)?
+        .with_action(KeyCode::R, RELOAD_RUNTIME_SHADERS)?
+        .build())
 }
 
 const RENDER_MODE_SWITCH: ActionId = ActionId(0);
@@ -54,35 +49,38 @@ impl<'a> System<'a> for RenderSettingsSys {
     type SystemData = (Write<'a, RenderSettings>, WriteStorage<'a, MappedInput>);
 
     fn run(&mut self, (mut r_settings, mut inputs): Self::SystemData) {
+        use crate::io::input::Input;
         log::trace!("RenderSettingsSys: run");
         let inp = inputs
             .get_mut(self.input_entity.unwrap())
             .expect("Failed to get mapped input for RenderSettingsSys");
 
-        if inp.contains_action(RENDER_MODE_SWITCH) {
-            log::debug!("Render mode switch!");
-            r_settings.render_mode = match r_settings.render_mode {
-                RenderMode::Opaque => RenderMode::Wireframe,
-                RenderMode::Wireframe => RenderMode::Opaque,
-            };
+        for i in inp.iter() {
+            match i {
+                Input::Action(RENDER_MODE_SWITCH) => {
+                    log::debug!("Render mode switch!");
+                    r_settings.render_mode = match r_settings.render_mode {
+                        RenderMode::Opaque => RenderMode::Wireframe,
+                        RenderMode::Wireframe => RenderMode::Opaque,
+                    };
+                }
+                Input::Action(RENDER_BOUNDING_BOX_SWITCH) => {
+                    log::debug!("Render bounding box switch!");
+                    r_settings.render_bounding_box = !r_settings.render_bounding_box;
+                }
+                Input::Action(RELOAD_RUNTIME_SHADERS) => {
+                    log::debug!("Reload runtime shaders!");
+                    r_settings.reload_runtime_shaders = true;
+                }
+                i => unreachable!("{:?}", i),
+            }
         }
-        if inp.contains_action(RENDER_BOUNDING_BOX_SWITCH) {
-            log::debug!("Render bounding box switch!");
-            r_settings.render_bounding_box = !r_settings.render_bounding_box;
-        }
-
-        if inp.contains_action(RELOAD_RUNTIME_SHADERS) {
-            log::debug!("Reload runtime shaders!");
-            r_settings.reload_runtime_shaders = true;
-        }
-
-        inp.clear();
     }
 
     fn setup(&mut self, world: &mut World) {
         Self::SystemData::setup(world);
         world.insert(RenderSettings::default());
-        let ctx = get_input_context();
+        let ctx = get_input_context().expect("Failed to build settings input context");
         self.input_entity = Some(world.create_entity().with(ctx).build());
     }
 }

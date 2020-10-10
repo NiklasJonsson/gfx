@@ -23,42 +23,37 @@ struct GameStateSwitcher {
 }
 
 impl<'a> System<'a> for GameStateSwitcher {
-    type SystemData = (
-        Write<'a, GameState>,
-        WriteStorage<'a, InputContext>,
-        WriteStorage<'a, MappedInput>,
-    );
+    type SystemData = (Write<'a, GameState>, WriteStorage<'a, MappedInput>);
 
-    fn run(&mut self, (mut state, mut contexts, mut inputs): Self::SystemData) {
+    fn run(&mut self, (mut state, mut inputs): Self::SystemData) {
+        use crate::io::input::Input;
         log::trace!("GameStateSwitcher: run");
 
         let ent = self.input_entity.unwrap();
         let inp = inputs.get_mut(ent).unwrap();
-        let ctx = contexts.get_mut(ent).unwrap();
 
-        if inp.contains_action(GAME_STATE_SWITCH) {
-            *state = match *state {
-                GameState::Paused => GameState::Running,
-                GameState::Running => GameState::Paused,
-            };
+        for i in inp.iter() {
+            if let Input::Action(GAME_STATE_SWITCH) = i {
+                *state = match *state {
+                    GameState::Paused => GameState::Running,
+                    GameState::Running => GameState::Paused,
+                };
 
-            log::debug!("GameStateSwitcher: set state: {:?}", *state);
-
-            ctx.set_consume_all(*state == GameState::Paused);
+                log::debug!("GameStateSwitcher: set state: {:?}", *state);
+            } else {
+                unreachable!();
+            }
         }
-
-        inp.clear();
     }
 
     fn setup(&mut self, world: &mut World) {
         Self::SystemData::setup(world);
         world.insert(GameState::default());
-
-        let escape_catcher = InputContext::start("EscapeCatcher")
-            .with_description("Global top-level escape catcher for game state switcher")
+        let escape_catcher = InputContext::builder("EscapeCatcher")
+            .description("Global top-level escape catcher for game state switcher")
+            .priority(InputContextPriority::First)
             .with_action(input::KeyCode::Escape, GAME_STATE_SWITCH)
             .expect("Could not insert Escape action for GameStateSwitcher")
-            .with_priority(InputContextPriority::First)
             .build();
 
         self.input_entity = Some(world.create_entity().with(escape_catcher).build());
