@@ -3,7 +3,6 @@ use crate::io::input::{ActionId, InputContext, InputContextPriority, MappedInput
 use crate::io::input;
 
 use specs::prelude::*;
-use specs::Component;
 
 #[derive(Debug, Copy, Clone, PartialEq, Eq)]
 pub enum GameState {
@@ -19,61 +18,56 @@ impl Default for GameState {
 
 const GAME_STATE_SWITCH: ActionId = ActionId(0);
 
-#[derive(Default, Component)]
-#[storage(NullStorage)]
-struct GameStateSwitcher;
+struct GameStateSwitcher {
+    input_entity: Option<specs::Entity>,
+}
 
-// Use NullStorage and ReadStorage<'a, Self> to only access this system's MappedInput and
-// InputContext. Only one game object will have GameStateSwitcher as null storage, the one holding
-// the right mapped input and input context.
 impl<'a> System<'a> for GameStateSwitcher {
     type SystemData = (
         Write<'a, GameState>,
         WriteStorage<'a, InputContext>,
         WriteStorage<'a, MappedInput>,
-        ReadStorage<'a, Self>,
     );
 
-    fn run(&mut self, (mut state, mut contexts, mut inputs, unique_component): Self::SystemData) {
+    fn run(&mut self, (mut state, mut contexts, mut inputs): Self::SystemData) {
         log::trace!("GameStateSwitcher: run");
-        for (inp, ctx, _) in (&mut inputs, &mut contexts, &unique_component).join() {
-            use GameState::*;
-            if inp.contains_action(GAME_STATE_SWITCH) {
-                *state = match *state {
-                    Paused => Running,
-                    Running => Paused,
-                };
 
-                log::debug!("GameStateSwitcher: set state: {:?}", *state);
+        let ent = self.input_entity.unwrap();
+        let inp = inputs.get_mut(ent).unwrap();
+        let ctx = contexts.get_mut(ent).unwrap();
 
-                ctx.set_consume_all(*state == Paused);
-            }
-            inp.clear();
+        if inp.contains_action(GAME_STATE_SWITCH) {
+            *state = match *state {
+                GameState::Paused => GameState::Running,
+                GameState::Running => GameState::Paused,
+            };
+
+            log::debug!("GameStateSwitcher: set state: {:?}", *state);
+
+            ctx.set_consume_all(*state == GameState::Paused);
         }
+
+        inp.clear();
     }
 
     fn setup(&mut self, world: &mut World) {
         Self::SystemData::setup(world);
         world.insert(GameState::default());
+
         let escape_catcher = InputContext::start("EscapeCatcher")
             .with_description("Global top-level escape catcher for game state switcher")
             .with_action(input::KeyCode::Escape, GAME_STATE_SWITCH)
             .expect("Could not insert Escape action for GameStateSwitcher")
             .with_priority(InputContextPriority::First)
             .build();
-        let mi = MappedInput::new();
-        world
-            .create_entity()
-            .with(mi)
-            .with(escape_catcher)
-            .with(GameStateSwitcher {})
-            .build();
+
+        self.input_entity = Some(world.create_entity().with(escape_catcher).build());
     }
 }
 
 pub fn register_systems<'a, 'b>(builder: DispatcherBuilder<'a, 'b>) -> DispatcherBuilder<'a, 'b> {
     builder.with(
-        GameStateSwitcher,
+        GameStateSwitcher { input_entity: None },
         "game_state_switcher",
         &[input::INPUT_MANAGER_SYSTEM_ID],
     )

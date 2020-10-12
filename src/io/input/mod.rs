@@ -1,13 +1,16 @@
 //! Module for mapping input events (key presses, mouse movement etc.) to Actions, States and
 //! Ranges, which the caller can define the semantics for. Typical usage:
-//! 1. Create an InputContext with the InputContextBuilder, using InputContext::start() and add
+//! 1. Create an InputContext with the InputContextBuilder, using InputContext::builder() and add
 //!    mappings and optionally a priority.
-//! 2. Create a MappedInput component for storing the mapped Input
-//! 3. Create an entity in the specs World with *both* a InputContext and a MappedInput component.
+//! 2. Create an entity in the specs World with an InputContext.
+//! 3. Store this entity in the System struct
 //! 4. When the InputMapper system has run, each entity will have it's mapped input available,
 //!    provided the event was not consumed by a InputContext with higher priority.
+//! 5. When the System::run is executed, fetch the mapped input with the stored entity.
 use specs::prelude::*;
+use specs::world::EntitiesRes;
 use specs::Component;
+
 use std::collections::{HashMap, HashSet, VecDeque};
 use std::hash::{Hash, Hasher};
 use winit::{event::AxisId, event::DeviceId};
@@ -89,7 +92,7 @@ pub enum DeviceAxis {
 #[derive(Default, Component, Debug)]
 #[storage(HashMapStorage)]
 pub struct MappedInput {
-    contents: HashSet<Input>,
+    contents: HashSet<Input>, // TODO: Should this be a vector instead (to not lose duplicates)?
 }
 
 // Public api
@@ -191,13 +194,20 @@ impl<'a> System<'a> for InputManager {
     type SystemData = (
         ReadStorage<'a, InputContext>,
         Read<'a, CurrentFrameExternalInputs>,
+        Read<'a, EntitiesRes>,
         WriteStorage<'a, MappedInput>,
     );
 
-    fn run(&mut self, (contexts, inputs, mut mapped): Self::SystemData) {
+    fn run(&mut self, (contexts, inputs, entities, mut mapped): Self::SystemData) {
         log::trace!("InputManager: run");
         let mut action_keys = VecDeque::with_capacity(inputs.len());
         let mut axes = VecDeque::with_capacity(inputs.len());
+
+        for (_ctx, ent) in (&contexts, &entities).join() {
+            if let None = mapped.get(ent) {
+                mapped.insert(ent, MappedInput::default()).unwrap();
+            }
+        }
 
         for input in inputs.iter() {
             match input {
