@@ -66,6 +66,7 @@ pub struct UIContext {
     pipeline: Handle<GraphicsPipeline>,
     desc_set: Handle<DescriptorSet>,
     input_entity: specs::Entity,
+    per_frame_data: Option<PerFrameData>,
 }
 
 fn query_mouse_state<'a>(
@@ -388,6 +389,7 @@ impl UIContext {
             desc_set,
             _font_texture: font_texture,
             input_entity,
+            per_frame_data: None,
         };
 
         ui_ctx.resize(renderer.swapchain_extent());
@@ -610,8 +612,7 @@ impl UIContext {
         );
         let ibuf_desc = IndexBufferDescriptor::from_slice(&indices, BufferMutability::Mutable);
 
-        let (vertex_buffer, index_buffer) = if world.has_value::<UIDrawCommands>() {
-            let per_frame_data = world.read_resource::<UIDrawCommands>().per_frame_data;
+        let (vertex_buffer, index_buffer) = if let Some(per_frame_data) = self.per_frame_data {
             let vertex_buffer = frame
                 .recreate_resource(per_frame_data.vertex_buffer, vbuf_desc)
                 .expect("Bad vbuf handle");
@@ -638,6 +639,8 @@ impl UIContext {
             fb_width,
             fb_height,
         };
+
+        self.per_frame_data = Some(per_frame_data);
 
         Some(UIDrawCommands {
             per_frame_data,
