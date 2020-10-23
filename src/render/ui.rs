@@ -60,7 +60,6 @@ struct PerFrameData {
     fb_height: f32,
 }
 
-// TODO: Move this to app?
 pub struct UIContext {
     imgui: imgui::Context,
     _font_texture: Handle<Texture>,
@@ -476,6 +475,7 @@ impl UIContext {
         let mut y_offset = 0.0;
         let funcs = [
             build_ui,
+            crate::editor::build_ui,
             crate::settings::build_ui,
             crate::game_state::build_ui,
             crate::io::input::build_ui,

@@ -6,6 +6,7 @@ mod asset;
 mod camera;
 mod common;
 mod ecs;
+mod editor;
 mod game_state;
 mod io;
 mod math;
@@ -117,26 +118,6 @@ impl App {
 
         let loaded_asset =
             asset::gltf::load_asset(&mut self.world, &mut self.renderer, &args.gltf_path);
-        if let Some(path) = &args.scene_out_file {
-            // TODO: Base this into print_graph_to_dot?
-            match std::fs::File::create(path) {
-                Ok(file) => {
-                    let result = transform_graph::print_graph_to_dot(
-                        &self.world,
-                        loaded_asset.scene_roots.iter().cloned(),
-                        file,
-                    );
-                    if let Err(e) = result {
-                        log::warn!("Failed to write scene graph to file: {}", e);
-                    }
-                }
-                Err(e) => log::warn!(
-                    "Unable to write scene graph to {}, because {}",
-                    path.display(),
-                    e
-                ),
-            }
-        }
 
         if let (Some(transform), true) = (loaded_asset.camera, args.use_scene_camera) {
             camera::Camera::set_camera_state(&mut self.world, cam_entity, &transform);

@@ -98,7 +98,6 @@ pub struct Camera;
 
 impl Camera {
     pub fn set_camera_state(w: &mut World, e: Entity, t: &Transform) {
-        assert!(App::entity_has_component::<FreeFlyCameraController>(w, e));
         FreeFlyCameraController::set_camera_state(w, e, t);
     }
 }
@@ -189,7 +188,6 @@ impl FreeFlyCameraController {
 
     pub fn set_camera_state(w: &mut World, e: Entity, t: &Transform) {
         log::debug!("Set camera state from transform: {:?}", t);
-        assert!(App::entity_has_component::<Self>(w, e));
         assert!(App::entity_has_component::<Camera>(w, e));
         let mat: glm::Mat4 = (*t).into();
         let pos: Position = mat.column(3).xyz().into();
