@@ -93,7 +93,7 @@ pub fn register_systems<'a, 'b>(builder: DispatcherBuilder<'a, 'b>) -> Dispatche
     )
 }
 
-pub fn build_ui<'a>(world: &World, ui: &imgui::Ui<'a>, pos: [f32; 2]) -> [f32; 2] {
+pub fn build_ui<'a>(world: &mut World, ui: &imgui::Ui<'a>, pos: [f32; 2]) -> [f32; 2] {
     let settings = world.read_resource::<RenderSettings>();
 
     let size = [300.0, 85.0];

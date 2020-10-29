@@ -9,7 +9,7 @@ use std::path::{Path, PathBuf};
 use super::LoadedAsset;
 
 use crate::math::Transform;
-use crate::render::material::{Material, ShaderUse};
+use crate::render::material::Material;
 use crate::render::uniform::PBRMaterialData;
 use crate::render::Mesh;
 use trekanten::mesh::BufferMutability;
@@ -590,7 +590,7 @@ fn upload_to_gpu<'a>(renderer: &mut trekanten::Renderer, ctx: &mut RecGltfCtx<'a
             }
         });
         let material_uniforms = gpu_uniform_buffer_handles[gltf_mat.material.buf_idx];
-        let mat_data = crate::render::material::MaterialData::PBR {
+        let mat_data = crate::render::material::Material::PBR {
             material_uniforms,
             normal_map,
             base_color_texture,
@@ -599,13 +599,7 @@ fn upload_to_gpu<'a>(renderer: &mut trekanten::Renderer, ctx: &mut RecGltfCtx<'a
         };
 
         materials
-            .insert(
-                ent,
-                Material {
-                    data: mat_data,
-                    compilation_mode: ShaderUse::PreCompiled,
-                },
-            )
+            .insert(ent, mat_data)
             .expect("Failed to insert material");
     }
 

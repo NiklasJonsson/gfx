@@ -1,8 +1,6 @@
 use specs::world::EntitiesRes;
 use specs::Component;
 
-use std::path::PathBuf;
-
 use nalgebra_glm as glm;
 
 use specs::prelude::*;
@@ -29,7 +27,7 @@ pub mod uniform;
 
 use crate::camera::*;
 use crate::math::{ModelMatrix, Position};
-use material::{Material, ShaderUse};
+use material::Material;
 
 use crate::settings::{RenderMode, RenderSettings};
 
@@ -98,6 +96,9 @@ fn get_proj_matrix(aspect_ratio: f32) -> glm::Mat4 {
 }
 
 #[derive(Component)]
+struct ReloadMaterial;
+
+#[derive(Component)]
 #[storage(VecStorage)]
 pub struct Mesh(pub trekanten::mesh::Mesh);
 
@@ -127,8 +128,8 @@ fn create_material_descriptor_set(
     renderer: &mut Renderer,
     material: &Material,
 ) -> Handle<DescriptorSet> {
-    match &material.data {
-        material::MaterialData::PBR {
+    match &material {
+        material::Material::PBR {
             material_uniforms,
             normal_map,
             base_color_texture,
@@ -177,15 +178,15 @@ pub fn get_pipeline_for(
     renderer: &mut Renderer,
     world: &World,
     mesh: &Mesh,
-    mat: &material::MaterialData,
+    mat: &material::Material,
 ) -> Result<Handle<GraphicsPipeline>, PipelineError> {
     let vbuf: &VertexBuffer = renderer
         .get_resource(&mesh.vertex_buffer)
         .expect("Invalid handle");
     let vertex_format = vbuf.format.clone();
-    let shaders = world.read_resource::<pipeline::PrecompiledShaders>();
+    let shader_compiler = world.read_resource::<pipeline::ShaderCompiler>();
     let pipe = match mat {
-        material::MaterialData::PBR {
+        material::Material::PBR {
             normal_map,
             base_color_texture,
             metallic_roughness_texture,
@@ -196,7 +197,7 @@ pub fn get_pipeline_for(
             let has_nm = normal_map.is_some();
             let has_bc = base_color_texture.is_some();
             let has_mr = metallic_roughness_texture.is_some();
-            let def = pipeline::ShaderDefinition {
+            let def = pipeline::pbr_gltf::ShaderDefinition {
                 has_tex_coords: has_nm || has_bc || has_mr,
                 has_vertex_colors: *has_vertex_colors,
                 has_tangents: has_nm,
@@ -204,10 +205,11 @@ pub fn get_pipeline_for(
                 has_metallic_roughness_texture: has_mr,
                 has_normal_map: has_nm,
             };
-            let (vert, frag) = (shaders.get_vert(&def), shaders.get_frag(&def));
+            let (vert, frag) = pipeline::pbr_gltf::compile(&*shader_compiler, &def)
+                .expect("Failed to compile shaders");
             let desc = GraphicsPipelineDescriptor::builder()
-                .vert(ShaderDescriptor::FromPath(PathBuf::from(vert)))
-                .frag(ShaderDescriptor::FromPath(PathBuf::from(frag)))
+                .vert(ShaderDescriptor::FromRawSpirv(vert.data()))
+                .frag(ShaderDescriptor::FromRawSpirv(frag.data()))
                 .vertex_format(vertex_format)
                 .build()
                 .expect("Failed to build graphics pipeline descriptor");
@@ -232,7 +234,7 @@ fn create_renderable(
     log::trace!("Creating renderable: {:?}, {:?}", material, render_mode);
     let material_descriptor_set = create_material_descriptor_set(renderer, material);
     let gfx_pipeline =
-        get_pipeline_for(renderer, world, mesh, &material.data).expect("Failed to get pipeline");
+        get_pipeline_for(renderer, world, mesh, &material).expect("Failed to get pipeline");
     RenderableMaterial {
         gfx_pipeline,
         material_descriptor_set,
@@ -240,14 +242,10 @@ fn create_renderable(
     }
 }
 
-fn create_renderables(
-    renderer: &mut Renderer,
-    world: &mut World,
-    render_mode: RenderMode,
-    reload_shaders: bool,
-) {
+fn create_renderables(renderer: &mut Renderer, world: &mut World, render_mode: RenderMode) {
     let meshes = world.read_storage::<Mesh>();
     let materials = world.read_storage::<Material>();
+    let mut should_reload = world.write_storage::<ReloadMaterial>();
     let mut renderables = world.write_storage::<RenderableMaterial>();
     let entities = world.read_resource::<EntitiesRes>();
 
@@ -265,22 +263,8 @@ fn create_renderables(
                 */
                 } else {
                     log::trace!("Using existing Renderable");
-                    if reload_shaders {
-                        log::trace!("Reloading shader");
-                        if let ShaderUse::Reloadable { .. } = &mat.compilation_mode {
-                            todo!("No support for reloadable shaders yet")
-                            /* TODO
-                            occ_entry.get_mut().g_pipeline = pipeline::create_graphics_pipeline(
-                                &self.vk_device,
-                                &self.render_pass,
-                                self.swapchain.dimensions(),
-                                render_mode.into(),
-                                &mesh.vertex_data,
-                                &mat.data,
-                                &mat.compilation_mode,
-                            )
-                            */
-                        }
+                    if should_reload.contains(ent) {
+                        log::trace!("Reloading shader for {:?}", ent);
                     }
                 }
             }
@@ -291,6 +275,8 @@ fn create_renderables(
             }
         }
     }
+
+    should_reload.clear();
 }
 
 fn draw_entities<'a>(world: &World, cmd_buf: &mut command::CommandBufferBuilder<'a>) {
@@ -321,7 +307,7 @@ fn draw_entities<'a>(world: &World, cmd_buf: &mut command::CommandBufferBuilder<
 }
 
 pub fn draw_frame(world: &mut World, ui: &mut ui::UIContext, renderer: &mut Renderer) {
-    let (render_mode, reload_shaders) = {
+    let (render_mode, _) = {
         let render_settings = world.read_resource::<RenderSettings>();
         (
             render_settings.render_mode,
@@ -329,11 +315,7 @@ pub fn draw_frame(world: &mut World, ui: &mut ui::UIContext, renderer: &mut Rend
         )
     };
 
-    if reload_shaders {
-        log::debug!("Shader reload requested");
-    }
-
-    create_renderables(renderer, world, render_mode, reload_shaders);
+    create_renderables(renderer, world, render_mode);
 
     let aspect_ratio = renderer.aspect_ratio();
     let mut frame = match renderer.next_frame() {
@@ -359,6 +341,8 @@ pub fn draw_frame(world: &mut World, ui: &mut ui::UIContext, renderer: &mut Rend
         proj: get_proj_matrix(aspect_ratio).into(),
     };
 
+    let ui_draw_commands = ui.build_ui(world, &mut frame);
+
     let FrameData {
         light_buffer,
         frame_set,
@@ -372,8 +356,6 @@ pub fn draw_frame(world: &mut World, ui: &mut ui::UIContext, renderer: &mut Rend
     frame
         .update_uniform_blocking(transforms_buffer, &transforms)
         .expect("Failed to update uniform");
-
-    let ui_draw_commands = ui.build_ui(world, &mut frame);
 
     let mut builder = frame
         .begin_render_pass()
@@ -411,7 +393,8 @@ pub fn draw_frame(world: &mut World, ui: &mut ui::UIContext, renderer: &mut Rend
 }
 
 pub fn setup_resources(world: &mut World, mut renderer: &mut Renderer) {
-    let shaders = pipeline::PrecompiledShaders::new();
+    let shader_compiler =
+        pipeline::ShaderCompiler::new().expect("Failed to create shader compiler");
 
     log::trace!("Creating dummy pipeline");
     let desc = UniformBufferDescriptor::Uninitialized::<uniform::LightingData> { n_elems: 1 };
@@ -434,10 +417,11 @@ pub fn setup_resources(world: &mut World, mut renderer: &mut Renderer) {
         .add_attribute(util::Format::FLOAT3)
         .build();
 
-    let (vert, frag) = shaders.get_default();
+    let (vert, frag) =
+        pipeline::pbr_gltf::compile_default(&shader_compiler).expect("Failed to compile");
     let desc = GraphicsPipelineDescriptor::builder()
-        .vert(ShaderDescriptor::FromPath(PathBuf::from(vert)))
-        .frag(ShaderDescriptor::FromPath(PathBuf::from(frag)))
+        .vert(ShaderDescriptor::FromRawSpirv(vert.data()))
+        .frag(ShaderDescriptor::FromRawSpirv(frag.data()))
         .vertex_format(vertex_format)
         .build()
         .expect("Failed to build graphics pipeline descriptor");
@@ -451,7 +435,7 @@ pub fn setup_resources(world: &mut World, mut renderer: &mut Renderer) {
         dummy_pipeline,
     });
 
-    world.insert(shaders);
+    world.insert(shader_compiler);
     log::trace!("Done");
 }
 
@@ -464,4 +448,5 @@ pub fn register_components(world: &mut World) {
     world.register::<crate::transform_graph::RenderGraphRoot>();
     world.register::<crate::transform_graph::RenderGraphChild>();
     world.register::<crate::camera::Camera>();
+    world.register::<ReloadMaterial>();
 }

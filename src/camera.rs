@@ -2,11 +2,11 @@ use specs::Component;
 
 use num_derive::FromPrimitive;
 
+use crate::ecs;
 use crate::io::input::{
     DeviceAxis, Input, InputContext, InputContextError, MappedInput, RangeId, Sensitivity, StateId,
 };
 use crate::math::{Position, Transform};
-
 use crate::time::DeltaTime;
 
 use glm::Vec3;
@@ -14,8 +14,6 @@ use nalgebra_glm as glm;
 use winit::event::VirtualKeyCode;
 
 use specs::prelude::*;
-
-use crate::App;
 
 use num_traits::cast::FromPrimitive;
 
@@ -188,7 +186,7 @@ impl FreeFlyCameraController {
 
     pub fn set_camera_state(w: &mut World, e: Entity, t: &Transform) {
         log::debug!("Set camera state from transform: {:?}", t);
-        assert!(App::entity_has_component::<Camera>(w, e));
+        assert!(ecs::entity_has_component::<Camera>(w, e));
         let mat: glm::Mat4 = (*t).into();
         let pos: Position = mat.column(3).xyz().into();
         // TODO: Move this to gltf-specific code. Take pos + view dir + up as args.

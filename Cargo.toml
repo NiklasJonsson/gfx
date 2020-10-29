@@ -19,7 +19,7 @@ specs = { version = "0.16.1", features = ["specs-derive"] }
 winit = "0.22.2"
 trekanten = {path = "trekanten" }
 imgui = "0.5.0"
-inline-spirv = "0.1.1"
+shaderc = "0.6.2"
 
 # Math/Physics
 nalgebra-glm = "0.4.0"
@@ -33,6 +33,7 @@ gltf = "0.14.0"
 log = "0.4.8"
 env_logger = "0.6.2"
 clap = "2.33.0"
+thiserror = "1.0.20"
 
 # Threading
 crossbeam = "0.7.3"
@@ -43,7 +44,3 @@ opt-level = 2
 
 [profile.dev.package.trekanten]
 opt-level = 0
-
-[build-dependencies]
-shaderc = "0.6.2"
-itertools = "0.9.0"

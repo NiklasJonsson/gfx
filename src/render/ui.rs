@@ -14,6 +14,8 @@ use trekanten::Frame;
 use trekanten::Renderer;
 use trekanten::{BufferHandle, Handle};
 
+use crate::render::pipeline::{Defines, ShaderCompiler, ShaderType};
+
 use specs::world::WorldExt;
 use specs::World;
 
@@ -22,6 +24,8 @@ use imgui::im_str;
 use crate::io::input;
 use crate::time::DeltaTime;
 use input::KeyCode;
+
+use std::path::Path;
 
 struct ImGuiVertex {
     _pos: [f32; 2],
@@ -38,19 +42,6 @@ impl VertexDefinition for ImGuiVertex {
             .build()
     }
 }
-
-static RAW_VERT_SPV: &[u32] = inline_spirv::include_spirv!(
-    "src/render/shaders/imgui/vert.glsl",
-    vert,
-    glsl,
-    entry = "main"
-);
-static RAW_FRAG_SPV: &[u32] = inline_spirv::include_spirv!(
-    "src/render/shaders/imgui/frag.glsl",
-    frag,
-    glsl,
-    entry = "main"
-);
 
 #[derive(Clone, Copy, Debug)]
 struct PerFrameData {
@@ -117,7 +108,7 @@ fn imgui_debug_ui<'a>(ui: &imgui::Ui<'a>) {
     imgui_debug_ui_mouse_state(ui, "dragging", imgui::Ui::is_mouse_dragging);
 }
 
-fn build_ui<'a>(world: &World, ui: &imgui::Ui<'a>, pos: [f32; 2]) -> [f32; 2] {
+fn build_ui<'a>(world: &mut World, ui: &imgui::Ui<'a>, pos: [f32; 2]) -> [f32; 2] {
     let dt = world.read_resource::<DeltaTime>();
 
     let size = [400.0, 300.0];
@@ -361,8 +352,20 @@ impl UIContext {
                 .expect("Failed to create font texture")
         };
 
-        let vert = ShaderDescriptor::FromRawSpirv(RAW_VERT_SPV.to_vec());
-        let frag = ShaderDescriptor::FromRawSpirv(RAW_FRAG_SPV.to_vec());
+        let (vert, frag) = {
+            let compiler = world.read_resource::<ShaderCompiler>();
+            let defines = Defines::default();
+            let vert = compiler
+                .compile(&defines, Path::new("imgui/vert.glsl"), ShaderType::Vertex)
+                .expect("Failed to compile imgui vert");
+            let frag = compiler
+                .compile(&defines, Path::new("imgui/frag.glsl"), ShaderType::Fragment)
+                .expect("Failed to compile imgui frag");
+            (vert, frag)
+        };
+
+        let vert = ShaderDescriptor::FromRawSpirv(vert.data());
+        let frag = ShaderDescriptor::FromRawSpirv(frag.data());
         let pipeline_descriptor = GraphicsPipelineDescriptor::builder()
             .vert(vert)
             .frag(frag)
@@ -467,7 +470,11 @@ impl UIContext {
         }
     }
 
-    pub fn build_ui<'a>(&mut self, world: &World, frame: &mut Frame<'a>) -> Option<UIDrawCommands> {
+    pub fn build_ui<'a>(
+        &mut self,
+        world: &mut World,
+        frame: &mut Frame<'a>,
+    ) -> Option<UIDrawCommands> {
         log::trace!("Building ui");
         self.resize(frame.extent());
         self.forward_input(world);

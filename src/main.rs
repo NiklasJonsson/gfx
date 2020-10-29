@@ -98,15 +98,6 @@ impl App {
     fn setup_resources(&mut self) {
         self.world.insert(render::ActiveCamera::empty());
         self.world.insert(DeltaTime::zero());
-        render::setup_resources(&mut self.world, &mut self.renderer);
-    }
-
-    // TODO: Move this
-    pub fn entity_has_component<C>(w: &World, e: Entity) -> bool
-    where
-        C: specs::Component,
-    {
-        w.read_storage::<C>().get(e).is_some()
     }
 
     fn populate_world(&mut self, args: &Args) {
@@ -122,32 +113,6 @@ impl App {
         if let (Some(transform), true) = (loaded_asset.camera, args.use_scene_camera) {
             camera::Camera::set_camera_state(&mut self.world, cam_entity, &transform);
         }
-
-        /* Uncomment for runtime shaders
-        let match_material = |mat: &Material| {
-            if let Material::GlTFPBR {
-                normal_map: Some(_),
-                base_color_texture: Some(_),
-                metallic_roughness_texture: Some(_),
-                ..
-            } = mat
-            {
-                true
-            } else {
-                false
-            }
-        };
-
-        for root in loaded_asset.scene_roots.iter() {
-            runtime_shaders_for_material(
-                &self.world,
-                *root,
-                "src/render/shaders/pbr_gltf_vert.spv",
-                "src/render/shaders/pbr_gltf_frag.spv",
-                match_material,
-            )
-        }
-        */
     }
 
     fn next_event(&self) -> Option<Event> {
@@ -258,12 +223,15 @@ impl App {
         event_queue: Arc<io::EventQueue>,
     ) -> Self {
         let mut world = World::new();
+        render::setup_resources(&mut world, &mut renderer);
+
         let (mut control_systems, mut engine_systems) = Self::init_dispatchers();
         asset::gltf::register_components(&mut world);
         render::register_components(&mut world);
         control_systems.setup(&mut world);
         engine_systems.setup(&mut world);
         io::setup(&mut world, window);
+
         let ui = render::ui::UIContext::new(&mut renderer, &mut world);
 
         App {
@@ -288,7 +256,10 @@ fn main() {
     };
 
     let event_loop = winit::event_loop::EventLoop::new();
-    let window = winit::window::Window::new(&event_loop).expect("Failed to create window");
+    let window = winit::window::WindowBuilder::new()
+        .with_maximized(true)
+        .build(&event_loop)
+        .expect("Failed to create window");
 
     let event_queue = Arc::new(io::EventQueue::new());
     let event_queue2 = Arc::clone(&event_queue);
