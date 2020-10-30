@@ -75,6 +75,7 @@ impl App {
         let engine_builder = DispatcherBuilder::new();
         let engine_builder = camera::register_systems(engine_builder);
         let engine_builder = settings::register_systems(engine_builder);
+        let engine_builder = render::register_systems(engine_builder);
 
         let engine = engine_builder
             .with_barrier()

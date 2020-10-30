@@ -15,7 +15,7 @@ pub struct RenderSettings {
     // Affects all entities
     pub render_mode: RenderMode,
     pub render_bounding_box: bool,
-    pub reload_runtime_shaders: bool,
+    pub reload_shaders: bool,
 }
 
 impl Default for RenderSettings {
@@ -23,7 +23,7 @@ impl Default for RenderSettings {
         Self {
             render_mode: RenderMode::Opaque,
             render_bounding_box: false,
-            reload_runtime_shaders: false,
+            reload_shaders: false,
         }
     }
 }
@@ -33,13 +33,13 @@ fn get_input_context() -> Result<InputContext, InputContextError> {
         .description("Input for changing render settings")
         .with_action(KeyCode::O, RENDER_MODE_SWITCH)?
         .with_action(KeyCode::P, RENDER_BOUNDING_BOX_SWITCH)?
-        .with_action(KeyCode::R, RELOAD_RUNTIME_SHADERS)?
+        .with_action(KeyCode::R, RELOAD_SHADERS)?
         .build())
 }
 
 const RENDER_MODE_SWITCH: ActionId = ActionId(0);
 const RENDER_BOUNDING_BOX_SWITCH: ActionId = ActionId(1);
-const RELOAD_RUNTIME_SHADERS: ActionId = ActionId(2);
+const RELOAD_SHADERS: ActionId = ActionId(2);
 
 struct RenderSettingsSys {
     input_entity: Option<specs::Entity>,
@@ -68,9 +68,9 @@ impl<'a> System<'a> for RenderSettingsSys {
                     log::debug!("Render bounding box switch!");
                     r_settings.render_bounding_box = !r_settings.render_bounding_box;
                 }
-                Input::Action(RELOAD_RUNTIME_SHADERS) => {
+                Input::Action(RELOAD_SHADERS) => {
                     log::debug!("Reload runtime shaders!");
-                    r_settings.reload_runtime_shaders = true;
+                    r_settings.reload_shaders = true;
                 }
                 i => unreachable!("{:?}", i),
             }
@@ -85,10 +85,12 @@ impl<'a> System<'a> for RenderSettingsSys {
     }
 }
 
+pub const RENDER_SETTINGS_SYS_ID: &str = "render_settings_sys";
+
 pub fn register_systems<'a, 'b>(builder: DispatcherBuilder<'a, 'b>) -> DispatcherBuilder<'a, 'b> {
     builder.with(
         RenderSettingsSys { input_entity: None },
-        "rendering_settings_sys",
+        RENDER_SETTINGS_SYS_ID,
         &[],
     )
 }
@@ -109,7 +111,7 @@ pub fn build_ui<'a>(world: &mut World, ui: &imgui::Ui<'a>, pos: [f32; 2]) -> [f3
             ));
             ui.text(imgui::im_str!(
                 "reload shaders: {}",
-                settings.reload_runtime_shaders
+                settings.reload_shaders
             ));
         });
 

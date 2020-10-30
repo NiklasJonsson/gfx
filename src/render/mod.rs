@@ -95,8 +95,9 @@ fn get_proj_matrix(aspect_ratio: f32) -> glm::Mat4 {
     proj
 }
 
-#[derive(Component)]
-struct ReloadMaterial;
+#[derive(Component, Default)]
+#[storage(NullStorage)]
+pub struct ReloadMaterial;
 
 #[derive(Component)]
 #[storage(VecStorage)]
@@ -253,8 +254,8 @@ fn create_renderables(renderer: &mut Renderer, world: &mut World, render_mode: R
         // TODO: Move to function
         let entry = renderables.entry(ent).expect("Failed to get entry!");
         match entry {
-            StorageEntry::Occupied(occ_entry) => {
-                if occ_entry.get().mode != render_mode {
+            StorageEntry::Occupied(mut entry) => {
+                if entry.get().mode != render_mode {
                     log::trace!("Renderable did not match render mode, creating new");
                     todo!("No support for render modes yet!")
                 /*
@@ -265,13 +266,16 @@ fn create_renderables(renderer: &mut Renderer, world: &mut World, render_mode: R
                     log::trace!("Using existing Renderable");
                     if should_reload.contains(ent) {
                         log::trace!("Reloading shader for {:?}", ent);
+                        // TODO: Destroy the previous pipeline
+                        entry.get_mut().gfx_pipeline = get_pipeline_for(renderer, world, mesh, mat)
+                            .expect("Failed to recreate");
                     }
                 }
             }
-            StorageEntry::Vacant(vac_entry) => {
+            StorageEntry::Vacant(entry) => {
                 log::trace!("No Renderable found, creating new");
                 let rend = create_renderable(renderer, world, mesh, mat, render_mode);
-                vac_entry.insert(rend);
+                entry.insert(rend);
             }
         }
     }
@@ -307,13 +311,7 @@ fn draw_entities<'a>(world: &World, cmd_buf: &mut command::CommandBufferBuilder<
 }
 
 pub fn draw_frame(world: &mut World, ui: &mut ui::UIContext, renderer: &mut Renderer) {
-    let (render_mode, _) = {
-        let render_settings = world.read_resource::<RenderSettings>();
-        (
-            render_settings.render_mode,
-            render_settings.reload_runtime_shaders,
-        )
-    };
+    let render_mode = world.read_resource::<RenderSettings>().render_mode;
 
     create_renderables(renderer, world, render_mode);
 
@@ -387,9 +385,6 @@ pub fn draw_frame(world: &mut World, ui: &mut ui::UIContext, renderer: &mut Rend
             }
         })
         .expect("Failed to submit frame");
-    world
-        .write_resource::<RenderSettings>()
-        .reload_runtime_shaders = false;
 }
 
 pub fn setup_resources(world: &mut World, mut renderer: &mut Renderer) {
@@ -449,4 +444,41 @@ pub fn register_components(world: &mut World) {
     world.register::<crate::transform_graph::RenderGraphChild>();
     world.register::<crate::camera::Camera>();
     world.register::<ReloadMaterial>();
+}
+
+pub fn register_systems<'a, 'b>(builder: DispatcherBuilder<'a, 'b>) -> DispatcherBuilder<'a, 'b> {
+    builder.with(
+        AssignReloadMaterials,
+        "assign_reload_materials",
+        &[crate::settings::RENDER_SETTINGS_SYS_ID],
+    )
+}
+
+struct AssignReloadMaterials;
+
+impl<'a> System<'a> for AssignReloadMaterials {
+    type SystemData = (
+        Read<'a, RenderSettings>,
+        Read<'a, EntitiesRes>,
+        ReadStorage<'a, Mesh>,
+        ReadStorage<'a, Material>,
+        WriteStorage<'a, ReloadMaterial>,
+    );
+
+    fn run(
+        &mut self,
+        (render_settings, entities, meshes, materials, mut reloads): Self::SystemData,
+    ) {
+        let should_reload = render_settings.reload_shaders;
+
+        if !should_reload {
+            return;
+        }
+
+        for (ent, _mesh, _mat) in (&entities, &meshes, &materials).join() {
+            reloads
+                .insert(ent, ReloadMaterial {})
+                .expect("Failed to insert");
+        }
+    }
 }

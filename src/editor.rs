@@ -25,11 +25,18 @@ fn build_tree<'a>(world: &World, ui: &imgui::Ui<'a>, ent: specs::Entity) -> Opti
     inspected
 }
 
-fn build_inspector<'a>(world: &World, ui: &imgui::Ui<'a>, ent: specs::Entity) {
-    use crate::math::Transform;
+fn build_inspector<'a>(world: &mut World, ui: &imgui::Ui<'a>, ent: specs::Entity) {
+    use crate::render::ReloadMaterial;
 
     ui.text(im_str!("{:?}", ent));
     ui.separator();
+    let pressed = ui.small_button(im_str!("reload material"));
+    if pressed {
+        world
+            .write_component::<ReloadMaterial>()
+            .insert(ent, ReloadMaterial {})
+            .expect("Failed to write!");
+    }
     /*
     let transforms = world.read_component::<Transform>();
     if let Some(tfm) = transforms.get(ent) {
