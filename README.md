@@ -1,4 +1,4 @@
-The beginnings of a vulkan renderer built on Rust and Vulkano.
+The beginnings of a vulkan renderer built with Rust and Ash.
 Currently supports limited metallic-roughness PBR as defined by gltf.
 
 Free flying camera controls:
@@ -7,8 +7,7 @@ Free flying camera controls:
 * ESC to pause/resume.
 
 Rendering controls:
-* O to switch between wireframe and opaque for models
-* P to render the bounding box of an object
+* R to reload all shaders
 
 Renders:
 Box
