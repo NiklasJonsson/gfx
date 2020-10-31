@@ -54,17 +54,20 @@ layout(set = 1, binding = 2) uniform sampler2D metallic_roughness_texture;
 layout(set = 1, binding = 3) uniform sampler2D normal_map;
 #endif
 
-vec3 fresnel(vec3 fresnel_0, float VdotH) {
-    vec3 base = vec3(1.0) - VdotH;
-    return fresnel_0 + (1.0 - fresnel_0) * pow(base, vec3(5.0));
+// Schlick approx. cos_angle is the angle between the normal and the light.
+vec3 fresnel(vec3 fresnel_0, float cos_angle) {
+    return fresnel_0 + (vec3(1.0) - fresnel_0) * pow(1.0 - cos_angle, 5.0);
 }
 
-// GGX / Trowbridge-Reitz
-float normal_distribution_function(float NdotH, float alpha_roughness) {
+// GGX / Trowbridge-Reitz.
+// cos_angle is cos of the angle between macro normal n and microfacet normal m (or h)
+// In real-time renderering, m is used for the general case and h for specular reflection
+float normal_distribution_function(float cos_angle, float alpha_roughness) {
     float a2 = pow(alpha_roughness, 2.0);
-    float bottom = M_PI * pow(1.0 + pow(NdotH, 2.0) * (a2 - 1.0), 2.0);
+    float top = clamp(sign(cos_angle), 0.0, 1.0) * a2;
+    float bottom = M_PI * pow(1.0 + pow(cos_angle, 2.0) * (a2 - 1.0), 2.0);
 
-    return a2 / bottom;
+    return top / bottom;
 }
 
 void main() {
@@ -80,15 +83,19 @@ void main() {
     normal = normalize(tbn * tex_normal);
 #endif
 
-    vec3 light_dir = normalize(lighting_data.light_pos.xyz - world_pos);
+    //vec3 light_dir = normalize(lighting_data.light_pos.xyz - world_pos);
+    vec3 light_dir = normalize(vec3(0.0, 10.0, 0.0) - world_pos);
     vec3 view_dir = normalize(lighting_data.view_pos.xyz - world_pos);
     vec3 bisect_light_view = normalize(view_dir + light_dir);
+    vec3 light_color = vec3(1.0);
 
-    // NdotL is frequently used to determine if light can directly hit this point
-    float NdotL = clamp(dot(normal, light_dir), 0.0, 1.0);
-    float NdotV = clamp(dot(normal, view_dir), 0.0, 1.0);
-    float NdotH = clamp(dot(normal, bisect_light_view), 0.0, 1.0);
-    float VdotH = clamp(dot(view_dir, bisect_light_view), 0.0, 1.0);
+    // n_dot_l is frequently used to determine if light can directly hit this point
+    float n_dot_l = clamp(dot(normal, light_dir), 0.0, 1.0);
+    float n_dot_v = clamp(dot(normal, view_dir), 0.0, 1.0);
+
+    float n_dot_h_unclamped = dot(normal, bisect_light_view);
+    float n_dot_h = clamp(n_dot_h_unclamped, 0.0, 1.0);
+    float h_dot_l = clamp(dot(bisect_light_view, light_dir), 0.0, 1.0);
 
     // Metallic-roughness/glTF PBR
     // Initial inputs come from textures and/or factors (uniforms)
@@ -101,13 +108,12 @@ void main() {
     // Explanations follow throughout the code
     // The choice of BRDF is not mandated by glTF
 
-    // TODO: Support textures for these
     vec3 base_color = material_data.base_color_factor.xyz;
     float metallic = material_data.metallic_factor;
     float roughness = material_data.roughness_factor;
 
     // For non-metals, we assume a F0 of 0.04. In reality it varies between 2-5% but we simplify
-    vec3 dielectric_specular = vec3(0.04);
+    float dielectric_specular = 0.04;
     vec3 black = vec3(0.0);
 
 #if HAS_BASE_COLOR_TEXTURE
@@ -129,7 +135,7 @@ void main() {
     // - diffuse_color.
     // The color of a material with a high metallic factor is black - a metal mostly reflects
     // and any tint is created with a specular reflection.
-    vec3 diffuse_color = mix(base_color * (1.0 - dielectric_specular.x), black, metallic);
+    vec3 diffuse_color = mix(base_color * (1.0 - dielectric_specular), black, metallic);
 
     // The fresnel effect is essentially larger viewing angle => larger specular reflection of light
     // fresnel_0 is the factor of the incoming light that is *reflected* at 0 degrees
@@ -137,24 +143,18 @@ void main() {
 
     // With this interpolation we say that metallic materials get their color from base_color,
     // used later as specular reflection! Whilst non-metals get almost no color.
-    vec3 fresnel_0 = mix(dielectric_specular, base_color, metallic);
+    vec3 fresnel_0 = mix(vec3(dielectric_specular), base_color, metallic);
 
     // Not to be confused with the color alpha/transparency
     float alpha_roughness = pow(roughness, 2.0);
 
     // Up until now, specific to gltf. From here on, wild west brdf
     // Define output as diffuse term + specular term
-    vec3 fresnel = NdotL > 0.0 ? fresnel(fresnel_0, VdotH) : black;
+    vec3 fresnel = n_dot_l > 0.0 ? fresnel(fresnel_0, h_dot_l) : black;
 
-    // diffuse term is the result of subsurface scattering, model as lambertian
-    // term modified by the amount of light refracted (later in mix())
-    vec3 diffuse = diffuse_color / M_PI;
-
-	// Diffuse and specular both depend on cos between the normal and light vectors.
-	// If the light is modeled as rays, the distance between the points where the light
-	// rays hit the surface decreases (=> light intensity increases) as the light vector
-	// approaches the normal.
-	diffuse *= NdotL;
+    // diffuse factor is the result of subsurface scattering, model as lambertian
+    // term modified by the amount of light refracted
+    vec3 f_diffuse = (1.0 - fresnel) * diffuse_color / M_PI;
 
     // specular term is microfacet based, assuming each micro-facet is fresnel mirror
     // *Very* unoptimized version: (F * G * D) / ( 4 * dot(n,l) * dot(n,v))
@@ -162,22 +162,24 @@ void main() {
     // the Smith height-corelated masking-shadowing function for G, we can rewrite it
     // (see Real-time rendering 4th ed. for details)
 
-    vec3 specular = vec3(0.0);
+    vec3 f_specular = vec3(0.0);
     // Only do this if the Light can hit the point
-    if (NdotL > 0.0) {
-        float divisor_0 = NdotV * sqrt(pow(alpha_roughness, 2.0) + pow(NdotL, 2.0) - pow(alpha_roughness * NdotL, 2.0));
-        float divisor_1 = NdotL * sqrt(pow(alpha_roughness, 2.0) + pow(NdotV, 2.0) - pow(alpha_roughness * NdotV, 2.0));
-        float OptTerm = 0.5/(divisor_0 + divisor_1);
-        vec3 D = vec3(normal_distribution_function(NdotH, alpha_roughness));
+    if (n_dot_l > 0.0) {
+        float a2 = pow(alpha_roughness, 2.0);
+        float divisor_0 = n_dot_v * sqrt(a2 + n_dot_l * (n_dot_l - a2 * n_dot_l));
+        float divisor_1 = n_dot_l * sqrt(a2 + n_dot_v * (n_dot_v - a2 * n_dot_v));
+        float Vis = 0.5/(divisor_0 + divisor_1);
+        vec3 D = vec3(normal_distribution_function(n_dot_h_unclamped, alpha_roughness));
 
-        specular = OptTerm * D;
+        f_specular = Vis * D * fresnel;
     }
 
-    vec3 color = mix(diffuse, specular, fresnel);
+	// Diffuse and specular both depend on cos between the normal and light vectors.
+	// If the light is modeled as rays, the distance between the points where the light
+	// rays hit the surface decreases (=> light intensity increases) as the light vector
+	// approaches the normal.
+    vec3 color = (f_diffuse + f_specular) * n_dot_l * light_color;
 
-    // TODO:
-    // - More variations on BRDF
-    // - lighting
-
+    color *= M_PI;
     out_color = vec4(color, 1.0);
 }
