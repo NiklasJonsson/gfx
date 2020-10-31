@@ -458,7 +458,7 @@ struct AssignReloadMaterials;
 
 impl<'a> System<'a> for AssignReloadMaterials {
     type SystemData = (
-        Read<'a, RenderSettings>,
+        Write<'a, RenderSettings>,
         Read<'a, EntitiesRes>,
         ReadStorage<'a, Mesh>,
         ReadStorage<'a, Material>,
@@ -467,7 +467,7 @@ impl<'a> System<'a> for AssignReloadMaterials {
 
     fn run(
         &mut self,
-        (render_settings, entities, meshes, materials, mut reloads): Self::SystemData,
+        (mut render_settings, entities, meshes, materials, mut reloads): Self::SystemData,
     ) {
         let should_reload = render_settings.reload_shaders;
 
@@ -480,5 +480,7 @@ impl<'a> System<'a> for AssignReloadMaterials {
                 .insert(ent, ReloadMaterial {})
                 .expect("Failed to insert");
         }
+
+        render_settings.reload_shaders = false;
     }
 }
