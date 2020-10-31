@@ -3,6 +3,8 @@ use specs::Component;
 
 use nalgebra_glm as glm;
 
+use thiserror::Error;
+
 use specs::prelude::*;
 use specs::storage::StorageEntry;
 
@@ -175,12 +177,20 @@ fn create_material_descriptor_set(
     }
 }
 
+#[derive(Debug, Error)]
+pub enum MaterialError {
+    #[error("Pipeline error: {0}")]
+    Pipeline(#[from] PipelineError),
+    #[error("GLSL compiler error: {0}")]
+    GlslCompiler(#[from] pipeline::CompilerError),
+}
+
 pub fn get_pipeline_for(
     renderer: &mut Renderer,
     world: &World,
     mesh: &Mesh,
     mat: &material::Material,
-) -> Result<Handle<GraphicsPipeline>, PipelineError> {
+) -> Result<Handle<GraphicsPipeline>, MaterialError> {
     let vbuf: &VertexBuffer = renderer
         .get_resource(&mesh.vertex_buffer)
         .expect("Invalid handle");
@@ -206,18 +216,15 @@ pub fn get_pipeline_for(
                 has_metallic_roughness_texture: has_mr,
                 has_normal_map: has_nm,
             };
-            let (vert, frag) = pipeline::pbr_gltf::compile(&*shader_compiler, &def)
-                .expect("Failed to compile shaders");
+            let (vert, frag) = pipeline::pbr_gltf::compile(&*shader_compiler, &def)?;
             let desc = GraphicsPipelineDescriptor::builder()
                 .vert(ShaderDescriptor::FromRawSpirv(vert.data()))
                 .frag(ShaderDescriptor::FromRawSpirv(frag.data()))
                 .vertex_format(vertex_format)
-                .build()
-                .expect("Failed to build graphics pipeline descriptor");
+                .build()?;
 
             renderer
-                .create_resource(desc)
-                .expect("Failed to create pipeline")
+                .create_resource(desc)?
         }
         m => todo!("No support for this material yet {:?}", m),
     };
@@ -267,8 +274,10 @@ fn create_renderables(renderer: &mut Renderer, world: &mut World, render_mode: R
                     if should_reload.contains(ent) {
                         log::trace!("Reloading shader for {:?}", ent);
                         // TODO: Destroy the previous pipeline
-                        entry.get_mut().gfx_pipeline = get_pipeline_for(renderer, world, mesh, mat)
-                            .expect("Failed to recreate");
+                        match get_pipeline_for(renderer, world, mesh, mat) {
+                            Ok(pipeline) => entry.get_mut().gfx_pipeline = pipeline,
+                            Err(e) => log::error!("Failed to compile pipeline: {}", e)
+                        }
                     }
                 }
             }

@@ -14,4 +14,6 @@ pub enum PipelineError {
     MissingArg(&'static str),
     #[error("Spirv reflection failed: {0}")]
     Reflection(#[from] SpirvError),
+    #[error("Failed to build graphics pipeline: {0}")]
+    GraphicsPipelineBuilder(String),
 }

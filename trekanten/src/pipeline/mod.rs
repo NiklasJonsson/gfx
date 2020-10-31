@@ -410,6 +410,7 @@ pub enum ShaderDescriptor {
 
 #[derive(Clone, Debug, PartialEq, Eq, Hash, Builder)]
 #[builder(pattern = "owned")]
+#[builder(build_fn(name = "generated_build"))]
 pub struct GraphicsPipelineDescriptor {
     pub vert: ShaderDescriptor,
     pub frag: ShaderDescriptor,
@@ -422,6 +423,12 @@ pub struct GraphicsPipelineDescriptor {
     pub blend_state: BlendState,
     #[builder(default)]
     pub depth_testing: DepthTest,
+}
+
+impl GraphicsPipelineDescriptorBuilder {
+    pub fn build(self) -> Result<GraphicsPipelineDescriptor, PipelineError> {
+        self.generated_build().map_err(PipelineError::GraphicsPipelineBuilder)
+    }
 }
 
 impl GraphicsPipelineDescriptor {
