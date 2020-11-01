@@ -2,6 +2,9 @@ use specs::prelude::*;
 
 use crate::transform_graph;
 use imgui::*;
+use crate::math::Transform;
+
+use nalgebra_glm as glm;
 
 fn build_tree<'a>(world: &World, ui: &imgui::Ui<'a>, ent: specs::Entity) -> Option<specs::Entity> {
     let mut inspected = None;
@@ -37,12 +40,19 @@ fn build_inspector<'a>(world: &mut World, ui: &imgui::Ui<'a>, ent: specs::Entity
             .insert(ent, ReloadMaterial {})
             .expect("Failed to write!");
     }
-    /*
+    ui.separator();
     let transforms = world.read_component::<Transform>();
-    if let Some(tfm) = transforms.get(ent) {
-        ui.text(im_str!("{:#?}", tfm.));
+    let tfm = transforms.get(ent);
+    let extra = if tfm.is_none() { " (None)" } else { "" };
+    if CollapsingHeader::new(&im_str!("Transform{}", extra)).build(ui) {
+        if let Some(tfm) = tfm {
+            let m: glm::Mat4 = (*tfm).into();
+            let mut pos = [m.column(3)[0], m.column(3)[1], m.column(3)[2]];
+            InputFloat3::new(ui, im_str!("Position"), &mut pos)
+            .read_only(true)
+            .build();
+        }
     }
-    */
 }
 
 struct SelectedEntity {
