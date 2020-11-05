@@ -1,8 +1,6 @@
 use specs::world::EntitiesRes;
 use specs::Component;
 
-use nalgebra_glm as glm;
-
 use thiserror::Error;
 
 use specs::prelude::*;
@@ -28,7 +26,7 @@ pub mod ui;
 pub mod uniform;
 
 use crate::camera::*;
-use crate::math::{ModelMatrix, Position};
+use crate::math::{Mat4, ModelMatrix, Transform, Vec3};
 use material::Material;
 
 use crate::settings::{RenderMode, RenderSettings};
@@ -45,17 +43,18 @@ impl ActiveCamera {
         ActiveCamera(Some(entity))
     }
 
-    pub fn camera_pos(world: &World) -> Position {
+    pub fn camera_pos(world: &World) -> Vec3 {
         let camera_entity = world
             .read_resource::<ActiveCamera>()
             .0
             .expect("No active camera!");
 
-        let positions = world.read_storage::<Position>();
+        let transforms = world.read_storage::<Transform>();
 
-        *positions
+        transforms
             .get(camera_entity)
             .expect("Could not get position component for camera")
+            .position
     }
 }
 
@@ -67,7 +66,7 @@ pub struct FrameData {
     pub dummy_pipeline: Handle<GraphicsPipeline>,
 }
 
-fn get_view_data(world: &World) -> (glm::Mat4, Position) {
+fn get_view_data(world: &World) -> (Mat4, Vec3) {
     let cam_pos = ActiveCamera::camera_pos(world);
 
     let camera_entity = world
@@ -81,16 +80,18 @@ fn get_view_data(world: &World) -> (glm::Mat4, Position) {
 
     // TODO: Camera system should write to ViewMatrixResource at the end of system
     // and we should read it here.
-    let view = FreeFlyCameraController::get_view_matrix_from(&cam_pos, cam_rotation_state);
+    let view = FreeFlyCameraController::get_view_matrix_from(cam_pos, cam_rotation_state);
     log::trace!("View matrix: {:#?}", view);
 
     (view, cam_pos)
 }
 
-fn get_proj_matrix(aspect_ratio: f32) -> glm::Mat4 {
-    let mut proj = glm::perspective(aspect_ratio, std::f32::consts::FRAC_PI_4, 0.05, 1000000.0);
+fn get_proj_matrix(aspect_ratio: f32) -> Mat4 {
+    let mut proj =
+        Mat4::perspective_rh_zo(std::f32::consts::FRAC_PI_4, aspect_ratio, 0.05, 1000000.0);
 
-    // glm::perspective is based on opengl left-handed coordinate system, vulkan has the y-axis
+    // glm::perspective is based on opengl left-handed coordinate system,
+    // vulkan has the y-axis
     // inverted (right-handed upside-down).
     proj[(1, 1)] *= -1.0;
 
@@ -223,8 +224,7 @@ pub fn get_pipeline_for(
                 .vertex_format(vertex_format)
                 .build()?;
 
-            renderer
-                .create_resource(desc)?
+            renderer.create_resource(desc)?
         }
         m => todo!("No support for this material yet {:?}", m),
     };
@@ -276,7 +276,7 @@ fn create_renderables(renderer: &mut Renderer, world: &mut World, render_mode: R
                         // TODO: Destroy the previous pipeline
                         match get_pipeline_for(renderer, world, mesh, mat) {
                             Ok(pipeline) => entry.get_mut().gfx_pipeline = pipeline,
-                            Err(e) => log::error!("Failed to compile pipeline: {}", e)
+                            Err(e) => log::error!("Failed to compile pipeline: {}", e),
                         }
                     }
                 }
@@ -299,8 +299,8 @@ fn draw_entities<'a>(world: &World, cmd_buf: &mut command::CommandBufferBuilder<
 
     for (mesh, renderable, mtx) in (&meshes, &renderables, &model_matrices).join() {
         let trn = uniform::Model {
-            model: mtx.0.into(),
-            model_it: glm::inverse_transpose(mtx.0).into(),
+            model: (*mtx).into(),
+            model_it: mtx.0.inverted().transposed().into_col_arrays(),
         };
 
         cmd_buf
@@ -341,11 +341,11 @@ pub fn draw_frame(world: &mut World, ui: &mut ui::UIContext, renderer: &mut Rend
     let (view_matrix, cam_pos) = get_view_data(world);
     let lighting_data = uniform::LightingData {
         light_pos: [0.0f32, 500.0f32, 0.0f32, 0.0f32],
-        view_pos: [cam_pos.x(), cam_pos.y(), cam_pos.z(), 0.0f32],
+        view_pos: [cam_pos.x, cam_pos.y, cam_pos.z, 0.0f32],
     };
     let transforms = uniform::Transforms {
-        view: view_matrix.into(),
-        proj: get_proj_matrix(aspect_ratio).into(),
+        view: view_matrix.into_col_arrays(),
+        proj: get_proj_matrix(aspect_ratio).into_col_arrays(),
     };
 
     let ui_draw_commands = ui.build_ui(world, &mut frame);
@@ -448,9 +448,8 @@ pub fn register_components(world: &mut World) {
     world.register::<RenderableMaterial>();
     world.register::<Mesh>();
     world.register::<Material>();
-    world.register::<crate::transform_graph::RenderGraphNode>();
-    world.register::<crate::transform_graph::RenderGraphRoot>();
-    world.register::<crate::transform_graph::RenderGraphChild>();
+    world.register::<crate::graph::Children>();
+    world.register::<crate::graph::Parent>();
     world.register::<crate::camera::Camera>();
 }
 

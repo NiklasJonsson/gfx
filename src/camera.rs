@@ -6,11 +6,9 @@ use crate::ecs;
 use crate::io::input::{
     DeviceAxis, Input, InputContext, InputContextError, MappedInput, RangeId, Sensitivity, StateId,
 };
-use crate::math::{Position, Transform};
+use crate::math::{Mat4, Transform, Vec3, Vec4};
 use crate::time::DeltaTime;
 
-use glm::Vec3;
-use nalgebra_glm as glm;
 use winit::event::VirtualKeyCode;
 
 use specs::prelude::*;
@@ -107,14 +105,15 @@ pub struct FreeFlyCameraController;
 impl FreeFlyCameraController {
     pub fn get_orientation_from(rotation_state: &CameraRotationState) -> CameraOrientation {
         // Disallow roll => y will only be a function of pitch
-        let view_direction: glm::Vec3 = glm::normalize(&glm::vec3(
+        let view_direction = Vec3::new(
             rotation_state.yaw.cos() * rotation_state.pitch.cos(),
             rotation_state.pitch.sin(),
             rotation_state.yaw.sin() * rotation_state.pitch.cos(),
-        ));
+        )
+        .normalized();
 
         // This means Q/E will always be up/down in WORLD coordinates
-        let up = glm::vec3(0.0, 1.0, 0.0);
+        let up = Vec3::new(0.0, 1.0, 0.0);
         // TODO: Move the code below to its own struct
         /* Re-enable if we want Q/E to align to upwards/downwards from
          * camera view direction. This needs to be clamped when looking
@@ -127,7 +126,7 @@ impl FreeFlyCameraController {
         CameraOrientation { view_direction, up }
     }
 
-    pub fn get_view_matrix_from(pos: &Position, rot_state: &CameraRotationState) -> glm::Mat4 {
+    pub fn get_view_matrix_from(pos: Vec3, rot_state: &CameraRotationState) -> Mat4 {
         let ori = FreeFlyCameraController::get_orientation_from(rot_state);
         let view_dir = ori.view_direction;
         let up = ori.up;
@@ -140,10 +139,10 @@ impl FreeFlyCameraController {
         // goes from the camera towards the origin. Right and up is in relation
         // to the view direction.
         // We need a right vector
-        let cam_right = glm::normalize(&glm::cross::<f32, glm::U3>(&view_dir, &up));
+        let cam_right = view_dir.cross(up).normalized();
 
         // Create a new up vector for orthonormal basis
-        let cam_up = glm::normalize(&glm::cross::<f32, glm::U3>(&cam_right, &view_dir));
+        let cam_up = cam_right.cross(view_dir).normalized();
         // cam_transform = T * R, view = inverse(cam_transform) = inv(R) * inv(T)
 
         /* We could also use the following code:
@@ -160,9 +159,9 @@ impl FreeFlyCameraController {
         */
 
         // This is the code from the opengl tutorial
-        let translation_inv = glm::translate(&glm::identity(), &-(pos.0));
+        let translation_inv = Mat4::translation_3d(-pos);
 
-        let rotation_inv = glm::mat4(
+        let rotation_inv = Mat4::new(
             cam_right.x,
             cam_right.y,
             cam_right.z,
@@ -187,18 +186,15 @@ impl FreeFlyCameraController {
     pub fn set_camera_state(w: &mut World, e: Entity, t: &Transform) {
         log::debug!("Set camera state from transform: {:?}", t);
         assert!(ecs::entity_has_component::<Camera>(w, e));
-        let mat: glm::Mat4 = (*t).into();
-        let pos: Position = mat.column(3).xyz().into();
+        let mat: Mat4 = (*t).into();
         // TODO: Move this to gltf-specific code. Take pos + view dir + up as args.
         // camera is looking in negative z according to the spec (gltf)
-        let view_dir: glm::Vec3 = (mat * glm::vec4(0.0, 0.0, -1.0, 0.0)).xyz().normalize();
+        let view_dir: Vec3 = (mat * Vec4::new(0.0, 0.0, -1.0, 0.0)).xyz().normalized();
 
-        log::debug!("pos: {:?}", pos);
-
-        let mut positions = w.write_storage::<Position>();
-        positions
-            .insert(e, pos)
-            .expect("Could not set position for camera!");
+        let mut transforms = w.write_storage::<Transform>();
+        transforms
+            .insert(e, *t)
+            .expect("Could not set transform for camera!");
 
         // These are derived with the same formulas used in get_orientation_from() above
         let pitch = view_dir.y.asin();
@@ -241,16 +237,16 @@ fn get_input_context() -> Result<InputContext, InputContextError> {
 impl<'a> System<'a> for FreeFlyCameraController {
     type SystemData = (
         WriteStorage<'a, MappedInput>,
-        WriteStorage<'a, Position>,
+        WriteStorage<'a, Transform>,
         WriteStorage<'a, CameraRotationState>,
         Read<'a, DeltaTime>,
     );
 
     fn run(&mut self, data: Self::SystemData) {
-        let (mut mapped_inputs, mut positions, mut cam_rot_state, delta_time) = data;
+        let (mut mapped_inputs, mut transforms, mut cam_rot_state, delta_time) = data;
 
-        for (mi, pos, rotation_state) in
-            (&mut mapped_inputs, &mut positions, &mut cam_rot_state).join()
+        for (mi, transform, rotation_state) in
+            (&mut mapped_inputs, &mut transforms, &mut cam_rot_state).join()
         {
             for input in mi.iter() {
                 match input {
@@ -275,19 +271,13 @@ impl<'a> System<'a> for FreeFlyCameraController {
                             * match (*id).into() {
                                 Forward => view_direction,
                                 Backward => -view_direction,
-                                Left => glm::normalize(&glm::cross::<f32, glm::U3>(
-                                    &up,
-                                    &view_direction,
-                                )),
-                                Right => -glm::normalize(&glm::cross::<f32, glm::U3>(
-                                    &up,
-                                    &view_direction,
-                                )),
+                                Left => up.cross(view_direction).normalized(),
+                                Right => -up.cross(view_direction).normalized(),
                                 Up => up,
                                 Down => -up,
                             };
 
-                        *pos += &dir;
+                        transform.position += dir;
                     }
                     _ => unreachable!("No actions for FreeFlyCamera!"),
                 }
@@ -297,7 +287,8 @@ impl<'a> System<'a> for FreeFlyCameraController {
 
     fn setup(&mut self, world: &mut World) {
         Self::SystemData::setup(world);
-        let start_pos = Position::new(2.0, 2.0, 2.0);
+        let mut t = Transform::default();
+        t.position = Vec3::new(2.0, 2.0, 2.0);
         // TODO: Compute from bounding box
         let rot_state = CameraRotationState {
             yaw: 4.0,
@@ -308,7 +299,7 @@ impl<'a> System<'a> for FreeFlyCameraController {
 
         world
             .create_entity()
-            .with(start_pos)
+            .with(t)
             .with(input_context)
             // Camera marker component means for the ActiveCamera resource
             .with(Camera)

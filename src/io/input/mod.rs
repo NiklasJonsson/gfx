@@ -97,6 +97,10 @@ impl MappedInput {
         self.contents.iter()
     }
 
+    pub fn len(&self) -> usize {
+        self.contents.len()
+    }
+
     pub fn drain(&mut self) -> Vec<Input> {
         std::mem::replace(&mut self.contents, Vec::new())
     }
@@ -395,7 +399,12 @@ mod tests {
         assert_eq!(
             mapped_input
                 .iter()
-                .filter(|&&inp| inp == i)
+                .filter(|&inp| match (inp, &i) {
+                    (Input::Action(aid0), Input::Action(aid1)) => *aid0 == *aid1,
+                    (Input::State(sid0), Input::State(sid1)) => *sid0 == *sid1,
+                    (Input::Range(rid0, _), Input::Range(rid1, _)) => *rid0 == *rid1,
+                    (_, _) => false,
+                })
                 .collect::<Vec<&Input>>()
                 .len(),
             count
@@ -434,7 +443,7 @@ mod tests {
             .expect("Fail")
             .with_state(KeyCode::X, TestState::State1)
             .expect("Fail")
-            .with_priority(InputContextPriority::First)
+            .priority(InputContextPriority::First)
             .build();
 
         let ctx2 = InputContext::builder("Ctx2")
@@ -442,7 +451,7 @@ mod tests {
             .expect("Fail")
             .with_state(KeyCode::X, TestState::State2)
             .expect("Fail")
-            .with_priority(InputContextPriority::Ui)
+            .priority(InputContextPriority::Ui)
             .build();
 
         let contexts = vec![ctx0, ctx1, ctx2];
@@ -451,8 +460,8 @@ mod tests {
         let mut dispatcher = register_systems(DispatcherBuilder::new()).build();
 
         let external_inputs = vec![
-            ExternalInput::KeyPress(KeyCode::O),
-            ExternalInput::KeyPress(KeyCode::X),
+            ExternalInput::Press(Button::from(KeyCode::O)),
+            ExternalInput::Press(Button::from(KeyCode::X)),
         ];
 
         dispatcher.setup(&mut world);

@@ -54,16 +54,6 @@ pub mod pbr_gltf {
                 .chain(once(self.has_normal_map))
         }
 
-        fn iter_mut(&mut self) -> impl Iterator<Item = &mut bool> {
-            use std::iter::once;
-            once(&mut self.has_tex_coords)
-                .chain(once(&mut self.has_vertex_colors))
-                .chain(once(&mut self.has_tangents))
-                .chain(once(&mut self.has_base_color_texture))
-                .chain(once(&mut self.has_metallic_roughness_texture))
-                .chain(once(&mut self.has_normal_map))
-        }
-
         fn defines(&self) -> Defines {
             let mut defines = Defines::default();
 

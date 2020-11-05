@@ -427,7 +427,8 @@ pub struct GraphicsPipelineDescriptor {
 
 impl GraphicsPipelineDescriptorBuilder {
     pub fn build(self) -> Result<GraphicsPipelineDescriptor, PipelineError> {
-        self.generated_build().map_err(PipelineError::GraphicsPipelineBuilder)
+        self.generated_build()
+            .map_err(PipelineError::GraphicsPipelineBuilder)
     }
 }
 

@@ -18,7 +18,6 @@ where
     ent
 }
 
-// TODO: Move this
 pub fn entity_has_component<C>(w: &World, e: Entity) -> bool
 where
     C: specs::Component,

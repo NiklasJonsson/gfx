@@ -1,98 +1,60 @@
 use super::*;
-use nalgebra_glm as glm;
-use nalgebra_glm::{Mat4, Vec3};
 use specs::Component;
-use std::ops::{AddAssign, Mul};
 
-// TODO: Auto derive inner type traits
-#[derive(Debug, Component, Clone, Copy)]
-#[storage(VecStorage)]
-pub struct Position(pub Vec3);
+pub type Vec3 = vek::Vec3<f32>;
+pub type Vec4 = vek::Vec4<f32>;
+pub type Mat4 = vek::Mat4<f32>;
+pub type Quat = vek::Quaternion<f32>;
 
-impl Position {
-    pub fn x(&self) -> f32 {
-        self.0.x
-    }
-    pub fn y(&self) -> f32 {
-        self.0.y
-    }
-    pub fn z(&self) -> f32 {
-        self.0.z
-    }
-}
-
-impl Position {
-    pub fn new(x: f32, y: f32, z: f32) -> Self {
-        Self(glm::vec3(x, y, z))
-    }
-
-    pub fn max() -> Self {
-        Self::new(f32::MAX, f32::MAX, f32::MAX)
-    }
-
-    pub fn min() -> Self {
-        Self::new(f32::MIN, f32::MIN, f32::MIN)
-    }
-}
-
-impl From<[f32; 3]> for Position {
-    fn from(x: [f32; 3]) -> Self {
-        Position::new(x[0], x[1], x[2])
-    }
-}
-
-impl From<Vec3> for Position {
-    fn from(src: Vec3) -> Self {
-        Position::new(src.x, src.y, src.z)
-    }
-}
-
-impl AddAssign<&Vec3> for Position {
-    fn add_assign(&mut self, other: &Vec3) {
-        self.0 += other;
-    }
-}
-
-impl std::fmt::Display for Position {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        writeln!(f, "({:.2}, {:.2}, {:.2})", self.x(), self.y(), self.z())
-    }
-}
-
-impl Mul<Position> for ModelMatrix {
-    type Output = Position;
-    fn mul(self, pos: Position) -> Position {
-        let v4 = glm::vec4(pos.x(), pos.y(), pos.z(), 1.0);
-        let r = self.0 * v4;
-        Position(glm::vec4_to_vec3(&r))
-    }
-}
+pub use vek::mat4;
+pub use vek::vec2;
+pub use vek::vec3;
+pub use vek::vec4;
 
 #[derive(Debug, Component, Copy, Clone)]
 #[storage(DenseVecStorage)]
-pub struct Transform(Mat4);
-
-impl From<[[f32; 4]; 4]> for Transform {
-    fn from(x: [[f32; 4]; 4]) -> Self {
-        Transform(x.into())
-    }
-}
-
-impl From<Mat4> for Transform {
-    fn from(x: Mat4) -> Self {
-        Transform(x)
-    }
-}
-
-impl Into<Mat4> for Transform {
-    fn into(self) -> Mat4 {
-        self.0
-    }
+pub struct Transform {
+    pub position: Vec3,
+    pub rotation: Quat,
+    pub scale: f32,
 }
 
 impl Transform {
-    pub fn identity() -> Transform {
-        Self(glm::identity::<f32, glm::U4>())
+    pub fn identity() -> Self {
+        Self {
+            position: Vec3::new(0.0, 0.0, 0.0),
+            rotation: Quat::from_xyzw(0.0, 0.0, 0.0, 1.0),
+            scale: 1.0,
+        }
+    }
+}
+
+impl Default for Transform {
+    fn default() -> Self {
+        Self::identity()
+    }
+}
+
+impl From<Transform> for Mat4 {
+    fn from(t: Transform) -> Self {
+        Self::translation_3d(t.position) * (Self::from(t.rotation) * Self::scaling_3d(t.scale))
+    }
+}
+
+impl std::ops::Mul for Transform {
+    type Output = Self;
+    fn mul(self, rhs: Self) -> Self::Output {
+        Self {
+            position: rhs.position + (rhs.rotation * (rhs.scale * self.position)),
+            rotation: rhs.rotation * self.rotation,
+            scale: rhs.scale * self.scale,
+        }
+    }
+}
+
+impl std::ops::MulAssign for Transform {
+    fn mul_assign(&mut self, rhs: Self) {
+        *self = *self * rhs;
     }
 }
 
@@ -101,15 +63,9 @@ impl Transform {
 #[repr(transparent)]
 pub struct ModelMatrix(pub Mat4);
 
-impl From<[[f32; 4]; 4]> for ModelMatrix {
-    fn from(x: [[f32; 4]; 4]) -> Self {
-        Self(x.into())
-    }
-}
-
-impl Into<[[f32; 4]; 4]> for ModelMatrix {
-    fn into(self) -> [[f32; 4]; 4] {
-        self.0.into()
+impl From<ModelMatrix> for [[f32; 4]; 4] {
+    fn from(m: ModelMatrix) -> Self {
+        m.0.into_col_arrays()
     }
 }
 
@@ -127,7 +83,7 @@ impl Into<Mat4> for ModelMatrix {
 
 impl ModelMatrix {
     pub fn identity() -> ModelMatrix {
-        Self(glm::identity::<f32, glm::U4>())
+        Self(Mat4::identity())
     }
 }
 
@@ -137,65 +93,15 @@ impl std::fmt::Display for ModelMatrix {
     }
 }
 
-/*
-pub fn to_vertices_and_indices(&self) -> (VertexBuf, IndexData) {
-    assert!(self.min.iter().all(|x| x != std::f32::MAX));
-    assert!(self.max.iter().all(|x| x != std::f32::MIN));
-
-    let BoundingBox { min, max } = self;
-
-    let mut vbuf: Vec<VertexPosOnly> = Vec::with_capacity(8);
-    // Face 1
-    vbuf.push(vertex::pos_only(min.x(), min.y(), min.z()));
-    vbuf.push(vertex::pos_only(max.x(), min.y(), min.z()));
-    vbuf.push(vertex::pos_only(max.x(), max.y(), min.z()));
-    vbuf.push(vertex::pos_only(min.x(), max.y(), min.z()));
-
-    // Face 2
-    vbuf.push(vertex::pos_only(min.x(), min.y(), max.z()));
-    vbuf.push(vertex::pos_only(max.x(), min.y(), max.z()));
-    vbuf.push(vertex::pos_only(max.x(), max.y(), max.z()));
-    vbuf.push(vertex::pos_only(min.x(), max.y(), max.z()));
-
-    let vbuf = VertexBuf::PosOnly(vbuf);
-
-    // 12 lines make a box, each has two vertices
-    let mut ibuf: Vec<u32> = Vec::with_capacity(24);
-    // Face 1
-    ibuf.push(0);
-    ibuf.push(1);
-    ibuf.push(1);
-    ibuf.push(2);
-    ibuf.push(2);
-    ibuf.push(3);
-    ibuf.push(3);
-    ibuf.push(0);
-
-    // One side
-    ibuf.push(0);
-    ibuf.push(4);
-
-    // Face 2
-    ibuf.push(4);
-    ibuf.push(5);
-    ibuf.push(5);
-    ibuf.push(6);
-    ibuf.push(6);
-    ibuf.push(7);
-    ibuf.push(7);
-    ibuf.push(4);
-
-    // Rest of the sides
-    ibuf.push(7);
-    ibuf.push(3);
-    ibuf.push(6);
-    ibuf.push(2);
-    ibuf.push(5);
-    ibuf.push(1);
-    assert_eq!(ibuf.len(), 24);
-
-    let ibuf = IndexData(ibuf);
-
-    (vbuf, ibuf)
+#[derive(Debug, Component)]
+pub struct BoundingBox {
+    pub min: Vec3,
+    pub max: Vec3,
 }
-*/
+
+impl BoundingBox {
+    pub fn combine(&mut self, other: &Self) {
+        self.min = Vec3::partial_min(self.min, other.min);
+        self.max = Vec3::partial_max(self.max, other.max);
+    }
+}

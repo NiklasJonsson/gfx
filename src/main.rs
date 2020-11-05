@@ -4,16 +4,15 @@ use std::sync::Arc;
 mod arg_parse;
 mod asset;
 mod camera;
-mod common;
 mod ecs;
 mod editor;
 mod game_state;
+mod graph;
 mod io;
 mod math;
 mod render;
 mod settings;
 mod time;
-mod transform_graph;
 
 use arg_parse::Args;
 use time::DeltaTime;
@@ -80,8 +79,8 @@ impl App {
         let engine = engine_builder
             .with_barrier()
             .with(
-                transform_graph::TransformPropagation,
-                transform_graph::TRANSFORM_PROPAGATION_SYSTEM_ID,
+                graph::TransformPropagation,
+                graph::TRANSFORM_PROPAGATION_SYSTEM_ID,
                 &[],
             )
             /* TODO: TREKANTEN

@@ -1,4 +1,3 @@
-use crate::transform_graph;
 use specs::Component;
 
 use specs::prelude::*;
@@ -6,12 +5,6 @@ use specs::world::EntitiesRes;
 use specs::{Entity, World};
 use std::path::{Path, PathBuf};
 
-use super::LoadedAsset;
-
-use crate::math::Transform;
-use crate::render::material::Material;
-use crate::render::uniform::PBRMaterialData;
-use crate::render::Mesh;
 use trekanten::mesh::BufferMutability;
 use trekanten::mesh::{IndexBuffer, IndexBufferDescriptor, VertexBuffer, VertexBufferDescriptor};
 use trekanten::resource::ResourceManager;
@@ -21,7 +14,14 @@ use trekanten::util;
 use trekanten::vertex::VertexFormat;
 use trekanten::BufferHandle;
 
-use nalgebra_glm as glm;
+use super::LoadedAsset;
+
+use crate::graph;
+use crate::math::*;
+use crate::render::material::Material;
+use crate::render::uniform::PBRMaterialData;
+use crate::render::Mesh;
+
 // Crate gltf
 #[derive(Debug)]
 struct GltfVertexBuffer {
@@ -337,85 +337,47 @@ struct AssetGraphResult {
     camera: Option<Entity>,
 }
 
-fn build_asset_graph_common<'a>(ctx: &mut RecGltfCtx, src: &gltf::Node<'a>) -> AssetGraphResult {
-    let node = ctx
-        .world
-        .create_entity()
-        .with(Transform::from(src.transform().matrix()))
-        .build();
+fn get_transform(src: gltf::scene::Transform) -> Transform {
+    let (pos, rot, scale) = src.decomposed();
+    let mut t = Transform::identity();
+    t.position = Vec3::from(pos);
+    t.rotation = Quat::from_xyzw(rot[0], rot[1], rot[2], rot[3]).normalized();
+    if !scale.iter().all(|x| *x == scale[0]) {
+        log::warn!("Non-uniform scaling in asset: {:?}", scale);
+        log::warn!("Using only {}", scale[0]);
+    }
+    t.scale = scale[0];
 
-    let mut children = src
-        .mesh()
-        .map(|mesh| {
-            mesh.primitives()
-                .map(|primitive| {
-                    let gltf_model = load_primitive(ctx, &primitive);
-                    ctx.world
-                        .create_entity()
-                        .with(gltf_model)
-                        .with(transform_graph::leaf(node))
-                        .build()
-                })
-                .collect::<Vec<_>>()
-        })
-        .unwrap_or_else(Vec::new);
+    t
+}
 
+fn load_node_rec(ctx: &mut RecGltfCtx, src: &gltf::Node) -> AssetGraphResult {
+    let tfm = get_transform(src.transform());
+
+    let node = ctx.world.create_entity().with(tfm).build();
+
+    if let Some(mesh) = src.mesh() {
+        for primitive in mesh.primitives() {
+            let gltf_model = load_primitive(ctx, &primitive);
+            let child = ctx.world.create_entity().with(gltf_model).build();
+
+            graph::add_edge(ctx.world, node, child);
+        }
+    }
+
+    let mut camera = src.camera().map(|_| node);
     // For each child *node*, we want its entity and if it has a camera
     // attached to it.
-    let (mut nodes, cameras): (Vec<_>, Vec<Option<_>>) = src
-        .children()
-        .map(|child| {
-            let AssetGraphResult { node, camera } = build_asset_graph_rec(ctx, &child, node);
-            (node, camera)
-        })
-        .unzip();
-
-    children.append(&mut nodes);
-
-    // Use this nodes camera if it has one.
-    let this_node_cam = src.camera().map(|_| node);
-    // Folding with or ensures we will get exactly one camera index. This
-    // currently prefers the current node camera if there are several, but we don't expect
-    // more than 1 camera per scene.
-    let camera: Option<Entity> = cameras.iter().fold(this_node_cam, |acc, &x| acc.or(x));
-
-    let mut nodes = ctx
-        .world
-        .write_storage::<transform_graph::RenderGraphNode>();
-    nodes
-        .insert(node, transform_graph::node(children))
-        .expect("Could not insert render graph node!");
+    for gltf_child in src.children() {
+        let AssetGraphResult {
+            node: child,
+            camera: child_camera,
+        } = load_node_rec(ctx, &gltf_child);
+        graph::add_edge(ctx.world, node, child);
+        camera = camera.or(child_camera);
+    }
 
     AssetGraphResult { node, camera }
-}
-
-fn build_asset_graph_rec<'a>(
-    ctx: &mut RecGltfCtx,
-    src: &gltf::Node<'a>,
-    parent: Entity,
-) -> AssetGraphResult {
-    let result = build_asset_graph_common(ctx, src);
-
-    let mut nodes = ctx
-        .world
-        .write_storage::<transform_graph::RenderGraphChild>();
-    nodes
-        .insert(result.node, transform_graph::child(parent))
-        .expect("Could not insert render graph node!");
-    result
-}
-
-fn build_asset_graph(ctx: &mut RecGltfCtx, src_root: &gltf::Node) -> AssetGraphResult {
-    let result = build_asset_graph_common(ctx, src_root);
-
-    let mut roots = ctx
-        .world
-        .write_storage::<transform_graph::RenderGraphRoot>();
-    roots
-        .insert(result.node, transform_graph::root())
-        .expect("Could not insert render graph root!");
-
-    result
 }
 
 fn get_cam_transform(
@@ -435,23 +397,22 @@ fn get_cam_transform(
         if let Some(cam) = camera_ent {
             log::info!("Found camera in scene graph.");
             log::info!("Concatenating transforms.");
-            let path = transform_graph::root_to_node_path(world, cam);
-            let mut transform: glm::Mat4 = glm::identity::<f32, glm::U4>();
+            let path = graph::root_to_node_path(world, cam);
+            let mut transform = Transform::identity();
             for ent in path {
                 let transforms = world.read_storage::<Transform>();
                 if let Some(t) = transforms.get(ent) {
-                    let t: glm::Mat4 = (*t).into();
-                    transform *= t;
+                    transform *= *t;
                 }
             }
-            cam_transform = Some(transform.into());
+            cam_transform = Some(transform);
         } else {
             log::info!("Did not find camera in scene graph");
             log::info!("Scanning the nodes for one with a camera");
             for node in gltf_doc.nodes() {
                 if node.camera().is_some() {
                     log::info!("Found transform for camera!");
-                    cam_transform = Some(node.transform().matrix().into());
+                    cam_transform = Some(get_transform(node.transform()));
                 }
             }
         }
@@ -640,7 +601,7 @@ pub fn load_asset(
         log::trace!("Root node {}", node.name().unwrap_or("node_no_name"));
         log::trace!("# children {}", node.children().len());
 
-        let AssetGraphResult { node, camera } = build_asset_graph(&mut rec_ctx, &node);
+        let AssetGraphResult { node, camera } = load_node_rec(&mut rec_ctx, &node);
         roots.push(node);
         camera_ent = camera;
     }

@@ -1,79 +1,41 @@
-use nalgebra_glm as glm;
-use nalgebra_glm::{Mat4, U4};
 use specs::prelude::*;
 use specs::Component;
-use specs_hierarchy::Parent as HParent;
 
 use std::collections::VecDeque;
 
-use specs::storage::StorageEntry;
+use crate::math::{Mat4, ModelMatrix, Transform};
 
-use crate::math::{ModelMatrix, Transform};
-
-/// Components for defining a node in a render graph
-/// Useful when representing 3d models comprised of
-/// several Mesh where we might have
-/// transforms on several levels that should be concatenated
-
-/// A child always has a parent. A root node will not have this component
-#[derive(Debug, Clone, Eq, Ord, PartialEq, PartialOrd)]
-pub struct RenderGraphChild {
+#[derive(Debug, Clone, Eq, Ord, PartialEq, PartialOrd, Component)]
+#[storage(DenseVecStorage)]
+pub struct Parent {
     pub parent: Entity,
 }
 
-impl Component for RenderGraphChild {
-    type Storage = FlaggedStorage<Self, DenseVecStorage<Self>>;
-}
-
-impl HParent for RenderGraphChild {
-    fn parent_entity(&self) -> Entity {
-        self.parent
-    }
-}
-
-/// A generic node, used by either roots or nodes that have children
-/// A leaf node will not have this component
 #[derive(Debug, Clone, Eq, Ord, PartialEq, PartialOrd, Component)]
 #[storage(DenseVecStorage)]
-pub struct RenderGraphNode {
+pub struct Children {
     pub children: Vec<Entity>,
 }
 
-/// Marker node for graph roots
-#[derive(Debug, Default, Clone, Eq, Ord, PartialEq, PartialOrd, Component)]
-#[storage(NullStorage)]
-pub struct RenderGraphRoot {}
-
-pub fn leaf(parent: Entity) -> RenderGraphChild {
-    RenderGraphChild { parent }
+impl Children {
+    pub fn iter(&self) -> impl Iterator<Item = &Entity> {
+        self.children.iter()
+    }
 }
 
-pub fn child(parent: Entity) -> RenderGraphChild {
-    RenderGraphChild { parent }
-}
+pub fn add_edge(world: &mut World, parent: Entity, child: Entity) {
+    let mut children_storage = world.write_storage::<Children>();
 
-pub fn root() -> RenderGraphRoot {
-    RenderGraphRoot {}
-}
+    let entry = children_storage
+        .entry(parent)
+        .expect("Failed to get entry!");
+    let contents = entry.or_insert(Children { children: vec![] });
+    contents.children.push(child);
 
-pub fn node(children: Vec<Entity>) -> RenderGraphNode {
-    RenderGraphNode { children }
-}
-
-pub fn attach_leaf(world: &mut World, parent: Entity) -> Entity {
-    let child_ent = world.create_entity().with(child(parent)).build();
-
-    let mut node_storage = world.write_storage::<RenderGraphNode>();
-
-    let entry = node_storage.entry(parent).expect("Failed to get entry!");
-    match entry {
-        StorageEntry::Occupied(mut entry) => entry.get_mut().children.push(child_ent),
-        StorageEntry::Vacant(entry) => {
-            entry.insert(node(vec![child_ent]));
-        }
-    };
-
-    child_ent
+    let mut parent_storage = world.write_storage::<Parent>();
+    parent_storage
+        .insert(child, Parent { parent })
+        .expect("Failed to get entry!");
 }
 
 pub const TRANSFORM_PROPAGATION_SYSTEM_ID: &str = "transform_propagation";
@@ -82,78 +44,69 @@ pub const TRANSFORM_PROPAGATION_SYSTEM_ID: &str = "transform_propagation";
 pub struct TransformPropagation;
 impl TransformPropagation {
     fn propagate_transforms_rec<'a>(
-        stack: &mut Vec<Mat4>,
         ent: Entity,
-        rgnodes: &ReadStorage<'a, RenderGraphNode>,
+        children_storage: &ReadStorage<'a, Children>,
         transforms: &ReadStorage<'a, Transform>,
         model_matrices: &mut WriteStorage<'a, ModelMatrix>,
+        parent_transform: Transform,
     ) {
-        let transform: Mat4 = transforms
+        let transform = transforms
             .get(ent)
             .copied()
-            .unwrap_or_else(|| glm::identity::<f32, U4>().into())
-            .into();
-        let transform = stack.last().unwrap() * transform;
+            .unwrap_or_else(Transform::identity);
 
-        stack.push(transform);
-        model_matrices.insert(ent, ModelMatrix(transform)).unwrap();
+        let transform = parent_transform * transform;
 
-        if let Some(node) = rgnodes.get(ent) {
-            for child in node.children.iter() {
+        model_matrices
+            .insert(ent, ModelMatrix(Mat4::from(transform)))
+            .unwrap();
+
+        if let Some(children) = children_storage.get(ent) {
+            for child in children.iter() {
                 TransformPropagation::propagate_transforms_rec(
-                    stack,
                     *child,
-                    rgnodes,
+                    children_storage,
                     transforms,
                     model_matrices,
+                    transform,
                 );
             }
         }
-        stack.pop();
     }
 }
 
-// TODO: Can we use a flagged storage for this?
-// E.g. only run propagation for any of the roots
-// for which it or children has been changed?
 impl<'a> System<'a> for TransformPropagation {
     type SystemData = (
         Entities<'a>,
-        ReadStorage<'a, RenderGraphRoot>,
-        ReadStorage<'a, RenderGraphNode>,
+        ReadStorage<'a, Parent>,
+        ReadStorage<'a, Children>,
         ReadStorage<'a, Transform>,
         WriteStorage<'a, ModelMatrix>,
     );
 
     fn run(
         &mut self,
-        (entities, roots, rgnodes, transforms, mut model_matrices): Self::SystemData,
+        (entities, parent_storage, children_storage, transforms, mut model_matrices): Self::SystemData,
     ) {
-        for (ent, _root) in (&entities, &roots).join() {
-            let mut stack: Vec<Mat4> = Vec::new();
-
-            let transform: Mat4 = transforms
+        for (ent, _, children) in (&entities, !&parent_storage, &children_storage).join() {
+            let transform = transforms
                 .get(ent)
                 .copied()
-                .unwrap_or_else(|| glm::identity::<f32, U4>().into())
-                .into();
-            stack.push(transform);
+                .unwrap_or_else(Transform::identity);
 
             if let Ok(entry) = model_matrices.entry(ent) {
                 // Root node, no need to multiply
-                entry.or_insert(ModelMatrix(stack[0]));
+                entry.or_insert(ModelMatrix(Mat4::from(transform)));
             }
 
-            if let Some(node) = rgnodes.get(ent) {
-                for child in node.children.iter() {
-                    TransformPropagation::propagate_transforms_rec(
-                        &mut stack,
-                        *child,
-                        &rgnodes,
-                        &transforms,
-                        &mut model_matrices,
-                    );
-                }
+            for child in children.iter() {
+                TransformPropagation::propagate_transforms_rec(
+                    *child,
+                    &children_storage,
+                    &transforms,
+                    &mut model_matrices,
+                    transform,
+                );
             }
         }
     }
@@ -267,28 +220,8 @@ impl<'a> System<'a> for RenderedBoundingBoxes {
 }
 */
 
-fn breadth_first_sys_mut<'a>(
-    nodes_storage: &WriteStorage<'a, RenderGraphNode>,
-    root: Entity,
-    mut visit_node: impl FnMut(Entity),
-) {
-    let mut queue = VecDeque::new();
-    queue.push_back(root);
-
-    while !queue.is_empty() {
-        let ent = queue.pop_front().unwrap();
-        visit_node(ent);
-
-        if let Some(node) = nodes_storage.get(ent) {
-            for c in node.children.iter() {
-                queue.push_back(*c);
-            }
-        }
-    }
-}
-
 fn breadth_first_sys<'a>(
-    nodes_storage: &ReadStorage<'a, RenderGraphNode>,
+    children_storage: &ReadStorage<'a, Children>,
     root: Entity,
     mut visit_node: impl FnMut(Entity),
 ) {
@@ -299,8 +232,8 @@ fn breadth_first_sys<'a>(
         let ent = queue.pop_front().unwrap();
         visit_node(ent);
 
-        if let Some(node) = nodes_storage.get(ent) {
-            for c in node.children.iter() {
+        if let Some(children) = children_storage.get(ent) {
+            for c in children.iter() {
                 queue.push_back(*c);
             }
         }
@@ -308,18 +241,12 @@ fn breadth_first_sys<'a>(
 }
 
 pub fn breadth_first(world: &World, root: Entity, visit_node: impl FnMut(Entity)) {
-    let nodes_storage = world.read_storage::<RenderGraphNode>();
+    let nodes_storage = world.read_storage::<Children>();
     breadth_first_sys(&nodes_storage, root, visit_node);
 }
 
-/// Traverse the graph starting at root and apply the function to each node.
-/// Use this when the order does not matter, only that each node is visited once.
-pub fn map(world: &World, root: Entity, visit_node: impl FnMut(Entity)) {
-    breadth_first(world, root, visit_node);
-}
-
 fn depth_first_sys<'a>(
-    nodes_storage: &ReadStorage<'a, RenderGraphNode>,
+    children_storage: &ReadStorage<'a, Children>,
     root: Entity,
     mut visit_node: impl FnMut(Entity),
 ) {
@@ -330,8 +257,8 @@ fn depth_first_sys<'a>(
         let ent = stack.pop().unwrap();
         visit_node(ent);
 
-        if let Some(node) = nodes_storage.get(ent) {
-            for c in node.children.iter() {
+        if let Some(children) = children_storage.get(ent) {
+            for c in children.iter() {
                 stack.push(*c);
             }
         }
@@ -339,7 +266,7 @@ fn depth_first_sys<'a>(
 }
 
 pub fn depth_first(world: &World, root: Entity, visit_node: impl FnMut(Entity)) {
-    let nodes_storage = world.read_storage::<RenderGraphNode>();
+    let nodes_storage = world.read_storage::<Children>();
     depth_first_sys(&nodes_storage, root, visit_node);
 }
 
@@ -407,20 +334,19 @@ impl ExactSizeIterator for PathWalker {
 }
 
 fn get_root_path(w: &World, node: Entity) -> Vec<Entity> {
-    let children = w.read_storage::<RenderGraphChild>();
+    let parents = w.read_storage::<Parent>();
 
     let mut path = Vec::with_capacity(8);
     let mut cur = node;
     loop {
         path.push(cur);
-        if let Some(child) = children.get(cur) {
+        if let Some(child) = parents.get(cur) {
             cur = child.parent;
         } else {
             break;
         }
     }
 
-    assert!(w.read_storage::<RenderGraphRoot>().get(cur).is_some());
     path.reverse();
 
     path
@@ -456,9 +382,8 @@ mod tests {
     fn setup_world() -> World {
         let mut world = World::new();
 
-        world.register::<RenderGraphNode>();
-        world.register::<RenderGraphRoot>();
-        world.register::<RenderGraphChild>();
+        world.register::<Children>();
+        world.register::<Parent>();
         world.register::<ID>();
 
         world
@@ -469,14 +394,10 @@ mod tests {
     }
 
     fn node_with_id(w: &mut World, children: Vec<Entity>, id: usize) -> Entity {
-        w.create_entity().with(node(children)).with(ID(id)).build()
-    }
-
-    fn add_parent_for(w: &mut World, child: Entity, parent: Entity) {
-        let mut children = w.write_storage::<RenderGraphChild>();
-        children
-            .insert(child, super::child(parent))
-            .expect("Failed!");
+        w.create_entity()
+            .with(Children { children })
+            .with(ID(id))
+            .build()
     }
 
     //      1
@@ -486,29 +407,17 @@ mod tests {
     //  5 6   7
     //
     fn setup_graph(w: &mut World) -> Entity {
-        let node5 = leaf_with_id(w, 5);
-        let node6 = leaf_with_id(w, 6);
-        let node2 = node_with_id(w, vec![node5, node6], 2);
-        let node3 = leaf_with_id(w, 3);
+        let nodes: Vec<Entity> = (1..8)
+            .map(|i| w.create_entity().with(ID(i)).build())
+            .collect();
+        add_edge(w, nodes[0], nodes[1]);
+        add_edge(w, nodes[0], nodes[2]);
+        add_edge(w, nodes[0], nodes[3]);
+        add_edge(w, nodes[1], nodes[4]);
+        add_edge(w, nodes[1], nodes[5]);
+        add_edge(w, nodes[3], nodes[6]);
 
-        let node7 = leaf_with_id(w, 7);
-        let node4 = node_with_id(w, vec![node7], 4);
-
-        let root = w
-            .create_entity()
-            .with(root())
-            .with(node(vec![node2, node3, node4]))
-            .with(ID(1))
-            .build();
-
-        add_parent_for(w, node2, root);
-        add_parent_for(w, node3, root);
-        add_parent_for(w, node4, root);
-        add_parent_for(w, node5, node2);
-        add_parent_for(w, node6, node2);
-        add_parent_for(w, node7, node4);
-
-        root
+        nodes[0]
     }
 
     #[test]

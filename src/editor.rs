@@ -1,10 +1,9 @@
 use specs::prelude::*;
 
-use crate::transform_graph;
-use imgui::*;
+use crate::graph;
+use crate::math::ModelMatrix;
 use crate::math::Transform;
-
-use nalgebra_glm as glm;
+use imgui::*;
 
 fn build_tree<'a>(world: &World, ui: &imgui::Ui<'a>, ent: specs::Entity) -> Option<specs::Entity> {
     let mut inspected = None;
@@ -14,10 +13,7 @@ fn build_tree<'a>(world: &World, ui: &imgui::Ui<'a>, ent: specs::Entity) -> Opti
         if pressed {
             inspected = Some(ent);
         }
-        if let Some(node) = world
-            .read_component::<transform_graph::RenderGraphNode>()
-            .get(ent)
-        {
+        if let Some(node) = world.read_component::<graph::Children>().get(ent) {
             for child in node.children.iter() {
                 let new = build_tree(world, ui, *child);
                 inspected = inspected.or(new);
@@ -46,11 +42,35 @@ fn build_inspector<'a>(world: &mut World, ui: &imgui::Ui<'a>, ent: specs::Entity
     let extra = if tfm.is_none() { " (None)" } else { "" };
     if CollapsingHeader::new(&im_str!("Transform{}", extra)).build(ui) {
         if let Some(tfm) = tfm {
-            let m: glm::Mat4 = (*tfm).into();
-            let mut pos = [m.column(3)[0], m.column(3)[1], m.column(3)[2]];
+            let mut pos = tfm.position.into_array();
             InputFloat3::new(ui, im_str!("Position"), &mut pos)
-            .read_only(true)
-            .build();
+                .read_only(true)
+                .build();
+
+            let mut rot = tfm.rotation.into_vec4().into_array();
+            InputFloat4::new(ui, im_str!("Rotation"), &mut rot)
+                .read_only(true)
+                .build();
+
+            let mut scale = tfm.scale;
+            InputFloat::new(ui, im_str!("Scale"), &mut scale)
+                .read_only(true)
+                .build();
+        }
+    }
+
+    let matrices = world.read_component::<ModelMatrix>();
+    let mat = matrices.get(ent);
+    let extra = if mat.is_none() { " (None)" } else { "" };
+    if CollapsingHeader::new(&im_str!("ModelMatrix{}", extra)).build(ui) {
+        if let Some(mat) = mat {
+            let rows = mat.0.into_row_arrays();
+            for r in rows.iter() {
+                let mut row = *r;
+                InputFloat4::new(ui, im_str!(""), &mut row)
+                    .read_only(true)
+                    .build();
+            }
         }
     }
 }
@@ -67,14 +87,14 @@ pub fn build_ui<'a>(world: &mut World, ui: &imgui::Ui<'a>, _pos: [f32; 2]) -> [f
     let mut inspected: Option<specs::Entity> = None;
 
     {
-        let root_storage = world.read_storage::<transform_graph::RenderGraphRoot>();
+        let parent_storage = world.read_storage::<graph::Parent>();
         let entities = world.read_resource::<specs::world::EntitiesRes>();
 
         imgui::Window::new(im_str!("Scene"))
             .position(scene_window_pos, Condition::Always)
             .size(scene_window_size, Condition::Always)
             .build(&ui, || {
-                for (ent, _root) in (&entities, &root_storage).join() {
+                for (ent, _root) in (&entities, !&parent_storage).join() {
                     inspected = build_tree(world, ui, ent);
                 }
             });
