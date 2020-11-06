@@ -2,6 +2,7 @@ use specs::Component;
 
 use num_derive::FromPrimitive;
 
+use crate::common::Name;
 use crate::ecs;
 use crate::io::input::{
     DeviceAxis, Input, InputContext, InputContextError, MappedInput, RangeId, Sensitivity, StateId,
@@ -216,11 +217,13 @@ impl FreeFlyCameraController {
     }
 }
 
+const NAME: &str = "FreeFlyCamera";
+
 // Default input mapping for camera
 fn get_input_context() -> Result<InputContext, InputContextError> {
     let sens = 0.005 as Sensitivity;
     use CameraMovement::*;
-    Ok(InputContext::builder("CameraInputContext")
+    Ok(InputContext::builder(&NAME)
         .description("Input mapping for untethered, 3D camera")
         .with_state(VirtualKeyCode::W, Forward)?
         .with_state(VirtualKeyCode::S, Backward)?
@@ -304,6 +307,7 @@ impl<'a> System<'a> for FreeFlyCameraController {
             // Camera marker component means for the ActiveCamera resource
             .with(Camera)
             .with(rot_state)
+            .with(Name::from(NAME))
             .build();
     }
 }

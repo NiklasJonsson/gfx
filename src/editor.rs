@@ -1,14 +1,22 @@
 use specs::prelude::*;
 
+use crate::common::Name;
 use crate::graph;
 use crate::math::ModelMatrix;
 use crate::math::Transform;
 use imgui::*;
 
+fn name(world: &World, ent: Entity) -> String {
+    let names = world.read_component::<Name>();
+    let name: &str = names.get(ent).map(|n| n.0.as_str()).unwrap_or("");
+    format!("{} ({}, {})", name, ent.id(), ent.gen().id())
+}
+
 fn build_tree<'a>(world: &World, ui: &imgui::Ui<'a>, ent: specs::Entity) -> Option<specs::Entity> {
     let mut inspected = None;
 
-    TreeNode::new(&im_str!("{:?}", ent)).build(&ui, || {
+    let name = im_str!("{}", name(world, ent));
+    TreeNode::new(&name).build(&ui, || {
         let pressed = ui.small_button(im_str!("inspect"));
         if pressed {
             inspected = Some(ent);
@@ -27,7 +35,7 @@ fn build_tree<'a>(world: &World, ui: &imgui::Ui<'a>, ent: specs::Entity) -> Opti
 fn build_inspector<'a>(world: &mut World, ui: &imgui::Ui<'a>, ent: specs::Entity) {
     use crate::render::ReloadMaterial;
 
-    ui.text(im_str!("{:?}", ent));
+    ui.text(im_str!("{}", name(world, ent)));
     ui.separator();
     let pressed = ui.small_button(im_str!("reload material"));
     if pressed {

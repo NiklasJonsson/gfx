@@ -4,6 +4,7 @@ use std::sync::Arc;
 mod arg_parse;
 mod asset;
 mod camera;
+mod common;
 mod ecs;
 mod editor;
 mod game_state;
@@ -228,6 +229,7 @@ impl App {
         let (mut control_systems, mut engine_systems) = Self::init_dispatchers();
         asset::gltf::register_components(&mut world);
         render::register_components(&mut world);
+        common::register_components(&mut world);
         control_systems.setup(&mut world);
         engine_systems.setup(&mut world);
         io::setup(&mut world, window);

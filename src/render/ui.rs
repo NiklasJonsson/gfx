@@ -14,16 +14,16 @@ use trekanten::Frame;
 use trekanten::Renderer;
 use trekanten::{BufferHandle, Handle};
 
+use crate::common::Name;
+use crate::io::input;
+use crate::io::input::KeyCode;
 use crate::render::pipeline::{Defines, ShaderCompiler, ShaderType};
+use crate::time::DeltaTime;
 
 use specs::world::WorldExt;
 use specs::World;
 
 use imgui::im_str;
-
-use crate::io::input;
-use crate::time::DeltaTime;
-use input::KeyCode;
 
 use std::path::Path;
 
@@ -179,6 +179,8 @@ const fn mouse_stateid_idx(s: input::StateId) -> u32 {
     s.0 - MOUSE_BUTTON_SEPARATOR
 }
 
+const NAME: &str = "UIInputContext";
+
 impl UIContext {
     fn init_imgui_ctx() -> imgui::Context {
         let mut ctx = imgui::Context::create();
@@ -326,7 +328,11 @@ impl UIContext {
         let input_ctx = Self::create_input_context(false, false, false)
             .expect("Failed to create inputo context for ui");
 
-        world.create_entity().with(input_ctx).build()
+        world
+            .create_entity()
+            .with(input_ctx)
+            .with(Name::from(NAME))
+            .build()
     }
 
     pub fn new(renderer: &mut Renderer, world: &mut World) -> Self {

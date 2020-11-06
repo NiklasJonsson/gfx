@@ -18,6 +18,12 @@ where
     ent
 }
 
+pub fn assign<C: specs::Component>(w: &mut World, ent: Entity, c: C) {
+    w.write_storage::<C>()
+        .insert(ent, c)
+        .expect("Failed to assign component");
+}
+
 pub fn entity_has_component<C>(w: &World, e: Entity) -> bool
 where
     C: specs::Component,

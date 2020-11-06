@@ -16,6 +16,8 @@ use trekanten::BufferHandle;
 
 use super::LoadedAsset;
 
+use crate::common::*;
+use crate::ecs;
 use crate::graph;
 use crate::math::*;
 use crate::render::material::Material;
@@ -355,6 +357,9 @@ fn load_node_rec(ctx: &mut RecGltfCtx, src: &gltf::Node) -> AssetGraphResult {
     let tfm = get_transform(src.transform());
 
     let node = ctx.world.create_entity().with(tfm).build();
+    if let Some(name) = src.name() {
+        ecs::assign(ctx.world, node, Name::from(name));
+    }
 
     if let Some(mesh) = src.mesh() {
         for primitive in mesh.primitives() {
@@ -362,6 +367,11 @@ fn load_node_rec(ctx: &mut RecGltfCtx, src: &gltf::Node) -> AssetGraphResult {
             let child = ctx.world.create_entity().with(gltf_model).build();
 
             graph::add_edge(ctx.world, node, child);
+        }
+
+        if let Some(name) = mesh.name() {
+            let name = String::from(src.name().unwrap_or("")) + name;
+            ecs::assign(ctx.world, node, Name::from(name));
         }
     }
 

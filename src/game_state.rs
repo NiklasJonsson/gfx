@@ -1,5 +1,6 @@
 use crate::io::input::{ActionId, InputContext, InputContextPriority, MappedInput};
 
+use crate::common::Name;
 use crate::io::input;
 
 use specs::prelude::*;
@@ -21,6 +22,8 @@ const GAME_STATE_SWITCH: ActionId = ActionId(0);
 struct GameStateSwitcher {
     input_entity: Option<specs::Entity>,
 }
+
+const NAME: &str = "GameStateSwitcher";
 
 impl<'a> System<'a> for GameStateSwitcher {
     type SystemData = (Write<'a, GameState>, WriteStorage<'a, MappedInput>);
@@ -49,14 +52,20 @@ impl<'a> System<'a> for GameStateSwitcher {
     fn setup(&mut self, world: &mut World) {
         Self::SystemData::setup(world);
         world.insert(GameState::default());
-        let escape_catcher = InputContext::builder("EscapeCatcher")
+        let escape_catcher = InputContext::builder(&NAME)
             .description("Global top-level escape catcher for game state switcher")
             .priority(InputContextPriority::First)
             .with_action(input::KeyCode::Escape, GAME_STATE_SWITCH)
             .expect("Could not insert Escape action for GameStateSwitcher")
             .build();
 
-        self.input_entity = Some(world.create_entity().with(escape_catcher).build());
+        self.input_entity = Some(
+            world
+                .create_entity()
+                .with(escape_catcher)
+                .with(Name::from(NAME))
+                .build(),
+        );
     }
 }
 

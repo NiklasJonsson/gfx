@@ -1,3 +1,4 @@
+use crate::common::Name;
 use crate::io::input::{ActionId, InputContext, InputContextError, KeyCode, MappedInput};
 
 use num_derive::FromPrimitive;
@@ -28,8 +29,10 @@ impl Default for RenderSettings {
     }
 }
 
+const NAME: &str = "RenderSettingsSys";
+
 fn get_input_context() -> Result<InputContext, InputContextError> {
-    Ok(InputContext::builder("RenderSettingsSys")
+    Ok(InputContext::builder(NAME)
         .description("Input for changing render settings")
         .with_action(KeyCode::O, RENDER_MODE_SWITCH)?
         .with_action(KeyCode::P, RENDER_BOUNDING_BOX_SWITCH)?
@@ -81,7 +84,13 @@ impl<'a> System<'a> for RenderSettingsSys {
         Self::SystemData::setup(world);
         world.insert(RenderSettings::default());
         let ctx = get_input_context().expect("Failed to build settings input context");
-        self.input_entity = Some(world.create_entity().with(ctx).build());
+        self.input_entity = Some(
+            world
+                .create_entity()
+                .with(ctx)
+                .with(Name::from(NAME))
+                .build(),
+        );
     }
 }
 
