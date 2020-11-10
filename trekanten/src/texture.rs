@@ -304,6 +304,14 @@ impl AsyncTextures {
         }))
     }
 
+    pub fn is_done(&self, h: &Handle<Texture>) -> Option<bool> {
+        self.inner
+            .read()
+            .storage
+            .get(&h.wrap_async())
+            .map(|x| !x.is_pending())
+    }
+
     pub fn insert(&self, h: &Handle<Texture>, t: Texture) {
         if let Some(x) = self.inner.write().storage.get_mut(&h.wrap_async()) {
             *x = Async::<Texture>::Available(t);

@@ -34,6 +34,7 @@ log = "0.4.8"
 env_logger = "0.6.2"
 clap = "2.33.0"
 thiserror = "1.0.20"
+resurs = {path = "resurs"}
 
 # Threading
 crossbeam = "0.7.3"

@@ -8,7 +8,7 @@ use crate::io::input::{
     DeviceAxis, Input, InputContext, InputContextError, KeyCode, MappedInput, MouseButton, RangeId,
     Sensitivity, StateId,
 };
-use crate::math::{Mat4, Transform, Vec3, Vec4};
+use crate::math::{Mat4, Transform, Vec3};
 use crate::time::DeltaTime;
 use ecs::prelude::*;
 
@@ -93,11 +93,13 @@ impl Into<RangeId> for CameraRotation {
 #[storage(NullStorage)]
 pub struct Camera;
 
+/*
 impl Camera {
     pub fn set_camera_state(w: &mut World, e: Entity, t: &Transform) {
         FreeFlyCameraController::set_camera_state(w, e, t);
     }
 }
+*/
 
 #[derive(Default, Component)]
 #[storage(NullStorage)]
@@ -184,6 +186,7 @@ impl FreeFlyCameraController {
         rotation_inv * translation_inv
     }
 
+    /*
     pub fn set_camera_state(w: &mut World, e: Entity, t: &Transform) {
         log::debug!("Set camera state from transform: {:?}", t);
         assert!(ecs::entity_has_component::<Camera>(w, e));
@@ -215,6 +218,7 @@ impl FreeFlyCameraController {
             .insert(e, CameraRotationState { yaw, pitch })
             .expect("Could not set rotation state for camera!");
     }
+    */
 }
 
 const NAME: &str = "FreeFlyCamera";
@@ -314,7 +318,6 @@ impl<'a> ecs::System<'a> for FreeFlyCameraController {
             .create_entity()
             .with(t)
             .with(input_context)
-            // Camera marker component means for the ActiveCamera resource
             .with(Camera)
             .with(rot_state)
             .with(Name::from(NAME))

@@ -1764,6 +1764,7 @@ dependencies = [
  "num-traits",
  "profiling",
  "puffin-imgui",
+ "resurs",
  "shaderc",
  "specs",
  "specs-hierarchy",

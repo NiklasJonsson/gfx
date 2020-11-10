@@ -10,6 +10,12 @@ pub struct PBRMaterialData {
 
 #[derive(Copy, Clone, Debug)]
 #[repr(C, packed)]
+pub struct UnlitUniformData {
+    pub color: [f32; 4],
+}
+
+#[derive(Copy, Clone, Debug)]
+#[repr(C, packed)]
 pub struct Transforms {
     pub view: [[f32; 4]; 4],
     pub proj: [[f32; 4]; 4],

@@ -175,6 +175,13 @@ impl<T> AsyncDeviceBufferStorage<T> {
         Some(RwLockReadGuard::map(g, |inner| inner.get(&h, idx).unwrap()))
     }
 
+    pub fn is_done(&self, h: &BufferHandle<T>) -> Option<bool> {
+        self.inner
+            .read()
+            .get_all(&h.wrap_async())
+            .map(|(buf0, buf1)| !buf0.is_pending() && buf1.map(|x| !x.is_pending()).unwrap_or(true))
+    }
+
     pub fn insert(&self, h: &BufferHandle<T>, buf0: T, buf1: Option<T>) {
         if let Some((slot0, slot1)) = self.inner.write().get_all_mut(&h.wrap_async()) {
             *slot0 = Async::Available(buf0);

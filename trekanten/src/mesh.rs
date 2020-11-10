@@ -17,7 +17,7 @@ pub struct Mesh {
     pub index_buffer: BufferHandle<IndexBuffer>,
 }
 
-#[derive(Debug, Copy, Clone)]
+#[derive(Debug, Copy, Clone, PartialEq, Eq, Hash)]
 pub enum IndexSize {
     Size32,
     Size16,
@@ -59,6 +59,18 @@ impl<'a> IndexBufferDescriptor<'a> {
             _ => unreachable!("Invalid index type, needs to be either 16 or 32 bits"),
         };
 
+        Self {
+            data,
+            index_size,
+            mutability,
+        }
+    }
+
+    pub fn from_raw<T>(
+        data: &'a [u8],
+        index_size: IndexSize,
+        mutability: BufferMutability,
+    ) -> Self {
         Self {
             data,
             index_size,

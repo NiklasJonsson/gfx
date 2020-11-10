@@ -1,146 +1,35 @@
 use specs::Component;
 
-use specs::prelude::*;
-use specs::world::EntitiesRes;
-use specs::{Entity, World};
+use crate::ecs;
+use ecs::prelude::*;
 use std::path::{Path, PathBuf};
 
+use trekanten::loader::ResourceLoader;
 use trekanten::mesh::BufferMutability;
 use trekanten::mesh::{
     IndexBuffer, OwningIndexBufferDescriptor, OwningVertexBufferDescriptor, VertexBuffer,
 };
-use trekanten::resource::ResourceManager;
-use trekanten::texture::{MipMaps, TextureDescriptor};
-use trekanten::uniform::OwningUniformBufferDescriptor;
+use trekanten::texture::{MipMaps, Texture, TextureDescriptor};
+use trekanten::uniform::{OwningUniformBufferDescriptor, UniformBuffer};
 use trekanten::util;
 use trekanten::vertex::VertexFormat;
 use trekanten::BufferHandle;
+use trekanten::Handle;
 
-use super::LoadedAsset;
-
-use crate::common::*;
-use crate::ecs;
+use crate::camera::Camera;
+use crate::common::Name;
 use crate::graph;
 use crate::math::*;
-use crate::render::material::Material;
+use crate::render;
+use crate::render::material::{Material, TextureUse};
 use crate::render::uniform::PBRMaterialData;
-use crate::render::Mesh;
 
-// Crate gltf
-#[derive(Debug)]
-struct GltfVertexBuffer {
-    data: Vec<u8>,
-    format: VertexFormat,
-}
-
-#[derive(Debug)]
-struct GltfIndexBufferHandle {
-    buf_idx: usize,
-    len: u32,
-}
-
-impl GltfIndexBufferHandle {
-    fn as_gpu_handle(&self, h: BufferHandle<IndexBuffer>) -> BufferHandle<IndexBuffer> {
-        BufferHandle::sub_buffer(h, 0, self.len)
-    }
-}
-
-#[derive(Debug)]
-struct GltfVertexBufferHandle {
-    buf_idx: usize,
-    n_vertices: u32,
-    vertex_size: u32,
-}
-
-impl GltfVertexBufferHandle {
-    fn as_gpu_handle(&self, h: BufferHandle<VertexBuffer>) -> BufferHandle<VertexBuffer> {
-        BufferHandle::sub_buffer(h, 0, self.n_vertices)
-    }
-}
-
-#[derive(Debug)]
-struct GltfMaterialBufferHandle {
-    buf_idx: usize,
-}
-
-#[derive(Debug)]
-struct GltfMaterial {
-    material: GltfMaterialBufferHandle,
-    normal_map: Option<GltfNormalMap>,
-    base_color: Option<GltfTexture>,
-    metallic_roughness: Option<GltfTexture>,
-    has_vertex_colors: bool,
-}
-
-#[derive(Component)]
-#[storage(VecStorage)]
-struct GltfModel {
-    mat: GltfMaterial,
-    index: GltfIndexBufferHandle,
-    vertex: GltfVertexBufferHandle,
-}
-
-#[derive(Debug)]
-struct GltfTexture {
-    path: PathBuf,
-    format: util::Format,
-}
-
-#[derive(Debug)]
-struct GltfNormalMap {
-    tex: GltfTexture,
-    scale: f32,
-}
-
-struct RecGltfCtx<'a> {
-    pub buffers: Vec<gltf::buffer::Data>,
-    pub path: PathBuf,
-    pub world: &'a mut World,
-    pub index_buffers: Vec<Vec<u32>>,
-    pub vertex_buffers: Vec<GltfVertexBuffer>,
-    pub material_buffer: Vec<PBRMaterialData>,
-}
-
-impl<'a> RecGltfCtx<'a> {
-    fn add_index_buffer(&mut self, v: Vec<u32>) -> GltfIndexBufferHandle {
-        let handle = GltfIndexBufferHandle {
-            buf_idx: self.index_buffers.len(),
-            len: v.len() as u32,
-        };
-
-        self.index_buffers.push(v);
-
-        handle
-    }
-
-    fn add_vertex_buffer(&mut self, v: GltfVertexBuffer) -> GltfVertexBufferHandle {
-        let GltfVertexBuffer { data, format } = v;
-        let vertex_size = format.size();
-        let n_vertices = data.len() as u32 / vertex_size;
-        let h = GltfVertexBufferHandle {
-            buf_idx: self.vertex_buffers.len(),
-            n_vertices,
-            vertex_size,
-        };
-        self.vertex_buffers.push(GltfVertexBuffer { format, data });
-
-        h
-    }
-
-    fn add_material_data(&mut self, data: PBRMaterialData) -> GltfMaterialBufferHandle {
-        self.material_buffer.push(data);
-        GltfMaterialBufferHandle {
-            buf_idx: self.material_buffer.len() - 1,
-        }
-    }
-}
-
-fn load_texture_common<'a>(
-    ctx: &RecGltfCtx<'a>,
+fn load_texture(
+    ctx: &RecGltfCtx,
     texture: &gltf::texture::Texture,
     coord_set: u32,
     format: util::Format,
-) -> GltfTexture {
+) -> Handle<Texture> {
     assert_eq!(coord_set, 0, "Not implemented!");
     assert_eq!(
         texture.sampler().wrap_s(),
@@ -164,31 +53,11 @@ fn load_texture_common<'a>(
         x => unimplemented!("Unsupported image source {:?}", x),
     };
 
-    GltfTexture {
-        path: image_path,
+    ctx.data.loader.load(TextureDescriptor::file(
+        image_path,
         format,
-    }
-}
-
-fn load_texture(
-    ctx: &RecGltfCtx,
-    texture_info: &gltf::texture::Info,
-    cs: util::Format,
-) -> GltfTexture {
-    load_texture_common(ctx, &texture_info.texture(), texture_info.tex_coord(), cs)
-}
-
-fn load_normal_map(ctx: &RecGltfCtx, normal_tex: &gltf::material::NormalTexture) -> GltfNormalMap {
-    // The normal map is always linear
-    let tex = load_texture_common(
-        ctx,
-        &normal_tex.texture(),
-        normal_tex.tex_coord(),
-        util::Format::RGBA_UNORM,
-    );
-    let scale = normal_tex.scale();
-
-    GltfNormalMap { tex, scale }
+        MipMaps::Generate,
+    ))
 }
 
 fn check_supported<'a>(primitive: &gltf::Primitive<'a>) {
@@ -209,7 +78,7 @@ fn check_supported<'a>(primitive: &gltf::Primitive<'a>) {
 fn interleave_vertex_buffer<'a>(
     ctx: &RecGltfCtx,
     primitive: &gltf::Primitive<'a>,
-) -> (GltfVertexBuffer, bool) {
+) -> (OwningVertexBufferDescriptor, bool) {
     check_supported(primitive);
     let reader = primitive.reader(|buffer| Some(&ctx.buffers[buffer.index()]));
     let positions = reader.read_positions().expect("Found no positions");
@@ -277,21 +146,39 @@ fn interleave_vertex_buffer<'a>(
         _ => unimplemented!("Unsupported vertex format"),
     }
 
-    (GltfVertexBuffer { data, format }, has_vertex_colors)
+    (
+        OwningVertexBufferDescriptor::from_raw(data, format, BufferMutability::Immutable),
+        has_vertex_colors,
+    )
 }
 
-fn load_primitive<'a>(ctx: &mut RecGltfCtx, primitive: &gltf::Primitive<'a>) -> GltfModel {
+fn to_index_buffer(indices: gltf::mesh::util::ReadIndices<'_>) -> OwningIndexBufferDescriptor {
+    use gltf::mesh::util::ReadIndices;
+    match indices {
+        ReadIndices::U8(iter) => {
+            let v: Vec<u16> = iter.map(|byte| byte as u16).collect();
+            OwningIndexBufferDescriptor::from_vec(v, BufferMutability::Immutable)
+        }
+        ReadIndices::U16(iter) => {
+            let v: Vec<u16> = iter.collect();
+            OwningIndexBufferDescriptor::from_vec(v, BufferMutability::Immutable)
+        }
+        ReadIndices::U32(iter) => {
+            let v: Vec<u32> = iter.collect();
+            OwningIndexBufferDescriptor::from_vec(v, BufferMutability::Immutable)
+        }
+    }
+}
+
+fn load_primitive<'a>(ctx: &mut RecGltfCtx, primitive: &gltf::Primitive<'a>) -> PendingGltfModel {
     assert!(primitive.mode() == gltf::mesh::Mode::Triangles);
     let reader = primitive.reader(|buffer| Some(&ctx.buffers[buffer.index()]));
 
-    let triangle_index_data = reader
-        .read_indices()
-        .expect("Found no indices")
-        .into_u32()
-        .collect::<Vec<_>>();
-    let index_handle = ctx.add_index_buffer(triangle_index_data);
-    let (vbuf, has_vertex_colors) = interleave_vertex_buffer(ctx, primitive);
-    let vertex_handle = ctx.add_vertex_buffer(vbuf);
+    let triangle_index_data = reader.read_indices().expect("Found no indices");
+
+    let index = ctx.data.loader.load(to_index_buffer(triangle_index_data));
+    let (vertex, has_vertex_colors) = interleave_vertex_buffer(ctx, primitive);
+    let vertex = ctx.data.loader.load(vertex);
 
     let mat = primitive.material();
     let pbr_mr = mat.pbr_metallic_roughness();
@@ -299,46 +186,54 @@ fn load_primitive<'a>(ctx: &mut RecGltfCtx, primitive: &gltf::Primitive<'a>) -> 
         unimplemented!("No support for emissive texture!");
     }
 
-    let base_color_texture = pbr_mr
-        .base_color_texture()
-        .map(|texture_info| load_texture(ctx, &texture_info, util::Format::RGBA_SRGB));
+    let base_color_texture = pbr_mr.base_color_texture().map(|info| {
+        load_texture(
+            ctx,
+            &info.texture(),
+            info.tex_coord(),
+            util::Format::RGBA_SRGB,
+        )
+    });
 
-    let metallic_roughness_texture = pbr_mr
-        .metallic_roughness_texture()
-        .map(|info| load_texture(ctx, &info, util::Format::RGBA_UNORM));
+    let metallic_roughness_texture = pbr_mr.metallic_roughness_texture().map(|info| {
+        load_texture(
+            ctx,
+            &info.texture(),
+            info.tex_coord(),
+            util::Format::RGBA_UNORM,
+        )
+    });
 
-    let normal_map = mat
-        .normal_texture()
-        .map(|normal_map| load_normal_map(ctx, &normal_map));
+    let normal_map = mat.normal_texture().map(|normal_map| {
+        load_texture(
+            ctx,
+            &normal_map.texture(),
+            normal_map.tex_coord(),
+            util::Format::RGBA_UNORM,
+        )
+    });
 
-    let material_data = PBRMaterialData {
+    let material = PBRMaterialData {
         base_color_factor: pbr_mr.base_color_factor(),
         metallic_factor: pbr_mr.metallic_factor(),
         roughness_factor: pbr_mr.roughness_factor(),
-        normal_scale: normal_map.as_ref().map(|x| x.scale).unwrap_or(1.0),
+        normal_scale: mat.normal_texture().map(|nm| nm.scale()).unwrap_or(1.0),
         _padding: 0.0,
     };
+    let idx = ctx.material_buffer.len();
+    ctx.material_buffer.push(material);
 
-    let mat_handle = ctx.add_material_data(material_data);
-
-    GltfModel {
+    PendingGltfModel {
         mat: GltfMaterial {
-            material: mat_handle,
+            material_data: UniformHandle::CPU(idx),
             normal_map,
             base_color: base_color_texture,
             metallic_roughness: metallic_roughness_texture,
             has_vertex_colors,
         },
-        vertex: vertex_handle,
-        index: index_handle,
+        vertex,
+        index,
     }
-}
-
-struct AssetGraphResult {
-    // The enitity that was created
-    node: Entity,
-    // An entity somewhere in the graph that has a camera
-    camera: Option<Entity>,
 }
 
 fn get_transform(src: gltf::scene::Transform) -> Transform {
@@ -355,47 +250,80 @@ fn get_transform(src: gltf::scene::Transform) -> Transform {
     t
 }
 
-fn load_node_rec(ctx: &mut RecGltfCtx, src: &gltf::Node) -> AssetGraphResult {
+fn load_node_rec(ctx: &mut RecGltfCtx, src: &gltf::Node) -> ecs::Entity {
     let tfm = get_transform(src.transform());
 
-    let node = ctx.world.create_entity().with(tfm).build();
+    let mut node = ctx
+        .data
+        .entities
+        .build_entity()
+        .with(tfm, &mut ctx.data.transforms);
+
     if let Some(name) = src.name() {
-        ecs::assign(ctx.world, node, Name::from(name));
+        node = node.with(Name::from(name), &mut ctx.data.names);
     }
+
+    let node = node.build();
 
     if let Some(mesh) = src.mesh() {
+        let mesh_child = ctx.data.entities.create();
         for primitive in mesh.primitives() {
             let gltf_model = load_primitive(ctx, &primitive);
-            let child = ctx.world.create_entity().with(gltf_model).build();
-
-            graph::add_edge(ctx.world, node, child);
+            let prim_child = ctx
+                .data
+                .entities
+                .build_entity()
+                .with(gltf_model, ctx.data.gltf_models)
+                .build();
+            graph::add_edge_sys(
+                &mut ctx.data.children_storage,
+                &mut ctx.data.parent_storage,
+                mesh_child,
+                prim_child,
+            );
         }
+        graph::add_edge_sys(
+            &mut ctx.data.children_storage,
+            &mut ctx.data.parent_storage,
+            node,
+            mesh_child,
+        );
 
         if let Some(name) = mesh.name() {
-            let name = String::from(src.name().unwrap_or("")) + name;
-            ecs::assign(ctx.world, node, Name::from(name));
+            ctx.data
+                .names
+                .insert(mesh_child, Name::from(name))
+                .expect("Failed to insert name");
         }
     }
 
-    let mut camera = src.camera().map(|_| node);
-    // For each child *node*, we want its entity and if it has a camera
-    // attached to it.
+    /*
+     * TODO: Handle cameras
+    if src.camera().is_some() {
+        ctx.data
+            .cameras
+            .insert(node, Camera {})
+            .expect("Failed to insert camera marker");
+    }
+    */
+
     for gltf_child in src.children() {
-        let AssetGraphResult {
-            node: child,
-            camera: child_camera,
-        } = load_node_rec(ctx, &gltf_child);
-        graph::add_edge(ctx.world, node, child);
-        camera = camera.or(child_camera);
+        let child = load_node_rec(ctx, &gltf_child);
+        graph::add_edge_sys(
+            &mut ctx.data.children_storage,
+            &mut ctx.data.parent_storage,
+            node,
+            child,
+        );
     }
 
-    AssetGraphResult { node, camera }
+    node
 }
 
 fn get_cam_transform(
     gltf_doc: gltf::Document,
     world: &World,
-    camera_ent: Option<Entity>,
+    camera_ent: Option<ecs::Entity>,
 ) -> Option<Transform> {
     let mut cam_transform: Option<Transform> = None;
 
@@ -436,206 +364,266 @@ fn get_cam_transform(
     cam_transform
 }
 
-fn log_asset_upload<'a>(ctx: &RecGltfCtx<'a>) {
-    log::info!("Uploading gltf asset to gpu");
-    log::info!("# vertex_buffers: {}", ctx.vertex_buffers.len());
-    for (i, vb) in ctx.vertex_buffers.iter().enumerate() {
-        log::info!("vertex buffer {}:", i);
-        log::info!("format: {}", vb.format);
-        log::info!(
-            "n vertices: {} ({} / {})",
-            vb.data.len() / vb.format.size() as usize,
-            vb.data.len(),
-            vb.format.size()
-        );
-    }
-    log::info!("# index_buffers: {}", ctx.index_buffers.len());
-    log::info!("# materials: {}", ctx.material_buffer.len());
+pub fn load_asset(world: &mut World, path: &Path) {
+    world
+        .create_entity()
+        .with(GltfAsset {
+            path: PathBuf::from(path),
+        })
+        .build();
 }
 
-fn upload_to_gpu<'a>(renderer: &mut trekanten::Renderer, ctx: RecGltfCtx<'a>) {
-    log_asset_upload(&ctx);
+#[derive(Default, Component)]
+pub struct GltfAsset {
+    path: PathBuf,
+}
 
-    let RecGltfCtx {
-        buffers: _,
-        path: _,
-        world,
-        index_buffers,
-        vertex_buffers,
-        material_buffer,
-    } = ctx;
+#[derive(Debug)]
+enum UniformHandle {
+    CPU(usize),
+    GPU(BufferHandle<UniformBuffer>),
+}
 
-    let mut meshes = world.write_storage::<Mesh>();
-    let mut materials = world.write_storage::<Material>();
-    let mut gltf_models = world.write_storage::<GltfModel>();
-    let entities = world.read_resource::<EntitiesRes>();
+impl UniformHandle {
+    fn gpu_handle(&self) -> BufferHandle<UniformBuffer> {
+        match self {
+            UniformHandle::GPU(h) => h.clone(),
+            _ => panic!("Expected a gpu handle"),
+        }
+    }
+}
 
-    let gpu_vert_buffers: Vec<BufferHandle<VertexBuffer>> = vertex_buffers
-        .into_iter()
-        .map(|vert_buf| {
-            renderer
-                .create_resource_blocking(OwningVertexBufferDescriptor::from_raw(
-                    vert_buf.data,
-                    vert_buf.format,
-                    BufferMutability::Immutable,
-                ))
-                .expect("Failed to create vertex buffer")
-        })
-        .collect();
+#[derive(Debug)]
+struct GltfMaterial {
+    material_data: UniformHandle,
+    normal_map: Option<Handle<Texture>>,
+    base_color: Option<Handle<Texture>>,
+    metallic_roughness: Option<Handle<Texture>>,
+    has_vertex_colors: bool,
+}
 
-    let gpu_index_buffers: Vec<BufferHandle<IndexBuffer>> = index_buffers
-        .into_iter()
-        .map(|idx_buf| {
-            renderer
-                .create_resource_blocking(OwningIndexBufferDescriptor::from_vec(
-                    idx_buf,
-                    BufferMutability::Immutable,
-                ))
-                .expect("Failed to create index buffer")
-        })
-        .collect();
+#[derive(Component)]
+#[storage(VecStorage)]
+pub struct PendingGltfModel {
+    mat: GltfMaterial,
+    index: BufferHandle<IndexBuffer>,
+    vertex: BufferHandle<VertexBuffer>,
+}
 
-    let gpu_uniform_buffer_handles = renderer
-        .create_resource_blocking(OwningUniformBufferDescriptor::from_vec(
-            material_buffer,
-            BufferMutability::Immutable,
-        ))
-        .expect("Failed to create uniform buffer for materials")
-        .split();
-
-    for (ent, model) in (&entities, &gltf_models).join() {
-        let gltf_vh = &model.vertex;
-        let gltf_ih = &model.index;
-        let gltf_mat = &model.mat;
-        let gpu_vh = gpu_vert_buffers[gltf_vh.buf_idx];
-        let gpu_ih = gpu_index_buffers[gltf_ih.buf_idx];
-
-        let vertex_buffer = gltf_vh.as_gpu_handle(gpu_vh);
-        let index_buffer = gltf_ih.as_gpu_handle(gpu_ih);
-        meshes
-            .insert(
-                ent,
-                Mesh(trekanten::mesh::Mesh {
-                    vertex_buffer,
-                    index_buffer,
-                }),
-            )
-            .expect("Failed to insert mesh");
-
-        let normal_map = gltf_mat.normal_map.as_ref().map(|x| {
-            let tex_h = renderer
-                .create_resource_blocking(TextureDescriptor::file(
-                    x.tex.path.clone(),
-                    x.tex.format,
-                    MipMaps::Generate,
-                ))
-                .expect("Failed to create texture handle for normal map");
-
-            let tex_use = crate::render::material::TextureUse {
-                handle: tex_h,
-                coord_set: 0,
-            };
-
-            crate::render::material::NormalMap {
-                tex: tex_use,
-                scale: x.scale,
-            }
-        });
-
-        let base_color_texture = gltf_mat.base_color.as_ref().map(|t| {
-            let tex_h = renderer
-                .create_resource_blocking(trekanten::texture::TextureDescriptor::file(
-                    t.path.clone(),
-                    t.format,
-                    MipMaps::Generate,
-                ))
-                .expect("Failed to create texture handle for normal map");
-            crate::render::material::TextureUse {
-                handle: tex_h,
-                coord_set: 0,
-            }
-        });
-
-        let metallic_roughness_texture = gltf_mat.metallic_roughness.as_ref().map(|t| {
-            let tex_h = renderer
-                .create_resource_blocking(trekanten::texture::TextureDescriptor::file(
-                    t.path.clone(),
-                    t.format,
-                    MipMaps::Generate,
-                ))
-                .expect("Failed to create texture handle for normal map");
-            crate::render::material::TextureUse {
-                handle: tex_h,
-                coord_set: 0,
-            }
-        });
-        let material_uniforms = gpu_uniform_buffer_handles[gltf_mat.material.buf_idx];
-        let mat_data = crate::render::material::Material::PBR {
-            material_uniforms,
-            normal_map,
-            base_color_texture,
-            metallic_roughness_texture,
-            has_vertex_colors: gltf_mat.has_vertex_colors,
+impl PendingGltfModel {
+    fn is_done(&self, loader: &trekanten::Loader) -> bool {
+        let tex_done = |tex: &Option<Handle<Texture>>| -> bool {
+            tex.map(|t| loader.is_done(&t).unwrap()).unwrap_or(true)
         };
 
-        materials
-            .insert(ent, mat_data)
-            .expect("Failed to insert material");
+        loader.is_done(&self.vertex).unwrap()
+            && loader.is_done(&self.index).unwrap()
+            && tex_done(&self.mat.normal_map)
+            && tex_done(&self.mat.base_color)
+            && tex_done(&self.mat.metallic_roughness)
+            && loader
+                .is_done(&self.mat.material_data.gpu_handle())
+                .unwrap()
     }
-
-    gltf_models.clear();
 }
 
-pub fn load_asset(
-    world: &mut World,
-    renderer: &mut trekanten::Renderer,
-    path: &Path,
-) -> LoadedAsset {
-    log::trace!("load gltf asset {}", path.display());
-    let start = std::time::Instant::now();
-    let (gltf_doc, buffers, _images) = gltf::import(path).expect("Unable to import gltf");
-    log::trace!(
-        "gltf import took {} ms",
-        start.elapsed().as_secs_f32() * 1000.0
+struct GltfLoader;
+
+impl GltfLoader {
+    pub const ID: &'static str = "GltfLoader";
+}
+
+#[derive(SystemData)]
+struct LoaderData<'a> {
+    entities: Entities<'a>,
+    loader: ReadExpect<'a, trekanten::Loader>,
+    assets: WriteStorage<'a, GltfAsset>,
+    transforms: WriteStorage<'a, Transform>,
+    parent_storage: WriteStorage<'a, graph::Parent>,
+    children_storage: WriteStorage<'a, graph::Children>,
+    names: WriteStorage<'a, Name>,
+    gltf_models: WriteStorage<'a, PendingGltfModel>,
+    cameras: WriteStorage<'a, Camera>,
+}
+
+struct CtxData<'a, 'b> {
+    entities: &'b mut Entities<'a>,
+    transforms: &'b mut WriteStorage<'a, Transform>,
+    parent_storage: &'b mut WriteStorage<'a, graph::Parent>,
+    children_storage: &'b mut WriteStorage<'a, graph::Children>,
+    names: &'b mut WriteStorage<'a, Name>,
+    gltf_models: &'b mut WriteStorage<'a, PendingGltfModel>,
+    cameras: &'b mut WriteStorage<'a, Camera>,
+    loader: &'b ReadExpect<'a, trekanten::Loader>,
+}
+
+struct RecGltfCtx<'a, 'b> {
+    pub data: CtxData<'a, 'b>,
+    pub buffers: Vec<gltf::buffer::Data>,
+    pub path: PathBuf,
+    pub material_buffer: Vec<PBRMaterialData>,
+}
+
+impl<'a> System<'a> for GltfLoader {
+    type SystemData = LoaderData<'a>;
+
+    fn run(&mut self, data: Self::SystemData) {
+        let Self::SystemData {
+            mut entities,
+            loader,
+            mut assets,
+            mut transforms,
+            mut children_storage,
+            mut parent_storage,
+            mut names,
+            mut gltf_models,
+            mut cameras,
+        } = data;
+
+        let asset_entities: Vec<ecs::Entity> =
+            (&entities, &assets).join().map(|(x, _)| x).collect();
+        for ent in asset_entities.into_iter() {
+            let asset = assets.get(ent).expect("Just filtered on this!");
+            log::trace!("load gltf asset {}", asset.path.display());
+
+            let start = std::time::Instant::now();
+            let (gltf_doc, buffers, _images) =
+                gltf::import(&asset.path).expect("Unable to import gltf");
+            log::trace!(
+                "gltf import took {} ms",
+                start.elapsed().as_secs_f32() * 1000.0
+            );
+
+            let ctx_data = CtxData {
+                entities: &mut entities,
+                transforms: &mut transforms,
+                parent_storage: &mut parent_storage,
+                children_storage: &mut children_storage,
+                names: &mut names,
+                gltf_models: &mut gltf_models,
+                cameras: &mut cameras,
+                loader: &loader,
+            };
+            assert_eq!(gltf_doc.scenes().len(), 1);
+            let mut rec_ctx = RecGltfCtx {
+                buffers,
+                path: asset.path.clone(),
+                data: ctx_data,
+                material_buffer: Vec::new(),
+            };
+
+            // A scene may have several root nodes
+            let nodes = gltf_doc.scenes().next().expect("No scenes!").nodes();
+            if gltf_doc.scenes().len() > 1 {
+                log::warn!("More than one scene found, only displaying the first");
+                log::warn!("Number of scenes: {}", gltf_doc.scenes().len());
+            }
+            for node in nodes {
+                log::trace!("Root node {}", node.name().unwrap_or("node_no_name"));
+                log::trace!("# children {}", node.children().len());
+
+                let root = load_node_rec(&mut rec_ctx, &node);
+                graph::add_edge_sys(
+                    &mut rec_ctx.data.children_storage,
+                    &mut rec_ctx.data.parent_storage,
+                    ent,
+                    root,
+                );
+            }
+
+            let RecGltfCtx {
+                material_buffer, ..
+            } = rec_ctx;
+
+            let gpu_uniform_buffer_handles = loader
+                .load(OwningUniformBufferDescriptor::from_vec(
+                    material_buffer,
+                    BufferMutability::Immutable,
+                ))
+                .split();
+
+            let map_cpu_to_gpu = |node: ecs::Entity| {
+                if let Some(model) = gltf_models.get_mut(node) {
+                    let idx = match model.mat.material_data {
+                        UniformHandle::CPU(i) => i,
+                        _ => panic!("Expected only cpu data at this point"),
+                    };
+                    model.mat.material_data = UniformHandle::GPU(gpu_uniform_buffer_handles[idx]);
+                }
+            };
+
+            graph::breadth_first_sys(&children_storage, ent, map_cpu_to_gpu);
+
+            log::trace!("gltf asset done");
+        }
+        assets.clear();
+    }
+}
+
+struct GltfFinish;
+
+impl GltfFinish {
+    pub const ID: &'static str = "GltfFinish";
+}
+
+impl<'a> System<'a> for GltfFinish {
+    type SystemData = (
+        Entities<'a>,
+        ReadExpect<'a, trekanten::Loader>,
+        WriteStorage<'a, PendingGltfModel>,
+        WriteStorage<'a, render::GpuMesh>,
+        WriteStorage<'a, Material>,
     );
-    assert_eq!(gltf_doc.scenes().len(), 1);
-    let mut rec_ctx = RecGltfCtx {
-        buffers,
-        path: path.into(),
-        world,
-        index_buffers: Vec::new(),
-        vertex_buffers: Vec::new(),
-        material_buffer: Vec::new(),
-    };
 
-    // A scene may have several root nodes
-    let nodes = gltf_doc.scenes().next().expect("No scenes!").nodes();
-    if gltf_doc.scenes().len() > 1 {
-        log::warn!("More than one scene found, only displaying the first");
-        log::warn!("Number of scenes: {}", gltf_doc.scenes().len());
-    }
-    let mut roots: Vec<Entity> = Vec::new();
-    let mut camera_ent: Option<Entity> = None;
-    for node in nodes {
-        log::trace!("Root node {}", node.name().unwrap_or("node_no_name"));
-        log::trace!("# children {}", node.children().len());
+    fn run(&mut self, (entities, loader, mut models, mut meshes, mut materials): Self::SystemData) {
+        let mut done = specs::BitSet::new();
 
-        let AssetGraphResult { node, camera } = load_node_rec(&mut rec_ctx, &node);
-        roots.push(node);
-        camera_ent = camera;
-    }
+        for (ent, model) in (&entities, &mut models).join() {
+            let is_done = model.is_done(&loader);
+            if is_done {
+                meshes
+                    .insert(
+                        ent,
+                        render::GpuMesh(trekanten::mesh::Mesh {
+                            vertex_buffer: model.vertex,
+                            index_buffer: model.index,
+                        }),
+                    )
+                    .expect("Failed to insert mesh");
 
-    let cam_transform = get_cam_transform(gltf_doc, rec_ctx.world, camera_ent);
+                let map_tex = |t: Option<Handle<Texture>>| -> Option<TextureUse> {
+                    t.map(|handle| TextureUse {
+                        handle,
+                        coord_set: 0,
+                    })
+                };
 
-    upload_to_gpu(renderer, rec_ctx);
-    log::trace!("gltf asset done");
+                let mat_data = Material::PBR {
+                    material_uniforms: model.mat.material_data.gpu_handle(),
+                    normal_map: map_tex(model.mat.normal_map),
+                    base_color_texture: map_tex(model.mat.base_color),
+                    metallic_roughness_texture: map_tex(model.mat.metallic_roughness),
+                    has_vertex_colors: model.mat.has_vertex_colors,
+                };
 
-    LoadedAsset {
-        scene_roots: roots,
-        camera: cam_transform,
+                materials
+                    .insert(ent, mat_data)
+                    .expect("Failed to insert material");
+
+                done.add(ent.id());
+            }
+        }
+
+        for (ent, _done) in (&entities, &done).join() {
+            models.remove(ent);
+        }
     }
 }
 
-pub fn register_components(world: &mut World) {
-    world.register::<GltfModel>();
+pub fn register_systems<'a, 'b>(builder: ExecutorBuilder<'a, 'b>) -> ExecutorBuilder<'a, 'b> {
+    builder.with(GltfLoader, GltfLoader::ID, &[]).with(
+        GltfFinish,
+        GltfFinish::ID,
+        &[GltfLoader::ID],
+    )
 }

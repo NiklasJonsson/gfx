@@ -17,6 +17,7 @@ pub mod vertex;
 
 pub use error::RenderError;
 pub use error::ResizeReason;
+pub use loader::Loader;
 pub use mem::BufferHandle;
 pub use render_pass::RenderPassBuilder;
 pub use resource::{Handle, MutResourceManager, ResourceManager};

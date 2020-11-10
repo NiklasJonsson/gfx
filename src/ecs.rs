@@ -2,18 +2,23 @@ use specs::prelude::*;
 use specs::Component;
 
 pub type World = specs::World;
+pub use specs::SystemData;
 
 pub mod prelude {
+    pub use specs::prelude::ResourceId;
+    pub use specs::SystemData;
     pub use specs::{Component, Entities, Entity};
     pub use specs::{DenseVecStorage, HashMapStorage, NullStorage, VecStorage};
-    pub use specs::{Read, ReadStorage, Write, WriteStorage};
+    pub use specs::{Read, ReadExpect, ReadStorage, Write, WriteStorage};
 
     pub use specs::{Builder as _, Join as _, SystemData as _, WorldExt as _};
 
     pub use super::{Executor, ExecutorBuilder, System, World};
 }
 
-pub fn get_singleton_entity<C>(w: &World) -> Entity
+pub type Entity = specs::Entity;
+
+pub fn try_get_singleton_entity<C>(w: &World) -> Option<Entity>
 where
     C: specs::Component,
 {
@@ -22,19 +27,15 @@ where
 
     let mut joined = (&entities, &markers).join();
     let item = joined.next();
-    assert!(
-        joined.next().is_none(),
-        "Expected only one entity with marker component!"
-    );
-    let (ent, _) = item.expect("Expected an entity!");
 
-    ent
+    item.map(|(ent, _)| ent)
 }
 
-pub fn assign<C: specs::Component>(w: &mut World, ent: Entity, c: C) {
-    w.write_storage::<C>()
-        .insert(ent, c)
-        .expect("Failed to assign component");
+pub fn get_singleton_entity<C>(w: &World) -> Entity
+where
+    C: specs::Component,
+{
+    try_get_singleton_entity::<C>(w).expect("Expected an entity!")
 }
 
 pub fn entity_has_component<C>(w: &World, e: Entity) -> bool
@@ -42,6 +43,41 @@ where
     C: specs::Component,
 {
     w.read_storage::<C>().get(e).is_some()
+}
+
+#[derive(Default, Component)]
+#[storage(NullStorage)]
+pub struct True<T>
+where
+    T: Default + Send + Sync + 'static,
+{
+    _ty: std::marker::PhantomData<T>,
+}
+
+#[derive(Default, Component)]
+#[storage(NullStorage)]
+pub struct False<T>
+where
+    T: Default + Send + Sync + 'static,
+{
+    _ty: std::marker::PhantomData<T>,
+}
+
+pub struct FlagComponent<T> {
+    _ty: std::marker::PhantomData<T>,
+}
+
+pub trait Flag {
+    type True;
+    type False;
+}
+
+impl<T> Flag for FlagComponent<T>
+where
+    T: Default + Send + Sync + 'static,
+{
+    type True = True<T>;
+    type False = False<T>;
 }
 
 pub trait System<'a> {

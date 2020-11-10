@@ -96,7 +96,7 @@ pub fn build_ui<'a>(world: &mut World, ui: &imgui::Ui<'a>) {
         .position(pos, imgui::Condition::FirstUseEver)
         .build(&ui, || {
             ui.text(im_str!("FPS: {:.3}", dt.as_fps()));
-            let mut p = crate::render::ActiveCamera::camera_pos(world).into_array();
+            let mut p = crate::render::camera_pos(world).into_array();
 
             InputFloat3::new(ui, im_str!("Camera pos"), &mut p)
                 .read_only(true)

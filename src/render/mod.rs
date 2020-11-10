@@ -7,7 +7,7 @@ use crate::ecs::prelude::*;
 use specs::storage::StorageEntry;
 
 use trekanten::descriptor::DescriptorSet;
-use trekanten::mesh::{BufferMutability, VertexBuffer};
+use trekanten::mesh::BufferMutability;
 use trekanten::pipeline::{
     GraphicsPipeline, GraphicsPipelineDescriptor, PipelineError, ShaderDescriptor,
 };
@@ -20,42 +20,27 @@ use trekanten::BufferHandle;
 use trekanten::RenderPassBuilder;
 use trekanten::Renderer;
 
+mod bounding_box;
+mod geometry;
 pub mod material;
 pub mod pipeline;
 pub mod ui;
 pub mod uniform;
 
 use crate::camera::*;
+use crate::ecs;
 use crate::math::{Mat4, ModelMatrix, Transform, Vec3};
 use material::Material;
 
 use crate::settings::{RenderMode, RenderSettings};
 
-#[derive(Debug, Default)]
-pub struct ActiveCamera(Option<Entity>);
-
-impl ActiveCamera {
-    pub fn empty() -> Self {
-        ActiveCamera(None)
-    }
-
-    pub fn with_entity(entity: Entity) -> Self {
-        ActiveCamera(Some(entity))
-    }
-
-    pub fn camera_pos(world: &World) -> Vec3 {
-        let camera_entity = world
-            .read_resource::<ActiveCamera>()
-            .0
-            .expect("No active camera!");
-
-        let transforms = world.read_storage::<Transform>();
-
-        transforms
-            .get(camera_entity)
-            .expect("Could not get position component for camera")
-            .position
-    }
+pub fn camera_pos(world: &World) -> Vec3 {
+    let camera_entity = ecs::get_singleton_entity::<Camera>(world);
+    let transforms = world.read_storage::<Transform>();
+    transforms
+        .get(camera_entity)
+        .expect("Could not get position component for camera")
+        .position
 }
 
 #[derive(Default)]
@@ -67,13 +52,15 @@ pub struct FrameData {
 }
 
 fn get_view_data(world: &World) -> (Mat4, Vec3) {
-    let cam_pos = ActiveCamera::camera_pos(world);
-
-    let camera_entity = world
-        .read_resource::<ActiveCamera>()
-        .0
-        .expect("No active camera!");
+    let camera_entity = ecs::get_singleton_entity::<Camera>(world);
+    let transforms = world.read_storage::<Transform>();
     let rots = world.read_storage::<CameraRotationState>();
+
+    let cam_pos = transforms
+        .get(camera_entity)
+        .expect("Could not get position component for camera")
+        .position;
+
     let cam_rotation_state = rots
         .get(camera_entity)
         .expect("Could not get rotation state for camera");
@@ -104,18 +91,18 @@ pub struct ReloadMaterial;
 
 #[derive(Component)]
 #[storage(VecStorage)]
-pub struct Mesh(pub trekanten::mesh::Mesh);
+pub struct GpuMesh(pub trekanten::mesh::Mesh);
 
-impl std::ops::Deref for Mesh {
+impl std::ops::Deref for GpuMesh {
     type Target = trekanten::mesh::Mesh;
     fn deref(&self) -> &Self::Target {
         &self.0
     }
 }
 
-impl Into<Mesh> for trekanten::mesh::Mesh {
-    fn into(self) -> Mesh {
-        Mesh(self)
+impl Into<GpuMesh> for trekanten::mesh::Mesh {
+    fn into(self) -> GpuMesh {
+        GpuMesh(self)
     }
 }
 
@@ -166,7 +153,7 @@ fn create_material_descriptor_set(
 
             if let Some(nm) = &normal_map {
                 desc_set_builder = desc_set_builder.add_texture(
-                    &nm.tex.handle,
+                    &nm.handle,
                     3,
                     trekanten::pipeline::ShaderStage::Fragment,
                 );
@@ -189,7 +176,7 @@ pub enum MaterialError {
 pub fn get_pipeline_for(
     renderer: &mut Renderer,
     world: &World,
-    mesh: &Mesh,
+    mesh: &GpuMesh,
     mat: &material::Material,
 ) -> Result<Handle<GraphicsPipeline>, MaterialError> {
     let vertex_format = renderer
@@ -238,7 +225,7 @@ pub fn get_pipeline_for(
 fn create_renderable(
     renderer: &mut Renderer,
     world: &World,
-    mesh: &Mesh,
+    mesh: &GpuMesh,
     material: &Material,
     render_mode: RenderMode,
 ) -> RenderableMaterial {
@@ -255,7 +242,7 @@ fn create_renderable(
 
 #[profiling::function]
 fn create_renderables(renderer: &mut Renderer, world: &mut World, render_mode: RenderMode) {
-    let meshes = world.read_storage::<Mesh>();
+    let meshes = world.read_storage::<GpuMesh>();
     let materials = world.read_storage::<Material>();
     let mut should_reload = world.write_storage::<ReloadMaterial>();
     let mut renderables = world.write_storage::<RenderableMaterial>();
@@ -299,7 +286,7 @@ fn create_renderables(renderer: &mut Renderer, world: &mut World, render_mode: R
 #[profiling::function]
 fn draw_entities<'a>(world: &World, cmd_buf: &mut RenderPassBuilder<'a>) {
     let model_matrices = world.read_storage::<ModelMatrix>();
-    let meshes = world.read_storage::<Mesh>();
+    let meshes = world.read_storage::<GpuMesh>();
     let renderables = world.read_storage::<RenderableMaterial>();
 
     for (mesh, renderable, mtx) in (&meshes, &renderables, &model_matrices).join() {
@@ -326,6 +313,12 @@ fn draw_entities<'a>(world: &World, cmd_buf: &mut RenderPassBuilder<'a>) {
 
 #[profiling::function]
 pub fn draw_frame(world: &mut World, ui: &mut ui::UIContext, renderer: &mut Renderer) {
+    let cam_entity = ecs::try_get_singleton_entity::<Camera>(world);
+    if cam_entity.is_none() {
+        log::warn!("No camera entity => no rendering");
+        return;
+    }
+
     let (render_mode, light_pos) = {
         let render_settings = world.read_resource::<RenderSettings>();
         (render_settings.render_mode, render_settings.light_pos)
@@ -458,13 +451,14 @@ pub fn setup_resources(world: &mut World, mut renderer: &mut Renderer) {
     });
 
     world.insert(shader_compiler);
+    world.insert(renderer.loader());
     log::trace!("Done");
 }
 
 pub fn register_components(world: &mut World) {
     // Register all component types
     world.register::<RenderableMaterial>();
-    world.register::<Mesh>();
+    world.register::<GpuMesh>();
     world.register::<Material>();
     world.register::<crate::graph::Children>();
     world.register::<crate::graph::Parent>();
@@ -472,7 +466,7 @@ pub fn register_components(world: &mut World) {
 }
 
 pub fn register_systems<'a, 'b>(builder: ExecutorBuilder<'a, 'b>) -> ExecutorBuilder<'a, 'b> {
-    builder.with(
+    bounding_box::register_systems(builder).with(
         AssignReloadMaterials,
         "assign_reload_materials",
         &[crate::settings::RENDER_SETTINGS_SYS_ID],
@@ -485,7 +479,7 @@ impl<'a> System<'a> for AssignReloadMaterials {
     type SystemData = (
         Write<'a, RenderSettings>,
         Read<'a, EntitiesRes>,
-        ReadStorage<'a, Mesh>,
+        ReadStorage<'a, GpuMesh>,
         ReadStorage<'a, Material>,
         WriteStorage<'a, ReloadMaterial>,
     );

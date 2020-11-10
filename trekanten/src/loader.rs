@@ -6,21 +6,21 @@ use crate::resource::{AsyncResources, Handle, ResourceCommand};
 use crate::texture::{Texture, TextureDescriptor};
 use crate::uniform::{OwningUniformBufferDescriptor, UniformBuffer};
 
-use std::sync::{mpsc::Receiver, mpsc::Sender, Arc};
+use std::sync::{mpsc::Receiver, mpsc::Sender, Arc, Mutex};
 
 pub type ResourceCommandSender = Sender<ResourceCommand>;
 pub type ResourceCommandReceiver = Receiver<ResourceCommand>;
 
 #[derive(Clone)]
 pub struct Loader {
-    send_channel: ResourceCommandSender,
+    send_channel: Arc<Mutex<ResourceCommandSender>>,
     resources: Arc<AsyncResources>,
 }
 
 impl Loader {
     pub fn new(send_channel: ResourceCommandSender, resources: Arc<AsyncResources>) -> Self {
         Self {
-            send_channel,
+            send_channel: Arc::new(Mutex::new(send_channel)),
             resources,
         }
     }
@@ -28,6 +28,7 @@ impl Loader {
 
 pub trait ResourceLoader<D, H> {
     fn load(&self, descriptor: D) -> H;
+    fn is_done(&self, h: &H) -> Option<bool>;
 }
 
 macro_rules! impl_loader {
@@ -41,10 +42,16 @@ macro_rules! impl_loader {
                 let handle = self.resources.$storage.allocate(&descriptor);
                 let cmd = ResourceCommand::$cmd_enum { descriptor, handle };
                 self.send_channel
+                    .lock()
+                    .expect("Failed to lock loader send channel")
                     .send(cmd)
-                    .expect("vertex buffer loader send fail");
+                    .expect("loader send fail on channel");
 
                 handle
+            }
+
+            fn is_done(&self, h: &$handle) -> Option<bool> {
+                self.resources.$storage.is_done(h)
             }
         }
     };

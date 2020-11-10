@@ -1,4 +1,4 @@
-use trekanten::texture::Texture;
+use trekanten as trek;
 use trekanten::uniform::UniformBuffer;
 use trekanten::BufferHandle;
 use trekanten::Handle;
@@ -8,25 +8,18 @@ use specs::DenseVecStorage;
 
 #[derive(Debug, Clone)]
 pub struct TextureUse {
-    pub handle: Handle<Texture>,
+    pub handle: Handle<trek::texture::Texture>,
     pub coord_set: u32,
-}
-
-// TODO: Do we need to pass around the scale here?
-#[derive(Debug, Clone)]
-pub struct NormalMap {
-    pub tex: TextureUse,
-    pub scale: f32,
 }
 
 #[derive(Debug, Clone, Component)]
 pub enum Material {
-    UniformColor {
-        color: [f32; 4],
+    Unlit {
+        color_uniform: BufferHandle<UniformBuffer>,
     },
     PBR {
         material_uniforms: BufferHandle<UniformBuffer>,
-        normal_map: Option<NormalMap>,
+        normal_map: Option<TextureUse>,
         base_color_texture: Option<TextureUse>,
         metallic_roughness_texture: Option<TextureUse>,
         has_vertex_colors: bool,

@@ -1,8 +1,9 @@
-use crate::math;
+use crate::ecs;
 
 pub mod gltf;
 
-pub struct LoadedAsset {
-    pub scene_roots: Vec<specs::Entity>,
-    pub camera: Option<math::Transform>,
+pub fn register_systems<'a, 'b>(
+    builder: ecs::ExecutorBuilder<'a, 'b>,
+) -> ecs::ExecutorBuilder<'a, 'b> {
+    gltf::register_systems(builder)
 }

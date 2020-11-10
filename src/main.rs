@@ -48,6 +48,7 @@ struct App {
     timer: time::Timer,
 }
 
+/* Unused for now
 impl App {
     fn take_cursor(&mut self) {
         self.cursor_grab(true);
@@ -63,6 +64,7 @@ impl App {
             .cursor_grab(cursor_grab);
     }
 }
+*/
 
 impl App {
     fn init_dispatchers<'a, 'b>() -> (Executor<'a, 'b>, Executor<'a, 'b>) {
@@ -74,6 +76,7 @@ impl App {
         let control = control_builder.build();
 
         let engine_builder = ExecutorBuilder::new();
+        let engine_builder = asset::register_systems(engine_builder);
         let engine_builder = camera::register_systems(engine_builder);
         let engine_builder = settings::register_systems(engine_builder);
         let engine_builder = render::register_systems(engine_builder);
@@ -98,23 +101,12 @@ impl App {
     }
 
     fn setup_resources(&mut self) {
-        self.world.insert(render::ActiveCamera::empty());
         self.world.insert(DeltaTime::zero());
     }
 
     fn populate_world(&mut self, args: &Args) {
         self.setup_resources();
-
-        let cam_entity = ecs::get_singleton_entity::<camera::Camera>(&self.world);
-        *self.world.write_resource::<render::ActiveCamera>() =
-            render::ActiveCamera::with_entity(cam_entity);
-
-        let loaded_asset =
-            asset::gltf::load_asset(&mut self.world, &mut self.renderer, &args.gltf_path);
-
-        if let (Some(transform), true) = (loaded_asset.camera, args.use_scene_camera) {
-            camera::Camera::set_camera_state(&mut self.world, cam_entity, &transform);
-        }
+        asset::gltf::load_asset(&mut self.world, &args.gltf_path);
     }
 
     fn next_event(&self) -> Option<Event> {
@@ -227,7 +219,6 @@ impl App {
         render::setup_resources(&mut world, &mut renderer);
 
         let (mut control_systems, mut engine_systems) = Self::init_dispatchers();
-        asset::gltf::register_components(&mut world);
         render::register_components(&mut world);
         common::register_components(&mut world);
         control_systems.setup(&mut world);

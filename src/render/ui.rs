@@ -108,7 +108,7 @@ fn imgui_debug_ui<'a>(ui: &imgui::Ui<'a>) {
     imgui_debug_ui_mouse_state(ui, "dragging", imgui::Ui::is_mouse_dragging);
 }
 
-pub fn build_ui<'a>(world: &mut World, ui: &imgui::Ui<'a>, pos: [f32; 2]) -> [f32; 2] {
+pub fn build_ui<'a>(_: &mut World, ui: &imgui::Ui<'a>, pos: [f32; 2]) -> [f32; 2] {
     let size = [400.0, 300.0];
     imgui::Window::new(im_str!("Imgui Debug"))
         .size(size, imgui::Condition::FirstUseEver)
