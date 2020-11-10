@@ -25,14 +25,22 @@ impl Children {
 
 pub fn add_edge(world: &mut World, parent: Entity, child: Entity) {
     let mut children_storage = world.write_storage::<Children>();
+    let mut parent_storage = world.write_storage::<Parent>();
+    add_edge_sys(&mut children_storage, &mut parent_storage, parent, child);
+}
 
+pub fn add_edge_sys<'a>(
+    children_storage: &mut WriteStorage<'a, Children>,
+    parent_storage: &mut WriteStorage<'a, Parent>,
+    parent: Entity,
+    child: Entity,
+) {
     let entry = children_storage
         .entry(parent)
         .expect("Failed to get entry!");
     let contents = entry.or_insert(Children { children: vec![] });
     contents.children.push(child);
 
-    let mut parent_storage = world.write_storage::<Parent>();
     parent_storage
         .insert(child, Parent { parent })
         .expect("Failed to get entry!");
@@ -112,119 +120,13 @@ impl<'a> System<'a> for TransformPropagation {
     }
 }
 
-#[derive(Component)]
-#[storage(HashMapStorage)]
-pub struct RenderedBoundingBox(Entity);
-
-/* TODO: TREKANTEN
-pub const RENDERED_BOUNDING_BOXES_SYSTEM_ID: &str = "rendered_bounding_boxes";
-/// SPECS system to generate bounding boxes for rendering
-/// Works per root node in the scene graph
-pub struct RenderedBoundingBoxes;
-impl<'a> System<'a> for RenderedBoundingBoxes {
-    type SystemData = (
-        Entities<'a>,
-        ReadStorage<'a, RenderGraphRoot>,
-        ReadStorage<'a, ModelMatrix>,
-        WriteStorage<'a, Mesh>,
-        WriteStorage<'a, Material>,
-        WriteStorage<'a, RenderGraphNode>,
-        WriteStorage<'a, RenderGraphChild>,
-        WriteStorage<'a, RenderedBoundingBox>,
-        WriteStorage<'a, crate::render::Renderable>,
-        Read<'a, RenderSettings>,
-    );
-
-    fn run(
-        &mut self,
-        (
-            entities,
-            roots,
-            matrices,
-            mut meshes,
-            mut materials,
-            mut rgnodes,
-            mut rgchildren,
-            mut rbbs,
-            mut renderables,
-            settings,
-        ): Self::SystemData,
-    ) {
-        let remove_rbbs = !settings.render_bounding_box;
-
-        if remove_rbbs {
-            let mut to_remove = Vec::new();
-            for (root_ent, bb) in (&entities, &rbbs).join() {
-                let bb_node = bb.0;
-                meshes.remove(bb_node);
-                renderables.remove(bb_node);
-                to_remove.push(root_ent);
-            }
-
-            for ent in to_remove {
-                rbbs.remove(ent);
-            }
-
-            return;
-        }
-
-        for (root_ent, _root) in (&entities, &roots).join() {
-            let mut biggest_bounding_box = BoundingBox::default();
-            let update_biggest = |ent: Entity| {
-                if let Some(new) = meshes.get(ent) {
-                    let m = *matrices.get(ent).unwrap();
-                    if let Some(bounding_box) = &new.bounding_box {
-                        let min = m * bounding_box.min;
-                        let max = m * bounding_box.max;
-                        let new = BoundingBox { min, max };
-                        biggest_bounding_box.combine_with(&new);
-                    }
-                }
-            };
-
-            transform_graph::breadth_first_sys_mut(&rgnodes, root_ent, update_biggest);
-            let child = entities.create();
-            rgnodes
-                .get_mut(root_ent)
-                .expect("Only a single root node")
-                .children
-                .push(child);
-            rgchildren
-                .insert(child, transform_graph::child(root_ent))
-                .expect("Can't add child->parent");
-
-            rbbs.insert(root_ent, RenderedBoundingBox(child))
-                .expect("Can't add rbb");
-
-            let (vertex_data, indices) = biggest_bounding_box.to_vertices_and_indices();
-            let ty = MeshType::Line { indices };
-            let material = Material {
-                data: trekanten::material::MaterialData::Color {
-                    color: [1.0, 0.0, 0.0, 1.0],
-                },
-                compilation_mode: ShaderUse::PreCompiled,
-            };
-            let mesh = Mesh {
-                ty,
-                vertex_data,
-                bounding_box: None,
-            };
-            meshes
-                .insert(child, mesh)
-                .expect("Unable to insert bb mesh");
-            materials
-                .insert(child, material)
-                .expect("Unable to add bb material");
-        }
-    }
-}
-*/
-
-fn breadth_first_sys<'a>(
-    children_storage: &ReadStorage<'a, Children>,
+pub fn breadth_first_sys<'a, CS>(
+    children_storage: CS,
     root: Entity,
     mut visit_node: impl FnMut(Entity),
-) {
+) where
+    CS: specs::storage::GenericReadStorage<Component = Children>,
+{
     let mut queue = VecDeque::new();
     queue.push_back(root);
 
@@ -276,7 +178,6 @@ enum PathDirection {
 }
 
 impl PathDirection {
-    // TODO: Change to operator++
     fn next(&mut self) {
         use PathDirection::*;
         *self = match *self {
@@ -293,7 +194,6 @@ impl PathDirection {
         }
     }
 
-    // TODO: Change to deref
     fn idx(&self) -> usize {
         use PathDirection::*;
         match self {

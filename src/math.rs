@@ -60,7 +60,6 @@ impl std::ops::MulAssign for Transform {
 
 #[derive(Debug, Component, Clone, Copy)]
 #[storage(DenseVecStorage)]
-#[repr(transparent)]
 pub struct ModelMatrix(pub Mat4);
 
 impl From<ModelMatrix> for [[f32; 4]; 4] {
@@ -93,15 +92,36 @@ impl std::fmt::Display for ModelMatrix {
     }
 }
 
-#[derive(Debug, Component)]
+#[derive(Debug, Clone, Copy, Component)]
+#[storage(DenseVecStorage)]
 pub struct BoundingBox {
     pub min: Vec3,
     pub max: Vec3,
 }
 
 impl BoundingBox {
-    pub fn combine(&mut self, other: &Self) {
+    pub fn combine(&mut self, other: Self) {
         self.min = Vec3::partial_min(self.min, other.min);
         self.max = Vec3::partial_max(self.max, other.max);
+    }
+}
+
+impl std::ops::Mul<BoundingBox> for Mat4 {
+    type Output = BoundingBox;
+    fn mul(self, rhs: BoundingBox) -> Self::Output {
+        BoundingBox {
+            min: (self * Vec4::from_point(rhs.min)).xyz(),
+            max: (self * Vec4::from_point(rhs.max)).xyz(),
+        }
+    }
+}
+
+impl<T> std::ops::Mul<T> for ModelMatrix
+where
+    Mat4: std::ops::Mul<T>,
+{
+    type Output = <Mat4 as std::ops::Mul<T>>::Output;
+    fn mul(self, t: T) -> Self::Output {
+        self.0 * t
     }
 }

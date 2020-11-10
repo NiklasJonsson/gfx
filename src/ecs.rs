@@ -1,4 +1,5 @@
 use specs::prelude::*;
+use specs::Component;
 
 pub fn get_singleton_entity<C>(w: &World) -> Entity
 where
@@ -29,4 +30,39 @@ where
     C: specs::Component,
 {
     w.read_storage::<C>().get(e).is_some()
+}
+
+#[derive(Default, Component)]
+#[storage(NullStorage)]
+pub struct True<T>
+where
+    T: Default + Send + Sync + 'static,
+{
+    _ty: std::marker::PhantomData<T>,
+}
+
+#[derive(Default, Component)]
+#[storage(NullStorage)]
+pub struct False<T>
+where
+    T: Default + Send + Sync + 'static,
+{
+    _ty: std::marker::PhantomData<T>,
+}
+
+pub struct FlagComponent<T> {
+    _ty: std::marker::PhantomData<T>,
+}
+
+pub trait Flag {
+    type True;
+    type False;
+}
+
+impl<T> Flag for FlagComponent<T>
+where
+    T: Default + Send + Sync + 'static,
+{
+    type True = True<T>;
+    type False = False<T>;
 }
