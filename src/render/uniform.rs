@@ -18,8 +18,8 @@ pub struct Transforms {
 #[derive(Copy, Clone, Debug)]
 #[repr(C, packed)]
 pub struct LightingData {
-    pub view_pos: [f32; 4],
     pub light_pos: [f32; 4],
+    pub view_pos: [f32; 4],
 }
 
 #[derive(Copy, Clone, Debug)]

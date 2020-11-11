@@ -83,8 +83,7 @@ void main() {
     normal = normalize(tbn * tex_normal);
 #endif
 
-    //vec3 light_dir = normalize(lighting_data.light_pos.xyz - world_pos);
-    vec3 light_dir = normalize(vec3(0.0, 10.0, 0.0) - world_pos);
+    vec3 light_dir = normalize(lighting_data.light_pos.xyz - world_pos);
     vec3 view_dir = normalize(lighting_data.view_pos.xyz - world_pos);
     vec3 bisect_light_view = normalize(view_dir + light_dir);
     vec3 light_color = vec3(1.0);

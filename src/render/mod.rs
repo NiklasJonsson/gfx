@@ -340,7 +340,7 @@ pub fn draw_frame(world: &mut World, ui: &mut ui::UIContext, renderer: &mut Rend
 
     let (view_matrix, cam_pos) = get_view_data(world);
     let lighting_data = uniform::LightingData {
-        light_pos: [0.0f32, 500.0f32, 0.0f32, 0.0f32],
+        light_pos: [0.0f32, 10.0f32, 0.0f32, 0.0f32],
         view_pos: [cam_pos.x, cam_pos.y, cam_pos.z, 0.0f32],
     };
     let transforms = uniform::Transforms {
