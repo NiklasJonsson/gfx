@@ -320,7 +320,10 @@ fn draw_entities<'a>(world: &World, cmd_buf: &mut command::CommandBufferBuilder<
 }
 
 pub fn draw_frame(world: &mut World, ui: &mut ui::UIContext, renderer: &mut Renderer) {
-    let render_mode = world.read_resource::<RenderSettings>().render_mode;
+    let (render_mode, light_pos) = {
+        let render_settings = world.read_resource::<RenderSettings>();
+        (render_settings.render_mode, render_settings.light_pos)
+    };
 
     create_renderables(renderer, world, render_mode);
 
@@ -340,8 +343,8 @@ pub fn draw_frame(world: &mut World, ui: &mut ui::UIContext, renderer: &mut Rend
 
     let (view_matrix, cam_pos) = get_view_data(world);
     let lighting_data = uniform::LightingData {
-        light_pos: [0.0f32, 10.0f32, 0.0f32, 0.0f32],
-        view_pos: [cam_pos.x, cam_pos.y, cam_pos.z, 0.0f32],
+        light_pos: [light_pos.x, light_pos.y, light_pos.z, 1.0f32],
+        view_pos: [cam_pos.x, cam_pos.y, cam_pos.z, 1.0f32],
     };
     let transforms = uniform::Transforms {
         view: view_matrix.into_col_arrays(),

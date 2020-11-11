@@ -1,5 +1,6 @@
 use crate::common::Name;
 use crate::io::input::{ActionId, InputContext, InputContextError, KeyCode, MappedInput};
+use crate::math::Vec3;
 
 use num_derive::FromPrimitive;
 
@@ -11,12 +12,13 @@ pub enum RenderMode {
     Wireframe,
 }
 
-#[derive(Debug, Copy, Clone, PartialEq, Eq)]
+#[derive(Debug, Copy, Clone, PartialEq)]
 pub struct RenderSettings {
     // Affects all entities
     pub render_mode: RenderMode,
     pub render_bounding_box: bool,
     pub reload_shaders: bool,
+    pub light_pos: Vec3,
 }
 
 impl Default for RenderSettings {
@@ -25,6 +27,11 @@ impl Default for RenderSettings {
             render_mode: RenderMode::Opaque,
             render_bounding_box: false,
             reload_shaders: false,
+            light_pos: Vec3 {
+                x: 0.0,
+                y: 10.0,
+                z: 0.0,
+            },
         }
     }
 }
@@ -105,7 +112,7 @@ pub fn register_systems<'a, 'b>(builder: DispatcherBuilder<'a, 'b>) -> Dispatche
 }
 
 pub fn build_ui<'a>(world: &mut World, ui: &imgui::Ui<'a>, pos: [f32; 2]) -> [f32; 2] {
-    let settings = world.read_resource::<RenderSettings>();
+    let mut settings = world.write_resource::<RenderSettings>();
 
     let size = [300.0, 85.0];
 
@@ -122,6 +129,9 @@ pub fn build_ui<'a>(world: &mut World, ui: &imgui::Ui<'a>, pos: [f32; 2]) -> [f3
                 "reload shaders: {}",
                 settings.reload_shaders
             ));
+            let mut pos = settings.light_pos.into_array();
+            imgui::InputFloat3::new(ui, imgui::im_str!("Position"), &mut pos).build();
+            settings.light_pos = Vec3::from(pos);
         });
 
     size
