@@ -10,6 +10,7 @@ mod error;
 mod framebuffer;
 mod image;
 mod instance;
+pub mod loader;
 mod mem;
 pub mod mesh;
 pub mod pipeline;
@@ -160,15 +161,16 @@ impl<'a>
         handle: BufferHandle<mesh::IndexBuffer>,
         descriptor: mesh::IndexBufferDescriptor<'b>,
     ) -> Result<BufferHandle<mesh::IndexBuffer>, mem::MemoryError> {
-        let queue = self.renderer.device.util_queue();
-        self.renderer.index_buffers.recreate(
+        let mut cmd_buf = self.renderer.begin_submit::<mem::MemoryError>()?;
+        let h = self.renderer.index_buffers.recreate(
             &self.renderer.device,
-            queue,
-            &self.renderer.util_command_pool,
+            &mut cmd_buf,
             handle,
             self.renderer.frame_idx as usize,
             &descriptor,
-        )
+        )?;
+        self.renderer.blocking_end::<mem::MemoryError>(cmd_buf)?;
+        Ok(h)
     }
 }
 
@@ -194,15 +196,17 @@ impl<'a>
         handle: BufferHandle<mesh::VertexBuffer>,
         descriptor: mesh::VertexBufferDescriptor<'b>,
     ) -> Result<BufferHandle<mesh::VertexBuffer>, mem::MemoryError> {
-        let queue = self.renderer.device.util_queue();
-        self.renderer.vertex_buffers.recreate(
+        let mut cmd_buf = self.renderer.begin_submit::<mem::MemoryError>()?;
+        let h = self.renderer.vertex_buffers.recreate(
             &self.renderer.device,
-            queue,
-            &self.renderer.util_command_pool,
+            &mut cmd_buf,
             handle,
             self.renderer.frame_idx as usize,
             &descriptor,
-        )
+        )?;
+        self.renderer.blocking_end::<mem::MemoryError>(cmd_buf)?;
+
+        Ok(h)
     }
 }
 
@@ -224,6 +228,8 @@ pub struct Renderer {
     swapchain: swapchain::Swapchain,
     swapchain_image_idx: u32, // TODO: Bake this into the swapchain?
     image_to_frame_idx: Vec<Option<u32>>,
+
+    loader: loader::Loader,
 
     util_command_pool: command::CommandPool,
 
@@ -340,6 +346,7 @@ impl Renderer {
             textures: Default::default(),
             descriptor_sets,
             util_command_pool,
+            loader: loader::Loader::default(),
         })
     }
 
@@ -471,6 +478,10 @@ impl Renderer {
     pub fn swapchain_extent(&self) -> util::Extent2D {
         self.swapchain.info().extent
     }
+
+    pub fn loader(&self) -> loader::Loader {
+        self.loader.clone()
+    }
 }
 
 /// These are functions only used by Frame
@@ -482,7 +493,7 @@ impl Renderer {
     ) -> Result<(), RenderError> {
         let ubuf = self
             .uniform_buffers
-            .get_mut(h.handle(), self.frame_idx as usize)
+            .get_buffered_mut(h, self.frame_idx as usize)
             .ok_or_else(|| RenderError::InvalidHandle(h.handle().id()))?;
 
         ubuf.update_with(data, h.offset())
@@ -502,8 +513,8 @@ impl Renderer {
 impl Renderer {
     fn get_uniform_buffers(
         &self,
-        handle: &Handle<uniform::UniformBuffer>,
-    ) -> Option<&[uniform::UniformBuffer; MAX_FRAMES_IN_FLIGHT]> {
+        handle: &BufferHandle<uniform::UniformBuffer>,
+    ) -> Option<(&uniform::UniformBuffer, Option<&uniform::UniformBuffer>)> {
         self.uniform_buffers.get_all(handle)
     }
 
@@ -523,6 +534,19 @@ impl Renderer {
         self.descriptor_sets
             .alloc(bindings)
             .expect("Failed to alloc")
+    }
+
+    fn begin_submit<E: From<command::CommandError>>(&self) -> Result<command::CommandBuffer, E> {
+        Ok(self.util_command_pool.begin_single_submit()?)
+    }
+
+    fn blocking_end<E: From<command::CommandError> + From<queue::QueueError>>(
+        &self,
+        mut c: command::CommandBuffer,
+    ) -> Result<(), E> {
+        c.end()?;
+        self.device.util_queue().submit_and_wait(&c)?;
+        Ok(())
     }
 }
 
@@ -572,9 +596,12 @@ impl<'a>
         &mut self,
         descriptor: mesh::VertexBufferDescriptor<'a>,
     ) -> Result<BufferHandle<mesh::VertexBuffer>, mem::MemoryError> {
-        let queue = self.device.util_queue();
-        self.vertex_buffers
-            .create(&self.device, queue, &self.util_command_pool, &descriptor)
+        let mut cmd_buf = self.begin_submit::<mem::MemoryError>()?;
+        let (h, _staging) = self
+            .vertex_buffers
+            .create(&self.device, &mut cmd_buf, &descriptor)?;
+        self.blocking_end::<mem::MemoryError>(cmd_buf)?;
+        Ok(h)
     }
 }
 
@@ -596,9 +623,12 @@ impl<'a>
         &mut self,
         descriptor: mesh::IndexBufferDescriptor<'a>,
     ) -> Result<BufferHandle<mesh::IndexBuffer>, mem::MemoryError> {
-        let queue = self.device.util_queue();
-        self.index_buffers
-            .create(&self.device, queue, &self.util_command_pool, &descriptor)
+        let mut cmd_buf = self.begin_submit::<mem::MemoryError>()?;
+        let (h, _staging) = self
+            .index_buffers
+            .create(&self.device, &mut cmd_buf, &descriptor)?;
+        self.blocking_end::<mem::MemoryError>(cmd_buf)?;
+        Ok(h)
     }
 }
 
@@ -615,31 +645,28 @@ impl<'a, T>
         handle: &BufferHandle<uniform::UniformBuffer>,
     ) -> Option<&uniform::UniformBuffer> {
         self.uniform_buffers
-            .get(handle.handle(), self.frame_idx as usize)
+            .get_buffered(handle, self.frame_idx as usize)
     }
 
     fn create_resource(
         &mut self,
         descriptor: uniform::UniformBufferDescriptor<'a, T>,
     ) -> Result<BufferHandle<uniform::UniformBuffer>, mem::MemoryError> {
-        let queue = self.device.util_queue();
-        let resource_handle = self.uniform_buffers.create(
-            &self.device,
-            queue,
-            &self.util_command_pool,
-            &descriptor,
-        )?;
+        let mut cmd_buf = self.begin_submit::<mem::MemoryError>()?;
+        let (resource_handle, _staging) =
+            self.uniform_buffers
+                .create(&self.device, &mut cmd_buf, &descriptor)?;
+        self.blocking_end::<mem::MemoryError>(cmd_buf)?;
 
         use crate::mem::BufferDescriptor;
 
-        // Frame index doesn't matter, stats are the same
         let buf = self
             .uniform_buffers
-            .get(&resource_handle, 0)
+            .get_either(&resource_handle, 0)
             .expect("Just added this...");
         unsafe {
             Ok(BufferHandle::from_buffer(
-                resource_handle,
+                *resource_handle.handle(),
                 0,
                 buf.n_elems(),
                 buf.elem_size(),

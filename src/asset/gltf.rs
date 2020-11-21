@@ -487,8 +487,9 @@ fn upload_to_gpu<'a>(renderer: &mut trekanten::Renderer, ctx: &mut RecGltfCtx<'a
         .collect();
 
     let gpu_uniform_buffer_handles = renderer
-        .create_resource(UniformBufferDescriptor::Immutable {
+        .create_resource(UniformBufferDescriptor {
             data: &ctx.material_buffer,
+            mutability: BufferMutability::Immutable,
         })
         .expect("Failed to create uniform buffer for materials")
         .split();

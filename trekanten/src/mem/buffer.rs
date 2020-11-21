@@ -2,13 +2,15 @@ use ash::vk;
 
 use vk_mem::{Allocation, AllocationCreateInfo, AllocationInfo, MemoryUsage};
 
-use super::MemoryError;
-
-use crate::command::CommandPool;
+use crate::command::CommandBuffer;
 use crate::device::AllocatorHandle;
 use crate::device::Device;
-use crate::queue::Queue;
-use crate::resource::Handle;
+use crate::resource::{AsyncStorage, Handle};
+
+use crate::loader;
+use crate::mem::MemoryError;
+
+use std::sync::Arc;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum BufferMutability {
@@ -17,21 +19,67 @@ pub enum BufferMutability {
 }
 
 pub trait BufferDescriptor {
-    type Buffer: Buffer;
+    type Buffer;
     fn mutability(&self) -> BufferMutability;
     fn n_elems(&self) -> u32;
     fn elem_size(&self) -> u16;
+    fn stride(&self, _: &Device) -> u16;
+    fn data(&self) -> &[u8];
+    fn vk_usage_flags(&self) -> vk::BufferUsageFlags;
 
+    // TODO: enqueue?
     fn create(
         &self,
         device: &Device,
-        queue: &Queue,
-        command_pool: &CommandPool,
-    ) -> Result<Self::Buffer, MemoryError>;
+        command_buffer: &mut CommandBuffer,
+    ) -> Result<(Self::Buffer, Option<DeviceBuffer>), MemoryError>;
 }
 
-pub trait Buffer {
-    fn stride(&self) -> u16;
+struct BufferCreation<BD>
+where
+    BD: BufferDescriptor + Clone,
+{
+    descriptor: BD,
+    handle: Handle<BD::Buffer>,
+    storage: Arc<AsyncStorage<BD::Buffer>>,
+    buffer: Option<BD::Buffer>,
+    staging: Option<DeviceBuffer>,
+}
+
+impl<BD> loader::ResourceCmd for BufferCreation<BD>
+where
+    BD: BufferDescriptor + Clone,
+{
+    fn start(&mut self, device: &Device, cmd_buf: &mut CommandBuffer) {
+        let (buffer, staging) = self.descriptor.create(device, cmd_buf).expect("Fail");
+        self.buffer = Some(buffer);
+        self.staging = staging;
+    }
+
+    fn end(self) {
+        self.storage
+            .insert(self.handle, self.buffer.expect("Called end before start"));
+    }
+}
+
+impl<BD> loader::Descriptor<<BD as BufferDescriptor>::Buffer> for BD
+where
+    BD: BufferDescriptor + Clone + 'static,
+{
+    fn load(
+        &self,
+        handle: Handle<BD::Buffer>,
+        storage: Arc<AsyncStorage<BD::Buffer>>,
+    ) -> Box<dyn loader::ResourceCmd> {
+        let descriptor = self.clone();
+        Box::new(BufferCreation {
+            descriptor,
+            handle,
+            storage,
+            buffer: None,
+            staging: None,
+        }) as Box<dyn loader::ResourceCmd>
+    }
 }
 
 #[derive(Debug, PartialEq, Eq, Hash)]
@@ -253,9 +301,7 @@ impl DeviceBuffer {
             }
         }
 
-        allocator
-            .unmap_memory(&staging.allocation)
-            .map_err(MemoryError::MemoryMapping)?;
+        allocator.unmap_memory(&staging.allocation);
 
         Ok(staging)
     }
@@ -299,13 +345,12 @@ impl DeviceBuffer {
 
     pub fn device_local(
         device: &Device,
-        queue: &Queue,
-        command_pool: &CommandPool,
+        command_buffer: &mut CommandBuffer,
         usage: vk::BufferUsageFlags,
         data: &[u8],
         elem_size: usize,
         stride: usize,
-    ) -> Result<Self, MemoryError> {
+    ) -> Result<(Self, Self), MemoryError> {
         log::trace!("Creating device local buffer (with data from staging)");
         let staging = Self::staging_with_data(device, data, elem_size, stride)?;
 
@@ -316,15 +361,9 @@ impl DeviceBuffer {
             MemoryUsage::GpuOnly,
         )?;
 
-        let mut cmd_buf = command_pool.begin_single_submit()?;
+        command_buffer.copy_buffer(staging.vk_buffer(), dst_buffer.vk_buffer(), staging.size());
 
-        cmd_buf
-            .copy_buffer(staging.vk_buffer(), dst_buffer.vk_buffer(), staging.size())
-            .end()?;
-
-        queue.submit_and_wait(&cmd_buf)?;
-
-        Ok(dst_buffer)
+        Ok((dst_buffer, staging))
     }
 
     pub fn vk_buffer(&self) -> &vk::Buffer {
@@ -346,9 +385,7 @@ impl DeviceBuffer {
             std::ptr::copy_nonoverlapping::<u8>(src, dst, size);
         }
 
-        self.allocator
-            .unmap_memory(&self.allocation)
-            .map_err(MemoryError::MemoryMapping)?;
+        self.allocator.unmap_memory(&self.allocation);
 
         Ok(())
     }
@@ -360,11 +397,84 @@ impl DeviceBuffer {
 
 impl std::ops::Drop for DeviceBuffer {
     fn drop(&mut self) {
-        if let Err(e) = self
-            .allocator
-            .destroy_buffer(self.vk_buffer, &self.allocation)
-        {
-            log::error!("Failed to destroy buffer: {}", e);
-        }
+        self.allocator
+            .destroy_buffer(self.vk_buffer, &self.allocation);
+    }
+}
+
+#[derive(Debug)]
+pub struct TypedBuffer<BT> {
+    buffer: DeviceBuffer,
+    elem_size: u16,
+    stride: u16,
+    buffer_type: BT,
+}
+
+impl<BT> TypedBuffer<BT> {
+    pub fn create(
+        device: &Device,
+        command_buffer: &mut CommandBuffer,
+        descriptor: &impl BufferDescriptor,
+        buffer_type: BT,
+    ) -> Result<(Self, Option<DeviceBuffer>), MemoryError> {
+        log::trace!("Creating buffer");
+        let elem_size = descriptor.elem_size();
+        let stride = descriptor.stride(device);
+        let vk_buffer_usage_flags = descriptor.vk_usage_flags();
+        let data = descriptor.data();
+
+        let (buffer, staging) = match descriptor.mutability() {
+            BufferMutability::Immutable => {
+                let (buffer, staging) = DeviceBuffer::device_local(
+                    device,
+                    command_buffer,
+                    vk_buffer_usage_flags,
+                    data,
+                    elem_size as usize,
+                    stride as usize,
+                )?;
+                (buffer, Some(staging))
+            }
+            BufferMutability::Mutable => (
+                DeviceBuffer::persistent_mapped(
+                    device,
+                    vk_buffer_usage_flags,
+                    data,
+                    elem_size as usize,
+                    stride as usize,
+                )?,
+                None,
+            ),
+        };
+
+        Ok((
+            Self {
+                buffer,
+                elem_size,
+                stride,
+                buffer_type,
+            },
+            staging,
+        ))
+    }
+
+    pub fn buffer_mut(&mut self) -> &mut DeviceBuffer {
+        &mut self.buffer
+    }
+
+    pub fn vk_buffer(&self) -> &vk::Buffer {
+        &self.buffer.vk_buffer()
+    }
+
+    pub fn elem_size(&self) -> u16 {
+        self.elem_size
+    }
+
+    pub fn buffer_type(&self) -> &BT {
+        &self.buffer_type
+    }
+
+    pub fn stride(&self) -> u16 {
+        self.stride
     }
 }

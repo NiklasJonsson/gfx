@@ -175,10 +175,12 @@ impl<'a> DescriptorSetBuilder<'a> {
             vk::ShaderStageFlags::from(stage),
         );
 
-        let [buf0, buf1] = self
+        let (buf0, buf1) = self
             .renderer
-            .get_uniform_buffers(buf_h.handle())
+            .get_uniform_buffers(buf_h)
             .expect("Failed to get buffer");
+
+        let buf1 = buf1.unwrap_or(buf0);
 
         // VMA allocator creates vk::Buffer from the device memory + offset so the offset from the buffer handle is enough here
         self.buffer_infos.push([

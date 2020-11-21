@@ -1,10 +1,9 @@
-use crate::command::CommandPool;
+use crate::command::CommandBuffer;
 use crate::device::Device;
-use crate::queue::Queue;
 use crate::resource::{BufferedStorage, Storage};
 
 use super::MemoryError;
-use super::{Buffer, BufferDescriptor, BufferHandle, BufferMutability};
+use super::{BufferDescriptor, BufferHandle, BufferMutability};
 
 pub struct DeviceBufferStorage<T> {
     buffered: BufferedStorage<T>,
@@ -20,10 +19,16 @@ impl<T> Default for DeviceBufferStorage<T> {
     }
 }
 
-impl<T> DeviceBufferStorage<T>
-where
-    T: Buffer,
-{
+impl<T> DeviceBufferStorage<T> {
+    pub fn get_all(&self, h: &BufferHandle<T>) -> Option<(&T, Option<&T>)> {
+        match h.mutability() {
+            BufferMutability::Immutable => self.unbuffered.get(h.handle()).map(|x| (x, None)),
+            BufferMutability::Mutable => {
+                self.buffered.get_all(h.handle()).map(|[x, y]| (x, Some(y)))
+            }
+        }
+    }
+
     pub fn get_buffered(&self, h: &BufferHandle<T>, idx: usize) -> Option<&T> {
         assert_eq!(h.mutability(), BufferMutability::Mutable);
         self.buffered.get(h.handle(), idx)
@@ -49,49 +54,51 @@ where
     pub fn create<BD>(
         &mut self,
         device: &Device,
-        queue: &Queue,
-        command_pool: &CommandPool,
+        command_buffer: &mut CommandBuffer,
         desc: &BD,
-    ) -> Result<BufferHandle<BD::Buffer>, MemoryError>
+    ) -> Result<(BufferHandle<BD::Buffer>, Vec<Option<super::DeviceBuffer>>), MemoryError>
     where
         BD: BufferDescriptor<Buffer = T>,
     {
-        let (h, stride) = match desc.mutability() {
+        let mut staging_buffers = Vec::new();
+        let stride = desc.stride(device);
+        let h = match desc.mutability() {
             BufferMutability::Immutable => {
                 log::trace!("Creating immutable buffer");
-                let buf = desc.create(device, queue, command_pool)?;
-                let stride = buf.stride();
-                (self.unbuffered.add(buf), stride)
+                let (buf, staging) = desc.create(device, command_buffer)?;
+                staging_buffers.push(staging);
+                self.unbuffered.add(buf)
             }
             BufferMutability::Mutable => {
                 log::trace!("Creating buffered buffer");
-                let bufs = [
-                    desc.create(device, queue, command_pool)?,
-                    desc.create(device, queue, command_pool)?,
-                ];
-                let stride = bufs[0].stride();
-
-                (self.buffered.add(bufs), stride)
+                let (buf0, staging0) = desc.create(device, command_buffer)?;
+                let (buf1, staging1) = desc.create(device, command_buffer)?;
+                let bufs = [buf0, buf1];
+                staging_buffers.push(staging0);
+                staging_buffers.push(staging1);
+                self.buffered.add(bufs)
             }
         };
 
-        Ok(unsafe {
-            BufferHandle::from_buffer(
-                h,
-                0,
-                desc.n_elems(),
-                desc.elem_size(),
-                stride,
-                desc.mutability(),
-            )
-        })
+        Ok((
+            unsafe {
+                BufferHandle::from_buffer(
+                    h,
+                    0,
+                    desc.n_elems(),
+                    desc.elem_size(),
+                    stride,
+                    desc.mutability(),
+                )
+            },
+            staging_buffers,
+        ))
     }
 
     pub fn recreate<BD>(
         &mut self,
         device: &Device,
-        queue: &Queue,
-        command_pool: &CommandPool,
+        command_buffer: &mut CommandBuffer,
         handle: BufferHandle<BD::Buffer>,
         idx: usize,
         desc: &BD,
@@ -102,7 +109,8 @@ where
         assert_eq!(desc.mutability(), handle.mutability());
         if let BufferMutability::Mutable = desc.mutability() {
             log::trace!("Recreating buffered buffer at {}", idx);
-            let new = desc.create(device, queue, command_pool)?;
+            let (new, staging) = desc.create(device, command_buffer)?;
+            assert!(staging.is_none(), "Can't recreate with staging");
             *self
                 .buffered
                 .get_mut(handle.handle(), idx)

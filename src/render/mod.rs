@@ -8,7 +8,7 @@ use specs::storage::StorageEntry;
 
 use trekanten::command;
 use trekanten::descriptor::DescriptorSet;
-use trekanten::mesh::VertexBuffer;
+use trekanten::mesh::{BufferMutability, VertexBuffer};
 use trekanten::pipeline::{
     GraphicsPipeline, GraphicsPipelineDescriptor, PipelineError, ShaderDescriptor,
 };
@@ -195,7 +195,7 @@ pub fn get_pipeline_for(
     let vbuf: &VertexBuffer = renderer
         .get_resource(&mesh.vertex_buffer)
         .expect("Invalid handle");
-    let vertex_format = vbuf.format.clone();
+    let vertex_format = vbuf.format().clone();
     let shader_compiler = world.read_resource::<pipeline::ShaderCompiler>();
     let pipe = match mat {
         material::Material::PBR {
@@ -404,10 +404,25 @@ pub fn setup_resources(world: &mut World, mut renderer: &mut Renderer) {
         pipeline::ShaderCompiler::new().expect("Failed to create shader compiler");
 
     log::trace!("Creating dummy pipeline");
-    let desc = UniformBufferDescriptor::Uninitialized::<uniform::LightingData> { n_elems: 1 };
+    let data = [uniform::LightingData {
+        light_pos: [0.0; 4],
+        view_pos: [0.0; 4],
+    }];
+    let desc = UniformBufferDescriptor {
+        data: &data,
+        mutability: BufferMutability::Mutable,
+    };
     let light_buffer = renderer.create_resource(desc).expect("FAIL");
 
-    let desc = UniformBufferDescriptor::Uninitialized::<uniform::Transforms> { n_elems: 1 };
+    let data = [uniform::Transforms {
+        view: [[0.0; 4]; 4],
+        proj: [[0.0; 4]; 4],
+    }];
+    let desc = UniformBufferDescriptor {
+        data: &data,
+        mutability: BufferMutability::Mutable,
+    };
+
     let transforms_buffer = renderer.create_resource(desc).expect("FAIL");
 
     let frame_set = DescriptorSet::builder(&mut renderer)

@@ -237,13 +237,20 @@ fn get_next_mvp(start: &std::time::Instant, aspect_ratio: f32) -> UniformBufferO
 fn main() -> Result<(), trekanten::RenderError> {
     env_logger::init();
 
-    let (vertices, indices) = load_viking_house();
-
     let mut window = GlfwWindow::new();
     let mut renderer = trekanten::Renderer::new(&window, window.extents())?;
+    let mut loader = renderer.loader();
+
+    let vertex_buffers = mesh::VertexBuffers::default();
+    let index_buffers = mesh::IndexBuffers::default();
+
+    let (vertices, indices) = load_viking_house();
 
     let vertex_buffer_descriptor =
         mesh::VertexBufferDescriptor::from_slice(&vertices, mesh::BufferMutability::Immutable);
+
+    let vertex_buffer = loader.load(vertex_buffer_descriptor, &mut vertex_buffers);
+
     let vertex_buffer = renderer
         .create_resource(vertex_buffer_descriptor)
         .expect("Failed to create vertex buffer");
@@ -272,16 +279,8 @@ fn main() -> Result<(), trekanten::RenderError> {
         .create_resource(pipeline_descriptor)
         .expect("Failed to create graphics pipeline");
 
-    let data = [UniformBufferObject {
-        model: glm::Mat4::default(),
-        view: glm::Mat4::default(),
-        proj: glm::Mat4::default(),
-    }];
-
-    let uniform_buffer_desc = uniform::UniformBufferDescriptor {
-        data: &data,
-        mutability: mesh::BufferMutability::Mutable,
-    };
+    let uniform_buffer_desc =
+        uniform::UniformBufferDescriptor::Uninitialized::<UniformBufferObject> { n_elems: 1 };
 
     let uniform_buffer_handle = renderer
         .create_resource(uniform_buffer_desc)
