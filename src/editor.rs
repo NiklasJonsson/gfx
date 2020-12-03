@@ -87,7 +87,36 @@ struct SelectedEntity {
     entity: specs::Entity,
 }
 
-pub fn build_ui<'a>(world: &mut World, ui: &imgui::Ui<'a>, _pos: [f32; 2]) -> [f32; 2] {
+pub fn build_ui<'a>(world: &mut World, ui: &imgui::Ui<'a>) {
+    let dt = *world.read_resource::<crate::time::DeltaTime>();
+    let size = [400.0, 300.0];
+    let pos = [0.0, 0.0];
+    imgui::Window::new(im_str!("Overview"))
+        .size(size, imgui::Condition::FirstUseEver)
+        .position(pos, imgui::Condition::FirstUseEver)
+        .build(&ui, || {
+            ui.text(im_str!("FPS: {:.3}", dt.as_fps()));
+            let mut p = crate::render::ActiveCamera::camera_pos(world).into_array();
+
+            InputFloat3::new(ui, im_str!("Camera pos"), &mut p)
+                .read_only(true)
+                .build();
+        });
+
+    {
+        let mut y_offset = 0.0;
+        let funcs = [
+            crate::render::ui::build_ui,
+            crate::settings::build_ui,
+            crate::game_state::build_ui,
+            crate::io::input::build_ui,
+        ];
+        for func in funcs.iter() {
+            let size = func(world, &ui, [0.0, y_offset]);
+            y_offset += size[1];
+        }
+    }
+
     let [width, _height] = ui.io().display_size;
     let scene_window_size = [300.0, 500.0];
     let scene_window_pos = [width - scene_window_size[0], 0.0];
@@ -123,6 +152,4 @@ pub fn build_ui<'a>(world: &mut World, ui: &imgui::Ui<'a>, _pos: [f32; 2]) -> [f
             });
         world.insert(SelectedEntity { entity: ent });
     }
-
-    [0.0, 0.0]
 }
