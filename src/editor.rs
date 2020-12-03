@@ -103,7 +103,7 @@ pub fn build_ui<'a>(world: &mut World, ui: &imgui::Ui<'a>, _pos: [f32; 2]) -> [f
             .size(scene_window_size, Condition::Always)
             .build(&ui, || {
                 for (ent, _root) in (&entities, !&parent_storage).join() {
-                    inspected = build_tree(world, ui, ent);
+                    inspected = inspected.or(build_tree(world, ui, ent));
                 }
             });
 
