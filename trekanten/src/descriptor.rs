@@ -4,6 +4,8 @@ use ash::version::DeviceV1_0;
 
 use thiserror::Error;
 
+use resurs::Async;
+
 use crate::device::Device;
 use crate::device::HasVkDevice;
 use crate::device::VkDeviceHandle;
@@ -133,6 +135,7 @@ impl<'a> DescriptorSetBuilder<'a> {
     }
 }
 
+// TOOD: Builder should fail if any of the resources are still pending
 impl<'a> DescriptorSetBuilder<'a> {
     fn add_binding(
         &mut self,
@@ -169,34 +172,51 @@ impl<'a> DescriptorSetBuilder<'a> {
         binding: u32,
         stage: ShaderStage,
     ) -> Self {
-        self.add_binding(
-            vk::DescriptorType::UNIFORM_BUFFER,
-            binding,
-            vk::ShaderStageFlags::from(stage),
-        );
+        let maybe = {
+            let ubufs = self.renderer.async_resources.uniform_buffers.read();
 
-        let (buf0, buf1) = self
-            .renderer
-            .get_uniform_buffers(buf_h)
-            .expect("Failed to get buffer");
+            let (buf0, buf1) = ubufs
+                .get_all(&buf_h.wrap_async())
+                .expect("Failed to get buffer");
 
-        let buf1 = buf1.unwrap_or(buf0);
+            if let Async::Available(buf0) = buf0 {
+                let buf1 = buf1.map(|x| x.as_ref().expect("Should have arrived"));
+                assert!(
+                    buf1.is_some() || buf_h.mutability() == crate::mem::BufferMutability::Immutable
+                );
+                let buf1 = buf1.unwrap_or(buf0);
+                let stride0 = buf0.stride();
+                let stride1 = buf1.stride();
+                Some((*buf0.vk_buffer(), stride0, *buf1.vk_buffer(), stride1))
+            } else {
+                None
+            }
+        };
 
-        // VMA allocator creates vk::Buffer from the device memory + offset so the offset from the buffer handle is enough here
-        self.buffer_infos.push([
-            vk::DescriptorBufferInfo {
-                buffer: *buf0.vk_buffer(),
-                offset: buf_h.offset() as u64,
-                range: buf_h.size() as u64,
-            },
-            vk::DescriptorBufferInfo {
-                buffer: *buf1.vk_buffer(),
-                offset: buf_h.offset() as u64,
-                range: buf_h.size() as u64,
-            },
-        ]);
+        if let Some((buf0, stride0, buf1, stride1)) = maybe {
+            self.add_binding(
+                vk::DescriptorType::UNIFORM_BUFFER,
+                binding,
+                vk::ShaderStageFlags::from(stage),
+            );
 
-        log::trace!("Added buffer info {:?}", self.buffer_infos.last().unwrap());
+            // TODO: This should check mutability of buffer
+            // VMA allocator creates vk::Buffer from the device memory + offset so the offset from the buffer handle is enough here
+            self.buffer_infos.push([
+                vk::DescriptorBufferInfo {
+                    buffer: buf0,
+                    offset: buf_h.idx() as u64 * stride0 as u64,
+                    range: buf_h.n_elems() as u64 * stride0 as u64,
+                },
+                vk::DescriptorBufferInfo {
+                    buffer: buf1,
+                    offset: buf_h.idx() as u64 * stride1 as u64,
+                    range: buf_h.n_elems() as u64 * stride1 as u64,
+                },
+            ]);
+
+            log::trace!("Added buffer info {:?}", self.buffer_infos.last().unwrap());
+        }
         self
     }
 
@@ -206,23 +226,34 @@ impl<'a> DescriptorSetBuilder<'a> {
         binding: u32,
         stage: ShaderStage,
     ) -> Self {
-        self.add_binding(
-            vk::DescriptorType::COMBINED_IMAGE_SAMPLER,
-            binding,
-            vk::ShaderStageFlags::from(stage),
-        );
+        let maybe = {
+            let tex = self
+                .renderer
+                .get_resource(tex_h)
+                .expect("Failed to get texture");
 
-        let tex: &Texture = self
-            .renderer
-            .get_resource(tex_h)
-            .expect("Failed to get texture");
-        // TODO: Here we should use the layout from the image if we tracked it
-        self.image_infos.push(vk::DescriptorImageInfo {
-            image_layout: vk::ImageLayout::SHADER_READ_ONLY_OPTIMAL,
-            image_view: *tex.vk_image_view(),
-            sampler: *tex.vk_sampler(),
-        });
-        log::trace!("Added texture info {:?}", self.image_infos.last().unwrap());
+            if let Async::Available(tex) = &*tex {
+                Some((*tex.vk_image_view(), *tex.vk_sampler()))
+            } else {
+                None
+            }
+        };
+
+        if let Some((image_view, sampler)) = maybe {
+            self.add_binding(
+                vk::DescriptorType::COMBINED_IMAGE_SAMPLER,
+                binding,
+                vk::ShaderStageFlags::from(stage),
+            );
+
+            // TODO: Here we should use the layout from the image if we tracked it
+            self.image_infos.push(vk::DescriptorImageInfo {
+                image_layout: vk::ImageLayout::SHADER_READ_ONLY_OPTIMAL,
+                image_view,
+                sampler,
+            });
+            log::trace!("Added texture info {:?}", self.image_infos.last().unwrap());
+        }
 
         self
     }

@@ -6,11 +6,9 @@ use vk_mem::Allocator;
 
 use std::sync::Arc;
 
-use crate::instance::Instance;
-use crate::queue::Queue;
-use crate::queue::QueueFamilies;
-use crate::queue::QueueFamily;
-use crate::surface::Surface;
+use super::instance::Instance;
+use super::queue::{Queue, QueueFamilies, QueueFamily};
+use super::surface::Surface;
 use crate::util::lifetime::LifetimeToken;
 
 mod device_selection;

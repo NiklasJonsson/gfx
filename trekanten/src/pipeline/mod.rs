@@ -21,6 +21,7 @@ mod spirv;
 
 pub use error::PipelineError;
 use spirv::{parse_spirv, ReflectionData};
+use std::sync::Arc;
 
 pub enum ShaderStage {
     Vertex,
@@ -436,6 +437,14 @@ impl GraphicsPipelineDescriptor {
     pub fn builder() -> GraphicsPipelineDescriptorBuilder {
         GraphicsPipelineDescriptorBuilder::default()
     }
+
+    pub fn create(
+        &self,
+        device: &Device,
+        render_pass: &RenderPass,
+    ) -> Result<GraphicsPipeline, PipelineError> {
+        GraphicsPipeline::create(device, render_pass, self)
+    }
 }
 
 #[derive(Default)]
@@ -443,45 +452,58 @@ pub struct GraphicsPipelines {
     mat_storage: CachedStorage<GraphicsPipelineDescriptor, GraphicsPipeline>,
 }
 
-impl GraphicsPipelines {
-    pub fn new() -> Self {
-        Self {
-            mat_storage: Default::default(),
-        }
+use crate::resource::Async;
+use parking_lot::{MappedRwLockReadGuard, RwLock, RwLockReadGuard};
+
+type Inner = CachedStorage<GraphicsPipelineDescriptor, Async<GraphicsPipeline>>;
+pub type PipelineStorageReadGuard<'a> = RwLockReadGuard<'a, Inner>;
+
+#[derive(Default)]
+pub struct AsyncGraphicsPipelines {
+    inner: Arc<RwLock<Inner>>,
+}
+
+impl AsyncGraphicsPipelines {
+    pub fn allocate(&self, descriptor: &GraphicsPipelineDescriptor) -> Handle<GraphicsPipeline> {
+        let mut guard = self.inner.write();
+        guard
+            .add(descriptor.clone(), Async::<GraphicsPipeline>::Pending)
+            .unwrap_async()
     }
 
-    fn create_pipeline(
-        device: &Device,
-        render_pass: &RenderPass,
+    pub fn cache(
+        &self,
         descriptor: &GraphicsPipelineDescriptor,
-    ) -> Result<GraphicsPipeline, PipelineError> {
-        GraphicsPipeline::create(device, render_pass, descriptor)
+    ) -> Option<Handle<GraphicsPipeline>> {
+        self.inner
+            .read()
+            .cached(descriptor)
+            .map(|h| h.unwrap_async())
     }
 
-    pub fn recreate_all(
-        &mut self,
-        device: &Device,
-        render_pass: &RenderPass,
-    ) -> Result<(), PipelineError> {
-        for (desc, pipe) in self.mat_storage.iter_mut() {
-            *pipe = Self::create_pipeline(device, render_pass, desc)?;
+    pub fn read(&self) -> PipelineStorageReadGuard<'_> {
+        self.inner.read()
+    }
+
+    pub fn get(
+        &self,
+        h: &Handle<GraphicsPipeline>,
+    ) -> Option<MappedRwLockReadGuard<'_, Async<GraphicsPipeline>>> {
+        let guard = self.inner.read();
+
+        if !guard.has(&h.wrap_async()) {
+            return None;
         }
 
-        Ok(())
+        Some(RwLockReadGuard::map(guard, |inner| {
+            inner.get(&h.wrap_async()).unwrap()
+        }))
     }
 
-    pub fn create(
-        &mut self,
-        device: &Device,
-        descriptor: GraphicsPipelineDescriptor,
-        render_pass: &RenderPass,
-    ) -> Result<Handle<GraphicsPipeline>, PipelineError> {
-        self.mat_storage.create_or_add(descriptor, |desc| {
-            Self::create_pipeline(device, render_pass, &desc)
-        })
-    }
-
-    pub fn get(&self, h: &Handle<GraphicsPipeline>) -> Option<&GraphicsPipeline> {
-        self.mat_storage.get(h)
+    pub fn insert(&self, h: &Handle<GraphicsPipeline>, pipeline: GraphicsPipeline) {
+        self.inner
+            .write()
+            .get_mut(&h.wrap_async())
+            .map(|x| *x = Async::<GraphicsPipeline>::Available(pipeline));
     }
 }

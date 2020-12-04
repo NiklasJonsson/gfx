@@ -3,26 +3,18 @@ use ash::vk;
 
 use thiserror::Error;
 
+use super::device::{Device, HasVkDevice, VkDeviceHandle};
+use super::framebuffer::Framebuffer;
+use super::queue::QueueFamily;
+use super::render_pass::RenderPass;
+
 use crate::descriptor::DescriptorSet;
-use crate::device::Device;
-use crate::device::HasVkDevice;
-use crate::device::VkDeviceHandle;
-use crate::framebuffer::Framebuffer;
 use crate::mesh::IndexBuffer;
 use crate::mesh::VertexBuffer;
 use crate::pipeline::GraphicsPipeline;
 use crate::pipeline::Pipeline;
 use crate::pipeline::ShaderStage;
-use crate::queue::QueueFamily;
-use crate::render_pass::RenderPass;
 use crate::util;
-
-// TODO: Temporary
-use crate::mem::BufferHandle;
-use crate::mesh::Mesh;
-use crate::resource::Handle;
-use crate::resource::ResourceManager;
-use crate::Renderer;
 
 #[derive(Debug, Error)]
 pub enum CommandError {
@@ -445,7 +437,7 @@ impl CommandBuffer {
         self
     }
 
-    pub fn bind_push_constant<V>(
+    pub fn bind_push_constant<V: Copy>(
         &mut self,
         pipeline: &GraphicsPipeline,
         stage: ShaderStage,
@@ -464,143 +456,5 @@ impl CommandBuffer {
         }
 
         self
-    }
-}
-
-// TODO: Rename RenderPassBuilder?
-pub struct CommandBufferBuilder<'a> {
-    renderer: &'a Renderer,
-    command_buffer: CommandBuffer,
-}
-
-impl<'a> CommandBufferBuilder<'a> {
-    pub fn bind_shader_resource_group(
-        &mut self,
-        idx: u32,
-        dset: &Handle<DescriptorSet>,
-        pipeline: &Handle<GraphicsPipeline>,
-    ) -> &mut Self {
-        let dset = self
-            .renderer
-            .get_descriptor_set(dset)
-            .expect("Failed to find descriptor set");
-        let pipeline = self
-            .renderer
-            .get_resource(pipeline)
-            .expect("Failed to find pipeline");
-        self.command_buffer.bind_descriptor_set(idx, dset, pipeline);
-
-        self
-    }
-
-    pub fn bind_graphics_pipeline(&mut self, gfx_pipeline: &Handle<GraphicsPipeline>) -> &mut Self {
-        let p = self
-            .renderer
-            .get_resource(gfx_pipeline)
-            .expect("Failed to get pipeline");
-        self.command_buffer.bind_graphics_pipeline(p);
-
-        self
-    }
-
-    pub fn bind_index_buffer(&mut self, handle: &BufferHandle<IndexBuffer>) -> &mut Self {
-        let ib = self
-            .renderer
-            .get_resource(handle)
-            .expect("Failed to get index buffer");
-
-        self.command_buffer.bind_index_buffer(ib, 0);
-
-        self
-    }
-
-    pub fn bind_vertex_buffer(&mut self, handle: &BufferHandle<VertexBuffer>) -> &mut Self {
-        let vb = self
-            .renderer
-            .get_resource(handle)
-            .expect("Failed to get vertex buffer");
-
-        self.command_buffer.bind_vertex_buffer(vb, 0);
-
-        self
-    }
-
-    pub fn draw_mesh(&mut self, mesh: &Mesh) -> &mut Self {
-        let vertex_index = mesh.vertex_buffer.idx() as i32;
-        let indices_index = mesh.index_buffer.idx();
-        let n_indices = mesh.index_buffer.n_elems();
-
-        let ib = self
-            .renderer
-            .get_resource(&mesh.index_buffer)
-            .expect("Failed to get index buffer");
-
-        let vb = self
-            .renderer
-            .get_resource(&mesh.vertex_buffer)
-            .expect("Failed to get vertex buffer");
-
-        self.command_buffer
-            .bind_index_buffer(ib, 0)
-            .bind_vertex_buffer(vb, 0)
-            .draw_indexed(n_indices, indices_index, vertex_index);
-
-        self
-    }
-
-    pub fn draw_indexed(
-        &mut self,
-        n_indices: u32,
-        indices_index: u32,
-        vertices_index: i32,
-    ) -> &mut Self {
-        self.command_buffer
-            .draw_indexed(n_indices, indices_index, vertices_index);
-
-        self
-    }
-
-    pub fn set_scissor(&mut self, scissor: util::Rect2D) -> &mut Self {
-        self.command_buffer.set_scissor(scissor);
-
-        self
-    }
-
-    pub fn set_viewport(&mut self, viewport: util::Viewport) -> &mut Self {
-        self.command_buffer.set_viewport(viewport);
-
-        self
-    }
-
-    pub fn bind_push_constant<V>(
-        &mut self,
-        pipeline: &Handle<GraphicsPipeline>,
-        stage: ShaderStage,
-        v: &V,
-    ) -> &mut Self {
-        let p = self
-            .renderer
-            .get_resource(pipeline)
-            .expect("Failed to get pipeline");
-        self.command_buffer.bind_push_constant(p, stage, v);
-
-        self
-    }
-
-    pub fn new(renderer: &'a Renderer, command_buffer: CommandBuffer) -> Self {
-        Self {
-            renderer,
-            command_buffer,
-        }
-    }
-
-    pub fn build(mut self) -> Result<CommandBuffer, CommandError> {
-        self.command_buffer.end_render_pass().end()?;
-        Ok(self.command_buffer)
-    }
-
-    pub fn inner(self) -> CommandBuffer {
-        let Self { command_buffer, .. } = self;
-        command_buffer
     }
 }

@@ -1,12 +1,25 @@
-pub use crate::resource::{Handle, Storage};
+pub use crate::{Handle, Storage};
 
 const N_STORAGE_BUFFERS: usize = 2;
 
 // TODO: Static assert for idx > 2?
+// TODO: Make generic over array length
 
 /// Convenience type for double buffered storage of T
 pub struct BufferedStorage<T> {
     storage: Storage<[T; N_STORAGE_BUFFERS]>,
+}
+
+impl<T> Handle<[T; N_STORAGE_BUFFERS]> {
+    pub fn as_unbuffered(self) -> Handle<T> {
+        Handle::<T>::new(self.id)
+    }
+}
+
+impl<T> Handle<T> {
+    pub fn as_buffered(&self) -> Handle<[T; N_STORAGE_BUFFERS]> {
+        Handle::<[T; N_STORAGE_BUFFERS]>::new(self.id)
+    }
 }
 
 impl<T> BufferedStorage<T> {
@@ -33,6 +46,10 @@ impl<T> BufferedStorage<T> {
 
     pub fn get_all(&self, h: &Handle<T>) -> Option<&[T; N_STORAGE_BUFFERS]> {
         self.storage.get(&h.as_buffered())
+    }
+
+    pub fn get_all_mut(&mut self, h: &Handle<T>) -> Option<&mut [T; N_STORAGE_BUFFERS]> {
+        self.storage.get_mut(&h.as_buffered())
     }
 
     pub fn is_empty(&self) -> bool {

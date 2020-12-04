@@ -8,7 +8,7 @@ edition = "2018"
 debug = true
 
 [workspace]
-members = ["trekanten" ]
+members = ["trekanten", "resurs" ]
 
 [dependencies]
 # ECS
@@ -17,7 +17,7 @@ specs = { version = "0.16.1", features = ["specs-derive"] }
 
 # Rendering/Graphics
 winit = "0.22.2"
-trekanten = {path = "trekanten" }
+trekanten = {path = "trekanten"}
 imgui = "0.5.0"
 shaderc = "0.6.2"
 

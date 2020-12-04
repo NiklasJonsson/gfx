@@ -5,17 +5,18 @@ use ash::vk;
 
 use thiserror::Error;
 
-use crate::command::CommandPool;
+use crate::command::CommandBuffer;
 use crate::device::Device;
 use crate::device::HasVkDevice;
 use crate::device::VkDeviceHandle;
 use crate::image::{ImageView, ImageViewError};
+use crate::mem::DeviceBuffer;
 use crate::mem::DeviceImage;
 use crate::mem::MemoryError;
-use crate::queue::Queue;
 use crate::resource::{Cache, Handle, Storage};
-
 use crate::util;
+
+use std::sync::Arc;
 
 #[derive(Debug, Error)]
 pub enum TextureError {
@@ -43,15 +44,6 @@ pub fn load_image<P: AsRef<Path>>(p: &P) -> Result<image::RgbaImage, image::Imag
     Ok(image)
 }
 
-#[derive(Debug, Clone)]
-pub enum TextureDescriptorTy<'a> {
-    File(PathBuf),
-    Raw {
-        data: &'a [u8],
-        extent: util::Extent2D,
-    },
-}
-
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum MipMaps {
     None,
@@ -61,32 +53,59 @@ pub enum MipMaps {
 #[derive(Debug, Clone)]
 struct DescriptorCommon {
     format: util::Format,
-    generate_mipmaps: bool,
+    mipmaps: MipMaps,
 }
 
-pub struct TextureDescriptor<'a> {
-    ty: TextureDescriptorTy<'a>,
+#[derive(Clone)]
+pub enum TextureDescriptorTy {
+    File(PathBuf),
+    Raw {
+        data: Arc<util::ByteBuffer>,
+        extent: util::Extent2D,
+    },
+}
+
+#[derive(Clone)]
+pub struct TextureDescriptor {
+    ty: TextureDescriptorTy,
     common: DescriptorCommon,
 }
 
-impl<'a> TextureDescriptor<'a> {
-    pub fn file(p: PathBuf, format: util::Format, mm: MipMaps) -> Self {
+impl TextureDescriptor {
+    pub fn file(p: PathBuf, format: util::Format, mipmaps: MipMaps) -> Self {
         Self {
             ty: TextureDescriptorTy::File(p),
-            common: DescriptorCommon {
-                format,
-                generate_mipmaps: mm == MipMaps::Generate,
-            },
+            common: DescriptorCommon { format, mipmaps },
         }
     }
 
-    pub fn raw(data: &'a [u8], extent: util::Extent2D, format: util::Format, mm: MipMaps) -> Self {
+    pub fn from_vec(
+        data: Vec<u8>,
+        extent: util::Extent2D,
+        format: util::Format,
+        mipmaps: MipMaps,
+    ) -> Self {
         Self {
-            ty: TextureDescriptorTy::Raw { data, extent },
-            common: DescriptorCommon {
-                format,
-                generate_mipmaps: mm == MipMaps::Generate,
+            ty: TextureDescriptorTy::Raw {
+                data: Arc::new(unsafe { util::ByteBuffer::from_vec(data) }),
+                extent,
             },
+            common: DescriptorCommon { format, mipmaps },
+        }
+    }
+
+    pub fn enqueue(
+        &self,
+        device: &Device,
+        command_buffer: &mut CommandBuffer,
+    ) -> Result<(Texture, DeviceBuffer), TextureError> {
+        match &self.ty {
+            TextureDescriptorTy::File(pathbuf) => {
+                Texture::from_file(device, command_buffer, &self.common, &pathbuf)
+            }
+            TextureDescriptorTy::Raw { data, extent } => {
+                Texture::from_raw(device, command_buffer, *extent, &self.common, &data)
+            }
         }
     }
 }
@@ -152,19 +171,17 @@ pub struct Texture {
 impl Texture {
     fn from_raw<'a>(
         device: &Device,
-        queue: &Queue,
-        command_pool: &CommandPool,
+        command_buffer: &mut CommandBuffer,
         extent: util::Extent2D,
         common: &DescriptorCommon,
         data: &'a [u8],
-    ) -> Result<Self, TextureError> {
-        let (image, mip_levels) = if common.generate_mipmaps {
+    ) -> Result<(Self, DeviceBuffer), TextureError> {
+        let ((image, staging), mip_levels) = if let MipMaps::Generate = common.mipmaps {
             let mip_levels = (extent.max_dim() as f32).log2().floor() as u32 + 1;
             (
                 DeviceImage::device_local_mipmapped(
                     device,
-                    queue,
-                    command_pool,
+                    command_buffer,
                     extent,
                     common.format,
                     mip_levels,
@@ -174,14 +191,7 @@ impl Texture {
             )
         } else {
             (
-                DeviceImage::device_local(
-                    device,
-                    queue,
-                    command_pool,
-                    extent,
-                    common.format,
-                    data,
-                )?,
+                DeviceImage::device_local(device, command_buffer, extent, common.format, data)?,
                 1,
             )
         };
@@ -193,27 +203,29 @@ impl Texture {
 
         let sampler = Sampler::new(device)?;
 
-        Ok(Self {
-            image,
-            image_view,
-            sampler,
-        })
+        Ok((
+            Self {
+                image,
+                image_view,
+                sampler,
+            },
+            staging,
+        ))
     }
 
     fn from_file(
         device: &Device,
-        queue: &Queue,
-        command_pool: &CommandPool,
+        command_buffer: &mut CommandBuffer,
         common: &DescriptorCommon,
         path: &Path,
-    ) -> Result<Self, TextureError> {
+    ) -> Result<(Self, DeviceBuffer), TextureError> {
         let image = load_image(&path)?;
         let extent = util::Extent2D {
             width: image.width(),
             height: image.height(),
         };
         let raw_image_data = image.into_raw();
-        Self::from_raw(device, queue, command_pool, extent, common, &raw_image_data)
+        Self::from_raw(device, command_buffer, extent, common, &raw_image_data)
     }
 
     pub fn vk_image(&self) -> &vk::Image {
@@ -238,55 +250,65 @@ impl std::fmt::Debug for Texture {
 #[derive(Default)]
 pub struct Textures {
     cache: Cache<PathBuf, Texture>,
-    storage: Storage<Texture>,
+    storage: Storage<Async<Texture>>,
 }
 
 impl Textures {
     pub fn new() -> Self {
         Self {
             cache: Cache::default(),
-            storage: Storage::<Texture>::new(),
+            storage: Storage::<Async<Texture>>::new(),
+        }
+    }
+}
+
+use crate::resource::Async;
+use parking_lot::{MappedRwLockReadGuard, RwLock, RwLockReadGuard};
+
+pub type TextureStorageReadGuard<'a> = RwLockReadGuard<'a, Textures>;
+
+#[derive(Default)]
+pub struct AsyncTextures {
+    inner: Arc<RwLock<Textures>>,
+}
+
+impl AsyncTextures {
+    pub fn allocate(&self, descriptor: &TextureDescriptor) -> Handle<Texture> {
+        let mut guard = self.inner.write();
+        let h = guard.storage.add(Async::<Texture>::Pending).unwrap_async();
+
+        if let TextureDescriptorTy::File(path) = &descriptor.ty {
+            guard.cache.add(path.clone(), h);
+        }
+
+        h
+    }
+
+    pub fn cache(&self, descriptor: &TextureDescriptor) -> Option<Handle<Texture>> {
+        if let TextureDescriptorTy::File(path) = &descriptor.ty {
+            self.inner.read().cache.get(path)
+        } else {
+            None
         }
     }
 
-    pub fn get(&self, h: &Handle<Texture>) -> Option<&Texture> {
-        self.storage.get(h)
+    pub fn get(&self, h: &Handle<Texture>) -> Option<MappedRwLockReadGuard<'_, Async<Texture>>> {
+        let guard = self.inner.read();
+
+        if !guard.storage.has(&h.wrap_async()) {
+            return None;
+        }
+
+        Some(RwLockReadGuard::map(guard, |textures| {
+            textures.storage.get(&h.wrap_async()).unwrap()
+        }))
     }
 
-    pub fn create(
-        &mut self,
-        device: &Device,
-        queue: &Queue,
-        command_pool: &CommandPool,
-        descriptor: TextureDescriptor,
-    ) -> Result<Handle<Texture>, TextureError> {
-        match descriptor.ty {
-            TextureDescriptorTy::File(pathbuf) => match self.cache.get(&pathbuf) {
-                Some(h) => Ok(h),
-                None => {
-                    let t = Texture::from_file(
-                        device,
-                        queue,
-                        command_pool,
-                        &descriptor.common,
-                        &pathbuf,
-                    )?;
-                    let h = self.storage.add(t);
-                    self.cache.add(pathbuf, h);
-                    Ok(h)
-                }
-            },
-            TextureDescriptorTy::Raw { data, extent } => {
-                let t = Texture::from_raw(
-                    device,
-                    queue,
-                    command_pool,
-                    extent,
-                    &descriptor.common,
-                    data,
-                )?;
-                Ok(self.storage.add(t))
-            }
-        }
+    pub fn insert(&self, h: &Handle<Texture>, t: Texture) {
+        self.inner
+            .write()
+            .storage
+            .get_mut(&h.wrap_async())
+            .map(|x| *x = Async::<Texture>::Available(t));
     }
 }

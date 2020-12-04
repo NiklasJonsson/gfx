@@ -1,26 +1,71 @@
-use crate::command::CommandBuffer;
-use crate::device::Device;
-use crate::resource::{AsyncStorage, Handle};
+use crate::mem::BufferHandle;
+use crate::mesh::{
+    IndexBuffer, OwningIndexBufferDescriptor, OwningVertexBufferDescriptor, VertexBuffer,
+};
+use crate::resource::{AsyncResources, Handle, ResourceCommand};
+use crate::texture::{Texture, TextureDescriptor};
+use crate::uniform::{OwningUniformBufferDescriptor, UniformBuffer};
 
-use std::sync::Arc;
+use std::sync::{mpsc::Receiver, mpsc::Sender, Arc};
 
-pub trait ResourceCmd {
-    fn start(&mut self, device: &Device, cmd_buf: &mut CommandBuffer);
-    fn end(self);
+pub type ResourceCommandSender = Sender<ResourceCommand>;
+pub type ResourceCommandReceiver = Receiver<ResourceCommand>;
+
+#[derive(Clone)]
+pub struct Loader {
+    send_channel: ResourceCommandSender,
+    resources: Arc<AsyncResources>,
 }
-
-pub trait Descriptor<R>: Clone {
-    fn load(&self, handle: Handle<R>, storage: Arc<AsyncStorage<R>>) -> Box<dyn ResourceCmd>;
-}
-
-#[derive(Debug, Default, Clone)]
-pub struct Loader {}
 
 impl Loader {
-    pub fn load<R, H>(&self, descriptor: impl Descriptor<R>, storage: Arc<AsyncStorage<R>>) -> H {
-        let handle = storage.allocate();
-
-        let _cmd = descriptor.load(handle, storage);
-        todo!()
+    pub fn new(send_channel: ResourceCommandSender, resources: Arc<AsyncResources>) -> Self {
+        Self {
+            send_channel,
+            resources,
+        }
     }
 }
+
+pub trait ResourceLoader<D, H> {
+    fn load(&self, descriptor: D) -> H;
+}
+
+macro_rules! impl_loader {
+    ($desc:ty, $handle:ty, $storage:ident, $cmd_enum:ident) => {
+        impl ResourceLoader<$desc, $handle> for Loader {
+            fn load(&self, descriptor: $desc) -> $handle {
+                if let Some(handle) = self.resources.$storage.cache(&descriptor) {
+                    return handle;
+                }
+
+                let handle = self.resources.$storage.allocate(&descriptor);
+                let cmd = ResourceCommand::$cmd_enum { descriptor, handle };
+                self.send_channel
+                    .send(cmd)
+                    .expect("vertex buffer loader send fail");
+
+                handle
+            }
+        }
+    };
+}
+
+impl_loader!(
+    OwningIndexBufferDescriptor,
+    BufferHandle<IndexBuffer>,
+    index_buffers,
+    CreateIndexBuffer
+);
+impl_loader!(
+    OwningVertexBufferDescriptor,
+    BufferHandle<VertexBuffer>,
+    vertex_buffers,
+    CreateVertexBuffer
+);
+impl_loader!(
+    OwningUniformBufferDescriptor,
+    BufferHandle<UniformBuffer>,
+    uniform_buffers,
+    CreateUniformBuffer
+);
+impl_loader!(TextureDescriptor, Handle<Texture>, textures, CreateTexture);

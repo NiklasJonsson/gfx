@@ -3,11 +3,10 @@ use ash::vk;
 
 use thiserror::Error;
 
-use crate::device::VkDeviceHandle;
+use super::device::{HasVkDevice, VkDeviceHandle};
+use super::image::ImageView;
+use super::render_pass::RenderPass;
 
-use crate::device::HasVkDevice;
-use crate::image::ImageView;
-use crate::render_pass::RenderPass;
 use crate::util;
 
 #[derive(Debug, Clone, Error)]

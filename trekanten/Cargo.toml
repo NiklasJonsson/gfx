@@ -21,6 +21,10 @@ env_logger = "0.7.1"
 image = "0.23.8"
 thiserror = "1.0.20"
 derive_builder = "0.9.0"
+num-traits = "0.2.14"
+static_assertions = "1.1.0"
+resurs = { path = "../resurs" }
+parking_lot = "0.11.1"
 
 [dev-dependencies]
 inline-spirv = "0.1.1"

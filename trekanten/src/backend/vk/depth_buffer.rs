@@ -2,8 +2,8 @@ use ash::vk;
 
 use thiserror::Error;
 
-use crate::device::Device;
-use crate::image::{ImageView, ImageViewError};
+use super::device::Device;
+use super::image::{ImageView, ImageViewError};
 use crate::mem::{DeviceImage, MemoryError};
 use crate::util;
 

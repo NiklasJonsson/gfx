@@ -896,7 +896,7 @@ dependencies = [
  "bitflags",
  "imgui-sys",
  "lazy_static",
- "parking_lot 0.11.0",
+ "parking_lot 0.11.1",
 ]
 
 [[package]]
@@ -1403,9 +1403,9 @@ dependencies = [
 
 [[package]]
 name = "num-traits"
-version = "0.2.12"
+version = "0.2.14"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "ac267bcc07f48ee5f8935ab0d24f316fb722d7a1292e2913f0cc196b29ffd611"
+checksum = "9a64b1ec5cda2586e284722486d802acf1f7dbdc623e2bfc57e65ca1cd099290"
 dependencies = [
  "autocfg",
  "libm",
@@ -1511,9 +1511,9 @@ dependencies = [
 
 [[package]]
 name = "parking_lot"
-version = "0.11.0"
+version = "0.11.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "a4893845fa2ca272e647da5d0e46660a314ead9c2fdd9a883aabc32e481a8733"
+checksum = "6d7744ac029df22dca6284efe4e898991d28e3085c706c972bcd7da4a27a15eb"
 dependencies = [
  "instant",
  "lock_api 0.4.1",
@@ -1902,6 +1902,10 @@ dependencies = [
  "web-sys",
  "winreg",
 ]
+
+[[package]]
+name = "resurs"
+version = "0.1.0"
 
 [[package]]
 name = "rustc_version"
@@ -2454,9 +2458,13 @@ dependencies = [
  "inline-spirv",
  "log",
  "nalgebra-glm",
+ "num-traits",
+ "parking_lot 0.11.1",
  "raw-window-handle",
  "reqwest",
+ "resurs",
  "spirv-reflect",
+ "static_assertions",
  "thiserror",
  "tobj",
  "vk-mem",

@@ -3,19 +3,18 @@ use ash::vk;
 
 use thiserror::Error;
 
-use crate::device::VkDeviceHandle;
+use super::color_buffer::ColorBuffer;
+use super::depth_buffer::DepthBuffer;
+use super::device::{Device, HasVkDevice, VkDeviceHandle};
 
-use crate::color_buffer::ColorBuffer;
-use crate::depth_buffer::DepthBuffer;
-use crate::device::Device;
-use crate::device::HasVkDevice;
-use crate::framebuffer::{Framebuffer, FramebufferError};
-use crate::image::{ImageView, ImageViewError};
-use crate::instance::Instance;
-use crate::queue::Queue;
-use crate::render_pass::RenderPass;
-use crate::surface::{Surface, SurfaceError};
-use crate::sync::Semaphore;
+use super::framebuffer::{Framebuffer, FramebufferError};
+use super::image::{ImageView, ImageViewError};
+use super::instance::Instance;
+use super::queue::Queue;
+use super::render_pass::RenderPass;
+use super::surface::{Surface, SurfaceError};
+use super::sync::Semaphore;
+
 use crate::util;
 
 #[derive(Clone, Debug, Error)]

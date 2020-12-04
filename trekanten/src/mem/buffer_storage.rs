@@ -1,8 +1,5 @@
-use crate::command::CommandBuffer;
-use crate::device::Device;
 use crate::resource::{BufferedStorage, Storage};
 
-use super::MemoryError;
 use super::{BufferDescriptor, BufferHandle, BufferMutability};
 
 pub struct DeviceBufferStorage<T> {
@@ -29,6 +26,16 @@ impl<T> DeviceBufferStorage<T> {
         }
     }
 
+    pub fn get_all_mut(&mut self, h: &BufferHandle<T>) -> Option<(&mut T, Option<&mut T>)> {
+        match h.mutability() {
+            BufferMutability::Immutable => self.unbuffered.get_mut(h.handle()).map(|x| (x, None)),
+            BufferMutability::Mutable => self
+                .buffered
+                .get_all_mut(h.handle())
+                .map(|[x, y]| (x, Some(y))),
+        }
+    }
+
     pub fn get_buffered(&self, h: &BufferHandle<T>, idx: usize) -> Option<&T> {
         assert_eq!(h.mutability(), BufferMutability::Mutable);
         self.buffered.get(h.handle(), idx)
@@ -44,80 +51,143 @@ impl<T> DeviceBufferStorage<T> {
         self.unbuffered.get(h.handle())
     }
 
-    pub fn get_either(&self, h: &BufferHandle<T>, idx: usize) -> Option<&T> {
+    pub fn add(&mut self, data0: T, data1: Option<T>) -> resurs::Handle<T> {
+        match data1 {
+            Some(data1) => self.buffered.add([data0, data1]),
+            None => self.unbuffered.add(data0),
+        }
+    }
+
+    pub fn get(&self, h: &BufferHandle<T>, idx: usize) -> Option<&T> {
         match h.mutability() {
             BufferMutability::Immutable => self.unbuffered.get(h.handle()),
             BufferMutability::Mutable => self.buffered.get(h.handle(), idx),
         }
     }
 
-    pub fn create<BD>(
-        &mut self,
-        device: &Device,
-        command_buffer: &mut CommandBuffer,
-        desc: &BD,
-    ) -> Result<(BufferHandle<BD::Buffer>, Vec<Option<super::DeviceBuffer>>), MemoryError>
-    where
-        BD: BufferDescriptor<Buffer = T>,
-    {
-        let mut staging_buffers = Vec::new();
-        let stride = desc.stride(device);
-        let h = match desc.mutability() {
-            BufferMutability::Immutable => {
-                log::trace!("Creating immutable buffer");
-                let (buf, staging) = desc.create(device, command_buffer)?;
-                staging_buffers.push(staging);
-                self.unbuffered.add(buf)
-            }
-            BufferMutability::Mutable => {
-                log::trace!("Creating buffered buffer");
-                let (buf0, staging0) = desc.create(device, command_buffer)?;
-                let (buf1, staging1) = desc.create(device, command_buffer)?;
-                let bufs = [buf0, buf1];
-                staging_buffers.push(staging0);
-                staging_buffers.push(staging1);
-                self.buffered.add(bufs)
-            }
-        };
-
-        Ok((
-            unsafe {
-                BufferHandle::from_buffer(
-                    h,
-                    0,
-                    desc.n_elems(),
-                    desc.elem_size(),
-                    stride,
-                    desc.mutability(),
-                )
-            },
-            staging_buffers,
-        ))
+    pub fn get_mut(&mut self, h: &BufferHandle<T>, idx: usize) -> Option<&mut T> {
+        match h.mutability() {
+            BufferMutability::Immutable => self.unbuffered.get_mut(h.handle()),
+            BufferMutability::Mutable => self.buffered.get_mut(h.handle(), idx),
+        }
     }
 
-    pub fn recreate<BD>(
-        &mut self,
-        device: &Device,
-        command_buffer: &mut CommandBuffer,
-        handle: BufferHandle<BD::Buffer>,
+    pub fn has(&self, h: &BufferHandle<T>) -> bool {
+        match h.mutability() {
+            BufferMutability::Immutable => self.unbuffered.has(h.handle()),
+            BufferMutability::Mutable => self.buffered.has(h.handle()),
+        }
+    }
+}
+
+use crate::resource::Async;
+use parking_lot::{
+    MappedRwLockReadGuard, MappedRwLockWriteGuard, RwLock, RwLockReadGuard, RwLockWriteGuard,
+};
+use std::sync::Arc;
+
+pub type BufferStorageReadGuard<'a, T> = RwLockReadGuard<'a, DeviceBufferStorage<T>>;
+
+pub struct AsyncDeviceBufferStorage<T> {
+    inner: Arc<RwLock<DeviceBufferStorage<Async<T>>>>,
+}
+
+impl<T> Default for AsyncDeviceBufferStorage<T> {
+    fn default() -> Self {
+        Self {
+            inner: Arc::new(RwLock::new(DeviceBufferStorage::default())),
+        }
+    }
+}
+
+impl<T> AsyncDeviceBufferStorage<T> {
+    pub fn get_buffered(
+        &self,
+        h: &BufferHandle<T>,
         idx: usize,
-        desc: &BD,
-    ) -> Result<BufferHandle<BD::Buffer>, MemoryError>
+    ) -> Option<MappedRwLockReadGuard<'_, Async<T>>> {
+        let g = self.inner.read();
+        let h = h.wrap_async();
+        if !g.has(&h) {
+            return None;
+        }
+
+        Some(RwLockReadGuard::map(g, |x| {
+            x.get_buffered(&h, idx).unwrap()
+        }))
+    }
+
+    pub fn allocate<BD>(&self, desc: &BD) -> BufferHandle<T>
     where
         BD: BufferDescriptor<Buffer = T>,
     {
-        assert_eq!(desc.mutability(), handle.mutability());
-        if let BufferMutability::Mutable = desc.mutability() {
-            log::trace!("Recreating buffered buffer at {}", idx);
-            let (new, staging) = desc.create(device, command_buffer)?;
-            assert!(staging.is_none(), "Can't recreate with staging");
-            *self
-                .buffered
-                .get_mut(handle.handle(), idx)
-                .expect("Bad handle") = new;
-            Ok(handle)
+        let buffer1 = if let BufferMutability::Immutable = desc.mutability() {
+            None
         } else {
-            unreachable!("Can't recreate immutable buffer");
+            Some(Async::<T>::Pending)
+        };
+        let inner_handle = self
+            .inner
+            .write()
+            .add(Async::<T>::Pending, buffer1)
+            .unwrap_async();
+        unsafe { BufferHandle::from_buffer(inner_handle, 0, desc.n_elems(), desc.mutability()) }
+    }
+
+    pub fn read(&self) -> BufferStorageReadGuard<'_, Async<T>> {
+        self.inner.read()
+    }
+
+    pub fn cache<BD>(&self, _desc: &BD) -> Option<BufferHandle<T>>
+    where
+        BD: BufferDescriptor<Buffer = T>,
+    {
+        None
+    }
+
+    pub fn get_buffered_mut(
+        &self,
+        h: &BufferHandle<T>,
+        idx: usize,
+    ) -> Option<MappedRwLockWriteGuard<'_, Async<T>>> {
+        let g = self.inner.write();
+        let h = h.wrap_async();
+        if !g.has(&h) {
+            return None;
         }
+
+        Some(RwLockWriteGuard::map(g, |inner| {
+            inner.get_buffered_mut(&h, idx).unwrap()
+        }))
+    }
+
+    pub fn get(
+        &self,
+        h: &BufferHandle<T>,
+        idx: usize,
+    ) -> Option<MappedRwLockReadGuard<'_, Async<T>>> {
+        let g = self.inner.read();
+        let h = h.wrap_async();
+        if !g.has(&h) {
+            return None;
+        }
+
+        Some(RwLockReadGuard::map(g, |inner| inner.get(&h, idx).unwrap()))
+    }
+
+    pub fn insert(&self, h: &BufferHandle<T>, buf0: T, buf1: Option<T>) {
+        self.inner
+            .write()
+            .get_all_mut(&h.wrap_async())
+            .map(|(slot0, slot1)| {
+                *slot0 = Async::Available(buf0);
+                match (buf1, slot1) {
+                    (Some(buf1), Some(slot1)) => *slot1 = Async::Available(buf1),
+                    (None, None) => (),
+                    _ => unreachable!(
+                        "mutability mismatch, expected buffers & pre-allocted slots to match"
+                    ),
+                }
+            });
     }
 }

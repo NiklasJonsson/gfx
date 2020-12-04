@@ -3,10 +3,7 @@ use ash::vk;
 
 use thiserror::Error;
 
-use crate::device::VkDeviceHandle;
-
-use crate::device::Device;
-use crate::device::HasVkDevice;
+use super::device::{Device, HasVkDevice, VkDeviceHandle};
 
 #[derive(Clone, Error, Debug)]
 pub enum RenderPassError {

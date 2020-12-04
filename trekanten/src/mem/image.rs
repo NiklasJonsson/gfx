@@ -3,10 +3,8 @@ use ash::vk;
 use vk_mem::{Allocation, AllocationCreateInfo, AllocationInfo, MemoryUsage};
 
 use crate::command::CommandBuffer;
-use crate::command::CommandPool;
 use crate::device::AllocatorHandle;
 use crate::device::Device;
-use crate::queue::Queue;
 use crate::util;
 
 use crate::mem::DeviceBuffer;
@@ -248,12 +246,11 @@ impl DeviceImage {
 
     pub fn device_local(
         device: &Device,
-        queue: &Queue,
-        command_pool: &CommandPool,
+        cmd_buf: &mut CommandBuffer,
         extent: util::Extent2D,
         format: util::Format,
         data: &[u8],
-    ) -> Result<Self, MemoryError> {
+    ) -> Result<(Self, DeviceBuffer), MemoryError> {
         // stride & alignment does not matter as long as they are the same.
         let staging =
             DeviceBuffer::staging_with_data(device, data, 1 /*elem_size*/, 1 /*stride*/)?;
@@ -269,11 +266,8 @@ impl DeviceImage {
             vk::SampleCountFlags::TYPE_1,
         )?;
 
-        // Transitioned to SHADER_READ_ONLY_OPTIMAL during mipmap generation
-        let mut cmd_buf = command_pool.begin_single_submit()?;
-
         transition_image_layout(
-            &mut cmd_buf,
+            cmd_buf,
             &dst_image.vk_image,
             1,
             format.into(),
@@ -283,7 +277,7 @@ impl DeviceImage {
         cmd_buf.copy_buffer_to_image(&staging.vk_buffer(), dst_image.vk_image(), &extent);
 
         transition_image_layout(
-            &mut cmd_buf,
+            cmd_buf,
             &dst_image.vk_image,
             1,
             format.into(),
@@ -291,22 +285,18 @@ impl DeviceImage {
             vk::ImageLayout::SHADER_READ_ONLY_OPTIMAL,
         );
 
-        cmd_buf.end()?;
-        queue.submit_and_wait(&cmd_buf)?;
-
-        Ok(dst_image)
+        Ok((dst_image, staging))
     }
 
     /// Create a device local image, generating mipmaps in the process
     pub fn device_local_mipmapped(
         device: &Device,
-        queue: &Queue,
-        command_pool: &CommandPool,
+        cmd_buf: &mut CommandBuffer,
         extent: util::Extent2D,
         format: util::Format,
         mip_levels: u32,
         data: &[u8],
-    ) -> Result<Self, MemoryError> {
+    ) -> Result<(Self, DeviceBuffer), MemoryError> {
         // stride & alignment does not matter as long as they are the same.
         let staging =
             DeviceBuffer::staging_with_data(device, data, 1 /*elem_size*/, 1 /*stride*/)?;
@@ -325,10 +315,8 @@ impl DeviceImage {
         )?;
 
         // Transitioned to SHADER_READ_ONLY_OPTIMAL during mipmap generation
-        let mut cmd_buf = command_pool.begin_single_submit()?;
-
         transition_image_layout(
-            &mut cmd_buf,
+            cmd_buf,
             &dst_image.vk_image,
             mip_levels,
             format.into(),
@@ -337,15 +325,13 @@ impl DeviceImage {
         );
         cmd_buf.copy_buffer_to_image(&staging.vk_buffer(), dst_image.vk_image(), &extent);
 
-        generate_mipmaps(&mut cmd_buf, dst_image.vk_image(), &extent, mip_levels);
+        generate_mipmaps(cmd_buf, dst_image.vk_image(), &extent, mip_levels);
 
-        cmd_buf.end()?;
-
-        queue.submit_and_wait(&cmd_buf)?;
-
-        Ok(dst_image)
+        Ok((dst_image, staging))
     }
+}
 
+impl DeviceImage {
     pub fn vk_image(&self) -> &vk::Image {
         &self.vk_image
     }

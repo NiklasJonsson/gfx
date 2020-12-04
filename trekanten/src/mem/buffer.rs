@@ -5,17 +5,19 @@ use vk_mem::{Allocation, AllocationCreateInfo, AllocationInfo, MemoryUsage};
 use crate::command::CommandBuffer;
 use crate::device::AllocatorHandle;
 use crate::device::Device;
-use crate::resource::{AsyncStorage, Handle};
+use crate::resource::Handle;
 
-use crate::loader;
 use crate::mem::MemoryError;
-
-use std::sync::Arc;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum BufferMutability {
     Immutable,
     Mutable,
+}
+
+pub struct BufferResult<B> {
+    pub buffer: B,
+    pub transient: Option<DeviceBuffer>,
 }
 
 pub trait BufferDescriptor {
@@ -27,58 +29,32 @@ pub trait BufferDescriptor {
     fn data(&self) -> &[u8];
     fn vk_usage_flags(&self) -> vk::BufferUsageFlags;
 
-    // TODO: enqueue?
-    fn create(
+    fn enqueue_single(
         &self,
         device: &Device,
         command_buffer: &mut CommandBuffer,
-    ) -> Result<(Self::Buffer, Option<DeviceBuffer>), MemoryError>;
-}
+    ) -> Result<BufferResult<Self::Buffer>, MemoryError>;
 
-struct BufferCreation<BD>
-where
-    BD: BufferDescriptor + Clone,
-{
-    descriptor: BD,
-    handle: Handle<BD::Buffer>,
-    storage: Arc<AsyncStorage<BD::Buffer>>,
-    buffer: Option<BD::Buffer>,
-    staging: Option<DeviceBuffer>,
-}
-
-impl<BD> loader::ResourceCmd for BufferCreation<BD>
-where
-    BD: BufferDescriptor + Clone,
-{
-    fn start(&mut self, device: &Device, cmd_buf: &mut CommandBuffer) {
-        let (buffer, staging) = self.descriptor.create(device, cmd_buf).expect("Fail");
-        self.buffer = Some(buffer);
-        self.staging = staging;
-    }
-
-    fn end(self) {
-        self.storage
-            .insert(self.handle, self.buffer.expect("Called end before start"));
-    }
-}
-
-impl<BD> loader::Descriptor<<BD as BufferDescriptor>::Buffer> for BD
-where
-    BD: BufferDescriptor + Clone + 'static,
-{
-    fn load(
+    fn enqueue(
         &self,
-        handle: Handle<BD::Buffer>,
-        storage: Arc<AsyncStorage<BD::Buffer>>,
-    ) -> Box<dyn loader::ResourceCmd> {
-        let descriptor = self.clone();
-        Box::new(BufferCreation {
-            descriptor,
-            handle,
-            storage,
-            buffer: None,
-            staging: None,
-        }) as Box<dyn loader::ResourceCmd>
+        device: &Device,
+        command_buffer: &mut CommandBuffer,
+    ) -> Result<
+        (
+            BufferResult<Self::Buffer>,
+            Option<BufferResult<Self::Buffer>>,
+        ),
+        MemoryError,
+    > {
+        let buf0 = self.enqueue_single(device, command_buffer)?;
+
+        let buf1 = if let BufferMutability::Mutable = self.mutability() {
+            Some(self.enqueue_single(device, command_buffer)?)
+        } else {
+            None
+        };
+
+        Ok((buf0, buf1))
     }
 }
 
@@ -88,8 +64,6 @@ pub struct BufferHandle<T> {
     mutability: BufferMutability,
     idx: u32,
     n_elems: u32,
-    elem_size: u16,
-    stride: u16,
 }
 
 // TODO: Fix these
@@ -106,11 +80,11 @@ impl<T> Default for BufferHandle<T> {
             mutability: BufferMutability::Immutable,
             idx: 0,
             n_elems: 0,
-            stride: 0,
-            elem_size: 0,
         }
     }
 }
+
+use crate::resource::Async;
 
 impl<T> BufferHandle<T> {
     pub fn sub_buffer(h: Self, idx: u32, n_elems: u32) -> Self {
@@ -122,8 +96,6 @@ impl<T> BufferHandle<T> {
         h: Handle<T>,
         idx: u32,
         n_elems: u32,
-        elem_size: u16,
-        stride: u16,
         mutability: BufferMutability,
     ) -> Self {
         Self {
@@ -131,8 +103,6 @@ impl<T> BufferHandle<T> {
             mutability,
             idx,
             n_elems,
-            elem_size,
-            stride,
         }
     }
 
@@ -154,19 +124,6 @@ impl<T> BufferHandle<T> {
             .collect::<Vec<_>>()
     }
 
-    pub fn offset(&self) -> u64 {
-        self.idx as u64 * self.stride as u64
-    }
-
-    pub fn size(&self) -> u64 {
-        let s = if self.n_elems > 1 {
-            (self.n_elems - 1) as u64 * self.stride as u64
-        } else {
-            0
-        };
-        s + self.elem_size as u64
-    }
-
     pub fn is_empty(&self) -> bool {
         self.n_elems == 0
     }
@@ -177,6 +134,15 @@ impl<T> BufferHandle<T> {
 
     pub fn n_elems(&self) -> u32 {
         self.n_elems
+    }
+
+    pub fn wrap_async(&self) -> BufferHandle<Async<T>> {
+        BufferHandle::<Async<T>> {
+            h: self.h.wrap_async(),
+            idx: self.idx,
+            n_elems: self.n_elems,
+            mutability: self.mutability,
+        }
     }
 }
 

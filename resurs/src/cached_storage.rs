@@ -2,6 +2,7 @@ use std::hash::Hash;
 
 use super::cache::*;
 use super::storage::*;
+use super::Handle;
 
 #[derive(Clone, Debug, Default)]
 struct Stats {
@@ -26,7 +27,11 @@ where
         Default::default()
     }
 
-    pub fn create_or_add<Create, Error>(
+    pub fn cached(&self, descriptor: &ResourceDescriptor) -> Option<Handle<Resource>> {
+        self.cache.get(descriptor)
+    }
+
+    pub fn get_or_add<Create, Error>(
         &mut self,
         descriptor: ResourceDescriptor,
         create: Create,
@@ -53,6 +58,21 @@ where
 
     pub fn get(&self, h: &Handle<Resource>) -> Option<&Resource> {
         self.storage.get(h)
+    }
+
+    pub fn add(&mut self, descriptor: ResourceDescriptor, r: Resource) -> Handle<Resource> {
+        let h = self.storage.add(r);
+        self.cache.add(descriptor, h);
+
+        h
+    }
+
+    pub fn has(&self, h: &Handle<Resource>) -> bool {
+        self.get(h).is_some()
+    }
+
+    pub fn get_mut(&mut self, h: &Handle<Resource>) -> Option<&mut Resource> {
+        self.storage.get_mut(h)
     }
 
     /// Iterate over the storage contents mutably.

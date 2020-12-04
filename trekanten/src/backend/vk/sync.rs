@@ -3,9 +3,7 @@ use ash::vk;
 
 use thiserror::Error;
 
-use crate::device::VkDeviceHandle;
-
-use crate::device::HasVkDevice;
+use super::device::{HasVkDevice, VkDeviceHandle};
 
 #[derive(Debug, Copy, Clone, Error)]
 pub enum SyncError {
@@ -17,6 +15,8 @@ pub enum SyncError {
     FenceAwait(vk::Result),
     #[error("Couldn't reset fence {0}")]
     FenceReset(vk::Result),
+    #[error("Couldn't query fence {0}")]
+    FenceQuery(vk::Result),
 }
 
 #[derive(Clone)]
@@ -110,6 +110,14 @@ impl Fence {
         }
 
         Ok(())
+    }
+
+    pub fn is_signaled(&self) -> Result<bool, SyncError> {
+        unsafe {
+            self.vk_device
+                .get_fence_status(self.vk_fence)
+                .map_err(SyncError::FenceQuery)
+        }
     }
 
     pub fn reset(&self) -> Result<(), SyncError> {

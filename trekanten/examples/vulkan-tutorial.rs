@@ -9,8 +9,8 @@ use trekanten::pipeline::ShaderStage;
 use trekanten::texture;
 use trekanten::uniform;
 use trekanten::util;
-use trekanten::vertex::VertexDefinition;
-use trekanten::ResourceManager;
+use trekanten::vertex::{VertexDefinition, VertexFormat};
+use trekanten::ResourceManager as _;
 
 use std::time::Duration;
 
@@ -92,6 +92,7 @@ unsafe impl raw_window_handle::HasRawWindowHandle for GlfwWindow {
     }
 }
 
+#[derive(Clone, Copy)]
 #[repr(C, packed)]
 struct Vertex {
     pos: glm::Vec3,
@@ -99,9 +100,9 @@ struct Vertex {
     tex_coord: glm::Vec2,
 }
 
-impl trekanten::vertex::VertexDefinition for Vertex {
-    fn format() -> trekanten::vertex::VertexFormat {
-        trekanten::vertex::VertexFormat::builder()
+impl VertexDefinition for Vertex {
+    fn format() -> VertexFormat {
+        VertexFormat::builder()
             .add_attribute(util::Format::FLOAT3)
             .add_attribute(util::Format::FLOAT3)
             .add_attribute(util::Format::FLOAT2)
@@ -109,6 +110,7 @@ impl trekanten::vertex::VertexDefinition for Vertex {
     }
 }
 
+#[derive(Clone, Copy)]
 #[repr(C)]
 struct UniformBufferObject {
     model: glm::Mat4,
@@ -243,15 +245,15 @@ fn main() -> Result<(), trekanten::RenderError> {
     let mut renderer = trekanten::Renderer::new(&window, window.extents())?;
 
     let vertex_buffer_descriptor =
-        mesh::VertexBufferDescriptor::from_slice(&vertices, mesh::BufferMutability::Immutable);
+        mesh::OwningVertexBufferDescriptor::from_vec(vertices, mesh::BufferMutability::Immutable);
     let vertex_buffer = renderer
-        .create_resource(vertex_buffer_descriptor)
+        .create_resource_blocking(vertex_buffer_descriptor)
         .expect("Failed to create vertex buffer");
 
     let index_buffer_descriptor =
-        mesh::IndexBufferDescriptor::from_slice(&indices, mesh::BufferMutability::Immutable);
+        mesh::OwningIndexBufferDescriptor::from_vec(indices, mesh::BufferMutability::Immutable);
     let index_buffer = renderer
-        .create_resource(index_buffer_descriptor)
+        .create_resource_blocking(index_buffer_descriptor)
         .expect("Failed to create index buffer");
 
     let mesh = mesh::Mesh {
@@ -269,28 +271,26 @@ fn main() -> Result<(), trekanten::RenderError> {
         .expect("Failed to build graphics pipeline descriptor");
 
     let gfx_pipeline_handle = renderer
-        .create_resource(pipeline_descriptor)
+        .create_resource_blocking(pipeline_descriptor)
         .expect("Failed to create graphics pipeline");
 
-    let data = [UniformBufferObject {
+    let data = vec![UniformBufferObject {
         model: glm::Mat4::default(),
         view: glm::Mat4::default(),
         proj: glm::Mat4::default(),
     }];
 
-    let uniform_buffer_desc = uniform::UniformBufferDescriptor {
-        data: &data,
-        mutability: mesh::BufferMutability::Mutable,
-    };
+    let uniform_buffer_desc =
+        uniform::OwningUniformBufferDescriptor::from_vec(data, mesh::BufferMutability::Mutable);
 
     let uniform_buffer_handle = renderer
-        .create_resource(uniform_buffer_desc)
+        .create_resource_blocking(uniform_buffer_desc)
         .expect("Failed to create uniform buffer");
 
     let _ = load_url("textures", TEX_URL);
     let tex_path = get_fname("textures", TEX_URL);
     let texture_handle = renderer
-        .create_resource(texture::TextureDescriptor::file(
+        .create_resource_blocking(texture::TextureDescriptor::file(
             tex_path.into(),
             util::Format::RGBA_SRGB,
             texture::MipMaps::Generate,

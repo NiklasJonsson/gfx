@@ -3,12 +3,9 @@ use ash::vk;
 
 use thiserror::Error;
 
-use crate::device::VkDeviceHandle;
-
-use crate::command::CommandBuffer;
-use crate::device::HasVkDevice;
-use crate::sync::Fence;
-use crate::sync::SyncError;
+use super::command::CommandBuffer;
+use super::device::{HasVkDevice, VkDeviceHandle};
+use super::sync::{Fence, SyncError};
 
 #[derive(Debug, Copy, Clone, Error)]
 pub enum QueueError {

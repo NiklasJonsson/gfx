@@ -2,7 +2,7 @@ use std::collections::HashMap;
 use std::hash::Hash;
 use std::marker::PhantomData;
 
-use super::storage::Handle;
+use super::Handle;
 
 /// Cache for descriptor to Handle<T>
 #[derive(Debug)]

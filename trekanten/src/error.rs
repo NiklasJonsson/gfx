@@ -2,7 +2,7 @@ use crate::*;
 
 use thiserror::Error;
 
-use crate::resource::storage::ID;
+use crate::resource::ID;
 
 #[derive(Debug, Clone, Copy)]
 pub enum ResizeReason {

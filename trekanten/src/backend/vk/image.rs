@@ -3,9 +3,8 @@ use ash::vk;
 
 use thiserror::Error;
 
-use crate::device::VkDeviceHandle;
+use super::device::{HasVkDevice, VkDeviceHandle};
 
-use crate::device::HasVkDevice;
 use crate::util;
 
 #[derive(Debug, Clone, Error)]

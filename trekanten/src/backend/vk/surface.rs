@@ -3,7 +3,8 @@ use ash::vk;
 
 use thiserror::Error;
 
-use crate::instance::Instance;
+use super::instance::Instance;
+
 use crate::util::lifetime::LifetimeToken;
 
 #[derive(Debug, Error, Clone)]
