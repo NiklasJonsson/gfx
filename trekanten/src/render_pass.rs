@@ -1,6 +1,6 @@
 use crate::mem::{BufferHandle, BufferStorageReadGuard};
 use crate::mesh::{IndexBuffer, Mesh, VertexBuffer};
-use crate::resource::{Handle, ResourceManager};
+use crate::resource::Handle;
 use crate::util;
 use crate::Renderer;
 
@@ -10,7 +10,7 @@ use crate::pipeline::{GraphicsPipeline, PipelineStorageReadGuard, ShaderStage};
 
 use resurs::Async;
 
-pub struct DrawListBuilder<'a> {
+pub struct RenderPassBuilder<'a> {
     renderer: &'a Renderer,
     vertex_buffers: BufferStorageReadGuard<'a, Async<VertexBuffer>>,
     index_buffers: BufferStorageReadGuard<'a, Async<IndexBuffer>>,
@@ -19,7 +19,7 @@ pub struct DrawListBuilder<'a> {
     command_buffer: CommandBuffer,
 }
 
-impl<'a> DrawListBuilder<'a> {
+impl<'a> RenderPassBuilder<'a> {
     pub fn bind_shader_resource_group(
         &mut self,
         idx: u32,

@@ -247,14 +247,8 @@ fn main() -> Result<(), trekanten::RenderError> {
     let loader = renderer.loader();
 
     // TODO:
-    // * Pipeline should be async as well
-    // * Per-frame uniform buffer updates should use frame resource commands
-    // * Batch load
     // * drawlist to render pass
-    // * figure out nice api for creating ubo & modifying every frame
-    // * async error propagation
 
-    // Use a channel to signal that it is done
     let (mesh_sender, mesh_receiver) = std::sync::mpsc::channel();
     let loader_clone = loader.clone();
     std::thread::spawn(move || {

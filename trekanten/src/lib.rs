@@ -3,12 +3,12 @@ use ash::vk;
 mod backend;
 mod common;
 pub mod descriptor;
-mod draw_list;
 mod error;
 pub mod loader;
 mod mem;
 pub mod mesh;
 pub mod pipeline;
+mod render_pass;
 pub mod resource;
 pub mod texture;
 pub mod uniform;
@@ -94,7 +94,7 @@ impl<'a> Frame<'a> {
     // DrawList
     pub fn begin_render_pass(
         &'a self,
-    ) -> Result<draw_list::DrawListBuilder<'a>, command::CommandError> {
+    ) -> Result<render_pass::RenderPassBuilder<'a>, command::CommandError> {
         let mut buf = self.new_raw_command_buffer()?;
         buf.begin_render_pass(
             self.renderer.render_pass(),
@@ -102,14 +102,14 @@ impl<'a> Frame<'a> {
             self.renderer.swapchain_extent(),
         );
 
-        Ok(draw_list::DrawListBuilder::new(
+        Ok(render_pass::RenderPassBuilder::new(
             self.renderer,
             buf,
             self.renderer.frame_idx,
         ))
     }
 
-    pub fn render_pass(&self) -> &render_pass::RenderPass {
+    pub fn render_pass(&self) -> &backend::render_pass::RenderPass {
         self.renderer.render_pass()
     }
 
@@ -196,7 +196,7 @@ pub struct Renderer {
 
     // Swapchain-related
     // TODO: render pass should move to something like a render graph
-    render_pass: render_pass::RenderPass,
+    render_pass: backend::render_pass::RenderPass,
     swapchain_framebuffers: Vec<framebuffer::Framebuffer>,
     depth_buffer: depth_buffer::DepthBuffer,
     color_buffer: color_buffer::ColorBuffer,
@@ -237,7 +237,7 @@ struct SwapchainAndCo {
     color_buffer: color_buffer::ColorBuffer,
     swapchain_framebuffers: Vec<framebuffer::Framebuffer>,
     image_to_frame_idx: Vec<Option<u32>>,
-    render_pass: render_pass::RenderPass,
+    render_pass: backend::render_pass::RenderPass,
 }
 
 fn create_swapchain_and_co(
@@ -251,7 +251,7 @@ fn create_swapchain_and_co(
     let swapchain =
         swapchain::Swapchain::new(&instance, &device, &surface, &requested_extent, old)?;
     let render_pass =
-        render_pass::RenderPass::new(&device, swapchain.info().format, msaa_sample_count)?;
+        backend::render_pass::RenderPass::new(&device, swapchain.info().format, msaa_sample_count)?;
 
     let image_to_frame_idx: Vec<Option<u32>> = (0..swapchain.num_images()).map(|_| None).collect();
     let depth_buffer =
@@ -689,7 +689,7 @@ impl Renderer {
         }
     }
 
-    fn render_pass(&self) -> &render_pass::RenderPass {
+    fn render_pass(&self) -> &backend::render_pass::RenderPass {
         &self.render_pass
     }
 

@@ -9,10 +9,10 @@ use std::io;
 use std::path::Path;
 use std::path::PathBuf;
 
+use crate::backend::render_pass::RenderPass;
 use crate::device::Device;
 use crate::device::HasVkDevice;
 use crate::device::VkDeviceHandle;
-use crate::render_pass::RenderPass;
 use crate::resource::{CachedStorage, Handle};
 use crate::vertex::VertexFormat;
 
@@ -445,11 +445,6 @@ impl GraphicsPipelineDescriptor {
     ) -> Result<GraphicsPipeline, PipelineError> {
         GraphicsPipeline::create(device, render_pass, self)
     }
-}
-
-#[derive(Default)]
-pub struct GraphicsPipelines {
-    mat_storage: CachedStorage<GraphicsPipelineDescriptor, GraphicsPipeline>,
 }
 
 use crate::resource::Async;

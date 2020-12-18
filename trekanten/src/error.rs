@@ -1,6 +1,10 @@
-use crate::*;
-
 use thiserror::Error;
+
+use crate::backend::*;
+use crate::descriptor;
+use crate::mem;
+use crate::pipeline;
+use crate::util;
 
 use crate::resource::ID;
 
