@@ -496,9 +496,8 @@ impl AsyncGraphicsPipelines {
     }
 
     pub fn insert(&self, h: &Handle<GraphicsPipeline>, pipeline: GraphicsPipeline) {
-        self.inner
-            .write()
-            .get_mut(&h.wrap_async())
-            .map(|x| *x = Async::<GraphicsPipeline>::Available(pipeline));
+        if let Some(x) = self.inner.write().get_mut(&h.wrap_async()) {
+            *x = Async::<GraphicsPipeline>::Available(pipeline);
+        }
     }
 }

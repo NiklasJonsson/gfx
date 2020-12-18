@@ -305,10 +305,8 @@ impl AsyncTextures {
     }
 
     pub fn insert(&self, h: &Handle<Texture>, t: Texture) {
-        self.inner
-            .write()
-            .storage
-            .get_mut(&h.wrap_async())
-            .map(|x| *x = Async::<Texture>::Available(t));
+        if let Some(x) = self.inner.write().storage.get_mut(&h.wrap_async()) {
+            *x = Async::<Texture>::Available(t);
+        }
     }
 }

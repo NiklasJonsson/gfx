@@ -176,18 +176,15 @@ impl<T> AsyncDeviceBufferStorage<T> {
     }
 
     pub fn insert(&self, h: &BufferHandle<T>, buf0: T, buf1: Option<T>) {
-        self.inner
-            .write()
-            .get_all_mut(&h.wrap_async())
-            .map(|(slot0, slot1)| {
-                *slot0 = Async::Available(buf0);
-                match (buf1, slot1) {
-                    (Some(buf1), Some(slot1)) => *slot1 = Async::Available(buf1),
-                    (None, None) => (),
-                    _ => unreachable!(
-                        "mutability mismatch, expected buffers & pre-allocted slots to match"
-                    ),
-                }
-            });
+        if let Some((slot0, slot1)) = self.inner.write().get_all_mut(&h.wrap_async()) {
+            *slot0 = Async::Available(buf0);
+            match (buf1, slot1) {
+                (Some(buf1), Some(slot1)) => *slot1 = Async::Available(buf1),
+                (None, None) => (),
+                _ => unreachable!(
+                    "mutability mismatch, expected buffers & pre-allocted slots to match"
+                ),
+            }
+        }
     }
 }

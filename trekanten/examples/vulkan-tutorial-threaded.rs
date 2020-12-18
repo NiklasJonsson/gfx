@@ -246,9 +246,6 @@ fn main() -> Result<(), trekanten::RenderError> {
     let mut renderer = trekanten::Renderer::new(&window, window.extents())?;
     let loader = renderer.loader();
 
-    // TODO:
-    // * drawlist to render pass
-
     let (mesh_sender, mesh_receiver) = std::sync::mpsc::channel();
     let loader_clone = loader.clone();
     std::thread::spawn(move || {

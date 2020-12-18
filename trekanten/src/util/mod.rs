@@ -46,7 +46,7 @@ impl ByteBuffer {
     // Requiring copy enforces that there is no custom drop that is needed
     // Very unsafe. Does not call drop()
     pub unsafe fn from_vec<T: Copy>(mut v: Vec<T>) -> Self {
-        assert!(v.len() > 0, "len() has to be larger than zero!");
+        assert!(!v.is_empty(), "can't be empty");
         // TODO: Static assertion
         assert!(std::mem::size_of::<T>() > 0, "ZST are not supported");
         let ptr = v.as_mut_ptr();

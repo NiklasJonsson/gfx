@@ -164,10 +164,7 @@ pub enum DeviceSuitability {
 
 impl DeviceSuitability {
     pub fn is_suitable(&self) -> bool {
-        match self {
-            DeviceSuitability::Suitable => true,
-            _ => false,
-        }
+        matches!(self, DeviceSuitability::Suitable)
     }
 }
 
