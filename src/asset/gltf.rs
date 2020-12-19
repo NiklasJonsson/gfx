@@ -6,10 +6,12 @@ use specs::{Entity, World};
 use std::path::{Path, PathBuf};
 
 use trekanten::mesh::BufferMutability;
-use trekanten::mesh::{IndexBuffer, IndexBufferDescriptor, VertexBuffer, VertexBufferDescriptor};
+use trekanten::mesh::{
+    IndexBuffer, OwningIndexBufferDescriptor, OwningVertexBufferDescriptor, VertexBuffer,
+};
 use trekanten::resource::ResourceManager;
 use trekanten::texture::{MipMaps, TextureDescriptor};
-use trekanten::uniform::UniformBufferDescriptor;
+use trekanten::uniform::OwningUniformBufferDescriptor;
 use trekanten::util;
 use trekanten::vertex::VertexFormat;
 use trekanten::BufferHandle;
@@ -451,21 +453,29 @@ fn log_asset_upload<'a>(ctx: &RecGltfCtx<'a>) {
     log::info!("# materials: {}", ctx.material_buffer.len());
 }
 
-fn upload_to_gpu<'a>(renderer: &mut trekanten::Renderer, ctx: &mut RecGltfCtx<'a>) {
-    let mut meshes = ctx.world.write_storage::<Mesh>();
-    let mut materials = ctx.world.write_storage::<Material>();
-    let mut gltf_models = ctx.world.write_storage::<GltfModel>();
-    let entities = ctx.world.read_resource::<EntitiesRes>();
+fn upload_to_gpu<'a>(renderer: &mut trekanten::Renderer, ctx: RecGltfCtx<'a>) {
+    log_asset_upload(&ctx);
 
-    log_asset_upload(ctx);
+    let RecGltfCtx {
+        buffers,
+        path,
+        world,
+        index_buffers,
+        vertex_buffers,
+        material_buffer,
+    } = ctx;
 
-    let gpu_vert_buffers: Vec<BufferHandle<VertexBuffer>> = ctx
-        .vertex_buffers
-        .iter()
+    let mut meshes = world.write_storage::<Mesh>();
+    let mut materials = world.write_storage::<Material>();
+    let mut gltf_models = world.write_storage::<GltfModel>();
+    let entities = world.read_resource::<EntitiesRes>();
+
+    let gpu_vert_buffers: Vec<BufferHandle<VertexBuffer>> = vertex_buffers
+        .into_iter()
         .map(|vert_buf| {
             renderer
-                .create_resource(VertexBufferDescriptor::from_raw(
-                    &vert_buf.data,
+                .create_resource_blocking(OwningVertexBufferDescriptor::from_raw(
+                    vert_buf.data,
                     vert_buf.format.clone(),
                     BufferMutability::Immutable,
                 ))
@@ -473,13 +483,12 @@ fn upload_to_gpu<'a>(renderer: &mut trekanten::Renderer, ctx: &mut RecGltfCtx<'a
         })
         .collect();
 
-    let gpu_index_buffers: Vec<BufferHandle<IndexBuffer>> = ctx
-        .index_buffers
-        .iter()
+    let gpu_index_buffers: Vec<BufferHandle<IndexBuffer>> = index_buffers
+        .into_iter()
         .map(|idx_buf| {
             renderer
-                .create_resource(IndexBufferDescriptor::from_slice(
-                    &idx_buf,
+                .create_resource_blocking(OwningIndexBufferDescriptor::from_vec(
+                    idx_buf,
                     BufferMutability::Immutable,
                 ))
                 .expect("Failed to create index buffer")
@@ -487,10 +496,10 @@ fn upload_to_gpu<'a>(renderer: &mut trekanten::Renderer, ctx: &mut RecGltfCtx<'a
         .collect();
 
     let gpu_uniform_buffer_handles = renderer
-        .create_resource(UniformBufferDescriptor {
-            data: &ctx.material_buffer,
-            mutability: BufferMutability::Immutable,
-        })
+        .create_resource_blocking(OwningUniformBufferDescriptor::from_vec(
+            material_buffer,
+            BufferMutability::Immutable,
+        ))
         .expect("Failed to create uniform buffer for materials")
         .split();
 
@@ -513,10 +522,9 @@ fn upload_to_gpu<'a>(renderer: &mut trekanten::Renderer, ctx: &mut RecGltfCtx<'a
             )
             .expect("Failed to insert mesh");
 
-        // TODO: Which of these textures should actually have mipmaps...
         let normal_map = gltf_mat.normal_map.as_ref().map(|x| {
             let tex_h = renderer
-                .create_resource(TextureDescriptor::file(
+                .create_resource_blocking(TextureDescriptor::file(
                     x.tex.path.clone(),
                     x.tex.format,
                     MipMaps::Generate,
@@ -536,7 +544,7 @@ fn upload_to_gpu<'a>(renderer: &mut trekanten::Renderer, ctx: &mut RecGltfCtx<'a
 
         let base_color_texture = gltf_mat.base_color.as_ref().map(|t| {
             let tex_h = renderer
-                .create_resource(trekanten::texture::TextureDescriptor::file(
+                .create_resource_blocking(trekanten::texture::TextureDescriptor::file(
                     t.path.clone(),
                     t.format,
                     MipMaps::Generate,
@@ -550,7 +558,7 @@ fn upload_to_gpu<'a>(renderer: &mut trekanten::Renderer, ctx: &mut RecGltfCtx<'a
 
         let metallic_roughness_texture = gltf_mat.metallic_roughness.as_ref().map(|t| {
             let tex_h = renderer
-                .create_resource(trekanten::texture::TextureDescriptor::file(
+                .create_resource_blocking(trekanten::texture::TextureDescriptor::file(
                     t.path.clone(),
                     t.format,
                     MipMaps::Generate,
@@ -619,7 +627,7 @@ pub fn load_asset(
 
     let cam_transform = get_cam_transform(gltf_doc, rec_ctx.world, camera_ent);
 
-    upload_to_gpu(renderer, &mut rec_ctx);
+    upload_to_gpu(renderer, rec_ctx);
     log::trace!("gltf asset done");
 
     LoadedAsset {

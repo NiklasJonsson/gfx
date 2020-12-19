@@ -1,7 +1,6 @@
-use trekanten::command::CommandBufferBuilder;
 use trekanten::descriptor::DescriptorSet;
-use trekanten::mesh::{BufferMutability, IndexBuffer, IndexBufferDescriptor};
-use trekanten::mesh::{VertexBuffer, VertexBufferDescriptor};
+use trekanten::mesh::{BufferMutability, IndexBuffer, OwningIndexBufferDescriptor};
+use trekanten::mesh::{OwningVertexBufferDescriptor, VertexBuffer};
 use trekanten::pipeline::{
     BlendState, DepthTest, GraphicsPipeline, GraphicsPipelineDescriptor, ShaderDescriptor,
     ShaderStage, TriangleCulling,
@@ -11,6 +10,7 @@ use trekanten::texture::{MipMaps, Texture, TextureDescriptor};
 use trekanten::util::{Extent2D, Format, Offset2D, Rect2D, Viewport};
 use trekanten::vertex::{VertexDefinition, VertexFormat};
 use trekanten::Frame;
+use trekanten::RenderPassBuilder;
 use trekanten::Renderer;
 use trekanten::{BufferHandle, Handle};
 
@@ -338,8 +338,10 @@ impl UIContext {
             let mut fonts = imgui_ctx.fonts();
             let atlas_texture = fonts.build_rgba32_texture();
 
-            let tex_desc = TextureDescriptor::raw(
-                atlas_texture.data,
+            // We get borrowed data from imgui for the texture so we need a copy here
+            // TODO: This is a use case for supporting borrowed data in a synchronous api
+            let tex_desc = TextureDescriptor::from_vec(
+                atlas_texture.data.to_owned(),
                 Extent2D {
                     width: atlas_texture.width,
                     height: atlas_texture.height,
@@ -348,7 +350,7 @@ impl UIContext {
                 MipMaps::None,
             );
             renderer
-                .create_resource(tex_desc)
+                .create_resource_blocking(tex_desc)
                 .expect("Failed to create font texture")
         };
 
@@ -377,7 +379,7 @@ impl UIContext {
             .expect("Failed to builder graphics pipeline descriptor");
 
         let pipeline = renderer
-            .create_resource(pipeline_descriptor)
+            .create_resource_blocking(pipeline_descriptor)
             .expect("Failed to create graphics pipeline");
 
         let desc_set = DescriptorSet::builder(renderer)
@@ -600,29 +602,27 @@ impl UIContext {
             std::mem::size_of::<ImGuiVertex>(),
             "Mismatch in imgui vertex type"
         );
-        let vbuf_desc = VertexBufferDescriptor::from_raw(
-            &vertices,
+        let vbuf_desc = OwningVertexBufferDescriptor::from_raw(
+            vertices,
             ImGuiVertex::format(),
             BufferMutability::Mutable,
         );
-        let ibuf_desc = IndexBufferDescriptor::from_slice(&indices, BufferMutability::Mutable);
+        let ibuf_desc = OwningIndexBufferDescriptor::from_vec(indices, BufferMutability::Mutable);
 
         let (vertex_buffer, index_buffer) = if let Some(per_frame_data) = self.per_frame_data {
             let vertex_buffer = frame
-                .recreate_resource(per_frame_data.vertex_buffer, vbuf_desc)
+                .recreate_resource_blocking(per_frame_data.vertex_buffer, vbuf_desc)
                 .expect("Bad vbuf handle");
             let index_buffer = frame
-                .recreate_resource(per_frame_data.index_buffer, ibuf_desc)
+                .recreate_resource_blocking(per_frame_data.index_buffer, ibuf_desc)
                 .expect("Bad ibuf handle");
             (vertex_buffer, index_buffer)
         } else {
             let vh = frame
-                .renderer()
-                .create_resource(vbuf_desc)
+                .create_resource_blocking(vbuf_desc)
                 .expect("Failed to create vertex buffer");
             let ih = frame
-                .renderer()
-                .create_resource(ibuf_desc)
+                .create_resource_blocking(ibuf_desc)
                 .expect("Failed to create index buffer");
 
             (vh, ih)
@@ -671,7 +671,7 @@ pub struct VertexShaderData {
 }
 
 impl UIDrawCommands {
-    pub fn record_draw_commands<'b>(self, cmd_buf: &mut CommandBufferBuilder<'b>) {
+    pub fn record_draw_commands<'b>(self, cmd_buf: &mut RenderPassBuilder<'b>) {
         log::trace!("Recording draw commands!");
         let Self {
             per_frame_data:

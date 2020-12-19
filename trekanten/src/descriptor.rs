@@ -216,6 +216,8 @@ impl<'a> DescriptorSetBuilder<'a> {
             ]);
 
             log::trace!("Added buffer info {:?}", self.buffer_infos.last().unwrap());
+        } else {
+            log::error!("Can't add buffer, still pending");
         }
         self
     }
@@ -253,6 +255,8 @@ impl<'a> DescriptorSetBuilder<'a> {
                 sampler,
             });
             log::trace!("Added texture info {:?}", self.image_infos.last().unwrap());
+        } else {
+            log::error!("Can't add texture, still pending");
         }
 
         self

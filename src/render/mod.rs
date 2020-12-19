@@ -6,7 +6,6 @@ use thiserror::Error;
 use specs::prelude::*;
 use specs::storage::StorageEntry;
 
-use trekanten::command;
 use trekanten::descriptor::DescriptorSet;
 use trekanten::mesh::{BufferMutability, VertexBuffer};
 use trekanten::pipeline::{
@@ -14,10 +13,11 @@ use trekanten::pipeline::{
 };
 use trekanten::resource::Handle;
 use trekanten::resource::ResourceManager;
-use trekanten::uniform::{UniformBuffer, UniformBufferDescriptor};
+use trekanten::uniform::{OwningUniformBufferDescriptor, UniformBuffer};
 use trekanten::util;
 use trekanten::vertex::VertexFormat;
 use trekanten::BufferHandle;
+use trekanten::RenderPassBuilder;
 use trekanten::Renderer;
 
 pub mod material;
@@ -192,10 +192,13 @@ pub fn get_pipeline_for(
     mesh: &Mesh,
     mat: &material::Material,
 ) -> Result<Handle<GraphicsPipeline>, MaterialError> {
-    let vbuf: &VertexBuffer = renderer
+    let vertex_format = renderer
         .get_resource(&mesh.vertex_buffer)
-        .expect("Invalid handle");
-    let vertex_format = vbuf.format().clone();
+        .expect("Invalid handle")
+        .as_ref()
+        .expect("should be available")
+        .format()
+        .clone();
     let shader_compiler = world.read_resource::<pipeline::ShaderCompiler>();
     let pipe = match mat {
         material::Material::PBR {
@@ -224,7 +227,7 @@ pub fn get_pipeline_for(
                 .vertex_format(vertex_format)
                 .build()?;
 
-            renderer.create_resource(desc)?
+            renderer.create_resource_blocking(desc)?
         }
         m => todo!("No support for this material yet {:?}", m),
     };
@@ -292,7 +295,7 @@ fn create_renderables(renderer: &mut Renderer, world: &mut World, render_mode: R
     should_reload.clear();
 }
 
-fn draw_entities<'a>(world: &World, cmd_buf: &mut command::CommandBufferBuilder<'a>) {
+fn draw_entities<'a>(world: &World, cmd_buf: &mut RenderPassBuilder<'a>) {
     let model_matrices = world.read_storage::<ModelMatrix>();
     let meshes = world.read_storage::<Mesh>();
     let renderables = world.read_storage::<RenderableMaterial>();
@@ -404,26 +407,20 @@ pub fn setup_resources(world: &mut World, mut renderer: &mut Renderer) {
         pipeline::ShaderCompiler::new().expect("Failed to create shader compiler");
 
     log::trace!("Creating dummy pipeline");
-    let data = [uniform::LightingData {
+    let data = vec![uniform::LightingData {
         light_pos: [0.0; 4],
         view_pos: [0.0; 4],
     }];
-    let desc = UniformBufferDescriptor {
-        data: &data,
-        mutability: BufferMutability::Mutable,
-    };
-    let light_buffer = renderer.create_resource(desc).expect("FAIL");
+    let desc = OwningUniformBufferDescriptor::from_vec(data, BufferMutability::Mutable);
+    let light_buffer = renderer.create_resource_blocking(desc).expect("FAIL");
 
-    let data = [uniform::Transforms {
+    let data = vec![uniform::Transforms {
         view: [[0.0; 4]; 4],
         proj: [[0.0; 4]; 4],
     }];
-    let desc = UniformBufferDescriptor {
-        data: &data,
-        mutability: BufferMutability::Mutable,
-    };
+    let desc = OwningUniformBufferDescriptor::from_vec(data, BufferMutability::Mutable);
 
-    let transforms_buffer = renderer.create_resource(desc).expect("FAIL");
+    let transforms_buffer = renderer.create_resource_blocking(desc).expect("FAIL");
 
     let frame_set = DescriptorSet::builder(&mut renderer)
         .add_buffer(
@@ -448,7 +445,7 @@ pub fn setup_resources(world: &mut World, mut renderer: &mut Renderer) {
         .build()
         .expect("Failed to build graphics pipeline descriptor");
 
-    let dummy_pipeline = renderer.create_resource(desc).expect("FAIL");
+    let dummy_pipeline = renderer.create_resource_blocking(desc).expect("FAIL");
 
     world.insert(FrameData {
         light_buffer,

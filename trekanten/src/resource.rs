@@ -47,8 +47,7 @@ pub trait ResourceManager<Descriptor, Resource, Handle> {
 
 pub trait MutResourceManager<Descriptor, Resource, Handle> {
     type Error;
-    fn get_resource_mut(&mut self, handle: &Handle) -> Option<&mut Resource>;
-    fn recreate_resource(
+    fn recreate_resource_blocking(
         &mut self,
         handle: Handle,
         descriptor: Descriptor,

@@ -18,6 +18,7 @@ pub mod vertex;
 pub use error::RenderError;
 pub use error::ResizeReason;
 pub use mem::BufferHandle;
+pub use render_pass::RenderPassBuilder;
 pub use resource::{Handle, MutResourceManager, ResourceManager};
 
 use ash::version::DeviceV1_0;
@@ -62,6 +63,7 @@ impl FrameSynchronization {
 
 pub struct Frame<'a> {
     renderer: &'a mut Renderer,
+    resources: Arc<resource::AsyncResources>,
     recorded_command_buffers: Vec<vk::CommandBuffer>,
     gfx_command_pool: command::CommandPool,
 }
@@ -144,6 +146,79 @@ impl<'a> Frame<'a> {
         }
     }
 }
+
+use parking_lot::MappedRwLockReadGuard;
+macro_rules! impl_mut_buffer_manager_frame {
+    ($desc:ty, $resource:ty, $handle:ty, $cmd_enum:ident, $storage:ident) => {
+        impl<'a> resource::MutResourceManager<$desc, $resource, $handle> for Frame<'a> {
+            type Error = mem::MemoryError;
+
+            fn recreate_resource_blocking(
+                &mut self,
+                handle: $handle,
+                descriptor: $desc,
+            ) -> Result<$handle, Self::Error> {
+                let cmd = ResourceCommand::$cmd_enum { descriptor, handle };
+                self.renderer.execute_command(cmd)?;
+                Ok(handle)
+            }
+        }
+    };
+}
+
+impl_mut_buffer_manager_frame!(
+    mesh::OwningVertexBufferDescriptor,
+    mesh::VertexBuffer,
+    BufferHandle<mesh::VertexBuffer>,
+    CreateVertexBuffer,
+    vertex_buffers
+);
+
+impl_mut_buffer_manager_frame!(
+    mesh::OwningIndexBufferDescriptor,
+    mesh::IndexBuffer,
+    BufferHandle<mesh::IndexBuffer>,
+    CreateIndexBuffer,
+    index_buffers
+);
+
+macro_rules! impl_buffer_manager_frame {
+    ($desc:ty, $resource:ty, $handle:ty, $cmd_enum:ident, $storage:ident) => {
+        impl<'a> resource::ResourceManager<$desc, $resource, $handle> for Frame<'a> {
+            type Error = mem::MemoryError;
+
+            fn get_resource(
+                &self,
+                handle: &$handle,
+            ) -> Option<MappedRwLockReadGuard<'_, resurs::Async<$resource>>> {
+                self.renderer.get_resource(handle)
+            }
+
+            fn create_resource_blocking(
+                &mut self,
+                descriptor: $desc,
+            ) -> Result<$handle, Self::Error> {
+                self.renderer.create_resource_blocking(descriptor)
+            }
+        }
+    };
+}
+
+impl_buffer_manager_frame!(
+    mesh::OwningVertexBufferDescriptor,
+    mesh::VertexBuffer,
+    BufferHandle<mesh::VertexBuffer>,
+    CreateVertexBuffer,
+    vertex_buffers
+);
+
+impl_buffer_manager_frame!(
+    mesh::OwningIndexBufferDescriptor,
+    mesh::IndexBuffer,
+    BufferHandle<mesh::IndexBuffer>,
+    CreateIndexBuffer,
+    index_buffers
+);
 
 struct Resources {
     descriptor_sets: descriptor::DescriptorSets,
@@ -549,6 +624,7 @@ impl Renderer {
         self.image_to_frame_idx[self.swapchain_image_idx as usize] = Some(self.frame_idx);
 
         Ok(Frame::<'a> {
+            resources: Arc::clone(&self.async_resources),
             renderer: self,
             recorded_command_buffers: Vec::new(),
             gfx_command_pool,
@@ -720,7 +796,6 @@ impl Renderer {
     }
 }
 
-use parking_lot::MappedRwLockReadGuard;
 macro_rules! impl_buffer_manager {
     ($desc:ty, $resource:ty, $handle:ty, $cmd_enum:ident, $storage:ident) => {
         impl resource::ResourceManager<$desc, $resource, $handle> for Renderer {

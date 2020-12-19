@@ -34,11 +34,11 @@ impl<'a> RenderPassBuilder<'a> {
         let pipeline = self
             .graphics_pipelines
             .get(&pipeline.wrap_async())
-            .expect("Failed to find pipeline");
+            .expect("Failed to find pipeline")
+            .as_ref()
+            .expect("Should have arrived");
 
-        if let Async::Available(pipeline) = pipeline {
-            self.command_buffer.bind_descriptor_set(idx, dset, pipeline);
-        }
+        self.command_buffer.bind_descriptor_set(idx, dset, pipeline);
 
         self
     }
@@ -47,11 +47,11 @@ impl<'a> RenderPassBuilder<'a> {
         let pipeline = self
             .graphics_pipelines
             .get(&pipeline.wrap_async())
-            .expect("Failed to get pipeline");
+            .expect("Failed to get pipeline")
+            .as_ref()
+            .expect("Should have arrived");
 
-        if let Async::Available(pipeline) = pipeline {
-            self.command_buffer.bind_graphics_pipeline(pipeline);
-        }
+        self.command_buffer.bind_graphics_pipeline(pipeline);
 
         self
     }
@@ -60,11 +60,11 @@ impl<'a> RenderPassBuilder<'a> {
         let ib = self
             .index_buffers
             .get(&handle.wrap_async(), self.frame_idx as usize)
-            .expect("Failed to get index buffer");
+            .expect("Failed to get index buffer")
+            .as_ref()
+            .expect("Should have arrived");
 
-        if let Async::Available(ib) = ib {
-            self.command_buffer.bind_index_buffer(&ib, 0);
-        }
+        self.command_buffer.bind_index_buffer(&ib, 0);
 
         self
     }
@@ -73,11 +73,11 @@ impl<'a> RenderPassBuilder<'a> {
         let vb = self
             .vertex_buffers
             .get(&handle.wrap_async(), self.frame_idx as usize)
-            .expect("Failed to get index buffer");
+            .expect("Failed to get index buffer")
+            .as_ref()
+            .expect("Should have arrived");
 
-        if let Async::Available(vb) = vb {
-            self.command_buffer.bind_vertex_buffer(&vb, 0);
-        }
+        self.command_buffer.bind_vertex_buffer(&vb, 0);
 
         self
     }
@@ -90,19 +90,21 @@ impl<'a> RenderPassBuilder<'a> {
         let vb = self
             .vertex_buffers
             .get(&mesh.vertex_buffer.wrap_async(), self.frame_idx as usize)
-            .expect("Failed to get index buffer");
+            .expect("Failed to get index buffer")
+            .as_ref()
+            .expect("Should have arrived");
 
         let ib = self
             .index_buffers
             .get(&mesh.index_buffer.wrap_async(), self.frame_idx as usize)
-            .expect("Failed to get index buffer");
+            .expect("Failed to get index buffer")
+            .as_ref()
+            .expect("Should have arrived");
 
-        if let (Async::Available(vb), Async::Available(ib)) = (vb, ib) {
-            self.command_buffer
-                .bind_index_buffer(ib, 0)
-                .bind_vertex_buffer(vb, 0)
-                .draw_indexed(n_indices, indices_index, vertex_index);
-        }
+        self.command_buffer
+            .bind_index_buffer(ib, 0)
+            .bind_vertex_buffer(vb, 0)
+            .draw_indexed(n_indices, indices_index, vertex_index);
 
         self
     }

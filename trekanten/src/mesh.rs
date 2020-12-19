@@ -227,6 +227,15 @@ impl OwningVertexBufferDescriptor {
             mutability,
         }
     }
+
+    pub fn from_raw(data: Vec<u8>, format: VertexFormat, mutability: BufferMutability) -> Self {
+        let data = unsafe { Arc::new(ByteBuffer::from_vec(data)) };
+        Self {
+            data,
+            format,
+            mutability,
+        }
+    }
 }
 
 impl<'a> BufferDescriptor for OwningVertexBufferDescriptor {
