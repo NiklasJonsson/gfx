@@ -1,6 +1,15 @@
 use specs::prelude::*;
 use specs::Component;
 
+pub mod prelude {
+    pub use specs::{DenseVecStorage, HashMapStorage, NullStorage, VecStorage};
+    pub use specs::{Dispatcher, DispatcherBuilder};
+    pub use specs::{Entity, World};
+    pub use specs::{Read, ReadStorage, Write, WriteStorage};
+
+    pub use specs::{Builder as _, Join as _, SystemData as _, WorldExt as _};
+}
+
 pub fn get_singleton_entity<C>(w: &World) -> Entity
 where
     C: specs::Component,
@@ -66,3 +75,31 @@ where
     type True = True<T>;
     type False = False<T>;
 }
+
+pub trait System<'a> {
+    type SystemData: specs::SystemData<'a>;
+
+    fn run(&mut self, data: Self::SystemData);
+    fn setup(&mut self, world: &mut specs::World) {}
+}
+
+struct SpecsSystem<'a, S: System<'a>> {
+    s: S,
+    _lifetime: std::marker::PhantomData<&'a S>,
+}
+
+impl<'a, S: System<'a>> specs::System<'a> for SpecsSystem<'a, S> {
+    type SystemData = <S as System<'a>>::SystemData;
+
+    fn run(&mut self, data: <S as System<'a>>::SystemData) {
+        log::info!("Running {}", std::any::type_name::<Self>());
+        self.s.run(data);
+    }
+
+    fn setup(&mut self, world: &mut World) {
+        <Self as specs::System>::setup(self, world);
+        <S as System>::setup(&mut self.s, world);
+    }
+}
+
+struct Schedule {}

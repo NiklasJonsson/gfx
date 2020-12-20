@@ -1,4 +1,3 @@
-use specs::prelude::*;
 use std::sync::Arc;
 
 mod arg_parse;
@@ -20,6 +19,7 @@ use time::DeltaTime;
 
 use game_state::GameState;
 
+use ecs::prelude::*;
 use io::event::Event;
 
 #[derive(Debug, PartialEq, Eq)]
