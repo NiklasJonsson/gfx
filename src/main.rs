@@ -1,4 +1,3 @@
-use specs::prelude::*;
 use std::sync::Arc;
 
 mod arg_parse;
@@ -20,6 +19,7 @@ use time::DeltaTime;
 
 use game_state::GameState;
 
+use ecs::prelude::*;
 use io::event::Event;
 
 #[derive(Debug, PartialEq, Eq)]
@@ -41,8 +41,8 @@ struct App {
     renderer: trekanten::Renderer,
     ui: render::ui::UIContext,
     state: AppState,
-    control_systems: Dispatcher<'static, 'static>,
-    engine_systems: Dispatcher<'static, 'static>,
+    control_systems: ecs::Executor<'static, 'static>,
+    engine_systems: ecs::Executor<'static, 'static>,
     frame_count: usize,
     timer: time::Timer,
 }
@@ -64,15 +64,15 @@ impl App {
 }
 
 impl App {
-    fn init_dispatchers<'a, 'b>() -> (Dispatcher<'a, 'b>, Dispatcher<'a, 'b>) {
-        let control_builder = DispatcherBuilder::new();
+    fn init_dispatchers<'a, 'b>() -> (Executor<'a, 'b>, Executor<'a, 'b>) {
+        let control_builder = ExecutorBuilder::new();
         // Input needs to go before as most systems depends on it
         let control_builder = io::input::register_systems(control_builder);
         let control_builder = game_state::register_systems(control_builder);
 
         let control = control_builder.build();
 
-        let engine_builder = DispatcherBuilder::new();
+        let engine_builder = ExecutorBuilder::new();
         let engine_builder = camera::register_systems(engine_builder);
         let engine_builder = settings::register_systems(engine_builder);
         let engine_builder = render::register_systems(engine_builder);
@@ -205,10 +205,10 @@ impl App {
                 AppAction::ContinueFrame => (),
             }
 
-            self.control_systems.dispatch(&self.world);
+            self.control_systems.execute(&self.world);
             let state = *self.world.read_resource::<GameState>();
             if let GameState::Running = state {
-                self.engine_systems.dispatch(&self.world);
+                self.engine_systems.execute(&self.world);
             }
             render::draw_frame(&mut self.world, &mut self.ui, &mut self.renderer);
 

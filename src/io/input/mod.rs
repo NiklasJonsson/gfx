@@ -7,7 +7,7 @@
 //! 4. When the InputMapper system has run, each entity will have it's mapped input available,
 //!    provided the event was not consumed by a InputContext with higher priority.
 //! 5. When the System::run is executed, fetch the mapped input with the stored entity.
-use specs::prelude::*;
+use crate::ecs::prelude::*;
 use specs::world::EntitiesRes;
 use specs::Component;
 
@@ -330,7 +330,7 @@ impl<'a> System<'a> for InputManager {
 
 pub const INPUT_MANAGER_SYSTEM_ID: &str = "input_manager_sys";
 
-pub fn register_systems<'a, 'b>(builder: DispatcherBuilder<'a, 'b>) -> DispatcherBuilder<'a, 'b> {
+pub fn register_systems<'a, 'b>(builder: ExecutorBuilder<'a, 'b>) -> ExecutorBuilder<'a, 'b> {
     builder.with(InputManager::new(), INPUT_MANAGER_SYSTEM_ID, &[])
 }
 
@@ -457,7 +457,7 @@ mod tests {
         let contexts = vec![ctx0, ctx1, ctx2];
 
         let mut world = World::new();
-        let mut dispatcher = register_systems(DispatcherBuilder::new()).build();
+        let mut dispatcher = register_systems(ExecutorBuilder::new()).build();
 
         let external_inputs = vec![
             ExternalInput::Press(Button::from(KeyCode::O)),

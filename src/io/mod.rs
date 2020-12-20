@@ -3,7 +3,7 @@ pub mod input;
 
 use winit::window::Window;
 
-use specs::prelude::*;
+use crate::ecs::World;
 
 // Commands from runner thread to event thread
 pub enum Command {

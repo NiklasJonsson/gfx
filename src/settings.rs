@@ -1,10 +1,9 @@
 use crate::common::Name;
+use crate::ecs::prelude::*;
 use crate::io::input::{ActionId, InputContext, InputContextError, KeyCode, MappedInput};
 use crate::math::Vec3;
 
 use num_derive::FromPrimitive;
-
-use specs::prelude::*;
 
 #[derive(Debug, Copy, Clone, PartialEq, Eq, FromPrimitive)]
 pub enum RenderMode {
@@ -103,7 +102,7 @@ impl<'a> System<'a> for RenderSettingsSys {
 
 pub const RENDER_SETTINGS_SYS_ID: &str = "render_settings_sys";
 
-pub fn register_systems<'a, 'b>(builder: DispatcherBuilder<'a, 'b>) -> DispatcherBuilder<'a, 'b> {
+pub fn register_systems<'a, 'b>(builder: ExecutorBuilder<'a, 'b>) -> ExecutorBuilder<'a, 'b> {
     builder.with(
         RenderSettingsSys { input_entity: None },
         RENDER_SETTINGS_SYS_ID,

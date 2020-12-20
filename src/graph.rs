@@ -1,4 +1,4 @@
-use specs::prelude::*;
+use crate::ecs::prelude::*;
 use specs::Component;
 
 use std::collections::VecDeque;
@@ -120,11 +120,8 @@ impl<'a> System<'a> for TransformPropagation {
     }
 }
 
-pub fn breadth_first_sys<'a, CS>(
-    children_storage: CS,
-    root: Entity,
-    mut visit_node: impl FnMut(Entity),
-) where
+pub fn breadth_first_sys<CS>(children_storage: CS, root: Entity, mut visit_node: impl FnMut(Entity))
+where
     CS: specs::storage::GenericReadStorage<Component = Children>,
 {
     let mut queue = VecDeque::new();

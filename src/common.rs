@@ -1,5 +1,4 @@
-use specs::prelude::*;
-use specs::Component;
+use crate::ecs::prelude::*;
 
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Component)]
 #[storage(DenseVecStorage)]

@@ -109,8 +109,6 @@ fn imgui_debug_ui<'a>(ui: &imgui::Ui<'a>) {
 }
 
 pub fn build_ui<'a>(world: &mut World, ui: &imgui::Ui<'a>, pos: [f32; 2]) -> [f32; 2] {
-    let dt = world.read_resource::<DeltaTime>();
-
     let size = [400.0, 300.0];
     imgui::Window::new(im_str!("Imgui Debug"))
         .size(size, imgui::Condition::FirstUseEver)

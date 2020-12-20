@@ -1,6 +1,18 @@
 use specs::prelude::*;
 use specs::Component;
 
+pub type World = specs::World;
+
+pub mod prelude {
+    pub use specs::{Component, Entities, Entity};
+    pub use specs::{DenseVecStorage, HashMapStorage, NullStorage, VecStorage};
+    pub use specs::{Read, ReadStorage, Write, WriteStorage};
+
+    pub use specs::{Builder as _, Join as _, SystemData as _, WorldExt as _};
+
+    pub use super::{Executor, ExecutorBuilder, System, World};
+}
+
 pub fn get_singleton_entity<C>(w: &World) -> Entity
 where
     C: specs::Component,
@@ -32,37 +44,90 @@ where
     w.read_storage::<C>().get(e).is_some()
 }
 
-#[derive(Default, Component)]
-#[storage(NullStorage)]
-pub struct True<T>
+pub trait System<'a> {
+    type SystemData: specs::SystemData<'a>;
+
+    fn run(&mut self, data: Self::SystemData);
+    fn setup(&mut self, _world: &mut specs::World) {}
+}
+
+// Too many lifetimes below, not sure how they work. Mostly taken from specs impl.
+// It does compile and run though :)
+
+pub struct SpecsSystem<S>
 where
-    T: Default + Send + Sync + 'static,
+    for<'a> S: System<'a> + Sync,
 {
-    _ty: std::marker::PhantomData<T>,
+    s: S,
 }
 
-#[derive(Default, Component)]
-#[storage(NullStorage)]
-pub struct False<T>
+impl<S> SpecsSystem<S>
 where
-    T: Default + Send + Sync + 'static,
+    for<'a> S: System<'a> + Sync,
 {
-    _ty: std::marker::PhantomData<T>,
+    pub fn new(s: S) -> Self {
+        Self { s }
+    }
 }
 
-pub struct FlagComponent<T> {
-    _ty: std::marker::PhantomData<T>,
-}
-
-pub trait Flag {
-    type True;
-    type False;
-}
-
-impl<T> Flag for FlagComponent<T>
+impl<'a, S> specs::System<'a> for SpecsSystem<S>
 where
-    T: Default + Send + Sync + 'static,
+    for<'b> S: System<'b> + Sync,
 {
-    type True = True<T>;
-    type False = False<T>;
+    type SystemData = <S as System<'a>>::SystemData;
+
+    fn run(&mut self, data: <S as System<'a>>::SystemData) {
+        log::trace!("Running {}", std::any::type_name::<S>());
+        self.s.run(data);
+    }
+
+    fn setup(&mut self, world: &mut World) {
+        Self::SystemData::setup(world);
+        <S as System>::setup(&mut self.s, world);
+    }
+}
+
+pub struct Executor<'a, 'b> {
+    dispatcher: specs::Dispatcher<'a, 'b>,
+}
+
+impl<'a, 'b> Executor<'a, 'b> {
+    pub fn execute(&mut self, world: &specs::World) {
+        self.dispatcher.dispatch(world);
+    }
+
+    pub fn setup(&mut self, world: &mut specs::World) {
+        self.dispatcher.setup(world);
+    }
+}
+
+pub struct ExecutorBuilder<'a, 'b> {
+    builder: specs::DispatcherBuilder<'a, 'b>,
+}
+
+impl<'a, 'b> ExecutorBuilder<'a, 'b> {
+    pub fn with<S>(mut self, s: S, id: &str, deps: &[&str]) -> Self
+    where
+        S: for<'c> System<'c> + Send + 'a + Sync,
+    {
+        self.builder.add(SpecsSystem::new(s), id, deps);
+        self
+    }
+
+    pub fn build(self) -> Executor<'a, 'b> {
+        Executor {
+            dispatcher: self.builder.build(),
+        }
+    }
+
+    pub fn with_barrier(mut self) -> ExecutorBuilder<'a, 'b> {
+        self.builder.add_barrier();
+        self
+    }
+
+    pub fn new() -> Self {
+        Self {
+            builder: specs::DispatcherBuilder::new(),
+        }
+    }
 }

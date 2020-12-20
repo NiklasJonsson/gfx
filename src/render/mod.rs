@@ -3,7 +3,7 @@ use specs::Component;
 
 use thiserror::Error;
 
-use specs::prelude::*;
+use crate::ecs::prelude::*;
 use specs::storage::StorageEntry;
 
 use trekanten::descriptor::DescriptorSet;
@@ -468,7 +468,7 @@ pub fn register_components(world: &mut World) {
     world.register::<crate::camera::Camera>();
 }
 
-pub fn register_systems<'a, 'b>(builder: DispatcherBuilder<'a, 'b>) -> DispatcherBuilder<'a, 'b> {
+pub fn register_systems<'a, 'b>(builder: ExecutorBuilder<'a, 'b>) -> ExecutorBuilder<'a, 'b> {
     builder.with(
         AssignReloadMaterials,
         "assign_reload_materials",

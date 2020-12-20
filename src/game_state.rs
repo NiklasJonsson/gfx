@@ -3,7 +3,7 @@ use crate::io::input::{ActionId, InputContext, InputContextPriority, MappedInput
 use crate::common::Name;
 use crate::io::input;
 
-use specs::prelude::*;
+use crate::ecs::prelude::*;
 
 #[derive(Debug, Copy, Clone, PartialEq, Eq)]
 pub enum GameState {
@@ -69,7 +69,7 @@ impl<'a> System<'a> for GameStateSwitcher {
     }
 }
 
-pub fn register_systems<'a, 'b>(builder: DispatcherBuilder<'a, 'b>) -> DispatcherBuilder<'a, 'b> {
+pub fn register_systems<'a, 'b>(builder: ExecutorBuilder<'a, 'b>) -> ExecutorBuilder<'a, 'b> {
     builder.with(
         GameStateSwitcher { input_entity: None },
         "game_state_switcher",

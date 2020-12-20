@@ -9,10 +9,9 @@ use crate::io::input::{
 };
 use crate::math::{Mat4, Transform, Vec3, Vec4};
 use crate::time::DeltaTime;
+use ecs::prelude::*;
 
 use winit::event::VirtualKeyCode;
-
-use specs::prelude::*;
 
 use num_traits::cast::FromPrimitive;
 
@@ -237,7 +236,7 @@ fn get_input_context() -> Result<InputContext, InputContextError> {
         .build())
 }
 
-impl<'a> System<'a> for FreeFlyCameraController {
+impl<'a> ecs::System<'a> for FreeFlyCameraController {
     type SystemData = (
         WriteStorage<'a, MappedInput>,
         WriteStorage<'a, Transform>,
@@ -312,6 +311,6 @@ impl<'a> System<'a> for FreeFlyCameraController {
     }
 }
 
-pub fn register_systems<'a, 'b>(builder: DispatcherBuilder<'a, 'b>) -> DispatcherBuilder<'a, 'b> {
+pub fn register_systems<'a, 'b>(builder: ExecutorBuilder<'a, 'b>) -> ExecutorBuilder<'a, 'b> {
     builder.with(FreeFlyCameraController, "free_fly_camera", &[])
 }

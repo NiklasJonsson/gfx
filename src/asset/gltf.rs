@@ -346,7 +346,7 @@ fn get_transform(src: gltf::scene::Transform) -> Transform {
     let mut t = Transform::identity();
     t.position = Vec3::from(pos);
     t.rotation = Quat::from_xyzw(rot[0], rot[1], rot[2], rot[3]).normalized();
-    if !scale.iter().all(|x| *x == scale[0]) {
+    if !scale.iter().all(|x| (*x - scale[0]).abs() < f32::EPSILON) {
         log::warn!("Non-uniform scaling in asset: {:?}", scale);
         log::warn!("Using only {}", scale[0]);
     }
@@ -457,8 +457,8 @@ fn upload_to_gpu<'a>(renderer: &mut trekanten::Renderer, ctx: RecGltfCtx<'a>) {
     log_asset_upload(&ctx);
 
     let RecGltfCtx {
-        buffers,
-        path,
+        buffers: _,
+        path: _,
         world,
         index_buffers,
         vertex_buffers,
@@ -476,7 +476,7 @@ fn upload_to_gpu<'a>(renderer: &mut trekanten::Renderer, ctx: RecGltfCtx<'a>) {
             renderer
                 .create_resource_blocking(OwningVertexBufferDescriptor::from_raw(
                     vert_buf.data,
-                    vert_buf.format.clone(),
+                    vert_buf.format,
                     BufferMutability::Immutable,
                 ))
                 .expect("Failed to create vertex buffer")
