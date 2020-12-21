@@ -457,14 +457,14 @@ mod tests {
         let contexts = vec![ctx0, ctx1, ctx2];
 
         let mut world = World::new();
-        let mut dispatcher = register_systems(ExecutorBuilder::new()).build();
+        let mut executor = register_systems(ExecutorBuilder::new()).build();
 
         let external_inputs = vec![
             ExternalInput::Press(Button::from(KeyCode::O)),
             ExternalInput::Press(Button::from(KeyCode::X)),
         ];
 
-        dispatcher.setup(&mut world);
+        executor.setup(&mut world);
 
         world.insert(CurrentFrameExternalInputs(external_inputs.clone()));
 
@@ -473,7 +473,7 @@ mod tests {
             .map(|ctx| world.create_entity().with(ctx).build())
             .collect();
 
-        dispatcher.dispatch(&mut world);
+        executor.execute(&mut world);
         verify_action_count(&world, entities[0], TestAction::Action0, 0);
         verify_action_count(&world, entities[1], TestAction::Action1, 1);
         verify_action_count(&world, entities[2], TestAction::Action2, 0);
@@ -484,7 +484,7 @@ mod tests {
         world.insert(CurrentFrameExternalInputs(external_inputs.clone()));
         world.delete_entity(entities[1]).expect("Fail");
 
-        dispatcher.dispatch(&mut world);
+        executor.execute(&mut world);
         verify_action_count(&world, entities[0], TestAction::Action0, 0);
         verify_action_count(&world, entities[2], TestAction::Action2, 0);
         verify_state_count(&world, entities[0], TestState::State0, 0);
