@@ -178,15 +178,7 @@ impl App {
             None | Some(Event::Resize(_)) => (),
         }
 
-        let running = *self.world.read_resource::<GameState>() == GameState::Running;
         let focused = self.state == AppState::Focused;
-
-        if running {
-            assert!(focused, "Can't be running but not be in focus!");
-            self.take_cursor();
-        } else {
-            self.release_cursor();
-        }
 
         if !focused {
             return AppAction::SkipFrame;

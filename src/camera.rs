@@ -5,13 +5,12 @@ use num_derive::FromPrimitive;
 use crate::common::Name;
 use crate::ecs;
 use crate::io::input::{
-    DeviceAxis, Input, InputContext, InputContextError, MappedInput, RangeId, Sensitivity, StateId,
+    DeviceAxis, Input, InputContext, InputContextError, KeyCode, MappedInput, MouseButton, RangeId,
+    Sensitivity, StateId,
 };
 use crate::math::{Mat4, Transform, Vec3, Vec4};
 use crate::time::DeltaTime;
 use ecs::prelude::*;
-
-use winit::event::VirtualKeyCode;
 
 use num_traits::cast::FromPrimitive;
 
@@ -55,6 +54,8 @@ enum CameraMovement {
     Right,
     Up,
     Down,
+
+    Move,
 }
 
 impl From<StateId> for CameraMovement {
@@ -224,12 +225,13 @@ fn get_input_context() -> Result<InputContext, InputContextError> {
     use CameraMovement::*;
     Ok(InputContext::builder(&NAME)
         .description("Input mapping for untethered, 3D camera")
-        .with_state(VirtualKeyCode::W, Forward)?
-        .with_state(VirtualKeyCode::S, Backward)?
-        .with_state(VirtualKeyCode::A, Left)?
-        .with_state(VirtualKeyCode::D, Right)?
-        .with_state(VirtualKeyCode::E, Up)?
-        .with_state(VirtualKeyCode::Q, Down)?
+        .with_state(KeyCode::W, Forward)?
+        .with_state(KeyCode::S, Backward)?
+        .with_state(KeyCode::A, Left)?
+        .with_state(KeyCode::D, Right)?
+        .with_state(KeyCode::E, Up)?
+        .with_state(KeyCode::Q, Down)?
+        .with_state(MouseButton::Right, Move)?
         // Switch y since the delta is computed from top-left corner
         .with_range(DeviceAxis::MouseX, CameraRotation::YawDelta, sens)?
         .with_range(DeviceAxis::MouseY, CameraRotation::PitchDelta, -sens)?
@@ -250,21 +252,29 @@ impl<'a> ecs::System<'a> for FreeFlyCameraController {
         for (mi, transform, rotation_state) in
             (&mut mapped_inputs, &mut transforms, &mut cam_rot_state).join()
         {
+            let mut moving = false;
             for input in mi.iter() {
                 match input {
                     Input::Range(id, val) => {
-                        log::trace!("Found range, applying");
-                        let rot: CameraRotation = (*id).into();
-                        if rot == CameraRotation::YawDelta {
-                            rotation_state.yaw += *val as f32;
-                        } else {
-                            assert_eq!(rot, CameraRotation::PitchDelta);
-                            rotation_state.pitch += *val as f32;
-                        }
+                        if moving {
+                            log::trace!("Found range, applying");
+                            let rot: CameraRotation = (*id).into();
+                            if rot == CameraRotation::YawDelta {
+                                rotation_state.yaw += *val as f32;
+                            } else {
+                                assert_eq!(rot, CameraRotation::PitchDelta);
+                                rotation_state.pitch += *val as f32;
+                            }
 
-                        rotation_state.clamp();
+                            rotation_state.clamp();
+                        }
                     }
                     Input::State(id) => {
+                        if let CameraMovement::Move = (*id).into() {
+                            moving = true;
+                            continue;
+                        }
+
                         let CameraOrientation { view_direction, up } =
                             FreeFlyCameraController::get_orientation_from(&rotation_state);
                         use CameraMovement::*;
@@ -277,6 +287,7 @@ impl<'a> ecs::System<'a> for FreeFlyCameraController {
                                 Right => -up.cross(view_direction).normalized(),
                                 Up => up,
                                 Down => -up,
+                                Move => unreachable!("Handled separately"),
                             };
 
                         transform.position += dir;
