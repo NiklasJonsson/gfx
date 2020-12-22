@@ -15,29 +15,29 @@ use super::error::DeviceCreationError;
 
 fn log_physical_devices(instance: &Instance, devices: &[ash::vk::PhysicalDevice]) {
     for device in devices.iter() {
-        log::trace!("Found device: {:?}", device);
+        log::info!("Found device: {:?}", device);
         let props = unsafe {
             instance
                 .vk_instance()
                 .get_physical_device_properties(*device)
         };
-        log::trace!("Properties: {:#?}", props);
+        log::debug!("Properties: {:#?}", props);
     }
 }
 
 fn log_device(instance: &Instance, device: &vk::PhysicalDevice) {
-    log::trace!("Vk device: {:?}", device);
+    log::info!("Vk device: {:?}", device);
 
     let props = unsafe {
         instance
             .vk_instance()
             .get_physical_device_properties(*device)
     };
-    log::trace!("Properties:");
-    log::trace!("\tvendor_id: {:?}", props.vendor_id);
-    log::trace!("\tdevice_id: {:?}", props.device_id);
-    log::trace!("\tdevice_type: {:?}", props.device_type);
-    log::trace!("\tdevice_name: {:?}", unsafe {
+    log::info!("Properties:");
+    log::info!("\tvendor_id: {:?}", props.vendor_id);
+    log::info!("\tdevice_id: {:?}", props.device_id);
+    log::info!("\tdevice_type: {:?}", props.device_type);
+    log::info!("\tdevice_name: {:?}", unsafe {
         CStr::from_ptr(props.device_name.as_ptr())
     });
 }
@@ -359,7 +359,7 @@ pub fn device_selection(
     scored.sort_by(|a, b| b.0.cmp(&a.0));
 
     let vk_phys_device = scored[0].1;
-    log::trace!("Choosing device:");
+    log::info!("Choosing device:");
     log_device(instance, &vk_phys_device);
 
     let queue_families_query = find_queue_families(instance, &vk_phys_device, surface)?;

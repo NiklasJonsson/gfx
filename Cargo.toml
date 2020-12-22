@@ -18,7 +18,7 @@ specs = { version = "0.16.1", features = ["specs-derive"] }
 # Rendering/Graphics
 winit = "0.22.2"
 trekanten = {path = "trekanten"}
-imgui = "0.5.0"
+imgui = "0.6.1"
 shaderc = "0.6.2"
 
 # Math/Physics
@@ -38,9 +38,15 @@ thiserror = "1.0.20"
 # Threading
 crossbeam = "0.7.3"
 
-# Set the default for dependencies.
-[profile.dev.package."*"]
-opt-level = 2
+# Perf
+profiling = "0.1.7"
+puffin-imgui = "0.5.0"
 
-[profile.dev.package.trekanten]
-opt-level = 0
+[features]
+default = ["profile-with-puffin"]
+
+profile-with-puffin = ["profiling/profile-with-puffin", "trekanten/profile-with-puffin"]
+profile-with-optick = ["profiling/profile-with-optick", "trekanten/profile-with-optick"]
+profile-with-superluminal = ["profiling/profile-with-superluminal", "trekanten/profile-with-superluminal"]
+profile-with-tracing = ["profiling/profile-with-tracing", "trekanten/profile-with-tracing"]
+profile-with-tracy = ["profiling/profile-with-tracy", "trekanten/profile-with-tracy"]

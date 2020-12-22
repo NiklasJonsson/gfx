@@ -498,6 +498,7 @@ impl Renderer {
         Ok(())
     }
 
+    #[profiling::function]
     fn process_commands(&mut self) {
         // Start incoming
         if let Ok(cmd) = self.resource_cmd_receive_queue.try_recv() {
@@ -599,6 +600,7 @@ impl Renderer {
         })
     }
 
+    #[profiling::function]
     pub fn next_frame<'a, 'b: 'a>(&'b mut self) -> Result<Frame<'a>, RenderError> {
         self.process_commands();
         {
@@ -631,6 +633,7 @@ impl Renderer {
         })
     }
 
+    #[profiling::function]
     pub fn submit(&mut self, frame: FinishedFrame) -> Result<(), RenderError> {
         self.process_commands();
         assert!(
@@ -686,6 +689,7 @@ impl Renderer {
         Ok(())
     }
 
+    #[profiling::function]
     pub fn resize(&mut self, new_extent: util::Extent2D) -> Result<(), RenderError> {
         log::trace!(
             "Resizing from {} to {}",

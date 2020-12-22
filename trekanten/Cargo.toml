@@ -26,6 +26,15 @@ static_assertions = "1.1.0"
 resurs = { path = "../resurs" }
 parking_lot = "0.11.1"
 
+profiling = "0.1.7"
+
+[features]
+profile-with-puffin = ["profiling/profile-with-puffin"]
+profile-with-optick = ["profiling/profile-with-optick"]
+profile-with-superluminal = ["profiling/profile-with-superluminal"]
+profile-with-tracing = ["profiling/profile-with-tracing"]
+profile-with-tracy = ["profiling/profile-with-tracy"]
+
 [dev-dependencies]
 inline-spirv = "0.1.1"
 reqwest = {version = "0.10.7", features = ["blocking"]}

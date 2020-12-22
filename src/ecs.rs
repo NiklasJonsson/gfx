@@ -78,6 +78,7 @@ where
 
     fn run(&mut self, data: <S as System<'a>>::SystemData) {
         log::trace!("Running {}", std::any::type_name::<S>());
+        profiling::scope!(std::any::type_name::<S>());
         self.s.run(data);
     }
 

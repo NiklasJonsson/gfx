@@ -10,6 +10,7 @@ mod game_state;
 mod graph;
 mod io;
 mod math;
+mod profile;
 mod render;
 mod settings;
 mod time;
@@ -135,6 +136,7 @@ impl App {
         }
     }
 
+    #[profiling::function]
     fn post_frame(&mut self, args: &arg_parse::Args) -> AppAction {
         self.world.maintain();
 
@@ -154,6 +156,7 @@ impl App {
         AppAction::ContinueFrame
     }
 
+    #[profiling::function]
     fn pre_frame(&mut self) -> AppAction {
         self.timer.tick();
         *self.world.write_resource::<DeltaTime>() = self.timer.delta();
@@ -194,11 +197,13 @@ impl App {
         AppAction::ContinueFrame
     }
 
+    #[profiling::function]
     fn run(&mut self, args: arg_parse::Args) {
         self.populate_world(&args);
         self.timer.start();
 
         loop {
+            profiling::scope!("main_loop");
             match self.pre_frame() {
                 AppAction::Quit => return,
                 AppAction::SkipFrame => continue,
@@ -215,9 +220,12 @@ impl App {
             if let AppAction::Quit = self.post_frame(&args) {
                 return;
             }
+
+            profiling::finish_frame!();
         }
     }
 
+    #[profiling::function]
     fn new(
         mut renderer: trekanten::Renderer,
         window: winit::window::Window,
@@ -233,6 +241,7 @@ impl App {
         control_systems.setup(&mut world);
         engine_systems.setup(&mut world);
         io::setup(&mut world, window);
+        profile::setup(&mut world);
 
         let ui = render::ui::UIContext::new(&mut renderer, &mut world);
 
@@ -252,6 +261,10 @@ impl App {
 
 fn main() {
     env_logger::init();
+
+    #[cfg(feature = "profile-with-puffin")]
+    profiling::puffin::set_scopes_on(true);
+
     let args = match arg_parse::parse() {
         None => return,
         Some(args) => args,
@@ -270,20 +283,25 @@ fn main() {
 
     // Thread runs the app while main takes the event loop
     // As we don't keep the join handle, this is detached from us. Still, it will be destroyed when we exit as we are the main thread.
-    std::thread::spawn(move || {
-        match trekanten::Renderer::new(&window, io::window_extents(&window)) {
-            Ok(renderer) => {
-                let mut app = App::new(renderer, window, event_queue2);
-                app.run(args);
+    std::thread::Builder::new()
+        .name("ramneryd::engine".to_string())
+        .spawn(move || {
+            profiling::register_thread!("ramneryd::engine");
+            match trekanten::Renderer::new(&window, io::window_extents(&window)) {
+                Ok(renderer) => {
+                    let mut app = App::new(renderer, window, event_queue2);
+                    app.run(args);
+                }
+                Err(e) => log::error!("Failed to create renderer: {}", e),
             }
-            Err(e) => log::error!("Failed to create renderer: {}", e),
-        }
-        if let Err(e) = send.send(io::Command::Quit) {
-            log::error!("Failed to send quit command to event thread: {}", e);
-        }
-        log::info!("Runner thread exiting");
-    });
+            if let Err(e) = send.send(io::Command::Quit) {
+                log::error!("Failed to send quit command to event thread: {}", e);
+            }
+            log::info!("Runner thread exiting");
+        })
+        .expect("Failed to start engine thread");
 
+    profiling::register_thread!("ramneryd::input");
     let mut event_manager = io::event::EventManager::new();
     event_loop.run(move |winit_event, _, control_flow| {
         io::event::event_thread_work(

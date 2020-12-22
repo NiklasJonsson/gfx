@@ -110,6 +110,7 @@ pub fn build_ui<'a>(world: &mut World, ui: &imgui::Ui<'a>) {
             crate::settings::build_ui,
             crate::game_state::build_ui,
             crate::io::input::build_ui,
+            crate::profile::build_ui,
         ];
         for func in funcs.iter() {
             let size = func(world, &ui, [0.0, y_offset]);

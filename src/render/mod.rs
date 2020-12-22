@@ -253,6 +253,7 @@ fn create_renderable(
     }
 }
 
+#[profiling::function]
 fn create_renderables(renderer: &mut Renderer, world: &mut World, render_mode: RenderMode) {
     let meshes = world.read_storage::<Mesh>();
     let materials = world.read_storage::<Material>();
@@ -295,6 +296,7 @@ fn create_renderables(renderer: &mut Renderer, world: &mut World, render_mode: R
     should_reload.clear();
 }
 
+#[profiling::function]
 fn draw_entities<'a>(world: &World, cmd_buf: &mut RenderPassBuilder<'a>) {
     let model_matrices = world.read_storage::<ModelMatrix>();
     let meshes = world.read_storage::<Mesh>();
@@ -322,6 +324,7 @@ fn draw_entities<'a>(world: &World, cmd_buf: &mut RenderPassBuilder<'a>) {
     }
 }
 
+#[profiling::function]
 pub fn draw_frame(world: &mut World, ui: &mut ui::UIContext, renderer: &mut Renderer) {
     let (render_mode, light_pos) = {
         let render_settings = world.read_resource::<RenderSettings>();

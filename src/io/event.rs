@@ -201,7 +201,6 @@ impl EventManager {
 
 use std::sync::mpsc;
 
-// This function signature is copied from
 pub fn event_thread_work(
     event_manager: &mut EventManager,
     event_queue: Arc<super::EventQueue>,
