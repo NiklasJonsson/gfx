@@ -43,8 +43,6 @@ profiling = "0.1.7"
 puffin-imgui = "0.5.0"
 
 [features]
-default = ["profile-with-puffin"]
-
 profile-with-puffin = ["profiling/profile-with-puffin", "trekanten/profile-with-puffin"]
 profile-with-optick = ["profiling/profile-with-optick", "trekanten/profile-with-optick"]
 profile-with-superluminal = ["profiling/profile-with-superluminal", "trekanten/profile-with-superluminal"]
