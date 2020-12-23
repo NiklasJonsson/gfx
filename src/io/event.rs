@@ -107,6 +107,7 @@ impl EventManager {
                 } else {
                     Event::Unfocus
                 };
+                resolve = true;
                 self.update_action(action);
             }
             WinEvent::WindowEvent {
