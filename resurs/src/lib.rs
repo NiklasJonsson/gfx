@@ -16,6 +16,13 @@ use std::marker::PhantomData;
 pub struct ID {
     index: usize,
 }
+
+impl std::fmt::Display for ID {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", self.index)
+    }
+}
+
 // Can't derive things on Handle because of PhantomData + generic
 // https://github.com/rust-lang/rust/issues/26925
 // so implement all of them manually :(

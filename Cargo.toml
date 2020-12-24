@@ -8,9 +8,11 @@ edition = "2018"
 debug = true
 
 [workspace]
-members = ["trekanten", "resurs" ]
+members = ["trekanten", "resurs", "ramneryd-derive" ]
 
 [dependencies]
+ramneryd-derive = { path = "ramneryd-derive" }
+
 # ECS
 specs-hierarchy = "0.6.0"
 specs = { version = "0.16.1", features = ["specs-derive"] }
@@ -35,6 +37,7 @@ env_logger = "0.6.2"
 clap = "2.33.0"
 thiserror = "1.0.20"
 resurs = {path = "resurs"}
+linkme = "0.2.2"
 
 # Threading
 crossbeam = "0.7.3"

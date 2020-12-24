@@ -1,17 +1,18 @@
-use specs::prelude::*;
-use specs::Component;
-
 pub type World = specs::World;
-pub use specs::SystemData;
+pub use ramneryd_derive::Component;
+pub type EntitiesRes = specs::world::EntitiesRes;
 
 pub mod prelude {
     pub use specs::prelude::ResourceId;
     pub use specs::SystemData;
-    pub use specs::{Component, Entities, Entity};
     pub use specs::{DenseVecStorage, HashMapStorage, NullStorage, VecStorage};
+    pub use specs::{Entities, Entity};
     pub use specs::{Read, ReadExpect, ReadStorage, Write, WriteStorage};
 
-    pub use specs::{Builder as _, Join as _, SystemData as _, WorldExt as _};
+    pub use specs::{Builder as _, Join as _, SystemData as _, WorldExt};
+
+    pub use super::Component;
+    pub use specs::world::Component;
 
     pub use super::{Executor, ExecutorBuilder, System, World};
 }
@@ -22,6 +23,8 @@ pub fn try_get_singleton_entity<C>(w: &World) -> Option<Entity>
 where
     C: specs::Component,
 {
+    use specs::Join as _;
+    use specs::WorldExt as _;
     let markers = w.read_storage::<C>();
     let entities = w.read_resource::<specs::world::EntitiesRes>();
 
@@ -42,42 +45,8 @@ pub fn entity_has_component<C>(w: &World, e: Entity) -> bool
 where
     C: specs::Component,
 {
+    use specs::WorldExt as _;
     w.read_storage::<C>().get(e).is_some()
-}
-
-#[derive(Default, Component)]
-#[storage(NullStorage)]
-pub struct True<T>
-where
-    T: Default + Send + Sync + 'static,
-{
-    _ty: std::marker::PhantomData<T>,
-}
-
-#[derive(Default, Component)]
-#[storage(NullStorage)]
-pub struct False<T>
-where
-    T: Default + Send + Sync + 'static,
-{
-    _ty: std::marker::PhantomData<T>,
-}
-
-pub struct FlagComponent<T> {
-    _ty: std::marker::PhantomData<T>,
-}
-
-pub trait Flag {
-    type True;
-    type False;
-}
-
-impl<T> Flag for FlagComponent<T>
-where
-    T: Default + Send + Sync + 'static,
-{
-    type True = True<T>;
-    type False = False<T>;
 }
 
 pub trait System<'a> {
@@ -119,6 +88,7 @@ where
     }
 
     fn setup(&mut self, world: &mut World) {
+        use specs::SystemData as _;
         Self::SystemData::setup(world);
         <S as System>::setup(&mut self.s, world);
     }
@@ -166,5 +136,19 @@ impl<'a, 'b> ExecutorBuilder<'a, 'b> {
         Self {
             builder: specs::DispatcherBuilder::new(),
         }
+    }
+}
+
+pub mod meta {
+    use linkme::distributed_slice;
+
+    #[distributed_slice]
+    pub static ALL_COMPONENTS: [Component] = [..];
+
+    pub struct Component {
+        pub name: &'static str,
+        pub size: usize,
+        pub has: fn(world: &specs::World, ent: super::Entity) -> bool,
+        pub inspect: Option<fn(world: &mut specs::World, ent: super::Entity, ui: &imgui::Ui<'_>)>,
     }
 }

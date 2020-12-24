@@ -1,5 +1,3 @@
-use specs::Component;
-
 use num_derive::FromPrimitive;
 
 use crate::common::Name;
@@ -26,7 +24,7 @@ const MIN_PITCH: f32 = 0.99 * -std::f32::consts::FRAC_PI_2;
 // TODO: Inheret clamping for the fields?
 // TOOD: Modulus for yaw?
 #[derive(Debug, Component)]
-#[storage(HashMapStorage)]
+#[component(storage = "HashMapStorage", inspect)]
 pub struct CameraRotationState {
     yaw: f32,
     pitch: f32,
@@ -90,7 +88,7 @@ impl Into<RangeId> for CameraRotation {
 
 /// Generic marker component for any camera type
 #[derive(Default, Component)]
-#[storage(NullStorage)]
+#[component(storage = "NullStorage")]
 pub struct Camera;
 
 /*
@@ -101,8 +99,7 @@ impl Camera {
 }
 */
 
-#[derive(Default, Component)]
-#[storage(NullStorage)]
+#[derive(Default)]
 pub struct FreeFlyCameraController;
 
 impl FreeFlyCameraController {

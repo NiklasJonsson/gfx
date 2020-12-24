@@ -1,16 +1,15 @@
 use crate::common::Name;
 use crate::ecs::prelude::*;
-use crate::ecs::Flag;
 use crate::graph;
 use crate::math::{BoundingBox, ModelMatrix, Transform};
 use crate::render::geometry::Mesh;
 
-#[derive(Default)]
-pub struct RenderBoundBox;
-type RenderBoundingBoxFlag = crate::ecs::FlagComponent<RenderBoundBox>;
+#[derive(Default, Component)]
+#[component(storage = "NullStorage")]
+pub struct DoRenderBoundingBox;
 
 #[derive(Default, Component)]
-#[storage(specs::NullStorage)]
+#[component(storage = "NullStorage")]
 pub struct BoundingBoxRenderer;
 
 pub struct CreateRenderedBoundingBoxes;
@@ -19,7 +18,7 @@ impl<'a> System<'a> for CreateRenderedBoundingBoxes {
         Entities<'a>,
         ReadStorage<'a, BoundingBox>,
         ReadStorage<'a, ModelMatrix>,
-        WriteStorage<'a, <RenderBoundingBoxFlag as Flag>::True>,
+        WriteStorage<'a, DoRenderBoundingBox>,
         WriteStorage<'a, graph::Children>,
         WriteStorage<'a, graph::Parent>,
         WriteStorage<'a, Transform>,

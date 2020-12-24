@@ -1,18 +1,17 @@
 use crate::ecs::prelude::*;
-use specs::Component;
 
 use std::collections::VecDeque;
 
 use crate::math::{Mat4, ModelMatrix, Transform};
 
 #[derive(Debug, Clone, Eq, Ord, PartialEq, PartialOrd, Component)]
-#[storage(DenseVecStorage)]
+#[component(inspect)]
 pub struct Parent {
     pub parent: Entity,
 }
 
 #[derive(Debug, Clone, Eq, Ord, PartialEq, PartialOrd, Component)]
-#[storage(DenseVecStorage)]
+#[component(inspect)]
 pub struct Children {
     pub children: Vec<Entity>,
 }
@@ -273,7 +272,7 @@ mod tests {
     use super::*;
 
     #[derive(Debug, Component)]
-    #[storage(DenseVecStorage)]
+    #[component(storage = "DenseVecStorage")]
     struct ID(usize);
 
     fn setup_world() -> World {

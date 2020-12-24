@@ -1,7 +1,7 @@
 use crate::ecs::prelude::*;
 
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Component)]
-#[storage(DenseVecStorage)]
+#[component(inspect)]
 pub struct Name(pub String);
 
 impl<S> From<S> for Name

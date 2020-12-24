@@ -8,8 +8,6 @@
 //!    provided the event was not consumed by a InputContext with higher priority.
 //! 5. When the System::run is executed, fetch the mapped input with the stored entity.
 use crate::ecs::prelude::*;
-use specs::world::EntitiesRes;
-use specs::Component;
 
 use std::collections::{HashMap, HashSet};
 use std::hash::Hash;
@@ -86,7 +84,7 @@ impl From<MouseButton> for Button {
 }
 
 #[derive(Default, Component, Debug)]
-#[storage(HashMapStorage)]
+#[component(storage = "HashMapStorage")]
 pub struct MappedInput {
     contents: Vec<Input>,
 }
@@ -193,7 +191,7 @@ impl<'a> System<'a> for InputManager {
     type SystemData = (
         ReadStorage<'a, InputContext>,
         Read<'a, CurrentFrameExternalInputs>,
-        Read<'a, EntitiesRes>,
+        Entities<'a>,
         WriteStorage<'a, MappedInput>,
     );
 

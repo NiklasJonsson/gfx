@@ -1,10 +1,8 @@
-use specs::world::EntitiesRes;
-use specs::Component;
+use ecs::EntitiesRes;
 
 use thiserror::Error;
 
 use crate::ecs::prelude::*;
-use specs::storage::StorageEntry;
 
 use trekanten::descriptor::DescriptorSet;
 use trekanten::mesh::BufferMutability;
@@ -86,11 +84,11 @@ fn get_proj_matrix(aspect_ratio: f32) -> Mat4 {
 }
 
 #[derive(Component, Default)]
-#[storage(NullStorage)]
+#[component(storage = "NullStorage")]
 pub struct ReloadMaterial;
 
 #[derive(Component)]
-#[storage(VecStorage)]
+#[component(storage = "VecStorage")]
 pub struct GpuMesh(pub trekanten::mesh::Mesh);
 
 impl std::ops::Deref for GpuMesh {
@@ -107,7 +105,7 @@ impl Into<GpuMesh> for trekanten::mesh::Mesh {
 }
 
 #[derive(Component)]
-#[storage(VecStorage)]
+#[component(storage = "VecStorage")]
 pub struct RenderableMaterial {
     gfx_pipeline: Handle<GraphicsPipeline>,
     material_descriptor_set: Handle<DescriptorSet>,
@@ -242,6 +240,8 @@ fn create_renderable(
 
 #[profiling::function]
 fn create_renderables(renderer: &mut Renderer, world: &mut World, render_mode: RenderMode) {
+    use specs::storage::StorageEntry;
+
     let meshes = world.read_storage::<GpuMesh>();
     let materials = world.read_storage::<Material>();
     let mut should_reload = world.write_storage::<ReloadMaterial>();

@@ -1,5 +1,3 @@
-use specs::Component;
-
 use crate::ecs;
 use ecs::prelude::*;
 use std::path::{Path, PathBuf};
@@ -403,7 +401,7 @@ struct GltfMaterial {
 }
 
 #[derive(Component)]
-#[storage(VecStorage)]
+#[component(storage = "VecStorage")]
 pub struct PendingGltfModel {
     mat: GltfMaterial,
     index: BufferHandle<IndexBuffer>,

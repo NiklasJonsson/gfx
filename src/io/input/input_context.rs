@@ -1,4 +1,4 @@
-use specs::prelude::*;
+use crate::ecs::prelude::*;
 use std::cmp::Ordering;
 use std::collections::hash_map::Entry::*;
 use std::collections::HashMap;
@@ -30,7 +30,7 @@ pub enum InputContextPriority {
 }
 
 #[derive(Component, Debug)]
-#[storage(HashMapStorage)]
+#[component(storage = "HashMapStorage")]
 pub struct InputContext {
     name: String,
     description: String,

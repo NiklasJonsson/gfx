@@ -1,10 +1,12 @@
 use specs::prelude::*;
 
 use crate::common::Name;
+use crate::ecs;
 use crate::graph;
-use crate::math::ModelMatrix;
-use crate::math::Transform;
 use imgui::*;
+
+mod inspect;
+pub use inspect::Inspect;
 
 fn name(world: &World, ent: Entity) -> String {
     let names = world.read_component::<Name>();
@@ -45,39 +47,21 @@ fn build_inspector<'a>(world: &mut World, ui: &imgui::Ui<'a>, ent: specs::Entity
             .expect("Failed to write!");
     }
     ui.separator();
-    let transforms = world.read_component::<Transform>();
-    let tfm = transforms.get(ent);
-    let extra = if tfm.is_none() { " (None)" } else { "" };
-    if CollapsingHeader::new(&im_str!("Transform{}", extra)).build(ui) {
-        if let Some(tfm) = tfm {
-            let mut pos = tfm.position.into_array();
-            InputFloat3::new(ui, im_str!("Position"), &mut pos)
-                .read_only(true)
-                .build();
 
-            let mut rot = tfm.rotation.into_vec4().into_array();
-            InputFloat4::new(ui, im_str!("Rotation"), &mut rot)
-                .read_only(true)
-                .build();
-
-            let mut scale = tfm.scale;
-            InputFloat::new(ui, im_str!("Scale"), &mut scale)
-                .read_only(true)
-                .build();
-        }
-    }
-
-    let matrices = world.read_component::<ModelMatrix>();
-    let mat = matrices.get(ent);
-    let extra = if mat.is_none() { " (None)" } else { "" };
-    if CollapsingHeader::new(&im_str!("ModelMatrix{}", extra)).build(ui) {
-        if let Some(mat) = mat {
-            let rows = mat.0.into_row_arrays();
-            for r in rows.iter() {
-                let mut row = *r;
-                InputFloat4::new(ui, im_str!(""), &mut row)
-                    .read_only(true)
-                    .build();
+    for comp in ecs::meta::ALL_COMPONENTS {
+        if (comp.has)(world, ent) {
+            if comp.size == 0 {
+                let _open = CollapsingHeader::new(&imgui::ImString::from(String::from(comp.name)))
+                    .leaf(true)
+                    .build(ui);
+            } else if CollapsingHeader::new(&imgui::ImString::from(String::from(comp.name)))
+                .build(ui)
+            {
+                if let Some(inspect) = comp.inspect {
+                    inspect(world, ent, ui);
+                } else {
+                    ui.text(im_str!("unimplemented"));
+                }
             }
         }
     }
@@ -101,6 +85,7 @@ pub fn build_ui<'a>(world: &mut World, ui: &imgui::Ui<'a>) {
             InputFloat3::new(ui, im_str!("Camera pos"), &mut p)
                 .read_only(true)
                 .build();
+            ui.text(im_str!("#components: {}", ecs::meta::ALL_COMPONENTS.len()));
         });
 
     {

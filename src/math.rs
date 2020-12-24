@@ -1,5 +1,4 @@
-use super::*;
-use specs::Component;
+use crate::ecs::prelude::*;
 
 pub type Vec3 = vek::Vec3<f32>;
 pub type Vec4 = vek::Vec4<f32>;
@@ -12,7 +11,7 @@ pub use vek::vec3;
 pub use vek::vec4;
 
 #[derive(Debug, Component, Copy, Clone)]
-#[storage(DenseVecStorage)]
+#[component(inspect)]
 pub struct Transform {
     pub position: Vec3,
     pub rotation: Quat,
@@ -59,7 +58,7 @@ impl std::ops::MulAssign for Transform {
 }
 
 #[derive(Debug, Component, Clone, Copy)]
-#[storage(DenseVecStorage)]
+#[component(inspect)]
 pub struct ModelMatrix(pub Mat4);
 
 impl From<ModelMatrix> for [[f32; 4]; 4] {
@@ -93,7 +92,7 @@ impl std::fmt::Display for ModelMatrix {
 }
 
 #[derive(Debug, Clone, Copy, Component)]
-#[storage(DenseVecStorage)]
+#[component(inspect)]
 pub struct BoundingBox {
     pub min: Vec3,
     pub max: Vec3,

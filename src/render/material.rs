@@ -1,18 +1,19 @@
-use trekanten as trek;
+use trekanten::texture;
 use trekanten::uniform::UniformBuffer;
 use trekanten::BufferHandle;
 use trekanten::Handle;
 
-use specs::Component;
-use specs::DenseVecStorage;
+use crate::ecs::prelude::*;
+use ramneryd_derive::Inspect;
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Inspect)]
 pub struct TextureUse {
-    pub handle: Handle<trek::texture::Texture>,
+    pub handle: Handle<texture::Texture>,
     pub coord_set: u32,
 }
 
 #[derive(Debug, Clone, Component)]
+#[component(inspect)]
 pub enum Material {
     Unlit {
         color_uniform: BufferHandle<UniformBuffer>,
