@@ -23,8 +23,8 @@ fn build_tree<'a>(world: &World, ui: &imgui::Ui<'a>, ent: specs::Entity) -> Opti
         if pressed {
             inspected = Some(ent);
         }
-        if let Some(node) = world.read_component::<graph::Children>().get(ent) {
-            for child in node.children.iter() {
+        if let Some(children) = world.read_component::<graph::Children>().get(ent) {
+            for child in children.iter() {
                 let new = build_tree(world, ui, *child);
                 inspected = inspected.or(new);
             }
@@ -131,8 +131,8 @@ pub fn build_ui<'a>(world: &mut World, ui: &imgui::Ui<'a>) {
     let inspected_window_pos = [scene_window_pos[0], scene_window_size[1]];
     if let Some(ent) = inspected {
         imgui::Window::new(im_str!("Inspector"))
-            .position(inspected_window_pos, Condition::Always)
-            .size(inspected_window_size, Condition::Always)
+            .position(inspected_window_pos, Condition::FirstUseEver)
+            .size(inspected_window_size, Condition::FirstUseEver)
             .build(&ui, || {
                 build_inspector(world, ui, ent);
             });

@@ -16,9 +16,10 @@ pub struct Children {
     pub children: Vec<Entity>,
 }
 
-impl Children {
-    pub fn iter(&self) -> impl Iterator<Item = &Entity> {
-        self.children.iter()
+impl std::ops::Deref for Children {
+    type Target = [Entity];
+    fn deref(&self) -> &Self::Target {
+        &self.children
     }
 }
 
