@@ -48,22 +48,6 @@ struct App {
     timer: time::Timer,
 }
 
-mod test {
-    #[derive(ramneryd_derive::Inspect)]
-    pub enum InnerEnum {
-        Inner0,
-        Inner1,
-    }
-
-    #[derive(ramneryd_derive::Component)]
-    #[component(inspect)]
-    pub enum Enum {
-        Unit,
-        Unnamed(u32, f32),
-        Named { x: f32, inner: InnerEnum },
-    }
-}
-
 /* Unused for now
 impl App {
     fn take_cursor(&mut self) {
@@ -123,18 +107,6 @@ impl App {
     fn populate_world(&mut self, args: &Args) {
         self.setup_resources();
         asset::gltf::load_asset(&mut self.world, &args.gltf_path);
-        self.world.create_entity().with(test::Enum::Unit).build();
-        self.world
-            .create_entity()
-            .with(test::Enum::Unnamed(10, 2.0))
-            .build();
-        self.world
-            .create_entity()
-            .with(test::Enum::Named {
-                x: 12.0,
-                inner: test::InnerEnum::Inner0,
-            })
-            .build();
     }
 
     fn next_event(&self) -> Option<Event> {
