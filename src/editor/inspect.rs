@@ -156,18 +156,18 @@ impl<T> Inspect for resurs::Handle<T> {
 impl<T> Inspect for trekanten::BufferHandle<T> {
     fn inspect<'a>(&self, ui: &Ui<'a>, name: &str) {
         let mut_str = if let trekanten::BufferMutability::Mutable = self.mutability() {
-            "mut"
+            "mut "
         } else {
             ""
         };
 
-        let ty = std::any::type_name::<Self>();
+        let ty = std::any::type_name::<T>();
         let s = format!(
-            "{}: {}({})&{} [{}..{}]",
+            "{}: &{}{}({})[{}..{}]",
             name,
+            mut_str,
             ty,
             self.handle().id(),
-            mut_str,
             self.idx(),
             self.idx() + self.n_elems()
         );
@@ -197,13 +197,55 @@ impl<T: Inspect> Inspect for Option<T> {
 
 impl Inspect for bool {
     fn inspect<'a>(&self, ui: &Ui<'a>, name: &str) {
-        let mut v = *self;
-        ui.checkbox(&imgui::im_str!("{}", name), &mut v);
+        ui.text(&imgui::im_str!("{}: {}", name, self));
     }
 
     fn inspect_mut<'a>(&mut self, ui: &Ui<'a>, name: &str) {
         let mut v = *self;
         ui.checkbox(&imgui::im_str!("{}", name), &mut v);
         *self = v;
+    }
+}
+
+pub fn inspect_struct<'a>(
+    name: &str,
+    ty: Option<&str>,
+    empty: bool,
+    ui: &Ui<'a>,
+    mut body: impl FnMut(),
+) {
+    if !name.is_empty() {
+        ui.text(name);
+        ui.same_line(0.0);
+    }
+
+    let mut header = false;
+    if let Some(ty) = ty {
+        if imgui::CollapsingHeader::new(&im_str!("struct {}", ty))
+            .leaf(empty)
+            .build(ui)
+        {
+            ui.indent();
+            body();
+            ui.unindent();
+        }
+    } else {
+        body();
+    }
+}
+
+impl Inspect for trekanten::mesh::Mesh {
+    fn inspect<'a>(&self, ui: &Ui<'a>, name: &str) {
+        inspect_struct(name, Some(std::any::type_name::<Self>()), false, ui, || {
+            self.vertex_buffer.inspect(ui, "vertex_buffer");
+            self.index_buffer.inspect(ui, "index_buffer");
+        });
+    }
+
+    fn inspect_mut<'a>(&mut self, ui: &Ui<'a>, name: &str) {
+        inspect_struct(name, Some(std::any::type_name::<Self>()), false, ui, || {
+            self.vertex_buffer.inspect_mut(ui, "vertex_buffer");
+            self.index_buffer.inspect_mut(ui, "index_buffer");
+        });
     }
 }

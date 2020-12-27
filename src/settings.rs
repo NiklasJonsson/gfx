@@ -3,9 +3,11 @@ use crate::ecs::prelude::*;
 use crate::io::input::{ActionId, InputContext, InputContextError, KeyCode, MappedInput};
 use crate::math::Vec3;
 
+use ramneryd_derive::Inspect;
+
 use num_derive::FromPrimitive;
 
-#[derive(Debug, Copy, Clone, PartialEq, Eq, FromPrimitive)]
+#[derive(Debug, Copy, Clone, PartialEq, Eq, FromPrimitive, Inspect)]
 pub enum RenderMode {
     Opaque,
     Wireframe,

@@ -63,6 +63,7 @@ pub(crate) fn impl_component(di: &DeriveInput) -> TokenStream {
             name: stringify!(#name),
             size: std::mem::size_of::<#name>(),
             has: <#name>::has,
+            register: <#name>::register,
             inspect: #inspect,
         }
     };
@@ -96,6 +97,11 @@ pub(crate) fn impl_component(di: &DeriveInput) -> TokenStream {
             pub fn has(world: &crate::ecs::World, ent: crate::ecs::Entity) -> bool {
                 use crate::ecs::prelude::WorldExt;
                 world.read_storage::<Self>().get(ent).is_some()
+            }
+
+            pub fn register(world: &mut crate::ecs::World) {
+                use crate::ecs::prelude::WorldExt;
+                world.register::<Self>();
             }
         }
 

@@ -1,4 +1,4 @@
-use ecs::EntitiesRes;
+use crate::ecs::EntitiesRes;
 
 use thiserror::Error;
 
@@ -88,7 +88,7 @@ fn get_proj_matrix(aspect_ratio: f32) -> Mat4 {
 pub struct ReloadMaterial;
 
 #[derive(Component)]
-#[component(storage = "VecStorage")]
+#[component(storage = "VecStorage", inspect)]
 pub struct GpuMesh(pub trekanten::mesh::Mesh);
 
 impl std::ops::Deref for GpuMesh {
@@ -105,7 +105,7 @@ impl Into<GpuMesh> for trekanten::mesh::Mesh {
 }
 
 #[derive(Component)]
-#[component(storage = "VecStorage")]
+#[component(storage = "VecStorage", inspect)]
 pub struct RenderableMaterial {
     gfx_pipeline: Handle<GraphicsPipeline>,
     material_descriptor_set: Handle<DescriptorSet>,
@@ -246,7 +246,7 @@ fn create_renderables(renderer: &mut Renderer, world: &mut World, render_mode: R
     let materials = world.read_storage::<Material>();
     let mut should_reload = world.write_storage::<ReloadMaterial>();
     let mut renderables = world.write_storage::<RenderableMaterial>();
-    let entities = world.read_resource::<EntitiesRes>();
+    let entities = world.entities();
 
     for (ent, mesh, mat) in (&entities, &meshes, &materials).join() {
         // TODO: Move to function

@@ -1,6 +1,6 @@
 use proc_macro2::{Ident, Span, TokenStream};
 use quote::{format_ident, quote, quote_spanned};
-use syn::{spanned::Spanned as _, DeriveInput};
+use syn::{spanned::Spanned as _, DeriveInput, Fields, FieldsUnnamed};
 
 fn inspect_fn_name(is_mut: bool) -> syn::Ident {
     if is_mut {
@@ -21,28 +21,7 @@ fn maybe_mut(is_mut: bool) -> TokenStream {
 
     quote! {#(#maybe_mut)*}
 }
-
-fn imgui_inspect_struct(data: &syn::DataStruct, is_mut: bool) -> TokenStream {
-    let fn_name = inspect_fn_name(is_mut);
-    let maybe_mut = maybe_mut(is_mut);
-
-    let fields = data.fields.iter().enumerate().map(|(i, f)| {
-        let field = f.ident.as_ref().map(|x| quote!{#x}).unwrap_or_else(|| {
-            let i = syn::Index::from(i);
-            quote!{#i}
-        });
-        let ty = &f.ty;
-        quote_spanned! {f.span()=>
-            <#ty as crate::editor::Inspect>::#fn_name(&#maybe_mut self.#field, ui, stringify!(#field));
-        }
-    });
-
-    quote! {
-        #(#fields)*
-    }
-}
-
-fn imgui_inspect_enum(data: &syn::DataEnum, is_mut: bool) -> TokenStream {
+fn inspect_enum_body(data: &syn::DataEnum, is_mut: bool) -> TokenStream {
     let fn_name = inspect_fn_name(is_mut);
     let maybe_mut = maybe_mut(is_mut);
 
@@ -61,9 +40,9 @@ fn imgui_inspect_enum(data: &syn::DataEnum, is_mut: bool) -> TokenStream {
             });
 
         let fields_lhs = match variant.fields {
-            syn::Fields::Named(_) => quote_spanned! {variant.span()=> {#(#fields_lhs),*}},
-            syn::Fields::Unnamed(_) => quote_spanned! {variant.span()=> (#(#fields_lhs),*)},
-            syn::Fields::Unit => quote_spanned! {variant.span()=> },
+            Fields::Named(_) => quote_spanned! {variant.span()=> {#(#fields_lhs),*}},
+            Fields::Unnamed(_) => quote_spanned! {variant.span()=> (#(#fields_lhs),*)},
+            Fields::Unit => quote! {},
         };
 
         let fields_rhs = variant.fields.iter().enumerate().map(|(i, f)| {
@@ -76,26 +55,39 @@ fn imgui_inspect_enum(data: &syn::DataEnum, is_mut: bool) -> TokenStream {
                 }
             };
 
+            let field_name = match &f.ident {
+                Some(i) => quote_spanned! {f.ident.span()=>#i},
+                None => {
+                    let i = syn::LitInt::new(format!("{}", i).as_str(), f.ident.span());
+                    quote_spanned! {f.span()=> #i}
+                }
+            };
+
             quote_spanned! {f.span()=>
-                <#ty as crate::editor::Inspect>::#fn_name(#field, ui, stringify!(#field));
+                <#ty as crate::editor::Inspect>::#fn_name(#field, ui, stringify!(#field_name));
             }
         });
 
+        let leaf = if let Fields::Unit = variant.fields {
+            quote! {true}
+        } else {
+            quote! {false}
+        };
+
         let fields_rhs = quote! {
-            #(#fields_rhs)*
+            let ty = imgui::im_str!("enum {}::{}", std::any::type_name::<Self>(), stringify!(#id));
+            if imgui::CollapsingHeader::new(&ty)
+                .default_open(true)
+                .leaf(#leaf)
+                .build(ui) {
+                ui.indent();
+                #(#fields_rhs)*
+                ui.unindent();
+            }
         };
 
         quote_spanned! {variant.span()=>
-            Self::#id #fields_lhs => {
-                let name = imgui::ImString::new(stringify!(#id));
-                if imgui::CollapsingHeader::new(&name)
-                    .default_open(true)
-                    .build(ui) {
-                    ui.indent();
-                    #fields_rhs
-                    ui.unindent();
-                }
-            }
+            Self::#id #fields_lhs => { #fields_rhs }
         }
     });
 
@@ -106,36 +98,108 @@ fn imgui_inspect_enum(data: &syn::DataEnum, is_mut: bool) -> TokenStream {
     }
 }
 
-pub(crate) fn impl_imgui_inspect(di: &DeriveInput) -> proc_macro2::TokenStream {
+fn inspect_enum(di: &DeriveInput) -> TokenStream {
     let name = &di.ident;
 
     let [body, body_mut] = match &di.data {
-        syn::Data::Struct(data) => [
-            imgui_inspect_struct(data, false),
-            imgui_inspect_struct(data, true),
-        ],
         syn::Data::Enum(data) => [
-            imgui_inspect_enum(data, false),
-            imgui_inspect_enum(data, true),
+            inspect_enum_body(data, false),
+            inspect_enum_body(data, true),
         ],
-        _ => unimplemented!("Only Struct or enum is supported"),
+        _ => panic!("Internal error: should be enum"),
     };
 
     quote! {
         impl crate::editor::Inspect for #name {
             fn inspect<'a>(&self, ui: &imgui::Ui<'a>, name: &str) {
                 use crate::editor::Inspect;
-                ui.indent();
+                if !name.is_empty() {
+                    ui.text(format!("{}:", name));
+                    ui.same_line(0.0);
+                }
+
                 #body
-                ui.unindent();
             }
 
             fn inspect_mut<'a>(&mut self, ui: &imgui::Ui<'a>, name: &str) {
                 use crate::editor::Inspect;
-                ui.indent();
+                if !name.is_empty() {
+                    ui.text(format!("{}:", name));
+                    ui.same_line(0.0);
+                }
+
                 #body_mut
-                ui.unindent();
             }
         }
+    }
+}
+
+fn inspect_struct_data(data: &syn::DataStruct, is_mut: bool) -> TokenStream {
+    let fn_name = inspect_fn_name(is_mut);
+    let maybe_mut = maybe_mut(is_mut);
+    let one_field = data.fields.len() == 1;
+
+    let fields = data.fields.iter().enumerate().map(|(i, f)| {
+        let field = f.ident.as_ref().map(|x| quote! {#x}).unwrap_or_else(|| {
+            let i = syn::Index::from(i);
+            quote! {#i}
+        });
+        let ty = &f.ty;
+        let name = if f.ident.is_none() && one_field {
+            quote_spanned! {f.span()=> ""}
+        } else {
+            quote_spanned! {f.span()=> stringify!(#field)}
+        };
+
+        quote_spanned! {f.span()=>
+            <#ty as crate::editor::Inspect>::#fn_name(&#maybe_mut self.#field, ui, #name);
+        }
+    });
+
+    quote! {
+        #(#fields)*
+    }
+}
+
+fn inspect_struct(di: &DeriveInput) -> TokenStream {
+    let name = &di.ident;
+
+    let [body, body_mut] = match &di.data {
+        syn::Data::Struct(data) => [
+            inspect_struct_data(data, false),
+            inspect_struct_data(data, true),
+        ],
+        _ => panic!("Internal error: should be struct"),
+    };
+
+    quote! {
+        impl crate::editor::Inspect for #name {
+            fn inspect<'a>(&self, ui: &imgui::Ui<'a>, name: &str) {
+                use crate::editor::Inspect;
+                crate::editor::inspect::inspect_struct(name, Some(stringify!(#name)),
+                    std::mem::size_of::<Self>() == 0, ui, || {
+                    #body
+                });
+            }
+
+            fn inspect_mut<'a>(&mut self, ui: &imgui::Ui<'a>, name: &str) {
+                use crate::editor::Inspect;
+                crate::editor::inspect::inspect_struct(name, Some(stringify!(#name)),
+                std::mem::size_of::<Self>() == 0, ui, || {
+                    #body_mut
+                });
+            }
+        }
+    }
+}
+pub(crate) fn impl_imgui_inspect(di: &DeriveInput) -> TokenStream {
+    let inspect_impl = match &di.data {
+        syn::Data::Struct(_) => inspect_struct(di),
+        syn::Data::Enum(_) => inspect_enum(di),
+        _ => unimplemented!("Only Struct or enum is supported"),
+    };
+
+    quote! {
+        #inspect_impl
     }
 }

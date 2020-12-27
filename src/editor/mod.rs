@@ -5,7 +5,7 @@ use crate::ecs;
 use crate::graph;
 use imgui::*;
 
-mod inspect;
+pub(crate) mod inspect;
 pub use inspect::Inspect;
 
 fn name(world: &World, ent: Entity) -> String {
@@ -54,14 +54,12 @@ fn build_inspector<'a>(world: &mut World, ui: &imgui::Ui<'a>, ent: specs::Entity
                 let _open = CollapsingHeader::new(&imgui::ImString::from(String::from(comp.name)))
                     .leaf(true)
                     .build(ui);
+            } else if let Some(inspect) = comp.inspect {
+                inspect(world, ent, ui);
             } else if CollapsingHeader::new(&imgui::ImString::from(String::from(comp.name)))
                 .build(ui)
             {
-                if let Some(inspect) = comp.inspect {
-                    inspect(world, ent, ui);
-                } else {
-                    ui.text(im_str!("unimplemented"));
-                }
+                ui.text(im_str!("unimplemented"));
             }
         }
     }

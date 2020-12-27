@@ -148,7 +148,15 @@ pub mod meta {
     pub struct Component {
         pub name: &'static str,
         pub size: usize,
-        pub has: fn(world: &specs::World, ent: super::Entity) -> bool,
-        pub inspect: Option<fn(world: &mut specs::World, ent: super::Entity, ui: &imgui::Ui<'_>)>,
+        pub has: fn(world: &super::World, ent: super::Entity) -> bool,
+        pub register: fn(world: &mut super::World),
+
+        pub inspect: Option<fn(world: &mut super::World, ent: super::Entity, ui: &imgui::Ui<'_>)>,
+    }
+
+    pub fn register_all_components(world: &mut super::World) {
+        for comp in ALL_COMPONENTS {
+            (comp.register)(world);
+        }
     }
 }
