@@ -1,7 +1,11 @@
 use super::input;
+use input::ExternalInput;
 
 use std::sync::Arc;
+use winit::dpi::LogicalPosition;
+use winit::event::DeviceEvent;
 use winit::event::ElementState;
+use winit::event::MouseScrollDelta;
 use winit::event::WindowEvent;
 
 // TODO: Handle resized here as well
@@ -11,7 +15,7 @@ pub enum Event {
     Focus,
     Unfocus,
     Resize(trekanten::util::Extent2D),
-    Input(Vec<input::ExternalInput>),
+    Input(Vec<ExternalInput>),
 }
 
 impl Default for Event {
@@ -121,9 +125,9 @@ impl EventManager {
                 let is_pressed = input.state == ElementState::Pressed;
                 if let Some(key) = input.virtual_keycode {
                     let ei = if is_pressed {
-                        input::ExternalInput::Press(input::Button::Key(key))
+                        ExternalInput::Press(input::Button::Key(key))
                     } else {
-                        input::ExternalInput::Release(input::Button::Key(key))
+                        ExternalInput::Release(input::Button::Key(key))
                     };
 
                     self.update_action(Event::Input(vec![ei]));
@@ -138,9 +142,9 @@ impl EventManager {
                 log::debug!("Captured mouse button: {:?}", button);
                 let is_pressed = state == ElementState::Pressed;
                 let ei = if is_pressed {
-                    input::ExternalInput::Press(input::Button::Mouse(button))
+                    ExternalInput::Press(input::Button::Mouse(button))
                 } else {
-                    input::ExternalInput::Release(input::Button::Mouse(button))
+                    ExternalInput::Release(input::Button::Mouse(button))
                 };
 
                 self.update_action(Event::Input(vec![ei]));
@@ -153,7 +157,7 @@ impl EventManager {
                 // Exclude the backspace key ('\u{7f}'). Otherwise we will insert this char and then
                 // delete it.
                 if ch != '\u{7f}' {
-                    self.update_action(Event::Input(vec![input::ExternalInput::RawChar(ch)]));
+                    self.update_action(Event::Input(vec![ExternalInput::RawChar(ch)]));
                 }
             }
             WinEvent::WindowEvent {
@@ -161,21 +165,37 @@ impl EventManager {
                 ..
             } => {
                 log::debug!("Received cursor moved: {:?}", position);
-                self.update_action(Event::Input(vec![input::ExternalInput::CursorPos(
+                self.update_action(Event::Input(vec![ExternalInput::CursorPos(
                     input::CursorPos([position.x, position.y]),
                 )]));
             }
             WinEvent::DeviceEvent {
                 event: inner_event, ..
-            } => {
-                if let winit::event::DeviceEvent::MouseMotion { delta: (x, y) } = inner_event {
+            } => match inner_event {
+                DeviceEvent::MouseMotion { delta: (x, y) } => {
                     log::debug!("Captured mouse motion: ({:?}, {:?})", x, y);
-                    let ei = input::ExternalInput::MouseDelta { x, y };
+                    let ei = ExternalInput::MouseDelta { x, y };
                     self.update_action(Event::Input(vec![ei]));
-                } else {
-                    log::trace!("Ignoring device event {:?}", inner_event);
                 }
-            }
+                DeviceEvent::MouseWheel { delta } => {
+                    let ei = match delta {
+                        MouseScrollDelta::LineDelta(x, y) => ExternalInput::ScrollDelta {
+                            x: (-x).into(),
+                            y: y.into(),
+                        },
+                        MouseScrollDelta::PixelDelta(LogicalPosition { x, y }) => {
+                            ExternalInput::ScrollDelta {
+                                x: (-x).into(),
+                                y: y.into(),
+                            }
+                        }
+                    };
+
+                    self.update_action(Event::Input(vec![ei]));
+                }
+
+                _ => log::trace!("Ignoring device event {:?}", inner_event),
+            },
             e => log::debug!("Ignoring high level event {:?}", e),
         };
 

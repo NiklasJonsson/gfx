@@ -62,7 +62,8 @@ pub enum Input {
 pub enum DeviceAxis {
     MouseX,
     MouseY,
-    MouseWheel,
+    ScrollX,
+    ScrollY,
 }
 
 #[derive(Debug, Clone, Copy, Hash, PartialEq, Eq)]
@@ -151,6 +152,7 @@ pub enum ExternalInput {
     Press(Button),
     Release(Button),
     MouseDelta { x: AxisValue, y: AxisValue },
+    ScrollDelta { x: AxisValue, y: AxisValue },
     CursorPos(CursorPos),
     RawChar(char),
 }
@@ -226,6 +228,10 @@ impl<'a> System<'a> for InputManager {
                     log::debug!("Captured mouse delta ({}, {})", x, y);
                     axes.push((DeviceAxis::MouseX, x));
                     axes.push((DeviceAxis::MouseY, y));
+                }
+                ExternalInput::ScrollDelta { x, y } => {
+                    axes.push((DeviceAxis::ScrollX, x));
+                    axes.push((DeviceAxis::ScrollY, y));
                 }
                 ExternalInput::RawChar(ch) => chars.push(*ch),
                 ExternalInput::CursorPos(pos) => cursor_positions.push(*pos),

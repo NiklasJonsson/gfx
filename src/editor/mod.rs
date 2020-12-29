@@ -89,7 +89,6 @@ pub fn build_ui<'a>(world: &mut World, ui: &imgui::Ui<'a>) {
     {
         let mut y_offset = 0.0;
         let funcs = [
-            crate::render::ui::build_ui,
             crate::settings::build_ui,
             crate::game_state::build_ui,
             crate::io::input::build_ui,

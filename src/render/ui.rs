@@ -60,65 +60,6 @@ pub struct UIContext {
     per_frame_data: Option<PerFrameData>,
 }
 
-fn query_mouse_state<'a>(
-    ui: &imgui::Ui<'a>,
-    query: fn(ui: &imgui::Ui<'a>, imgui::MouseButton) -> bool,
-) -> [bool; 5] {
-    [
-        query(ui, imgui::MouseButton::Left),
-        query(ui, imgui::MouseButton::Right),
-        query(ui, imgui::MouseButton::Middle),
-        query(ui, imgui::MouseButton::Extra1),
-        query(ui, imgui::MouseButton::Extra2),
-    ]
-}
-
-fn imgui_debug_ui_mouse_state<'a>(
-    ui: &imgui::Ui<'a>,
-    prefix: &str,
-    query: fn(ui: &imgui::Ui<'a>, imgui::MouseButton) -> bool,
-) {
-    let query = query_mouse_state(ui, query);
-    ui.text(im_str!(
-        "{0: <10} | {1: <10} | {2: <10} | {3: <10} | {4: <10} | {5: <10}",
-        prefix,
-        query[0],
-        query[1],
-        query[2],
-        query[3],
-        query[4]
-    ));
-}
-
-fn imgui_debug_ui<'a>(ui: &imgui::Ui<'a>) {
-    ui.text(im_str!("Mouse button"));
-    ui.text(im_str!(
-        "{0: <10} | {1: <10} | {2: <10} | {3: <10} | {4: <10} | {5: <10}",
-        "",
-        "left",
-        "right",
-        "middle",
-        "extra1",
-        "extra2"
-    ));
-    imgui_debug_ui_mouse_state(ui, "down", imgui::Ui::is_mouse_down);
-    imgui_debug_ui_mouse_state(ui, "clicked", imgui::Ui::is_mouse_clicked);
-    imgui_debug_ui_mouse_state(ui, "double", imgui::Ui::is_mouse_double_clicked);
-    imgui_debug_ui_mouse_state(ui, "released", imgui::Ui::is_mouse_released);
-    imgui_debug_ui_mouse_state(ui, "dragging", imgui::Ui::is_mouse_dragging);
-}
-
-pub fn build_ui<'a>(_: &mut World, ui: &imgui::Ui<'a>, pos: [f32; 2]) -> [f32; 2] {
-    let size = [400.0, 300.0];
-    imgui::Window::new(im_str!("Imgui Debug"))
-        .size(size, imgui::Condition::FirstUseEver)
-        .position(pos, imgui::Condition::FirstUseEver)
-        .build(&ui, || {
-            imgui_debug_ui(ui);
-        });
-    size
-}
-
 /* TODO:
     /// Render preparation callback.
     ///
@@ -145,7 +86,8 @@ pub fn build_ui<'a>(_: &mut World, ui: &imgui::Ui<'a>, pos: [f32; 2]) -> [f32; 2
 }
 */
 
-const MOUSE_WHEEL_DELTA: input::RangeId = input::RangeId(0);
+const MOUSE_WHEEL_DELTA_X: input::RangeId = input::RangeId(0);
+const MOUSE_WHEEL_DELTA_Y: input::RangeId = input::RangeId(1);
 
 const MOUSE_BUTTON_SEPARATOR: u32 = 1 << 16;
 fn is_mouse_button(state_id: input::StateId) -> bool {
@@ -282,7 +224,8 @@ impl UIContext {
             .with_state_passthrough(KeyCode::Y, StateId(KeyCode::Y as _), keyboard)?
             .with_state_passthrough(KeyCode::Z, StateId(KeyCode::Z as _), keyboard)?
             .wants_cursor_pos(true, mouse)
-            .with_range_passthrough(DeviceAxis::MouseWheel, MOUSE_WHEEL_DELTA, 1.0, mouse)?
+            .with_range_passthrough(DeviceAxis::ScrollX, MOUSE_WHEEL_DELTA_X, 1.0, mouse)?
+            .with_range_passthrough(DeviceAxis::ScrollY, MOUSE_WHEEL_DELTA_Y, 1.0, mouse)?
             .with_state_passthrough(
                 MouseButton::Left,
                 mouse_button_stateid(MouseButton::Left),
@@ -455,7 +398,8 @@ impl UIContext {
                     io.key_alt = key == LAlt as u32 || key == RAlt as u32;
                     io.key_super = key == LWin as u32 || key == RWin as u32;
                 }
-                Input::Range(MOUSE_WHEEL_DELTA, val) => io.mouse_wheel += val as f32,
+                Input::Range(MOUSE_WHEEL_DELTA_Y, val) => io.mouse_wheel += val as f32,
+                Input::Range(MOUSE_WHEEL_DELTA_X, val) => io.mouse_wheel_h += val as f32,
                 Input::Text(chars) => {
                     for c in chars.iter() {
                         io.add_input_character(*c);
