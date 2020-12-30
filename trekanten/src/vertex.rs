@@ -2,11 +2,13 @@ use crate::util;
 use ash::vk;
 use std::hash::{Hash, Hasher};
 
+use arrayvec::ArrayVec;
+
 // TODO: vk agnostic
 #[derive(Debug, Clone)]
 pub struct VertexFormat {
-    binding_description: Vec<vk::VertexInputBindingDescription>,
-    attribute_description: Vec<vk::VertexInputAttributeDescription>,
+    binding_description: ArrayVec<[vk::VertexInputBindingDescription; 8]>,
+    attribute_description: ArrayVec<[vk::VertexInputAttributeDescription; 16]>,
     size: u32,
 }
 
@@ -103,8 +105,8 @@ impl VertexFormat {
 impl VertexFormat {
     pub fn empty() -> Self {
         Self {
-            binding_description: Vec::new(),
-            attribute_description: Vec::new(),
+            binding_description: ArrayVec::new(),
+            attribute_description: ArrayVec::new(),
             size: 0,
         }
     }
@@ -140,11 +142,13 @@ impl VertexFormatBuilder {
     }
 
     pub fn build(mut self) -> VertexFormat {
-        self.format.binding_description = vec![vk::VertexInputBindingDescription {
-            binding: 0,
-            stride: self.format.size,
-            input_rate: vk::VertexInputRate::VERTEX,
-        }];
+        self.format
+            .binding_description
+            .push(vk::VertexInputBindingDescription {
+                binding: 0,
+                stride: self.format.size,
+                input_rate: vk::VertexInputRate::VERTEX,
+            });
         self.format
     }
 }

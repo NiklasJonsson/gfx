@@ -2579,6 +2579,7 @@ dependencies = [
 name = "trekanten"
 version = "0.1.0"
 dependencies = [
+ "arrayvec 0.5.1",
  "ash",
  "ash-window",
  "derive_builder",
