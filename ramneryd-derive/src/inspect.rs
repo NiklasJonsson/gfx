@@ -1,6 +1,6 @@
 use proc_macro2::{Ident, Span, TokenStream};
 use quote::{format_ident, quote, quote_spanned};
-use syn::{spanned::Spanned as _, DeriveInput, Fields, FieldsUnnamed};
+use syn::{spanned::Spanned as _, DeriveInput, Fields};
 
 fn inspect_fn_name(is_mut: bool) -> syn::Ident {
     if is_mut {

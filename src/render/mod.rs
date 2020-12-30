@@ -455,16 +455,6 @@ pub fn setup_resources(world: &mut World, mut renderer: &mut Renderer) {
     log::trace!("Done");
 }
 
-pub fn register_components(world: &mut World) {
-    // Register all component types
-    world.register::<RenderableMaterial>();
-    world.register::<GpuMesh>();
-    world.register::<Material>();
-    world.register::<crate::graph::Children>();
-    world.register::<crate::graph::Parent>();
-    world.register::<crate::camera::Camera>();
-}
-
 pub fn register_systems<'a, 'b>(builder: ExecutorBuilder<'a, 'b>) -> ExecutorBuilder<'a, 'b> {
     bounding_box::register_systems(builder).with(
         AssignReloadMaterials,

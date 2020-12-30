@@ -12,7 +12,3 @@ where
         Self(String::from(s))
     }
 }
-
-pub fn register_components(w: &mut World) {
-    w.register::<Name>();
-}

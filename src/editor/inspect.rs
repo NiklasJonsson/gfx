@@ -219,7 +219,6 @@ pub fn inspect_struct<'a>(
         ui.same_line(0.0);
     }
 
-    let mut header = false;
     if let Some(ty) = ty {
         if imgui::CollapsingHeader::new(&im_str!("struct {}", ty))
             .leaf(empty)
