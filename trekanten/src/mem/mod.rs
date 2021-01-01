@@ -23,4 +23,8 @@ pub enum MemoryError {
     CopySubmit(#[from] QueueError),
     #[error("memory mapping failed {0}")]
     MemoryMapping(vk_mem::Error),
+    #[error("realloc failed {0}")]
+    Realloc(vk_mem::Error),
+    #[error("memory binding failed {0}")]
+    MemoryBinding(vk_mem::Error),
 }

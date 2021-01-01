@@ -552,13 +552,13 @@ impl UIContext {
         let ibuf_desc = OwningIndexBufferDescriptor::from_vec(indices, BufferMutability::Mutable);
 
         let (vertex_buffer, index_buffer) = if let Some(per_frame_data) = self.per_frame_data {
-            let vertex_buffer = frame
+            frame
                 .recreate_resource_blocking(per_frame_data.vertex_buffer, vbuf_desc)
                 .expect("Bad vbuf handle");
-            let index_buffer = frame
+            frame
                 .recreate_resource_blocking(per_frame_data.index_buffer, ibuf_desc)
                 .expect("Bad ibuf handle");
-            (vertex_buffer, index_buffer)
+            (per_frame_data.vertex_buffer, per_frame_data.index_buffer)
         } else {
             let vh = frame
                 .create_resource_blocking(vbuf_desc)

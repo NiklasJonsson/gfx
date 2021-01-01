@@ -150,18 +150,42 @@ impl<'a> Frame<'a> {
 
 use parking_lot::MappedRwLockReadGuard;
 macro_rules! impl_mut_buffer_manager_frame {
-    ($desc:ty, $resource:ty, $handle:ty, $cmd_enum:ident, $storage:ident) => {
-        impl<'a> resource::MutResourceManager<$desc, $resource, $handle> for Frame<'a> {
+    ($desc:ty, $resource:ty, $storage:ident) => {
+        impl<'a> resource::MutResourceManager<$desc, $resource, BufferHandle<$resource>>
+            for Frame<'a>
+        {
             type Error = mem::MemoryError;
 
+            /// Recreates a whole buffer, regardless if the buffer handle is only a subslice
+            /// Any handles pointing to this are invalidated and only the returned value should be
+            /// used. If the buffer is not "Mutable" & Available, then this will panic.
             fn recreate_resource_blocking(
                 &mut self,
-                handle: $handle,
+                handle: BufferHandle<$resource>,
                 descriptor: $desc,
-            ) -> Result<$handle, Self::Error> {
-                let cmd = ResourceCommand::$cmd_enum { descriptor, handle };
-                self.renderer.execute_command(cmd)?;
-                Ok(handle)
+            ) -> Result<BufferHandle<$resource>, Self::Error> {
+                assert_eq!(handle.mutability(), BufferMutability::Mutable);
+                if let resurs::Async::Available(ref mut buf) = &mut *self
+                    .resources
+                    .$storage
+                    .get_buffered_mut(&handle, self.renderer.frame_idx as usize)
+                    .expect("Fail")
+                {
+                    // TODO: Bump generation of handle as well (when supported by storage)
+                    buf.recreate(&self.renderer.device, &descriptor)?;
+                    let handle = unsafe {
+                        BufferHandle::from_buffer(
+                            *handle.handle(),
+                            0,
+                            descriptor.n_elems(),
+                            BufferMutability::Mutable,
+                        )
+                    };
+
+                    Ok(handle)
+                } else {
+                    panic!("Can't recreate a pending resource!");
+                }
             }
         }
     };
@@ -170,16 +194,12 @@ macro_rules! impl_mut_buffer_manager_frame {
 impl_mut_buffer_manager_frame!(
     mesh::OwningVertexBufferDescriptor,
     mesh::VertexBuffer,
-    BufferHandle<mesh::VertexBuffer>,
-    CreateVertexBuffer,
     vertex_buffers
 );
 
 impl_mut_buffer_manager_frame!(
     mesh::OwningIndexBufferDescriptor,
     mesh::IndexBuffer,
-    BufferHandle<mesh::IndexBuffer>,
-    CreateIndexBuffer,
     index_buffers
 );
 
@@ -231,7 +251,6 @@ impl Resources {
     }
 }
 
-// The curse of typed buffers
 enum PendingResourceCommand {
     CreateVertexBuffer {
         descriptor: mesh::OwningVertexBufferDescriptor,
