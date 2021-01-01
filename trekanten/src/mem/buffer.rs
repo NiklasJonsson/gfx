@@ -1,6 +1,6 @@
 use ash::vk;
 
-use vk_mem::{Allocation, AllocationCreateInfo, AllocationInfo, MemoryUsage};
+use vk_mem::{Allocation, AllocationCreateInfo, MemoryUsage};
 
 use crate::command::CommandBuffer;
 use crate::device::AllocatorHandle;
@@ -163,16 +163,17 @@ pub struct DeviceBuffer {
     vk_buffer: vk::Buffer,
     allocation: Allocation,
     size: usize,
-    allocation_info: AllocationInfo,
+    is_mapped: bool,
 }
 
 impl std::fmt::Debug for DeviceBuffer {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let allocation_info = self.allocator.get_allocation_info(&self.allocation);
         f.debug_struct("DeviceBuffer")
             .field("vk_buffer", &self.vk_buffer)
             .field("allocation", &self.allocation)
             .field("size", &self.size)
-            .field("allocation_info", &self.allocation_info)
+            .field("allocation_info", &allocation_info)
             .finish()
     }
 }
@@ -210,8 +211,8 @@ impl DeviceBuffer {
             allocator,
             vk_buffer,
             allocation,
-            allocation_info,
             size,
+            is_mapped: false,
         })
     }
 
@@ -222,7 +223,7 @@ impl DeviceBuffer {
         stride: u16,
         buffer_usage: vk::BufferUsageFlags,
         mem_usage: MemoryUsage,
-        _do_unmap: bool, // TODO
+        do_unmap: bool,
     ) -> Result<Self, MemoryError> {
         log::trace!("Creating device buffer with data");
         assert!(data.len() % (elem_size as usize) == 0);
@@ -233,15 +234,11 @@ impl DeviceBuffer {
             elem_size,
             stride
         );
-        let allocator = device.allocator();
         let size = get_aligned_size(data.len(), elem_size, stride);
         log::trace!("Total buffer size: {}", size);
 
-        let staging = DeviceBuffer::empty(device, size, buffer_usage, mem_usage)?;
-
-        let dst = allocator
-            .map_memory(&staging.allocation)
-            .map_err(MemoryError::MemoryMapping)?;
+        let mut buffer = DeviceBuffer::empty(device, size, buffer_usage, mem_usage)?;
+        let dst = buffer.map()?;
         let src = data.as_ptr() as *const u8;
         if elem_size == stride {
             log::trace!("Straight copy from {:?} to {:?}, size: {}", src, dst, size);
@@ -259,9 +256,11 @@ impl DeviceBuffer {
             }
         }
 
-        allocator.unmap_memory(&staging.allocation);
+        if do_unmap {
+            buffer.unmap();
+        }
 
-        Ok(staging)
+        Ok(buffer)
     }
 
     pub fn staging_with_data(
@@ -326,17 +325,31 @@ impl DeviceBuffer {
 }
 
 impl DeviceBuffer {
+    pub fn map(&mut self) -> Result<*mut u8, MemoryError> {
+        self.is_mapped = true;
+        self.allocator
+            .map_memory(&self.allocation)
+            .map_err(MemoryError::MemoryMapping)
+    }
+
+    pub fn unmap(&mut self) {
+        assert!(self.is_mapped);
+        self.is_mapped = false;
+        self.allocator.unmap_memory(&self.allocation)
+    }
+
     pub fn vk_buffer(&self) -> &vk::Buffer {
         &self.vk_buffer
     }
 
     pub fn update_data_at(&mut self, data: &[u8], offset: usize) -> Result<(), MemoryError> {
+        assert!(self.is_mapped);
         let size = data.len();
-
         let dst_base = self
             .allocator
-            .map_memory(&self.allocation)
-            .map_err(MemoryError::MemoryMapping)?;
+            .get_allocation_info(&self.allocation)
+            .map_err(MemoryError::MemoryMapping)?
+            .get_mapped_data();
 
         let src = data.as_ptr() as *const u8;
         unsafe {
@@ -344,8 +357,6 @@ impl DeviceBuffer {
             let dst = dst_base.add(offset);
             std::ptr::copy_nonoverlapping::<u8>(src, dst, size);
         }
-
-        self.allocator.unmap_memory(&self.allocation);
 
         Ok(())
     }
@@ -357,6 +368,9 @@ impl DeviceBuffer {
 
 impl std::ops::Drop for DeviceBuffer {
     fn drop(&mut self) {
+        if self.is_mapped {
+            self.unmap();
+        }
         self.allocator
             .destroy_buffer(self.vk_buffer, &self.allocation);
     }
