@@ -41,7 +41,6 @@ pub fn camera_pos(world: &World) -> Vec3 {
         .position
 }
 
-#[derive(Default)]
 pub struct FrameData {
     pub light_buffer: BufferHandle<UniformBuffer>,
     pub frame_set: Handle<DescriptorSet>,

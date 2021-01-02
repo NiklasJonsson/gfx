@@ -2,9 +2,6 @@ pub use crate::{Handle, Storage};
 
 const N_STORAGE_BUFFERS: usize = 2;
 
-// TODO: Static assert for idx > 2?
-// TODO: Make generic over array length
-
 /// Convenience type for double buffered storage of T
 pub struct BufferedStorage<T> {
     storage: Storage<[T; N_STORAGE_BUFFERS]>,

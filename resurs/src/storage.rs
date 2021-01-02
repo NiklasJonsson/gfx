@@ -1,119 +1,218 @@
-use super::{Handle, ID};
+use super::Handle;
 
-// Based on sparse sets:
-// https://programmingpraxis.com/2012/03/09/sparse-sets/
-// https://bitsquid.blogspot.com/2011/09/managing-decoupling-part-4-id-lookup.html
-// https://blog.molecular-matters.com/2013/07/24/adventures-in-data-oriented-design-part-3c-external-references/
-
-// TODO: Implement ID index reuse with generations, as sparse will grow bigger and bigger as it is
-// now
-pub struct Storage<T> {
-    data: Vec<T>,
-    dense: Vec<ID>,
-    sparse: Vec<usize>,
+// Implementation is based on freelist array from https://ourmachinery.com/post/data-structures-part-1-bulk-data/
+#[derive(Debug, Default, Copy, Clone, PartialEq, Eq, Ord, PartialOrd, Hash)]
+pub struct ID {
+    index: u32,
+    generation: u32,
 }
 
-const INVALID_DENSE_IDX: usize = usize::MAX;
+impl std::fmt::Display for ID {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        writeln!(f, "ID i{}, g{}", self.index, self.generation)
+    }
+}
 
-impl<T> Storage<T> {
-    pub fn new() -> Self {
-        Default::default()
+enum ItemContent<T> {
+    Data(T),
+    NextFree(u32),
+}
+
+impl<T> ItemContent<T> {
+    pub fn as_ref(&self) -> ItemContent<&T> {
+        match self {
+            Self::Data(d) => ItemContent::Data(d),
+            Self::NextFree(n) => ItemContent::NextFree(*n),
+        }
     }
 
-    pub fn add(&mut self, a: T) -> Handle<T> {
-        assert_eq!(self.data.len(), self.dense.len());
+    pub fn as_mut(&mut self) -> ItemContent<&mut T> {
+        match self {
+            Self::Data(d) => ItemContent::Data(d),
+            Self::NextFree(n) => ItemContent::NextFree(*n),
+        }
+    }
 
-        let sparse_idx = self.sparse.len();
-        let dense_idx = self.dense.len();
-        self.sparse.push(dense_idx);
-        self.data.push(a);
-        let id = ID { index: sparse_idx };
+    pub fn data(self) -> Option<T> {
+        match self {
+            Self::Data(d) => Some(d),
+            Self::NextFree(_) => None,
+        }
+    }
+}
 
-        self.dense.push(id);
+struct Item<T> {
+    content: ItemContent<T>,
+    generation: u32,
+}
+
+impl<T> Item<T> {
+    pub fn as_ref(&self) -> Item<&T> {
+        Item {
+            content: self.content.as_ref(),
+            generation: self.generation,
+        }
+    }
+
+    pub fn as_mut(&mut self) -> Item<&mut T> {
+        Item {
+            content: self.content.as_mut(),
+            generation: self.generation,
+        }
+    }
+
+    pub fn data(self) -> Option<T> {
+        self.content.data()
+    }
+}
+
+pub struct Storage<T> {
+    items: Vec<Item<T>>,
+    next_free: u32,
+    n_items: u32,
+}
+
+impl<T> Storage<T> {
+    #[inline]
+    pub fn new() -> Self {
+        Self {
+            items: Vec::new(),
+            next_free: 0,
+            n_items: 0,
+        }
+    }
+
+    #[inline]
+    pub fn with_capacity(cap: u32) -> Self {
+        Self {
+            items: Vec::with_capacity(cap as usize),
+            next_free: 0,
+            n_items: 0,
+        }
+    }
+
+    #[inline]
+    pub fn add(&mut self, data: T) -> Handle<T> {
+        let id = if self.next_free as usize == self.items.len() {
+            debug_assert!(self.items.len() <= u32::MAX as usize);
+            self.items.push(Item {
+                content: ItemContent::Data(data),
+                generation: 0,
+            });
+            self.next_free += 1;
+
+            ID {
+                index: (self.items.len() - 1) as u32,
+                generation: 0,
+            }
+        } else {
+            let index = self.next_free;
+            let free = &mut self.items[index as usize];
+            if let ItemContent::NextFree(next_free) = free.content {
+                self.next_free = next_free;
+            } else {
+                panic!("Internal error: bad next_free value");
+            }
+
+            free.content = ItemContent::Data(data);
+            ID {
+                index,
+                generation: free.generation,
+            }
+        };
+        self.n_items += 1;
 
         Handle::<T>::new(id)
     }
 
+    fn check_id(&self, id: ID) -> bool {
+        let index = id.index as usize;
+
+        if index >= self.items.len() {
+            return false;
+        }
+
+        if id.generation != self.items[index].generation {
+            return false;
+        }
+
+        return true;
+    }
+
+    #[inline]
     pub fn remove(&mut self, h: Handle<T>) -> Option<T> {
-        if !self.has(&h) {
+        let id = h.id();
+        if !self.check_id(id) {
             return None;
         }
-        assert!(!self.sparse.is_empty());
-        assert_eq!(self.data.len(), self.dense.len());
 
-        let sparse_idx = h.index();
-        let dense_idx = self.sparse[sparse_idx];
+        let generation = id.generation.wrapping_add(1);
+        let item = Item {
+            content: ItemContent::NextFree(self.next_free),
+            generation,
+        };
+        self.next_free = id.index;
+        self.n_items -= 1;
 
-        if self.dense.len() > 1 {
-            // Swap last and the one we want to remove
-            let last = self.dense.len() - 1;
-            self.dense.swap(dense_idx, last);
-            self.data.swap(dense_idx, last);
-            assert_eq!(self.sparse[self.dense[dense_idx].index], last);
-            // Update the sparse -> dense idx
-            self.sparse[self.dense[dense_idx].index] = dense_idx;
-        }
-
-        self.sparse[sparse_idx] = INVALID_DENSE_IDX;
-
-        assert_eq!(*self.dense.last().unwrap(), h.id);
-
-        self.dense.pop();
-        Some(self.data.pop().unwrap())
+        std::mem::replace(&mut self.items[id.index as usize], item).data()
     }
 
+    #[inline]
     pub fn has(&self, h: &Handle<T>) -> bool {
-        if self.sparse.is_empty() || h.index() as usize >= self.sparse.len() {
+        let id = h.id();
+        if !self.check_id(id) {
             return false;
         }
 
-        if self.sparse[h.index() as usize] == INVALID_DENSE_IDX {
-            return false;
+        if let ItemContent::Data(_) = self.items[id.index as usize].content {
+            true
+        } else {
+            false
         }
-
-        self.dense[self.sparse[h.index() as usize]] == h.id
     }
 
+    #[inline]
     pub fn get(&self, h: &Handle<T>) -> Option<&T> {
         if !self.has(h) {
             None
         } else {
-            Some(&self.data[self.sparse[h.index()] as usize])
+            self.items[h.id().index as usize].as_ref().data()
         }
     }
 
+    #[inline]
     pub fn get_mut(&mut self, h: &Handle<T>) -> Option<&mut T> {
         if !self.has(h) {
             None
         } else {
-            Some(&mut self.data[self.sparse[h.index()] as usize])
+            self.items[h.id().index as usize].as_mut().data()
         }
     }
 
+    #[inline]
     pub fn is_empty(&self) -> bool {
-        self.data.is_empty()
+        self.n_items == 0
     }
 
+    #[inline]
     pub fn len(&self) -> usize {
-        self.data.len()
+        self.n_items as usize
     }
 
+    #[inline]
     pub fn iter(&self) -> impl Iterator<Item = &T> {
-        self.data.iter()
+        self.items.iter().filter_map(|x| x.as_ref().data())
     }
 
+    #[inline]
     pub fn iter_mut(&mut self) -> impl Iterator<Item = &mut T> {
-        self.data.iter_mut()
+        self.items.iter_mut().filter_map(|x| x.as_mut().data())
     }
 }
 
 impl<T> Default for Storage<T> {
     fn default() -> Self {
-        Self {
-            data: Default::default(),
-            dense: Default::default(),
-            sparse: Default::default(),
-        }
+        Self::new()
     }
 }
 

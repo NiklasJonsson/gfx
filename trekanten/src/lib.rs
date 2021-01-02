@@ -171,7 +171,6 @@ macro_rules! impl_mut_buffer_manager_frame {
                     .get_buffered_mut(&handle, self.renderer.frame_idx as usize)
                     .expect("Fail")
                 {
-                    // TODO: Bump generation of handle as well (when supported by storage)
                     buf.recreate(&self.renderer.device, &descriptor)?;
                     let handle = unsafe {
                         BufferHandle::from_buffer(
@@ -839,7 +838,10 @@ macro_rules! impl_buffer_manager {
                 descriptor: $desc,
             ) -> Result<$handle, Self::Error> {
                 let handle = self.async_resources.$storage.allocate(&descriptor);
-                let cmd = ResourceCommand::$cmd_enum { descriptor, handle };
+                let cmd = ResourceCommand::$cmd_enum {
+                    descriptor,
+                    handle: handle.clone(),
+                };
                 self.execute_command(cmd)?;
                 Ok(handle)
             }

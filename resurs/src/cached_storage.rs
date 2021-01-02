@@ -28,7 +28,7 @@ where
     }
 
     pub fn cached(&self, descriptor: &ResourceDescriptor) -> Option<Handle<Resource>> {
-        self.cache.get(descriptor)
+        self.cache.get(descriptor).cloned()
     }
 
     pub fn get_or_add<Create, Error>(
@@ -42,7 +42,7 @@ where
         let h = match self.cache.get(&descriptor) {
             Some(h) => {
                 self.stats.hits += 1;
-                h
+                h.clone()
             }
             None => {
                 self.stats.misses += 1;

@@ -9,19 +9,9 @@ pub use buffered_storage::BufferedStorage;
 pub use cache::Cache;
 pub use cached_storage::CachedStorage;
 pub use storage::Storage;
+pub use storage::ID;
 
 use std::marker::PhantomData;
-
-#[derive(Debug, Default, Copy, Clone, PartialEq, Eq, Ord, PartialOrd, Hash)]
-pub struct ID {
-    index: usize,
-}
-
-impl std::fmt::Display for ID {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{}", self.index)
-    }
-}
 
 // Can't derive things on Handle because of PhantomData + generic
 // https://github.com/rust-lang/rust/issues/26925
@@ -33,19 +23,11 @@ pub struct Handle<T> {
 
 impl<T> std::fmt::Debug for Handle<T> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "Handle<{}>", std::any::type_name::<T>())?;
-        f.debug_struct("").field("id", &self.id).finish()
+        let name = format!("Handle<{}>", std::any::type_name::<T>());
+        f.debug_struct(&name).field("id", &self.id).finish()
     }
 }
 
-impl<T> Default for Handle<T> {
-    fn default() -> Self {
-        Self {
-            id: ID::default(),
-            ty: PhantomData {},
-        }
-    }
-}
 impl<T> std::cmp::PartialEq for Handle<T> {
     fn eq(&self, other: &Self) -> bool {
         self.id == other.id
@@ -66,10 +48,6 @@ impl<T> Handle<T> {
             id,
             ty: PhantomData {},
         }
-    }
-
-    fn index(&self) -> usize {
-        self.id.index
     }
 
     pub fn id(&self) -> ID {

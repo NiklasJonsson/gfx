@@ -16,8 +16,8 @@ impl<D: Hash + Eq, T> Cache<D, T> {
         Default::default()
     }
 
-    pub fn get(&self, desc: &D) -> Option<Handle<T>> {
-        self.cache.get(desc).cloned()
+    pub fn get(&self, desc: &D) -> Option<&Handle<T>> {
+        self.cache.get(desc)
     }
 
     pub fn add(&mut self, desc: D, h: Handle<T>) {

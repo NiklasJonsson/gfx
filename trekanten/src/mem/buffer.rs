@@ -73,16 +73,6 @@ impl<T> Clone for BufferHandle<T> {
     }
 }
 impl<T> Copy for BufferHandle<T> {}
-impl<T> Default for BufferHandle<T> {
-    fn default() -> Self {
-        Self {
-            h: Handle::<T>::default(),
-            mutability: BufferMutability::Immutable,
-            idx: 0,
-            n_elems: 0,
-        }
-    }
-}
 
 use crate::resource::Async;
 

@@ -286,7 +286,7 @@ impl AsyncTextures {
 
     pub fn cache(&self, descriptor: &TextureDescriptor) -> Option<Handle<Texture>> {
         if let TextureDescriptorTy::File(path) = &descriptor.ty {
-            self.inner.read().cache.get(path)
+            self.inner.read().cache.get(path).cloned()
         } else {
             None
         }
