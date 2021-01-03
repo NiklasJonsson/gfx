@@ -12,7 +12,6 @@ mod io;
 mod math;
 mod profile;
 mod render;
-mod settings;
 mod time;
 
 use arg_parse::Args;
@@ -78,7 +77,6 @@ impl App {
         let engine_builder = ExecutorBuilder::new();
         let engine_builder = asset::register_systems(engine_builder);
         let engine_builder = camera::register_systems(engine_builder);
-        let engine_builder = settings::register_systems(engine_builder);
         let engine_builder = render::register_systems(engine_builder);
 
         let engine = engine_builder

@@ -18,6 +18,10 @@ impl Defines {
     pub fn iter(&self) -> impl Iterator<Item = &(String, String)> {
         self.vals.iter()
     }
+
+    pub fn empty() -> Self {
+        Self { vals: Vec::new() }
+    }
 }
 
 pub mod pbr_gltf {

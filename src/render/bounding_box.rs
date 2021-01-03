@@ -1,12 +1,20 @@
 use crate::common::Name;
 use crate::ecs::prelude::*;
 use crate::graph;
-use crate::math::{BoundingBox, ModelMatrix, Transform};
-use crate::render::geometry::Mesh;
+use crate::math::{BoundingBox, Transform, Vec3};
+use crate::render::{material::Material, material::PendingMaterial, mesh::PendingMesh};
+
+use trekanten::loader::ResourceLoader;
+use trekanten::uniform::OwningUniformBufferDescriptor;
+use trekanten::BufferMutability;
 
 #[derive(Default, Component)]
 #[component(storage = "NullStorage")]
 pub struct DoRenderBoundingBox;
+
+#[derive(Default, Component)]
+#[component(storage = "NullStorage")]
+pub struct DontRenderBoundingBox;
 
 #[derive(Default, Component)]
 #[component(storage = "NullStorage")]
@@ -17,14 +25,16 @@ impl<'a> System<'a> for CreateRenderedBoundingBoxes {
     type SystemData = (
         Entities<'a>,
         ReadStorage<'a, BoundingBox>,
-        ReadStorage<'a, ModelMatrix>,
         WriteStorage<'a, DoRenderBoundingBox>,
+        WriteStorage<'a, DontRenderBoundingBox>,
         WriteStorage<'a, graph::Children>,
         WriteStorage<'a, graph::Parent>,
         WriteStorage<'a, Transform>,
         WriteStorage<'a, Name>,
         WriteStorage<'a, BoundingBoxRenderer>,
-        WriteStorage<'a, Mesh>,
+        WriteStorage<'a, super::mesh::PendingMesh>,
+        WriteStorage<'a, super::material::PendingMaterial>,
+        WriteExpect<'a, trekanten::Loader>,
     );
 
     fn run(
@@ -32,83 +42,80 @@ impl<'a> System<'a> for CreateRenderedBoundingBoxes {
         (
             entities,
             bounding_box_storage,
-            matrices,
             mut do_render_bounding_box,
+            mut dont_render_bounding_box,
             mut children_storage,
             mut parent_storage,
             mut transforms,
             mut names,
             mut bounding_box_renderer_storage,
             mut meshes,
+            mut materials,
+            loader,
         ): Self::SystemData,
     ) {
-        for (ent, bbox, matrix, _) in (
-            &entities,
-            &bounding_box_storage,
-            &matrices,
-            &do_render_bounding_box,
-        )
-            .join()
-        {
-            let mut total_bbox = *matrix * *bbox;
-            let update_bbox = |e: Entity| {
-                if let Some(bbox) = bounding_box_storage.get(e) {
-                    let m = *matrices.get(ent).expect("No model matrix for bounding box");
-                    total_bbox.combine(m * *bbox);
-                }
+        // TODO: Create one big buffer for each of vertex/index/uniform
+        for (ent, bbox, _) in (&entities, &bounding_box_storage, &do_render_bounding_box).join() {
+            let dims = bbox.max - bbox.min;
+            let (vertices, indices) = super::geometry::box_mesh(dims.x, dims.y, dims.z);
+            let vertex_buffer = loader.load(vertices);
+            let index_buffer = loader.load(indices);
+            let pending_mesh = PendingMesh(Some(super::GpuMesh {
+                mesh: trekanten::mesh::Mesh {
+                    vertex_buffer,
+                    index_buffer,
+                },
+                polygon_mode: trekanten::pipeline::PolygonMode::Line,
+            }));
+
+            let uniform_data = super::uniform::UnlitUniformData {
+                color: [1.0, 0.0, 0.0, 1.0],
             };
 
-            graph::breadth_first_sys(&children_storage, ent, update_bbox);
-            let child = entities.create();
+            let color_uniform = loader.load(OwningUniformBufferDescriptor::from_vec(
+                vec![uniform_data],
+                BufferMutability::Immutable,
+            ));
+
+            let pending_material = PendingMaterial::from(Material::Unlit { color_uniform });
+
+            let mut tfm = Transform::identity();
+            tfm.position = Vec3 {
+                x: dims.x / 2.0,
+                y: dims.y / 2.0,
+                z: dims.z / 2.0,
+            };
+
+            let child = entities
+                .build_entity()
+                .with(Name::from("BoundingBoxRenderer"), &mut names)
+                .with(tfm, &mut transforms)
+                .with(BoundingBoxRenderer, &mut bounding_box_renderer_storage)
+                .with(pending_mesh, &mut meshes)
+                .with(pending_material, &mut materials)
+                .build();
+
             graph::add_edge_sys(&mut children_storage, &mut parent_storage, ent, child);
-            names
-                .insert(child, Name::from("RendererBoundingBox"))
-                .expect("Failed to add component");
-            transforms
-                .insert(child, Transform::identity())
-                .expect("Failed to insert transform");
-            bounding_box_renderer_storage
-                .insert(child, BoundingBoxRenderer {})
-                .expect("Failed to insert bb renderer");
-            meshes
-                .insert(child, super::geometry::box_mesh())
-                .expect("Failed to insert mesh");
         }
 
         do_render_bounding_box.clear();
+
+        for (ent, _) in (&entities, &dont_render_bounding_box).join() {
+            graph::breadth_first_sys(&children_storage, ent, |n| {
+                if bounding_box_renderer_storage.get(n).is_some() {
+                    entities.delete(n).expect("bad graph");
+                }
+            });
+        }
+        dont_render_bounding_box.clear();
     }
 }
 
-/*
-let remove_rbbs = !settings.render_bounding_box;
-
-if remove_rbbs {
-    let mut to_remove = Vec::new();
-    for (root_ent, bb) in (&entities, &rbbs).join() {
-        let bb_node = bb.0;
-        meshes.remove(bb_node);
-        renderables.remove(bb_node);
-        to_remove.push(root_ent);
-    }
-
-    for ent in to_remove {
-        rbbs.remove(ent);
-    }
-
-    return;
-}
-
-for (root_ent, _root) in (&entities, &roots).join() {
-
-    let ty = MeshType::Line { indices };
-
-    meshes
-        .insert(child, mesh)
-        .expect("Unable to insert bb mesh");
-    materials
-        .insert(child, material)
-        .expect("Unable to add bb material");
-*/
+// TODO: Remaining:
+// * keypress/ui assigns DeleteRenderBox
+// * Assign bounding box during mesh loading
+// * button in inspector to render bbox
+// * implement geometry::box
 
 pub fn register_systems<'a, 'b>(builder: ExecutorBuilder<'a, 'b>) -> ExecutorBuilder<'a, 'b> {
     builder.with(

@@ -2,7 +2,9 @@ use crate::common::Name;
 use crate::ecs::prelude::*;
 use crate::io::input::{ActionId, InputContext, InputContextError, KeyCode, MappedInput};
 use crate::math::Vec3;
+use crate::render;
 
+use crate::editor::Inspect as _;
 use ramneryd_derive::Inspect;
 
 use num_derive::FromPrimitive;
@@ -13,7 +15,7 @@ pub enum RenderMode {
     Wireframe,
 }
 
-#[derive(Debug, Copy, Clone, PartialEq)]
+#[derive(Debug, Copy, Clone, PartialEq, Inspect)]
 pub struct RenderSettings {
     // Affects all entities
     pub render_mode: RenderMode,
@@ -105,14 +107,16 @@ impl<'a> System<'a> for RenderSettingsSys {
 pub const RENDER_SETTINGS_SYS_ID: &str = "render_settings_sys";
 
 pub fn register_systems<'a, 'b>(builder: ExecutorBuilder<'a, 'b>) -> ExecutorBuilder<'a, 'b> {
-    builder.with(
-        RenderSettingsSys { input_entity: None },
-        RENDER_SETTINGS_SYS_ID,
-        &[],
-    )
+    builder
+        .with(
+            RenderSettingsSys { input_entity: None },
+            RENDER_SETTINGS_SYS_ID,
+            &[],
+        )
+        .with(ApplySettings, "ApplySettings", &[RENDER_SETTINGS_SYS_ID])
 }
 
-pub fn build_ui<'a>(world: &mut World, ui: &imgui::Ui<'a>, pos: [f32; 2]) -> [f32; 2] {
+pub(crate) fn build_ui<'a>(world: &mut World, ui: &imgui::Ui<'a>, pos: [f32; 2]) -> [f32; 2] {
     let mut settings = world.write_resource::<RenderSettings>();
 
     let size = [300.0, 85.0];
@@ -121,19 +125,51 @@ pub fn build_ui<'a>(world: &mut World, ui: &imgui::Ui<'a>, pos: [f32; 2]) -> [f3
         .position(pos, imgui::Condition::FirstUseEver)
         .size(size, imgui::Condition::FirstUseEver)
         .build(&ui, || {
-            ui.text(imgui::im_str!("render mode: {:?}", settings.render_mode));
-            ui.text(imgui::im_str!(
-                "bounding box: {}",
-                settings.render_bounding_box
-            ));
-            ui.text(imgui::im_str!(
-                "reload shaders: {}",
-                settings.reload_shaders
-            ));
-            let mut pos = settings.light_pos.into_array();
-            imgui::InputFloat3::new(ui, imgui::im_str!("Position"), &mut pos).build();
-            settings.light_pos = Vec3::from(pos);
+            settings.inspect_mut(ui, "");
         });
 
     size
+}
+
+struct ApplySettings;
+
+impl<'a> System<'a> for ApplySettings {
+    type SystemData = (
+        Write<'a, RenderSettings>,
+        Entities<'a>,
+        ReadStorage<'a, render::material::Material>,
+        ReadStorage<'a, crate::math::BoundingBox>,
+        WriteStorage<'a, render::ReloadMaterial>,
+        WriteStorage<'a, render::bounding_box::DoRenderBoundingBox>,
+    );
+
+    fn run(&mut self, data: Self::SystemData) {
+        let (
+            mut render_settings,
+            entities,
+            materials,
+            bounding_boxes,
+            mut reload_materials,
+            mut render_bbox,
+        ) = data;
+        if render_settings.reload_shaders {
+            for (ent, _mat) in (&entities, &materials).join() {
+                reload_materials
+                    .insert(ent, render::ReloadMaterial)
+                    .expect("Failed to insert");
+            }
+
+            render_settings.reload_shaders = false;
+        }
+
+        if render_settings.render_bounding_box {
+            for (ent, _bbox) in (&entities, &bounding_boxes).join() {
+                render_bbox
+                    .insert(ent, render::bounding_box::DoRenderBoundingBox)
+                    .expect("Failed to insert");
+            }
+
+            render_settings.render_bounding_box = false;
+        }
+    }
 }

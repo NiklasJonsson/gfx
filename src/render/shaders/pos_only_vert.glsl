@@ -6,7 +6,7 @@ layout(set = 0, binding = 0) uniform Transforms {
     mat4 proj;
 } ubo;
 
-layout(set = 0, binding = 1) uniform Model {
+layout(push_constant) uniform Model {
     mat4 model;
     mat4 model_it;
 } model_ubo;

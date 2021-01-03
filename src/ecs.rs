@@ -1,13 +1,12 @@
 pub type World = specs::World;
 pub use ramneryd_derive::Component;
-pub type EntitiesRes = specs::world::EntitiesRes;
 
 pub mod prelude {
     pub use specs::prelude::ResourceId;
     pub use specs::SystemData;
     pub use specs::{DenseVecStorage, HashMapStorage, NullStorage, VecStorage};
     pub use specs::{Entities, Entity};
-    pub use specs::{Read, ReadExpect, ReadStorage, Write, WriteStorage};
+    pub use specs::{Read, ReadExpect, ReadStorage, Write, WriteExpect, WriteStorage};
 
     pub use specs::{Builder as _, Join as _, SystemData as _, WorldExt};
 

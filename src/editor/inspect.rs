@@ -142,6 +142,24 @@ impl Inspect for String {
     }
 }
 
+impl Inspect for std::path::PathBuf {
+    fn inspect<'a>(&self, ui: &Ui<'a>, name: &str) {
+        ui.text(im_str!("{}: {}", name, &self.display()));
+    }
+
+    fn inspect_mut<'a>(&mut self, ui: &Ui<'a>, name: &str) {
+        let mut v = imgui::ImString::from(
+            self.clone()
+                .into_os_string()
+                .into_string()
+                .unwrap_or_else(|_| String::from("bad path")),
+        );
+        if ui.input_text(&im_str!("{}", name), &mut v).build() {
+            *self = std::path::PathBuf::from(v.to_str());
+        }
+    }
+}
+
 impl<T> Inspect for resurs::Handle<T> {
     fn inspect<'a>(&self, ui: &Ui<'a>, name: &str) {
         let s = format!("{}: {}({})", name, std::any::type_name::<Self>(), self.id());
@@ -246,5 +264,53 @@ impl Inspect for trekanten::mesh::Mesh {
             self.vertex_buffer.inspect_mut(ui, "vertex_buffer");
             self.index_buffer.inspect_mut(ui, "index_buffer");
         });
+    }
+}
+
+impl Inspect for trekanten::pipeline::PolygonMode {
+    fn inspect<'a>(&self, ui: &Ui<'a>, name: &str) {
+        if !name.is_empty() {
+            ui.text(format!("{}:", name));
+            ui.same_line(0.0);
+        }
+
+        match self {
+            Self::Fill => {
+                let ty = imgui::im_str!("enum {}::{}", std::any::type_name::<Self>(), "Fill");
+                let _ = imgui::CollapsingHeader::new(&ty)
+                    .default_open(true)
+                    .leaf(true)
+                    .build(ui);
+            }
+            Self::Line => {
+                let ty = imgui::im_str!("enum {}::{}", std::any::type_name::<Self>(), "Line");
+                let _ = imgui::CollapsingHeader::new(&ty)
+                    .default_open(true)
+                    .leaf(true)
+                    .build(ui);
+            }
+            Self::Point => {
+                let ty = imgui::im_str!("enum {}::{}", std::any::type_name::<Self>(), "Point");
+                let _ = imgui::CollapsingHeader::new(&ty)
+                    .default_open(true)
+                    .leaf(true)
+                    .build(ui);
+            }
+        }
+    }
+
+    fn inspect_mut<'a>(&mut self, ui: &Ui<'a>, name: &str) {
+        self.inspect(ui, name);
+    }
+}
+
+// TODO: A generic impl_inspect_display here
+impl Inspect for usize {
+    fn inspect<'a>(&self, ui: &Ui<'a>, name: &str) {
+        ui.text(&imgui::im_str!("{}: {}", name, self));
+    }
+
+    fn inspect_mut<'a>(&mut self, ui: &Ui<'a>, name: &str) {
+        self.inspect(ui, name);
     }
 }

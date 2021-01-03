@@ -1,5 +1,3 @@
-use crate::ecs::EntitiesRes;
-
 use thiserror::Error;
 
 use crate::ecs::prelude::*;
@@ -19,18 +17,22 @@ use trekanten::RenderPassBuilder;
 use trekanten::Renderer;
 
 mod bounding_box;
+pub(crate) mod debug_window;
 mod geometry;
 pub mod material;
+pub mod mesh;
 pub mod pipeline;
 pub mod ui;
 pub mod uniform;
+
+pub use mesh::GpuMesh;
 
 use crate::camera::*;
 use crate::ecs;
 use crate::math::{Mat4, ModelMatrix, Transform, Vec3};
 use material::Material;
 
-use crate::settings::{RenderMode, RenderSettings};
+use debug_window::{RenderMode, RenderSettings};
 
 pub fn camera_pos(world: &World) -> Vec3 {
     let camera_entity = ecs::get_singleton_entity::<Camera>(world);
@@ -87,24 +89,7 @@ fn get_proj_matrix(aspect_ratio: f32) -> Mat4 {
 pub struct ReloadMaterial;
 
 #[derive(Component)]
-#[component(storage = "VecStorage", inspect)]
-pub struct GpuMesh(pub trekanten::mesh::Mesh);
-
-impl std::ops::Deref for GpuMesh {
-    type Target = trekanten::mesh::Mesh;
-    fn deref(&self) -> &Self::Target {
-        &self.0
-    }
-}
-
-impl Into<GpuMesh> for trekanten::mesh::Mesh {
-    fn into(self) -> GpuMesh {
-        GpuMesh(self)
-    }
-}
-
-#[derive(Component)]
-#[component(storage = "VecStorage", inspect)]
+#[component(inspect)]
 pub struct RenderableMaterial {
     gfx_pipeline: Handle<GraphicsPipeline>,
     material_descriptor_set: Handle<DescriptorSet>,
@@ -158,7 +143,16 @@ fn create_material_descriptor_set(
 
             desc_set_builder.build()
         }
-        _ => unimplemented!("Could not create descriptor set, unsupported material"),
+        material::Material::Unlit { color_uniform } => {
+            let mut desc_set_builder = DescriptorSet::builder(renderer);
+            desc_set_builder = desc_set_builder.add_buffer(
+                &color_uniform,
+                0,
+                trekanten::pipeline::ShaderStage::Fragment,
+            );
+
+            desc_set_builder.build()
+        }
     }
 }
 
@@ -175,7 +169,9 @@ pub fn get_pipeline_for(
     world: &World,
     mesh: &GpuMesh,
     mat: &material::Material,
+    global_render_mode: RenderMode,
 ) -> Result<Handle<GraphicsPipeline>, MaterialError> {
+    // TODO: Infer from spirv?
     let vertex_format = renderer
         .get_resource(&mesh.vertex_buffer)
         .expect("Invalid handle")
@@ -183,6 +179,12 @@ pub fn get_pipeline_for(
         .expect("should be available")
         .format()
         .clone();
+
+    let polygon_mode = match (global_render_mode, mesh.polygon_mode) {
+        (RenderMode::Opaque, mesh_poly_mode) => mesh_poly_mode,
+        (RenderMode::Wireframe, _) => trekanten::pipeline::PolygonMode::Line,
+    };
+
     let shader_compiler = world.read_resource::<pipeline::ShaderCompiler>();
     let pipe = match mat {
         material::Material::PBR {
@@ -204,16 +206,39 @@ pub fn get_pipeline_for(
                 has_metallic_roughness_texture: has_mr,
                 has_normal_map: has_nm,
             };
+
             let (vert, frag) = pipeline::pbr_gltf::compile(&*shader_compiler, &def)?;
             let desc = GraphicsPipelineDescriptor::builder()
                 .vert(ShaderDescriptor::FromRawSpirv(vert.data()))
                 .frag(ShaderDescriptor::FromRawSpirv(frag.data()))
                 .vertex_format(vertex_format)
+                .polygon_mode(polygon_mode)
                 .build()?;
 
             renderer.create_resource_blocking(desc)?
         }
-        m => todo!("No support for this material yet {:?}", m),
+        material::Material::Unlit { .. } => {
+            use std::path::PathBuf;
+            let vertex = shader_compiler.compile(
+                &pipeline::Defines::empty(),
+                &PathBuf::from("pos_only_vert.glsl"),
+                pipeline::ShaderType::Vertex,
+            )?;
+            let fragment = shader_compiler.compile(
+                &pipeline::Defines::empty(),
+                &PathBuf::from("uniform_color_frag.glsl"),
+                pipeline::ShaderType::Fragment,
+            )?;
+
+            let desc = GraphicsPipelineDescriptor::builder()
+                .vert(ShaderDescriptor::FromRawSpirv(vertex.data()))
+                .frag(ShaderDescriptor::FromRawSpirv(fragment.data()))
+                .vertex_format(vertex_format)
+                .polygon_mode(polygon_mode)
+                .build()?;
+
+            renderer.create_resource_blocking(desc)?
+        }
     };
 
     Ok(pipe)
@@ -228,8 +253,8 @@ fn create_renderable(
 ) -> RenderableMaterial {
     log::trace!("Creating renderable: {:?}, {:?}", material, render_mode);
     let material_descriptor_set = create_material_descriptor_set(renderer, material);
-    let gfx_pipeline =
-        get_pipeline_for(renderer, world, mesh, &material).expect("Failed to get pipeline");
+    let gfx_pipeline = get_pipeline_for(renderer, world, mesh, &material, render_mode)
+        .expect("Failed to get pipeline");
     RenderableMaterial {
         gfx_pipeline,
         material_descriptor_set,
@@ -264,7 +289,7 @@ fn create_renderables(renderer: &mut Renderer, world: &mut World, render_mode: R
                     if should_reload.contains(ent) {
                         log::trace!("Reloading shader for {:?}", ent);
                         // TODO: Destroy the previous pipeline
-                        match get_pipeline_for(renderer, world, mesh, mat) {
+                        match get_pipeline_for(renderer, world, mesh, mat, render_mode) {
                             Ok(pipeline) => entry.get_mut().gfx_pipeline = pipeline,
                             Err(e) => log::error!("Failed to compile pipeline: {}", e),
                         }
@@ -455,40 +480,9 @@ pub fn setup_resources(world: &mut World, mut renderer: &mut Renderer) {
 }
 
 pub fn register_systems<'a, 'b>(builder: ExecutorBuilder<'a, 'b>) -> ExecutorBuilder<'a, 'b> {
-    bounding_box::register_systems(builder).with(
-        AssignReloadMaterials,
-        "assign_reload_materials",
-        &[crate::settings::RENDER_SETTINGS_SYS_ID],
-    )
-}
-
-struct AssignReloadMaterials;
-
-impl<'a> System<'a> for AssignReloadMaterials {
-    type SystemData = (
-        Write<'a, RenderSettings>,
-        Read<'a, EntitiesRes>,
-        ReadStorage<'a, GpuMesh>,
-        ReadStorage<'a, Material>,
-        WriteStorage<'a, ReloadMaterial>,
-    );
-
-    fn run(
-        &mut self,
-        (mut render_settings, entities, meshes, materials, mut reloads): Self::SystemData,
-    ) {
-        let should_reload = render_settings.reload_shaders;
-
-        if !should_reload {
-            return;
-        }
-
-        for (ent, _mesh, _mat) in (&entities, &meshes, &materials).join() {
-            reloads
-                .insert(ent, ReloadMaterial {})
-                .expect("Failed to insert");
-        }
-
-        render_settings.reload_shaders = false;
-    }
+    let builder = bounding_box::register_systems(builder);
+    let builder = mesh::register_systems(builder);
+    let builder = material::register_systems(builder);
+    let builder = debug_window::register_systems(builder);
+    builder
 }

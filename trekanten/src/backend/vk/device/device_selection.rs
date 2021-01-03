@@ -175,9 +175,11 @@ impl std::fmt::Display for DeviceSuitability {
 }
 
 fn required_device_features() -> vk::PhysicalDeviceFeatures {
-    vk::PhysicalDeviceFeatures::builder()
-        .sampler_anisotropy(true)
-        .build()
+    vk::PhysicalDeviceFeatures {
+        sampler_anisotropy: vk::TRUE,
+        fill_mode_non_solid: vk::TRUE,
+        ..Default::default()
+    }
 }
 
 // TODO: ash does not support struct eq for features :(
@@ -192,7 +194,7 @@ fn device_supports_features(
             .get_physical_device_features(*phys_device)
     };
 
-    supported.sampler_anisotropy == vk::TRUE
+    supported.sampler_anisotropy == vk::TRUE && supported.fill_mode_non_solid == vk::TRUE
 }
 
 fn device_supports_mipmap_generation(
@@ -381,7 +383,7 @@ pub fn device_selection(
     let extensions = required_device_extensions();
     let extensions_ptrs = util::ffi::vec_cstring_to_raw(extensions);
 
-    let features = vk::PhysicalDeviceFeatures::builder().sampler_anisotropy(true);
+    let features = required_device_features();
 
     let device_info = vk::DeviceCreateInfo::builder()
         .queue_create_infos(&queue_infos)

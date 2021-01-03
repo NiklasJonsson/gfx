@@ -155,6 +155,19 @@ impl Default for DepthTest {
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum PolygonMode {
+    Fill,
+    Line,
+    Point,
+}
+
+impl Default for PolygonMode {
+    fn default() -> Self {
+        Self::Fill
+    }
+}
+
 pub struct GraphicsPipeline {
     vk_device: VkDeviceHandle,
     vk_pipeline: vk::Pipeline,
@@ -267,10 +280,16 @@ impl GraphicsPipeline {
             .topology(vk::PrimitiveTopology::TRIANGLE_LIST)
             .primitive_restart_enable(false);
 
+        let vk_polygon_mode = match desc.polygon_mode {
+            PolygonMode::Fill => vk::PolygonMode::FILL,
+            PolygonMode::Line => vk::PolygonMode::LINE,
+            PolygonMode::Point => vk::PolygonMode::POINT,
+        };
+
         let raster_state_info = vk::PipelineRasterizationStateCreateInfo::builder()
             .depth_clamp_enable(false)
             .rasterizer_discard_enable(false)
-            .polygon_mode(vk::PolygonMode::FILL)
+            .polygon_mode(vk_polygon_mode)
             .line_width(1.0)
             .cull_mode(desc.culling.into())
             .front_face(desc.winding.into())
@@ -424,6 +443,8 @@ pub struct GraphicsPipelineDescriptor {
     pub blend_state: BlendState,
     #[builder(default)]
     pub depth_testing: DepthTest,
+    #[builder(default)]
+    pub polygon_mode: PolygonMode,
 }
 
 impl GraphicsPipelineDescriptorBuilder {
