@@ -171,6 +171,7 @@ macro_rules! impl_mut_buffer_manager_frame {
                     .get_buffered_mut(&handle, self.renderer.frame_idx as usize)
                     .expect("Fail")
                 {
+                    // TODO: Increment generation of backing storage
                     buf.recreate(&self.renderer.device, &descriptor)?;
                     let handle = unsafe {
                         BufferHandle::from_buffer(

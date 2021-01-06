@@ -17,8 +17,9 @@ use trekanten::RenderPassBuilder;
 use trekanten::Renderer;
 
 mod bounding_box;
-pub(crate) mod debug_window;
-mod geometry;
+pub mod debug_window;
+pub mod geometry;
+pub mod light;
 pub mod material;
 pub mod mesh;
 pub mod pipeline;
@@ -114,14 +115,14 @@ fn create_material_descriptor_set(
             desc_set_builder = desc_set_builder.add_buffer(
                 &material_uniforms,
                 0,
-                trekanten::pipeline::ShaderStage::Fragment,
+                trekanten::pipeline::ShaderStage::FRAGMENT,
             );
 
             if let Some(bct) = &base_color_texture {
                 desc_set_builder = desc_set_builder.add_texture(
                     &bct.handle,
                     1,
-                    trekanten::pipeline::ShaderStage::Fragment,
+                    trekanten::pipeline::ShaderStage::FRAGMENT,
                 );
             }
 
@@ -129,7 +130,7 @@ fn create_material_descriptor_set(
                 desc_set_builder = desc_set_builder.add_texture(
                     &mrt.handle,
                     2,
-                    trekanten::pipeline::ShaderStage::Fragment,
+                    trekanten::pipeline::ShaderStage::FRAGMENT,
                 );
             }
 
@@ -137,7 +138,7 @@ fn create_material_descriptor_set(
                 desc_set_builder = desc_set_builder.add_texture(
                     &nm.handle,
                     3,
-                    trekanten::pipeline::ShaderStage::Fragment,
+                    trekanten::pipeline::ShaderStage::FRAGMENT,
                 );
             }
 
@@ -148,7 +149,7 @@ fn create_material_descriptor_set(
             desc_set_builder = desc_set_builder.add_buffer(
                 &color_uniform,
                 0,
-                trekanten::pipeline::ShaderStage::Fragment,
+                trekanten::pipeline::ShaderStage::FRAGMENT,
             );
 
             desc_set_builder.build()
@@ -328,7 +329,7 @@ fn draw_entities<'a>(world: &World, cmd_buf: &mut RenderPassBuilder<'a>) {
             )
             .bind_push_constant(
                 &renderable.gfx_pipeline,
-                trekanten::pipeline::ShaderStage::Vertex,
+                trekanten::pipeline::ShaderStage::VERTEX,
                 &trn,
             )
             .draw_mesh(&mesh);
@@ -339,13 +340,13 @@ fn draw_entities<'a>(world: &World, cmd_buf: &mut RenderPassBuilder<'a>) {
 pub fn draw_frame(world: &mut World, ui: &mut ui::UIContext, renderer: &mut Renderer) {
     let cam_entity = ecs::try_get_singleton_entity::<Camera>(world);
     if cam_entity.is_none() {
-        log::warn!("No camera entity => no rendering");
+        log::warn!("Did not find a camera entity, can't render");
         return;
     }
 
-    let (render_mode, light_pos) = {
+    let render_mode = {
         let render_settings = world.read_resource::<RenderSettings>();
-        (render_settings.render_mode, render_settings.light_pos)
+        render_settings.render_mode
     };
 
     create_renderables(renderer, world, render_mode);
@@ -364,16 +365,6 @@ pub fn draw_frame(world: &mut World, ui: &mut ui::UIContext, renderer: &mut Rend
     }
     .expect("Failed to get next frame");
 
-    let (view_matrix, cam_pos) = get_view_data(world);
-    let lighting_data = uniform::LightingData {
-        light_pos: [light_pos.x, light_pos.y, light_pos.z, 1.0f32],
-        view_pos: [cam_pos.x, cam_pos.y, cam_pos.z, 1.0f32],
-    };
-    let transforms = uniform::Transforms {
-        view: view_matrix.into_col_arrays(),
-        proj: get_proj_matrix(aspect_ratio).into_col_arrays(),
-    };
-
     let ui_draw_commands = ui.build_ui(world, &mut frame);
 
     let FrameData {
@@ -383,30 +374,70 @@ pub fn draw_frame(world: &mut World, ui: &mut ui::UIContext, renderer: &mut Rend
         dummy_pipeline,
     } = &*world.read_resource::<FrameData>();
 
-    frame
-        .update_uniform_blocking(light_buffer, &lighting_data)
-        .expect("Failed to update uniform");
-    frame
-        .update_uniform_blocking(transforms_buffer, &transforms)
-        .expect("Failed to update uniform");
+    // View data
+    {
+        let (view_matrix, view_pos) = get_view_data(world);
+        let view_proj = get_proj_matrix(aspect_ratio) * view_matrix;
+        let transforms = uniform::ViewData {
+            view_proj: view_proj.into_col_arrays(),
+            view_pos: [view_pos.x, view_pos.y, view_pos.z, 1.0f32],
+        };
 
-    let mut builder = frame
-        .begin_render_pass()
-        .expect("Failed to begin render pass");
-
-    builder
-        .bind_graphics_pipeline(dummy_pipeline)
-        .bind_shader_resource_group(0u32, frame_set, dummy_pipeline);
-
-    draw_entities(world, &mut builder);
-    if let Some(ui_draw_commands) = ui_draw_commands {
-        ui_draw_commands.record_draw_commands(&mut builder);
+        // TODO: Rename transforms
+        frame
+            .update_uniform_blocking(transforms_buffer, &transforms)
+            .expect("Failed to update uniform");
     }
 
-    let buf = builder
-        .build()
-        .expect("Failed to create render pass command buffer");
-    frame.add_raw_command_buffer(buf);
+    // Lights
+    {
+        let mut data = uniform::LightingData::default();
+        let mut n_punctual = 0;
+        let lights = world.read_storage::<light::Light>();
+        let transforms = world.read_storage::<Transform>();
+        for (light, tfm) in (&lights, &transforms).join() {
+            match light {
+                light::Light::Punctual { color } => {
+                    if n_punctual >= uniform::MAX_NUM_PUNCTUAL_LIGHTS {
+                        log::warn!("Too many punctual lights, ignoring");
+                        continue;
+                    }
+
+                    data.punctual_lights[n_punctual].pos =
+                        [tfm.position.x, tfm.position.y, tfm.position.z, 1.0f32];
+                    data.punctual_lights[n_punctual].color = [color.x, color.y, color.z, 1.0f32];
+                    n_punctual += 1;
+                }
+                _ => todo!(),
+            }
+        }
+
+        data.set_num_punctual_lights(n_punctual as u8);
+        frame
+            .update_uniform_blocking(light_buffer, &data)
+            .expect("Failed to update light");
+    }
+
+    // main render pass
+    {
+        let mut builder = frame
+            .begin_render_pass()
+            .expect("Failed to begin render pass");
+
+        builder
+            .bind_graphics_pipeline(dummy_pipeline)
+            .bind_shader_resource_group(0u32, frame_set, dummy_pipeline);
+
+        draw_entities(world, &mut builder);
+        if let Some(ui_draw_commands) = ui_draw_commands {
+            ui_draw_commands.record_draw_commands(&mut builder);
+        }
+
+        let buf = builder
+            .build()
+            .expect("Failed to create render pass command buffer");
+        frame.add_raw_command_buffer(buf);
+    }
 
     let frame = frame.finish();
     renderer
@@ -423,59 +454,83 @@ pub fn draw_frame(world: &mut World, ui: &mut ui::UIContext, renderer: &mut Rend
 }
 
 pub fn setup_resources(world: &mut World, mut renderer: &mut Renderer) {
-    let shader_compiler =
-        pipeline::ShaderCompiler::new().expect("Failed to create shader compiler");
+    use uniform::UniformBlock as _;
 
-    log::trace!("Creating dummy pipeline");
-    let data = vec![uniform::LightingData {
-        light_pos: [0.0; 4],
-        view_pos: [0.0; 4],
-    }];
-    let desc = OwningUniformBufferDescriptor::from_vec(data, BufferMutability::Mutable);
-    let light_buffer = renderer.create_resource_blocking(desc).expect("FAIL");
+    {
+        let shader_compiler =
+            pipeline::ShaderCompiler::new().expect("Failed to create shader compiler");
 
-    let data = vec![uniform::Transforms {
-        view: [[0.0; 4]; 4],
-        proj: [[0.0; 4]; 4],
-    }];
-    let desc = OwningUniformBufferDescriptor::from_vec(data, BufferMutability::Mutable);
+        world.insert(shader_compiler);
+        world.insert(renderer.loader());
+    }
 
-    let transforms_buffer = renderer.create_resource_blocking(desc).expect("FAIL");
+    let frame_data = {
+        let shader_compiler = world.read_resource::<pipeline::ShaderCompiler>();
 
-    let frame_set = DescriptorSet::builder(&mut renderer)
-        .add_buffer(
-            &transforms_buffer,
-            0,
-            trekanten::pipeline::ShaderStage::Vertex,
-        )
-        .add_buffer(&light_buffer, 1, trekanten::pipeline::ShaderStage::Fragment)
-        .build();
+        log::trace!("Creating dummy pipeline");
 
-    let vertex_format = VertexFormat::builder()
-        .add_attribute(util::Format::FLOAT3)
-        .add_attribute(util::Format::FLOAT3)
-        .build();
+        // TODO: Single elem uniform buffer here. Add to the same buffer?
+        let light_data = vec![uniform::LightingData {
+            punctual_lights: [uniform::PunctualLight::default(); uniform::MAX_NUM_PUNCTUAL_LIGHTS],
+            num_lights: 0,
+        }];
+        let light_data =
+            OwningUniformBufferDescriptor::from_vec(light_data, BufferMutability::Mutable);
+        let light_data = renderer.create_resource_blocking(light_data).expect("FAIL");
 
-    let (vert, frag) =
-        pipeline::pbr_gltf::compile_default(&shader_compiler).expect("Failed to compile");
-    let desc = GraphicsPipelineDescriptor::builder()
-        .vert(ShaderDescriptor::FromRawSpirv(vert.data()))
-        .frag(ShaderDescriptor::FromRawSpirv(frag.data()))
-        .vertex_format(vertex_format)
-        .build()
-        .expect("Failed to build graphics pipeline descriptor");
+        let view_data = vec![uniform::ViewData {
+            view_proj: [[0.0; 4]; 4],
+            view_pos: [0.0; 4],
+        }];
+        let view_data =
+            OwningUniformBufferDescriptor::from_vec(view_data, BufferMutability::Mutable);
+        let view_data = renderer.create_resource_blocking(view_data).expect("FAIL");
 
-    let dummy_pipeline = renderer.create_resource_blocking(desc).expect("FAIL");
+        assert_eq!(uniform::LightingData::SET, uniform::ViewData::SET);
+        let frame_set = DescriptorSet::builder(&mut renderer)
+            .add_buffer(
+                &view_data,
+                uniform::ViewData::BINDING,
+                trekanten::pipeline::ShaderStage::VERTEX
+                    | trekanten::pipeline::ShaderStage::FRAGMENT,
+            )
+            .add_buffer(
+                &light_data,
+                uniform::LightingData::BINDING,
+                trekanten::pipeline::ShaderStage::FRAGMENT,
+            )
+            .build();
 
-    world.insert(FrameData {
-        light_buffer,
-        frame_set,
-        transforms_buffer,
-        dummy_pipeline,
-    });
+        let vertex_format = VertexFormat::builder()
+            .add_attribute(util::Format::FLOAT3)
+            .add_attribute(util::Format::FLOAT3)
+            .build();
 
-    world.insert(shader_compiler);
-    world.insert(renderer.loader());
+        let result = pipeline::pbr_gltf::compile_default(&shader_compiler);
+
+        if let Err(e) = result {
+            log::error!("{}", e);
+            return;
+        }
+
+        let (vert, frag) = result.unwrap();
+        let desc = GraphicsPipelineDescriptor::builder()
+            .vert(ShaderDescriptor::FromRawSpirv(vert.data()))
+            .frag(ShaderDescriptor::FromRawSpirv(frag.data()))
+            .vertex_format(vertex_format)
+            .build()
+            .expect("Failed to build graphics pipeline descriptor");
+
+        let dummy_pipeline = renderer.create_resource_blocking(desc).expect("FAIL");
+        FrameData {
+            light_buffer: light_data,
+            frame_set,
+            transforms_buffer: view_data,
+            dummy_pipeline,
+        }
+    };
+
+    world.insert(frame_data);
     log::trace!("Done");
 }
 

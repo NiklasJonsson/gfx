@@ -324,7 +324,7 @@ impl UIContext {
             .expect("Failed to create graphics pipeline");
 
         let desc_set = DescriptorSet::builder(renderer)
-            .add_texture(&font_texture, 0, ShaderStage::Fragment)
+            .add_texture(&font_texture, 0, ShaderStage::FRAGMENT)
             .build();
 
         let input_entity = Self::init_entity(world);
@@ -644,7 +644,7 @@ impl UIDrawCommands {
             .bind_index_buffer(&index_buffer)
             .bind_vertex_buffer(&vertex_buffer)
             .bind_shader_resource_group(0, &desc_set, &pipeline)
-            .bind_push_constant(&pipeline, ShaderStage::Vertex, &vertex_shader_data);
+            .bind_push_constant(&pipeline, ShaderStage::VERTEX, &vertex_shader_data);
 
         for cmd in commands.iter() {
             cmd_buf.set_scissor(cmd.scissor).draw_indexed(

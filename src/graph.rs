@@ -266,7 +266,6 @@ mod tests {
     use super::*;
 
     #[derive(Debug, Component)]
-    #[component(storage = "DenseVecStorage")]
     struct ID(usize);
 
     fn setup_world() -> World {

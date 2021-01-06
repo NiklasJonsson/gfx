@@ -86,13 +86,6 @@ impl App {
                 graph::TRANSFORM_PROPAGATION_SYSTEM_ID,
                 &[],
             )
-            /* TODO: TREKANTEN
-            .with(
-                transform_graph::RenderedBoundingBoxes,
-                transform_graph::RENDERED_BOUNDING_BOXES_SYSTEM_ID,
-                &[transform_graph::TRANSFORM_PROPAGATION_SYSTEM_ID],
-            )
-            */
             .build();
 
         (control, engine)
@@ -105,12 +98,40 @@ impl App {
     fn populate_world(&mut self, args: &Args) {
         self.setup_resources();
         asset::gltf::load_asset(&mut self.world, &args.gltf_path);
+        self.world
+            .create_entity()
+            .with(render::light::Light::Punctual {
+                color: math::Vec3 {
+                    x: 1.0,
+                    y: 1.0,
+                    z: 1.0,
+                },
+            })
+            .with(math::Transform::pos(math::Vec3 {
+                x: 0.0,
+                y: 10.0,
+                z: 0.0,
+            }))
+            .build();
+        self.world
+            .create_entity()
+            .with(render::light::Light::Punctual {
+                color: math::Vec3 {
+                    x: 1.0,
+                    y: 0.5,
+                    z: 1.0,
+                },
+            })
+            .with(math::Transform::pos(math::Vec3 {
+                x: 10.0,
+                y: 1.0,
+                z: 0.0,
+            }))
+            .build();
+
     }
 
     fn next_event(&self) -> Option<Event> {
-        // TODO:
-        // * Can we move this to the event thread
-        // * Merge mouse deltas?
         let mut all_inputs = Vec::with_capacity(self.event_queue.len());
         while let Ok(event) = self.event_queue.pop() {
             match event {

@@ -25,7 +25,7 @@ pub trait BufferDescriptor {
     fn mutability(&self) -> BufferMutability;
     fn n_elems(&self) -> u32;
     fn elem_size(&self) -> u16;
-    fn stride(&self, _: &Device) -> u16;
+    fn elem_align(&self, _: &Device) -> u16;
     fn data(&self) -> &[u8];
     fn vk_usage_flags(&self) -> vk::BufferUsageFlags;
 
@@ -136,18 +136,6 @@ impl<T> BufferHandle<T> {
     }
 }
 
-fn get_aligned_size(n_bytes: usize, elem_size: u16, stride: u16) -> usize {
-    let elem_size = elem_size as usize;
-    let stride = stride as usize;
-    let n_elems = n_bytes / elem_size;
-    if stride == elem_size {
-        n_bytes
-    } else {
-        assert!(elem_size <= stride);
-        n_elems * stride
-    }
-}
-
 pub struct DeviceBuffer {
     allocator: AllocatorHandle,
     vk_buffer: vk::Buffer,
@@ -167,6 +155,12 @@ impl std::fmt::Debug for DeviceBuffer {
             .finish()
     }
 }
+
+fn stride(elem_size: u16, elem_align: u16) -> u16 {
+    let padding = if elem_size == elem_align { 0 } else { 1 };
+    ((elem_size / elem_align) + padding) * elem_align
+}
+
 impl DeviceBuffer {
     pub fn empty(
         device: &Device,
@@ -210,7 +204,7 @@ impl DeviceBuffer {
         device: &Device,
         data: &[u8],
         elem_size: u16,
-        stride: u16,
+        elem_align: u16,
         buffer_usage: vk::BufferUsageFlags,
         mem_usage: MemoryUsage,
         do_unmap: bool,
@@ -219,18 +213,19 @@ impl DeviceBuffer {
         assert!(data.len() % (elem_size as usize) == 0);
         let n_elems = data.len() / (elem_size as usize);
         log::trace!(
-            "n_elems: {}, elem_size: {}, stride: {}",
+            "n_elems: {}, elem_size: {}, elem_align: {}",
             n_elems,
             elem_size,
-            stride
+            elem_align,
         );
-        let size = get_aligned_size(data.len(), elem_size, stride);
+        let stride = stride(elem_size, elem_align);
+        let size = stride as usize * n_elems;
         log::trace!("Total buffer size: {}", size);
 
         let mut buffer = DeviceBuffer::empty(device, size, buffer_usage, mem_usage)?;
         let dst = buffer.map()?;
         let src = data.as_ptr() as *const u8;
-        if elem_size == stride {
+        if elem_size == elem_align {
             log::trace!("Straight copy from {:?} to {:?}, size: {}", src, dst, size);
             unsafe {
                 std::ptr::copy_nonoverlapping::<u8>(src, dst, size);
@@ -257,14 +252,14 @@ impl DeviceBuffer {
         device: &Device,
         data: &[u8],
         elem_size: u16,
-        stride: u16,
+        elem_align: u16,
     ) -> Result<Self, MemoryError> {
         log::trace!("Creating staging buffer");
         Self::with_data(
             device,
             data,
             elem_size,
-            stride,
+            elem_align,
             vk::BufferUsageFlags::TRANSFER_SRC,
             MemoryUsage::CpuOnly,
             true,
@@ -276,14 +271,14 @@ impl DeviceBuffer {
         usage: vk::BufferUsageFlags,
         data: &[u8],
         elem_size: u16,
-        stride: u16,
+        elem_align: u16,
     ) -> Result<Self, MemoryError> {
         log::trace!("Creating persistent mapped buffer");
         Self::with_data(
             device,
             data,
             elem_size,
-            stride,
+            elem_align,
             usage,
             MemoryUsage::CpuToGpu,
             false,
@@ -296,10 +291,10 @@ impl DeviceBuffer {
         usage: vk::BufferUsageFlags,
         data: &[u8],
         elem_size: u16,
-        stride: u16,
+        elem_align: u16,
     ) -> Result<(Self, Self), MemoryError> {
         log::trace!("Creating device local buffer (with data from staging)");
-        let staging = Self::staging_with_data(device, data, elem_size, stride)?;
+        let staging = Self::staging_with_data(device, data, elem_size, elem_align)?;
 
         let dst_buffer = Self::empty(
             device,
@@ -383,7 +378,7 @@ impl<BT> TypedBuffer<BT> {
     ) -> Result<(Self, Option<DeviceBuffer>), MemoryError> {
         log::trace!("Creating buffer");
         let elem_size = descriptor.elem_size();
-        let stride = descriptor.stride(device);
+        let elem_align = descriptor.elem_align(device);
         let vk_buffer_usage_flags = descriptor.vk_usage_flags();
         let data = descriptor.data();
 
@@ -395,7 +390,7 @@ impl<BT> TypedBuffer<BT> {
                     vk_buffer_usage_flags,
                     data,
                     elem_size,
-                    stride,
+                    elem_align,
                 )?;
                 (buffer, Some(staging))
             }
@@ -405,11 +400,13 @@ impl<BT> TypedBuffer<BT> {
                     vk_buffer_usage_flags,
                     data,
                     elem_size,
-                    stride,
+                    elem_align,
                 )?,
                 None,
             ),
         };
+
+        let stride = stride(elem_size, elem_align);
 
         Ok((
             Self {
@@ -429,10 +426,12 @@ impl<BT> TypedBuffer<BT> {
     ) -> Result<(), MemoryError> {
         assert!(descriptor.mutability() == BufferMutability::Mutable);
         let elem_size = descriptor.elem_size();
-        let stride = descriptor.stride(device);
+        let n_elems = descriptor.n_elems();
+        let elem_align = descriptor.elem_align(device);
         let vk_buffer_usage_flags = descriptor.vk_usage_flags();
         let data = descriptor.data();
-        let size = get_aligned_size(descriptor.data().len(), elem_size, stride);
+        let stride = stride(elem_size, elem_align);
+        let size = stride as usize * n_elems as usize;
         if size > self.buffer.size() {
             self.buffer = DeviceBuffer::persistent_mapped(
                 device,

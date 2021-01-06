@@ -1,10 +1,10 @@
 use crate::common::Name;
 use crate::ecs::prelude::*;
 use crate::io::input::{ActionId, InputContext, InputContextError, KeyCode, MappedInput};
-use crate::math::Vec3;
 use crate::render;
 
-use crate::editor::Inspect as _;
+use crate::editor;
+use editor::Inspect as _;
 use ramneryd_derive::Inspect;
 
 use num_derive::FromPrimitive;
@@ -21,7 +21,6 @@ pub struct RenderSettings {
     pub render_mode: RenderMode,
     pub render_bounding_box: bool,
     pub reload_shaders: bool,
-    pub light_pos: Vec3,
 }
 
 impl Default for RenderSettings {
@@ -30,11 +29,6 @@ impl Default for RenderSettings {
             render_mode: RenderMode::Opaque,
             render_bounding_box: false,
             reload_shaders: false,
-            light_pos: Vec3 {
-                x: 0.0,
-                y: 10.0,
-                z: 0.0,
-            },
         }
     }
 }
@@ -126,6 +120,20 @@ pub(crate) fn build_ui<'a>(world: &mut World, ui: &imgui::Ui<'a>, pos: [f32; 2])
         .size(size, imgui::Condition::FirstUseEver)
         .build(&ui, || {
             settings.inspect_mut(ui, "");
+            ui.text("Lights");
+            let mut lights = world.write_storage::<render::light::Light>();
+            let mut transforms = world.write_storage::<crate::math::Transform>();
+            for (light, tfm) in (&mut lights, &mut transforms).join() {
+                editor::inspect::inspect_struct(
+                    "",
+                    Some("Light"),
+                    ui,
+                    Some(|| {
+                        tfm.inspect_mut(ui, "transform");
+                        light.inspect_mut(ui, "light");
+                    }),
+                );
+            }
         });
 
     size

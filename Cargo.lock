@@ -2728,6 +2728,7 @@ dependencies = [
  "arrayvec 0.5.1",
  "ash",
  "ash-window",
+ "bitflags",
  "derive_builder",
  "env_logger 0.7.1",
  "glfw",

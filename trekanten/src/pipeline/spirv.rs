@@ -21,18 +21,39 @@ impl ReflectionData {
     }
 
     pub fn merge_layouts(&mut self, other: Vec<DescriptorSetLayoutData>) {
-        for mut ol in other.into_iter() {
-            let mut found = false;
-            for l in self.desc_layouts.iter_mut() {
-                if ol.set_idx == l.set_idx {
-                    l.bindings.append(&mut ol.bindings);
-                    found = true;
-                    break;
+        for other_set in other.into_iter() {
+            let mut found_set = false;
+            for set in self.desc_layouts.iter_mut() {
+                if set.set_idx == other_set.set_idx {
+                    found_set = true;
+
+                    for other_binding in other_set.bindings.iter() {
+                        let mut found_binding = false;
+                        for binding in set.bindings.iter_mut() {
+                            if binding.binding == other_binding.binding {
+                                found_binding = true;
+                                assert_eq!(binding.descriptor_type, other_binding.descriptor_type);
+                                assert_eq!(
+                                    binding.descriptor_count,
+                                    other_binding.descriptor_count
+                                );
+                                assert_eq!(
+                                    binding.p_immutable_samplers,
+                                    other_binding.p_immutable_samplers
+                                );
+                                binding.stage_flags |= other_binding.stage_flags;
+                            }
+                        }
+
+                        if !found_binding {
+                            set.bindings.push(*other_binding);
+                        }
+                    }
                 }
             }
 
-            if !found {
-                self.desc_layouts.push(ol);
+            if !found_set {
+                self.desc_layouts.push(other_set);
             }
         }
     }
@@ -74,12 +95,24 @@ pub enum SpirvError {
     Parsing(&'static str),
 }
 
-fn map_shader_stage_flags(refl_stage: &ReflectShaderStageFlags) -> vk::ShaderStageFlags {
-    match *refl_stage {
-        ReflectShaderStageFlags::VERTEX => vk::ShaderStageFlags::VERTEX,
-        ReflectShaderStageFlags::FRAGMENT => vk::ShaderStageFlags::FRAGMENT,
-        _ => unimplemented!("Unsupported shader stage: {:?}", refl_stage),
+fn map_shader_stage_flags(refl_stage: ReflectShaderStageFlags) -> vk::ShaderStageFlags {
+    let mut out = vk::ShaderStageFlags::empty();
+
+    if refl_stage.contains(ReflectShaderStageFlags::VERTEX) {
+        out |= vk::ShaderStageFlags::VERTEX;
     }
+
+    if refl_stage.contains(ReflectShaderStageFlags::FRAGMENT) {
+        out |= vk::ShaderStageFlags::FRAGMENT;
+    }
+
+    if refl_stage & (!(ReflectShaderStageFlags::VERTEX | ReflectShaderStageFlags::FRAGMENT))
+        != ReflectShaderStageFlags::empty()
+    {
+        unimplemented!("Unsupported shader stage: {:?}", refl_stage);
+    }
+
+    out
 }
 
 fn map_descriptor_type(refl_desc_ty: &ReflectDescriptorType) -> vk::DescriptorType {
@@ -110,7 +143,7 @@ pub fn parse_spirv(spv_data: &[u32]) -> Result<ReflectionData, SpirvError> {
     let desc_sets = module
         .enumerate_descriptor_sets(None)
         .map_err(SpirvError::Parsing)?;
-    let stage_flags = map_shader_stage_flags(&module.get_shader_stage());
+    let stage_flags = map_shader_stage_flags(module.get_shader_stage());
     let mut desc_layouts = Vec::with_capacity(desc_sets.len());
     for refl_desc_set in desc_sets.iter() {
         let set_idx = refl_desc_set.set;

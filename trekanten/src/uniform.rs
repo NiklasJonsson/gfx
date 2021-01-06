@@ -29,7 +29,7 @@ impl<'a, T: Copy> BufferDescriptor for UniformBufferDescriptor<'a, T> {
         std::mem::size_of::<T>() as u16
     }
 
-    fn stride(&self, device: &Device) -> u16 {
+    fn elem_align(&self, device: &Device) -> u16 {
         device.uniform_buffer_offset_alignment() as u16
     }
 
@@ -99,7 +99,7 @@ impl BufferDescriptor for OwningUniformBufferDescriptor {
         self.elem_size
     }
 
-    fn stride(&self, device: &Device) -> u16 {
+    fn elem_align(&self, device: &Device) -> u16 {
         device.uniform_buffer_offset_alignment() as u16
     }
 

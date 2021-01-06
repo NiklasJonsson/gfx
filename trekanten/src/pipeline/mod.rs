@@ -23,17 +23,26 @@ pub use error::PipelineError;
 use spirv::{parse_spirv, ReflectionData};
 use std::sync::Arc;
 
-pub enum ShaderStage {
-    Vertex,
-    Fragment,
+bitflags::bitflags! {
+    pub struct ShaderStage: u8 {
+        const VERTEX = 0b1;
+        const FRAGMENT = 0b10;
+    }
 }
 
 impl From<ShaderStage> for vk::ShaderStageFlags {
     fn from(s: ShaderStage) -> Self {
-        match s {
-            ShaderStage::Vertex => vk::ShaderStageFlags::VERTEX,
-            ShaderStage::Fragment => vk::ShaderStageFlags::FRAGMENT,
+        let mut out = vk::ShaderStageFlags::default();
+
+        if s.contains(ShaderStage::VERTEX) {
+            out |= vk::ShaderStageFlags::VERTEX;
         }
+
+        if s.contains(ShaderStage::FRAGMENT) {
+            out |= vk::ShaderStageFlags::FRAGMENT;
+        }
+
+        out
     }
 }
 

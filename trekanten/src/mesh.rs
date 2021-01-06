@@ -95,7 +95,7 @@ impl<'a> BufferDescriptor for IndexBufferDescriptor<'a> {
         (self.data.len() / self.elem_size() as usize) as u32
     }
 
-    fn stride(&self, _: &Device) -> u16 {
+    fn elem_align(&self, _: &Device) -> u16 {
         self.elem_size()
     }
 
@@ -164,7 +164,7 @@ impl BufferDescriptor for OwningIndexBufferDescriptor {
         (self.data.len() / self.elem_size() as usize) as u32
     }
 
-    fn stride(&self, _: &Device) -> u16 {
+    fn elem_align(&self, _: &Device) -> u16 {
         self.elem_size()
     }
 
@@ -265,7 +265,7 @@ impl<'a> BufferDescriptor for OwningVertexBufferDescriptor {
         (self.data.len() / self.elem_size() as usize) as u32
     }
 
-    fn stride(&self, _: &Device) -> u16 {
+    fn elem_align(&self, _: &Device) -> u16 {
         self.elem_size()
     }
 
@@ -337,7 +337,7 @@ impl<'a> BufferDescriptor for VertexBufferDescriptor<'a> {
         (self.data.len() / self.elem_size() as usize) as u32
     }
 
-    fn stride(&self, _: &Device) -> u16 {
+    fn elem_align(&self, _: &Device) -> u16 {
         self.elem_size()
     }
 

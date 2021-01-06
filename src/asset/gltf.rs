@@ -408,7 +408,7 @@ struct GltfMaterial {
 }
 
 #[derive(Component)]
-#[component(storage = "VecStorage", inspect)]
+#[component(inspect)]
 pub struct PendingGltfModel {
     mat: GltfMaterial,
     index: BufferHandle<IndexBuffer>,

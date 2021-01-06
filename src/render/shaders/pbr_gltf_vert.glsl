@@ -1,15 +1,15 @@
 #version 450
 #extension GL_ARB_separate_shader_objects : enable
 
-layout(set = 0, binding = 0) uniform Transforms {
-    mat4 view;
-    mat4 proj;
-} ubo;
+layout(set = 0, binding = 0) uniform ViewData {
+    mat4 view_proj;
+    vec4 view_pos;
+} view_data;
 
 layout(push_constant) uniform Model {
     mat4 model;
     mat4 model_it; // inverse transpose of model matrix
-} model_ubo;
+} model_tfm;
 
 layout(location = 0) in vec3 position;
 layout(location = 1) in vec3 normal;
@@ -42,8 +42,8 @@ layout(location = BITAN_LOC) out vec3 world_bitangent;
 #endif
 
 void main() {
-    world_normal = normalize((model_ubo.model_it * vec4(normal, 0.0)).xyz);
-    world_pos = (model_ubo.model * vec4(position, 1.0)).xyz;
+    world_normal = normalize((model_tfm.model_it * vec4(normal, 0.0)).xyz);
+    world_pos = (model_tfm.model * vec4(position, 1.0)).xyz;
 #if HAS_TEX_COORDS
     tex_coords_0 = tex_coords;
 #endif
@@ -53,9 +53,9 @@ void main() {
 #endif
 
 #if HAS_TANGENTS
-    world_tangent = normalize((model_ubo.model * vec4(tangent.xyz, 0.0)).xyz);
+    world_tangent = normalize((model_tfm.model * vec4(tangent.xyz, 0.0)).xyz);
     world_bitangent = normalize(cross(world_normal, world_tangent) * tangent.w);
 #endif
 
-    gl_Position = ubo.proj * ubo.view * model_ubo.model * vec4(position, 1.0);
+    gl_Position = view_data.view_proj * model_tfm.model * vec4(position, 1.0);
 }

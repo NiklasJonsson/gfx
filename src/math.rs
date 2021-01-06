@@ -26,6 +26,13 @@ impl Transform {
             scale: 1.0,
         }
     }
+
+    pub fn pos(position: Vec3) -> Self {
+        Self {
+            position,
+            ..Self::identity()
+        }
+    }
 }
 
 impl Default for Transform {

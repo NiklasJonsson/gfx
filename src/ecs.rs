@@ -40,14 +40,6 @@ where
     try_get_singleton_entity::<C>(w).expect("Expected an entity!")
 }
 
-pub fn entity_has_component<C>(w: &World, e: Entity) -> bool
-where
-    C: specs::Component,
-{
-    use specs::WorldExt as _;
-    w.read_storage::<C>().get(e).is_some()
-}
-
 pub trait System<'a> {
     type SystemData: specs::SystemData<'a>;
 
