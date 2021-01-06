@@ -238,7 +238,7 @@ pub fn inspect_struct<'a>(
     }
 
     if let Some(ty) = ty {
-        if imgui::CollapsingHeader::new(&im_str!("struct {}", ty))
+        if imgui::CollapsingHeader::new(&im_str!("struct {}##{}", ty, name))
             .leaf(empty)
             .build(ui)
         {
