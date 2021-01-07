@@ -265,7 +265,13 @@ fn load_node_rec(ctx: &mut RecGltfCtx, src: &gltf::Node) -> ecs::Entity {
     let node = node.build();
 
     if let Some(mesh) = src.mesh() {
-        let mesh_child = ctx.data.entities.create();
+        let mesh_child = ctx
+            .data
+            .entities
+            .build_entity()
+            .with(Transform::identity(), ctx.data.transforms)
+            .build();
+
         for (i, primitive) in mesh.primitives().enumerate() {
             let gltf_model = load_primitive(ctx, &primitive);
 
@@ -281,6 +287,7 @@ fn load_node_rec(ctx: &mut RecGltfCtx, src: &gltf::Node) -> ecs::Entity {
                 .with(gltf_model, ctx.data.gltf_models)
                 .with(Name(format!("Primitive {}", i)), ctx.data.names)
                 .with(bbox, ctx.data.bboxes)
+                .with(Transform::identity(), ctx.data.transforms)
                 .build();
             graph::add_edge_sys(
                 &mut ctx.data.children_storage,
@@ -516,6 +523,11 @@ impl<'a> System<'a> for GltfLoader {
                     ent,
                     root,
                 );
+                rec_ctx
+                    .data
+                    .transforms
+                    .insert(ent, Transform::identity())
+                    .unwrap();
             }
 
             let RecGltfCtx {

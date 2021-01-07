@@ -58,26 +58,24 @@ impl TransformPropagation {
         model_matrices: &mut WriteStorage<'a, ModelMatrix>,
         parent_transform: Transform,
     ) {
-        let transform = transforms
-            .get(ent)
-            .copied()
-            .unwrap_or_else(Transform::identity);
+        let transform = transforms.get(ent);
 
-        let transform = parent_transform * transform;
+        if let Some(transform) = transform {
+            let transform = parent_transform * *transform;
+            model_matrices
+                .insert(ent, ModelMatrix(Mat4::from(transform)))
+                .unwrap();
 
-        model_matrices
-            .insert(ent, ModelMatrix(Mat4::from(transform)))
-            .unwrap();
-
-        if let Some(children) = children_storage.get(ent) {
-            for child in children.iter() {
-                TransformPropagation::propagate_transforms_rec(
-                    *child,
-                    children_storage,
-                    transforms,
-                    model_matrices,
-                    transform,
-                );
+            if let Some(children) = children_storage.get(ent) {
+                for child in children.iter() {
+                    TransformPropagation::propagate_transforms_rec(
+                        *child,
+                        children_storage,
+                        transforms,
+                        model_matrices,
+                        transform,
+                    );
+                }
             }
         }
     }
@@ -96,24 +94,19 @@ impl<'a> System<'a> for TransformPropagation {
         &mut self,
         (entities, parent_storage, children_storage, transforms, mut model_matrices): Self::SystemData,
     ) {
-        for (ent, _, children) in (&entities, !&parent_storage, &children_storage).join() {
-            let transform = transforms
-                .get(ent)
-                .copied()
-                .unwrap_or_else(Transform::identity);
-
-            if let Ok(entry) = model_matrices.entry(ent) {
-                // Root node, no need to multiply
-                entry.or_insert(ModelMatrix(Mat4::from(transform)));
-            }
-
+        for (ent, _, children, transform) in
+            (&entities, !&parent_storage, &children_storage, &transforms).join()
+        {
+            model_matrices
+                .insert(ent, ModelMatrix(Mat4::from(*transform)))
+                .unwrap();
             for child in children.iter() {
                 TransformPropagation::propagate_transforms_rec(
                     *child,
                     &children_storage,
                     &transforms,
                     &mut model_matrices,
-                    transform,
+                    *transform,
                 );
             }
         }
