@@ -137,7 +137,7 @@ fn inspect_enum(di: &DeriveInput) -> TokenStream {
 fn inspect_struct_data(data: &syn::DataStruct, is_mut: bool) -> TokenStream {
     let fn_name = inspect_fn_name(is_mut);
     let maybe_mut = maybe_mut(is_mut);
-    let one_field = data.fields.len() == 1;
+    let n_fields = data.fields.len();
 
     let fields = data.fields.iter().enumerate().map(|(i, f)| {
         let field = f.ident.as_ref().map(|x| quote! {#x}).unwrap_or_else(|| {
@@ -145,7 +145,7 @@ fn inspect_struct_data(data: &syn::DataStruct, is_mut: bool) -> TokenStream {
             quote! {#i}
         });
         let ty = &f.ty;
-        let name = if f.ident.is_none() && one_field {
+        let name = if f.ident.is_none() && n_fields == 1 {
             quote_spanned! {f.span()=> ""}
         } else {
             quote_spanned! {f.span()=> stringify!(#field)}
@@ -156,8 +156,16 @@ fn inspect_struct_data(data: &syn::DataStruct, is_mut: bool) -> TokenStream {
         }
     });
 
-    quote! {
-        #(#fields)*
+    if n_fields == 0 {
+        quote! {
+            None
+        }
+    } else {
+        quote! {
+            Some(|| {
+                #(#fields)*
+            })
+        }
     }
 }
 
@@ -177,17 +185,13 @@ fn inspect_struct(di: &DeriveInput) -> TokenStream {
             fn inspect<'a>(&self, ui: &imgui::Ui<'a>, name: &str) {
                 use crate::editor::Inspect;
                 crate::editor::inspect::inspect_struct(name, Some(stringify!(#name)),
-                    std::mem::size_of::<Self>() == 0, ui, || {
-                    #body
-                });
+                    ui, #body);
             }
 
             fn inspect_mut<'a>(&mut self, ui: &imgui::Ui<'a>, name: &str) {
                 use crate::editor::Inspect;
                 crate::editor::inspect::inspect_struct(name, Some(stringify!(#name)),
-                std::mem::size_of::<Self>() == 0, ui, || {
-                    #body_mut
-                });
+                    ui, #body_mut);
             }
         }
     }

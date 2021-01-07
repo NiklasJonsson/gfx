@@ -225,13 +225,10 @@ impl Inspect for bool {
     }
 }
 
-pub fn inspect_struct<'a>(
-    name: &str,
-    ty: Option<&str>,
-    empty: bool,
-    ui: &Ui<'a>,
-    mut body: impl FnMut(),
-) {
+pub fn inspect_struct<'a, Body>(name: &str, ty: Option<&str>, ui: &Ui<'a>, body: Option<Body>)
+where
+    Body: FnMut(),
+{
     if !name.is_empty() {
         ui.text(name);
         ui.same_line(0.0);
@@ -239,31 +236,45 @@ pub fn inspect_struct<'a>(
 
     if let Some(ty) = ty {
         if imgui::CollapsingHeader::new(&im_str!("struct {}##{}", ty, name))
-            .leaf(empty)
+            .leaf(body.is_none())
             .build(ui)
         {
             ui.indent();
-            body();
+            if let Some(mut body) = body {
+                body();
+            }
             ui.unindent();
         }
     } else {
-        body();
+        if let Some(mut body) = body {
+            body();
+        }
     }
 }
 
 impl Inspect for trekanten::mesh::Mesh {
     fn inspect<'a>(&self, ui: &Ui<'a>, name: &str) {
-        inspect_struct(name, Some(std::any::type_name::<Self>()), false, ui, || {
-            self.vertex_buffer.inspect(ui, "vertex_buffer");
-            self.index_buffer.inspect(ui, "index_buffer");
-        });
+        inspect_struct(
+            name,
+            Some(std::any::type_name::<Self>()),
+            ui,
+            Some(|| {
+                self.vertex_buffer.inspect(ui, "vertex_buffer");
+                self.index_buffer.inspect(ui, "index_buffer");
+            }),
+        );
     }
 
     fn inspect_mut<'a>(&mut self, ui: &Ui<'a>, name: &str) {
-        inspect_struct(name, Some(std::any::type_name::<Self>()), false, ui, || {
-            self.vertex_buffer.inspect_mut(ui, "vertex_buffer");
-            self.index_buffer.inspect_mut(ui, "index_buffer");
-        });
+        inspect_struct(
+            name,
+            Some(std::any::type_name::<Self>()),
+            ui,
+            Some(|| {
+                self.vertex_buffer.inspect_mut(ui, "vertex_buffer");
+                self.index_buffer.inspect_mut(ui, "index_buffer");
+            }),
+        );
     }
 }
 
