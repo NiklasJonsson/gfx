@@ -128,7 +128,6 @@ impl App {
                 z: 0.0,
             }))
             .build();
-
     }
 
     fn next_event(&self) -> Option<Event> {

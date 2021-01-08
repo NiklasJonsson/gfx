@@ -235,7 +235,12 @@ where
     }
 
     if let Some(ty) = ty {
-        if imgui::CollapsingHeader::new(&im_str!("struct {}##{}", ty, name))
+        let id = if name.is_empty() {
+            im_str!("struct {}", ty)
+        } else {
+            im_str!("struct {}##{}", ty, name)
+        };
+        if imgui::CollapsingHeader::new(&id)
             .leaf(body.is_none())
             .build(ui)
         {

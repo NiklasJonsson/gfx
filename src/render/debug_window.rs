@@ -115,7 +115,7 @@ pub(crate) fn build_ui<'a>(world: &mut World, ui: &imgui::Ui<'a>, pos: [f32; 2])
 
     let size = [300.0, 85.0];
 
-    imgui::Window::new(imgui::im_str!("Render settings"))
+    imgui::Window::new(imgui::im_str!("Render debug"))
         .position(pos, imgui::Condition::FirstUseEver)
         .size(size, imgui::Condition::FirstUseEver)
         .build(&ui, || {
@@ -123,10 +123,11 @@ pub(crate) fn build_ui<'a>(world: &mut World, ui: &imgui::Ui<'a>, pos: [f32; 2])
             ui.text("Lights");
             let mut lights = world.write_storage::<render::light::Light>();
             let mut transforms = world.write_storage::<crate::math::Transform>();
-            for (light, tfm) in (&mut lights, &mut transforms).join() {
+            for (i, (light, tfm)) in (&mut lights, &mut transforms).join().enumerate() {
+                let id = format!("Light##{}", i);
                 editor::inspect::inspect_struct(
                     "",
-                    Some("Light"),
+                    Some(&id),
                     ui,
                     Some(|| {
                         tfm.inspect_mut(ui, "transform");
