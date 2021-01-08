@@ -4,7 +4,7 @@ use crate::math::Vec3;
 #[derive(Component)]
 #[component(inspect)]
 pub enum Light {
-    Punctual { color: Vec3 },
+    Point { color: Vec3, range: f32 },
     Directional { color: Vec3 },
-    Spotlight { color: Vec3, angle: f32 },
+    Spot { color: Vec3, angle: f32 },
 }

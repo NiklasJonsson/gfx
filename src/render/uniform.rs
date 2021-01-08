@@ -28,7 +28,7 @@ impl UniformBlock for UnlitUniformData {
 #[repr(C, packed)]
 pub struct PunctualLight {
     pub pos: [f32; 4],
-    pub color: [f32; 4],
+    pub color_range: [f32; 4],
 }
 
 pub const MAX_NUM_PUNCTUAL_LIGHTS: usize = 16;

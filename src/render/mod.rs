@@ -397,7 +397,7 @@ pub fn draw_frame(world: &mut World, ui: &mut ui::UIContext, renderer: &mut Rend
         let transforms = world.read_storage::<Transform>();
         for (light, tfm) in (&lights, &transforms).join() {
             match light {
-                light::Light::Punctual { color } => {
+                light::Light::Point { color, range } => {
                     if n_punctual >= uniform::MAX_NUM_PUNCTUAL_LIGHTS {
                         log::warn!("Too many punctual lights, ignoring");
                         continue;
@@ -405,7 +405,8 @@ pub fn draw_frame(world: &mut World, ui: &mut ui::UIContext, renderer: &mut Rend
 
                     data.punctual_lights[n_punctual].pos =
                         [tfm.position.x, tfm.position.y, tfm.position.z, 1.0f32];
-                    data.punctual_lights[n_punctual].color = [color.x, color.y, color.z, 1.0f32];
+                    data.punctual_lights[n_punctual].color_range =
+                        [color.x, color.y, color.z, *range];
                     n_punctual += 1;
                 }
                 _ => todo!(),

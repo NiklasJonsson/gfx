@@ -14,7 +14,7 @@ layout(set = 0, binding = 0) uniform ViewData {
 #define PUNCTUAL_LIGHTS_BITS (0xF)
 struct PunctualLight {
     vec4 pos;
-    vec4 color;
+    vec4 color_range; // .w is the range
 };
 
 layout(set = 0, binding = 1) uniform LightingData {
@@ -24,6 +24,27 @@ layout(set = 0, binding = 1) uniform LightingData {
 
 uint num_punctual_lights() {
     return min(lighting_data.num_lights & PUNCTUAL_LIGHTS_BITS, MAX_NUM_PUNCTUAL_LIGHTS);
+}
+
+float punctual_light_range(PunctualLight l) {
+    return l.color_range.w;
+}
+
+// This is based on the recommended impl for KHR_punctual_lights:
+// https://github.com/KhronosGroup/glTF/blob/master/extensions/2.0/Khronos/KHR_lights_punctual/README.md#range-property
+// This frostbite presentation has some more details on the same formula:
+// https://seblagarde.files.wordpress.com/2015/07/course_notes_moving_frostbite_to_pbr_v32.pdf
+// Also in real-time rendering 4, p 113, eq. 5.14 (which refers to the above presentation)
+float distance_attenuation(vec3 light_vec, float light_range) {
+    float dist_sqr = dot(light_vec, light_vec);
+    float range_sqr = pow(light_range, 2.0);
+    // inverse square law for light falloff & eps to avoid singularity
+    float attenuation = 1.0 / max(dist_sqr, pow(0.01, 2.0));
+    // Modified lerp(attenuation, 0, dist / light_range) so that we get a maximum range but the lerp does not affect
+    // the falloff too severely. See frostbite presentation/real-time rendering for more info.
+    float smooth_factor = pow(clamp(1.0 - pow(dist_sqr / range_sqr, 2.0), 0.0, 1.0), 2.0);
+
+    return attenuation * smooth_factor;
 }
 
 layout(location = 0) in vec3 world_normal;
@@ -161,15 +182,18 @@ void main() {
     vec3 color = vec3(0);
 
     for (uint i = 0; i < num_punctual_lights(); ++i) {
-        vec3 light_dir = normalize(lighting_data.punctual_lights[i].pos.xyz - world_pos);
+        PunctualLight light = lighting_data.punctual_lights[i];
+
+        vec3 unnormalized_light_dir = light.pos.xyz - world_pos;
+        vec3 light_dir = normalize(unnormalized_light_dir);
         vec3 bisect_light_view = normalize(view_dir + light_dir);
-        vec3 light_color = lighting_data.punctual_lights[i].color.xyz;
+        vec3 light_color = light.color_range.xyz;
+        float attenuation = distance_attenuation(unnormalized_light_dir, punctual_light_range(light));
 
         float n_dot_l = clamp(dot(normal, light_dir), 0.0, 1.0);
         float n_dot_h_unclamped = dot(normal, bisect_light_view);
         float n_dot_h = clamp(n_dot_h_unclamped, 0.0, 1.0);
         float h_dot_l = clamp(dot(bisect_light_view, light_dir), 0.0, 1.0);
-
 
         // Up until now, specific to gltf. From here on, wild west brdf
         // Define output as diffuse term + specular term
@@ -201,9 +225,11 @@ void main() {
         // If the light is modeled as rays, the distance between the points where the light
         // rays hit the surface decreases (=> light intensity increases) as the light vector
         // approaches the normal.
-        // TODO: Where does PI come from for specular?
-        color += M_PI * (f_diffuse + f_specular) * n_dot_l * light_color;
+        color += (f_diffuse + f_specular) * n_dot_l * light_color * attenuation;
     }
+    // Punctual lights means the integral in the reflectance equation simplifies down to PI,
+    // see real-time rendering 4, p. 316 eq. 9.14
+    color *= M_PI;
 
     out_color = vec4(color, 1.0);
 }

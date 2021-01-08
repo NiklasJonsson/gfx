@@ -100,12 +100,13 @@ impl App {
         asset::gltf::load_asset(&mut self.world, &args.gltf_path);
         self.world
             .create_entity()
-            .with(render::light::Light::Punctual {
+            .with(render::light::Light::Point {
                 color: math::Vec3 {
                     x: 1.0,
                     y: 1.0,
                     z: 1.0,
                 },
+                range: 20.0,
             })
             .with(math::Transform::pos(math::Vec3 {
                 x: 0.0,
@@ -115,12 +116,13 @@ impl App {
             .build();
         self.world
             .create_entity()
-            .with(render::light::Light::Punctual {
+            .with(render::light::Light::Point {
                 color: math::Vec3 {
                     x: 1.0,
                     y: 0.5,
                     z: 1.0,
                 },
+                range: 5.0,
             })
             .with(math::Transform::pos(math::Vec3 {
                 x: 10.0,

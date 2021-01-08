@@ -240,6 +240,7 @@ where
         } else {
             im_str!("struct {}##{}", ty, name)
         };
+        let token = ui.push_id(&id);
         if imgui::CollapsingHeader::new(&id)
             .leaf(body.is_none())
             .build(ui)
@@ -250,10 +251,13 @@ where
             }
             ui.unindent();
         }
+        token.pop(ui);
     } else {
+        let token = ui.push_id(&name);
         if let Some(mut body) = body {
             body();
         }
+        token.pop(ui);
     }
 }
 
