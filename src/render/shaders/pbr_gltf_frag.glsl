@@ -32,7 +32,8 @@ float punctual_light_range(PunctualLight l) {
 
 // This is based on the recommended impl for KHR_punctual_lights:
 // https://github.com/KhronosGroup/glTF/blob/master/extensions/2.0/Khronos/KHR_lights_punctual/README.md#range-property
-// This frostbite presentation has some more details on the same formula:
+// It does not contain the square for the smooth factor though.
+// This frostbite presentation has some more details:
 // https://seblagarde.files.wordpress.com/2015/07/course_notes_moving_frostbite_to_pbr_v32.pdf
 // Also in real-time rendering 4, p 113, eq. 5.14 (which refers to the above presentation)
 float distance_attenuation(vec3 light_vec, float light_range) {
