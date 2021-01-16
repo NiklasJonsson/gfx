@@ -21,6 +21,7 @@ pub struct RenderSettings {
     pub render_mode: RenderMode,
     pub render_bounding_box: bool,
     pub reload_shaders: bool,
+    pub render_light_volumes: bool,
 }
 
 impl Default for RenderSettings {
@@ -29,6 +30,7 @@ impl Default for RenderSettings {
             render_mode: RenderMode::Opaque,
             render_bounding_box: false,
             reload_shaders: false,
+            render_light_volumes: false,
         }
     }
 }
@@ -100,6 +102,7 @@ impl<'a> System<'a> for RenderSettingsSys {
 
 pub const RENDER_SETTINGS_SYS_ID: &str = "render_settings_sys";
 
+// TODO: Merge these systems?
 pub fn register_systems<'a, 'b>(builder: ExecutorBuilder<'a, 'b>) -> ExecutorBuilder<'a, 'b> {
     builder
         .with(
@@ -107,7 +110,7 @@ pub fn register_systems<'a, 'b>(builder: ExecutorBuilder<'a, 'b>) -> ExecutorBui
             RENDER_SETTINGS_SYS_ID,
             &[],
         )
-        .with(ApplySettings, "ApplySettings", &[RENDER_SETTINGS_SYS_ID])
+        .with(ApplySettings, ApplySettings::ID, &[RENDER_SETTINGS_SYS_ID])
 }
 
 pub(crate) fn build_ui<'a>(world: &mut World, ui: &imgui::Ui<'a>, pos: [f32; 2]) -> [f32; 2] {
@@ -140,16 +143,22 @@ pub(crate) fn build_ui<'a>(world: &mut World, ui: &imgui::Ui<'a>, pos: [f32; 2])
     size
 }
 
-struct ApplySettings;
+pub struct ApplySettings;
+
+impl ApplySettings {
+    pub const ID: &'static str = "ApplySettings";
+}
 
 impl<'a> System<'a> for ApplySettings {
     type SystemData = (
         Write<'a, RenderSettings>,
         Entities<'a>,
         ReadStorage<'a, render::material::Material>,
-        ReadStorage<'a, crate::math::BoundingBox>,
         WriteStorage<'a, render::ReloadMaterial>,
+        ReadStorage<'a, crate::math::BoundingBox>,
         WriteStorage<'a, render::bounding_box::DoRenderBoundingBox>,
+        ReadStorage<'a, render::light::Light>,
+        WriteStorage<'a, render::light::RenderLightVolume>,
     );
 
     fn run(&mut self, data: Self::SystemData) {
@@ -157,9 +166,11 @@ impl<'a> System<'a> for ApplySettings {
             mut render_settings,
             entities,
             materials,
-            bounding_boxes,
             mut reload_materials,
+            bounding_boxes,
             mut render_bbox,
+            lights,
+            mut render_light_cmds,
         ) = data;
         if render_settings.reload_shaders {
             for (ent, _mat) in (&entities, &materials).join() {
@@ -179,6 +190,16 @@ impl<'a> System<'a> for ApplySettings {
             }
 
             render_settings.render_bounding_box = false;
+        }
+
+        if render_settings.render_light_volumes {
+            for (ent, _light) in (&entities, &lights).join() {
+                render_light_cmds
+                    .insert(ent, render::light::RenderLightVolume)
+                    .expect("Failed to insert");
+            }
+
+            render_settings.render_light_volumes = false;
         }
     }
 }

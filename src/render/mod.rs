@@ -536,9 +536,13 @@ pub fn setup_resources(world: &mut World, mut renderer: &mut Renderer) {
 }
 
 pub fn register_systems<'a, 'b>(builder: ExecutorBuilder<'a, 'b>) -> ExecutorBuilder<'a, 'b> {
-    let builder = bounding_box::register_systems(builder);
-    let builder = mesh::register_systems(builder);
-    let builder = material::register_systems(builder);
-    let builder = debug_window::register_systems(builder);
-    builder
+    [
+        debug_window::register_systems,
+        bounding_box::register_systems,
+        light::register_systems,
+        mesh::register_systems,
+        material::register_systems,
+    ]
+    .iter()
+    .fold(builder, |a, x| x(a))
 }

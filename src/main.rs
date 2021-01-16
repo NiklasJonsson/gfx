@@ -110,7 +110,7 @@ impl App {
             })
             .with(math::Transform::pos(math::Vec3 {
                 x: 0.0,
-                y: 10.0,
+                y: 2.0,
                 z: 0.0,
             }))
             .build();
@@ -125,7 +125,7 @@ impl App {
                 range: 5.0,
             })
             .with(math::Transform::pos(math::Vec3 {
-                x: 10.0,
+                x: 2.0,
                 y: 1.0,
                 z: 0.0,
             }))

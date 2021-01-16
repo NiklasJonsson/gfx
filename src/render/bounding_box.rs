@@ -121,6 +121,6 @@ pub fn register_systems<'a, 'b>(builder: ExecutorBuilder<'a, 'b>) -> ExecutorBui
     builder.with(
         CreateRenderedBoundingBoxes,
         std::any::type_name::<CreateRenderedBoundingBoxes>(),
-        &[],
+        &[crate::render::debug_window::ApplySettings::ID],
     )
 }

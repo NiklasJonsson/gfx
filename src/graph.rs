@@ -1,4 +1,5 @@
 use crate::ecs::prelude::*;
+use specs::storage;
 
 use std::collections::VecDeque;
 
@@ -48,7 +49,6 @@ pub fn add_edge_sys<'a>(
 
 pub const TRANSFORM_PROPAGATION_SYSTEM_ID: &str = "transform_propagation";
 
-/// SPECS system to concatenate model matrices
 pub struct TransformPropagation;
 impl TransformPropagation {
     fn propagate_transforms_rec<'a>(
@@ -115,7 +115,7 @@ impl<'a> System<'a> for TransformPropagation {
 
 pub fn breadth_first_sys<CS>(children_storage: CS, root: Entity, mut visit_node: impl FnMut(Entity))
 where
-    CS: specs::storage::GenericReadStorage<Component = Children>,
+    CS: storage::GenericReadStorage<Component = Children>,
 {
     let mut queue = VecDeque::new();
     queue.push_back(root);
