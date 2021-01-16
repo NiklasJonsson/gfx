@@ -24,33 +24,10 @@ impl std::ops::Deref for Children {
     }
 }
 
-pub fn add_edge(world: &mut World, parent: Entity, child: Entity) {
-    let mut children_storage = world.write_storage::<Children>();
-    let mut parent_storage = world.write_storage::<Parent>();
-    add_edge_sys(&mut children_storage, &mut parent_storage, parent, child);
-}
-
-pub fn add_edge_sys<'a>(
-    children_storage: &mut WriteStorage<'a, Children>,
-    parent_storage: &mut WriteStorage<'a, Parent>,
-    parent: Entity,
-    child: Entity,
-) {
-    let entry = children_storage
-        .entry(parent)
-        .expect("Failed to get entry!");
-    let contents = entry.or_insert(Children { children: vec![] });
-    contents.children.push(child);
-
-    parent_storage
-        .insert(child, Parent { parent })
-        .expect("Failed to get entry!");
-}
-
-pub const TRANSFORM_PROPAGATION_SYSTEM_ID: &str = "transform_propagation";
-
 pub struct TransformPropagation;
 impl TransformPropagation {
+    pub const ID: &'static str = "TransformPropagation";
+
     fn propagate_transforms_rec<'a>(
         ent: Entity,
         children_storage: &ReadStorage<'a, Children>,
@@ -113,55 +90,85 @@ impl<'a> System<'a> for TransformPropagation {
     }
 }
 
-pub fn breadth_first_sys<CS>(children_storage: CS, root: Entity, mut visit_node: impl FnMut(Entity))
-where
-    CS: storage::GenericReadStorage<Component = Children>,
-{
-    let mut queue = VecDeque::new();
-    queue.push_back(root);
+pub mod sys {
+    pub use super::*;
 
-    while !queue.is_empty() {
-        let ent = queue.pop_front().unwrap();
-        visit_node(ent);
+    pub fn add_edge<'a>(
+        children_storage: &mut WriteStorage<'a, Children>,
+        parent_storage: &mut WriteStorage<'a, Parent>,
+        parent: Entity,
+        child: Entity,
+    ) {
+        let entry = children_storage
+            .entry(parent)
+            .expect("Failed to get entry!");
+        let contents = entry.or_insert(Children { children: vec![] });
+        contents.children.push(child);
 
-        if let Some(children) = children_storage.get(ent) {
-            for c in children.iter() {
-                queue.push_back(*c);
+        parent_storage
+            .insert(child, Parent { parent })
+            .expect("Failed to get entry!");
+    }
+
+    pub fn breadth_first<CS>(children_storage: CS, root: Entity, mut visit_node: impl FnMut(Entity))
+    where
+        CS: storage::GenericReadStorage<Component = Children>,
+    {
+        let mut queue = VecDeque::new();
+        queue.push_back(root);
+
+        while !queue.is_empty() {
+            let ent = queue.pop_front().unwrap();
+            visit_node(ent);
+
+            if let Some(children) = children_storage.get(ent) {
+                for c in children.iter() {
+                    queue.push_back(*c);
+                }
+            }
+        }
+    }
+
+    pub fn depth_first<'a>(
+        children_storage: &ReadStorage<'a, Children>,
+        root: Entity,
+        mut visit_node: impl FnMut(Entity),
+    ) {
+        let mut stack = Vec::new();
+        stack.push(root);
+
+        while !stack.is_empty() {
+            let ent = stack.pop().unwrap();
+            visit_node(ent);
+
+            if let Some(children) = children_storage.get(ent) {
+                for c in children.iter() {
+                    stack.push(*c);
+                }
             }
         }
     }
 }
 
-pub fn breadth_first(world: &World, root: Entity, visit_node: impl FnMut(Entity)) {
-    let nodes_storage = world.read_storage::<Children>();
-    breadth_first_sys(&nodes_storage, root, visit_node);
-}
+pub mod world {
+    pub use super::*;
 
-fn depth_first_sys<'a>(
-    children_storage: &ReadStorage<'a, Children>,
-    root: Entity,
-    mut visit_node: impl FnMut(Entity),
-) {
-    let mut stack = Vec::new();
-    stack.push(root);
+    pub fn add_edge(world: &mut World, parent: Entity, child: Entity) {
+        let mut children_storage = world.write_storage::<Children>();
+        let mut parent_storage = world.write_storage::<Parent>();
+        super::sys::add_edge(&mut children_storage, &mut parent_storage, parent, child);
+    }
 
-    while !stack.is_empty() {
-        let ent = stack.pop().unwrap();
-        visit_node(ent);
+    pub fn breadth_first(world: &World, root: Entity, visit_node: impl FnMut(Entity)) {
+        let nodes_storage = world.read_storage::<Children>();
+        super::sys::breadth_first(&nodes_storage, root, visit_node);
+    }
 
-        if let Some(children) = children_storage.get(ent) {
-            for c in children.iter() {
-                stack.push(*c);
-            }
-        }
+    pub fn depth_first(world: &World, root: Entity, visit_node: impl FnMut(Entity)) {
+        let nodes_storage = world.read_storage::<Children>();
+        super::sys::depth_first(&nodes_storage, root, visit_node);
     }
 }
-
-pub fn depth_first(world: &World, root: Entity, visit_node: impl FnMut(Entity)) {
-    let nodes_storage = world.read_storage::<Children>();
-    depth_first_sys(&nodes_storage, root, visit_node);
-}
-
 enum PathDirection {
     RootToNode(usize),
     NodeToRoot(usize),
@@ -263,6 +270,7 @@ pub fn node_to_root_path(world: &World, node: Entity) -> impl ExactSizeIterator<
 
 #[cfg(test)]
 mod tests {
+    use super::world::*;
     use super::*;
 
     #[derive(Debug, Component)]
@@ -276,17 +284,6 @@ mod tests {
         world.register::<ID>();
 
         world
-    }
-
-    fn leaf_with_id(w: &mut World, id: usize) -> Entity {
-        w.create_entity().with(ID(id)).build()
-    }
-
-    fn node_with_id(w: &mut World, children: Vec<Entity>, id: usize) -> Entity {
-        w.create_entity()
-            .with(Children { children })
-            .with(ID(id))
-            .build()
     }
 
     //      1

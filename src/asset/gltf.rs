@@ -16,7 +16,7 @@ use trekanten::Handle;
 
 use crate::camera::Camera;
 use crate::common::Name;
-use crate::graph;
+use crate::graph::sys as graph;
 use crate::math::*;
 use crate::render;
 use crate::render::material::{Material, TextureUse};
@@ -289,14 +289,14 @@ fn load_node_rec(ctx: &mut RecGltfCtx, src: &gltf::Node) -> ecs::Entity {
                 .with(bbox, ctx.data.bboxes)
                 .with(Transform::identity(), ctx.data.transforms)
                 .build();
-            graph::add_edge_sys(
+            graph::add_edge(
                 &mut ctx.data.children_storage,
                 &mut ctx.data.parent_storage,
                 mesh_child,
                 prim_child,
             );
         }
-        graph::add_edge_sys(
+        graph::add_edge(
             &mut ctx.data.children_storage,
             &mut ctx.data.parent_storage,
             node,
@@ -323,7 +323,7 @@ fn load_node_rec(ctx: &mut RecGltfCtx, src: &gltf::Node) -> ecs::Entity {
 
     for gltf_child in src.children() {
         let child = load_node_rec(ctx, &gltf_child);
-        graph::add_edge_sys(
+        graph::add_edge(
             &mut ctx.data.children_storage,
             &mut ctx.data.parent_storage,
             node,
@@ -517,7 +517,7 @@ impl<'a> System<'a> for GltfLoader {
                 log::trace!("# children {}", node.children().len());
 
                 let root = load_node_rec(&mut rec_ctx, &node);
-                graph::add_edge_sys(
+                graph::add_edge(
                     &mut rec_ctx.data.children_storage,
                     &mut rec_ctx.data.parent_storage,
                     ent,
@@ -576,7 +576,7 @@ impl<'a> System<'a> for GltfLoader {
                 }
             };
 
-            graph::breadth_first_sys(&children_storage, ent, map_cpu_to_gpu);
+            graph::breadth_first(&children_storage, ent, map_cpu_to_gpu);
             gltf_models.clear();
 
             log::trace!("gltf asset done");

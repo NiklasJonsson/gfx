@@ -83,7 +83,7 @@ impl App {
             .with_barrier()
             .with(
                 graph::TransformPropagation,
-                graph::TRANSFORM_PROPAGATION_SYSTEM_ID,
+                graph::TransformPropagation::ID,
                 &[],
             )
             .build();

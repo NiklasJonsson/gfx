@@ -155,7 +155,7 @@ impl<'a> System<'a> for ApplySettings {
         ReadStorage<'a, render::material::Material>,
         WriteStorage<'a, render::ReloadMaterial>,
         ReadStorage<'a, crate::math::BoundingBox>,
-        WriteStorage<'a, render::bounding_box::DoRenderBoundingBox>,
+        WriteStorage<'a, render::bounding_box::RenderBoundingBox>,
         ReadStorage<'a, render::light::Light>,
         WriteStorage<'a, render::light::RenderLightVolume>,
     );
@@ -184,7 +184,7 @@ impl<'a> System<'a> for ApplySettings {
         if render_settings.render_bounding_box {
             for (ent, _bbox) in (&entities, &bounding_boxes).join() {
                 render_bbox
-                    .insert(ent, render::bounding_box::DoRenderBoundingBox)
+                    .insert(ent, render::bounding_box::RenderBoundingBox)
                     .expect("Failed to insert");
             }
 

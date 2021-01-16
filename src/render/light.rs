@@ -1,7 +1,7 @@
 use crate::ecs::prelude::*;
 use crate::math::{Transform, Vec3};
 
-use crate::graph::{add_edge_sys, breadth_first_sys, Children, Parent};
+use crate::graph::{sys::add_edge, sys::breadth_first, Children, Parent};
 use crate::render::{material::Material, material::PendingMaterial, mesh::PendingMesh};
 
 use trekanten::loader::ResourceLoader;
@@ -24,31 +24,7 @@ pub enum Light {
     Spot { color: Vec3, angle: f32 },
 }
 
-// TODO:
-// render settings checkbox
-// How to turn on/off in a nice way?
-// In-general: Rethink settings & ecs interaction. The code here is exactly the same as for bounding box.
-// What is the cleanest way to express that something should be renderered for an entity?
 pub struct RenderLightVolumes;
-
-/* Idea:
- No need for "flag" component. The presence of RenderBoundingBox denotes that this entitys bounding box should be rendered.
- pseudo:
- for (ent, l, _) in (ents, lights, command_markers).join() {
-    let cur = find_child<LightVolumeRenderer>(ent);
-    if updated_light(ent) || cur.is_none() {
-        match cur {
-            None => build_entity()...,
-            Some => get_mesh(ent).recreate(gen_mesh()),
-        }
-    }
-}
-for (ent, renderer) in (ents, renderers).join() {
-    if !hasComponent<RenderLightVolume>(parent(ent)) {
-        delete(entity);
-    }
-}
-*/
 
 impl<'a> System<'a> for RenderLightVolumes {
     type SystemData = (
@@ -86,7 +62,7 @@ impl<'a> System<'a> for RenderLightVolumes {
             };
 
             let mut found_child = false;
-            breadth_first_sys(&children, ent, |node| {
+            breadth_first(&children, ent, |node| {
                 found_child = renderer_markers.get(node).is_some()
             });
             if found_child {
@@ -123,7 +99,16 @@ impl<'a> System<'a> for RenderLightVolumes {
                 .with(pending_material, &mut materials)
                 .build();
 
-            add_edge_sys(&mut children, &mut parents, ent, child);
+            add_edge(&mut children, &mut parents, ent, child);
+        }
+        for (ent, _marker) in (&entities, &renderer_markers).join() {
+            if let Some(Parent { parent }) = parents.get(ent) {
+                if !command_markers.get(*parent).is_some() {
+                    entities.delete(ent).unwrap();
+                }
+            } else {
+                entities.delete(ent).unwrap();
+            }
         }
     }
 }

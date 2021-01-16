@@ -1,6 +1,6 @@
 use crate::common::Name;
 use crate::ecs::prelude::*;
-use crate::graph;
+use crate::graph::sys as graph;
 use crate::math::{BoundingBox, Transform, Vec3};
 use crate::render::{material::Material, material::PendingMaterial, mesh::PendingMesh};
 
@@ -10,11 +10,7 @@ use trekanten::BufferMutability;
 
 #[derive(Default, Component)]
 #[component(storage = "NullStorage")]
-pub struct DoRenderBoundingBox;
-
-#[derive(Default, Component)]
-#[component(storage = "NullStorage")]
-pub struct DontRenderBoundingBox;
+pub struct RenderBoundingBox;
 
 #[derive(Default, Component)]
 #[component(storage = "NullStorage")]
@@ -25,8 +21,7 @@ impl<'a> System<'a> for CreateRenderedBoundingBoxes {
     type SystemData = (
         Entities<'a>,
         ReadStorage<'a, BoundingBox>,
-        WriteStorage<'a, DoRenderBoundingBox>,
-        WriteStorage<'a, DontRenderBoundingBox>,
+        WriteStorage<'a, RenderBoundingBox>,
         WriteStorage<'a, graph::Children>,
         WriteStorage<'a, graph::Parent>,
         WriteStorage<'a, Transform>,
@@ -42,20 +37,26 @@ impl<'a> System<'a> for CreateRenderedBoundingBoxes {
         (
             entities,
             bounding_box_storage,
-            mut do_render_bounding_box,
-            mut dont_render_bounding_box,
+            command_markers,
             mut children_storage,
             mut parent_storage,
             mut transforms,
             mut names,
-            mut bounding_box_renderer_storage,
+            mut renderer_markers,
             mut meshes,
             mut materials,
             loader,
         ): Self::SystemData,
     ) {
         // TODO: Create one big buffer for each of vertex/index/uniform
-        for (ent, bbox, _) in (&entities, &bounding_box_storage, &do_render_bounding_box).join() {
+        for (ent, bbox, _) in (&entities, &bounding_box_storage, &command_markers).join() {
+            let mut found = false;
+            graph::breadth_first(&children_storage, ent, |node| {
+                found = renderer_markers.get(node).is_some()
+            });
+            if found {
+                continue;
+            }
             let dims = bbox.max - bbox.min;
             let (vertices, indices) = super::geometry::box_mesh(dims.x, dims.y, dims.z);
             let vertex_buffer = loader.load(vertices);
@@ -90,32 +91,25 @@ impl<'a> System<'a> for CreateRenderedBoundingBoxes {
                 .build_entity()
                 .with(Name::from("BoundingBoxRenderer"), &mut names)
                 .with(tfm, &mut transforms)
-                .with(BoundingBoxRenderer, &mut bounding_box_renderer_storage)
+                .with(BoundingBoxRenderer, &mut renderer_markers)
                 .with(pending_mesh, &mut meshes)
                 .with(pending_material, &mut materials)
                 .build();
 
-            graph::add_edge_sys(&mut children_storage, &mut parent_storage, ent, child);
+            graph::add_edge(&mut children_storage, &mut parent_storage, ent, child);
         }
 
-        do_render_bounding_box.clear();
-
-        for (ent, _) in (&entities, &dont_render_bounding_box).join() {
-            graph::breadth_first_sys(&children_storage, ent, |n| {
-                if bounding_box_renderer_storage.get(n).is_some() {
-                    entities.delete(n).expect("bad graph");
+        for (ent, _marker) in (&entities, &renderer_markers).join() {
+            if let Some(graph::Parent { parent }) = parent_storage.get(ent) {
+                if !command_markers.get(*parent).is_some() {
+                    entities.delete(ent).unwrap();
                 }
-            });
+            } else {
+                entities.delete(ent).unwrap();
+            }
         }
-        dont_render_bounding_box.clear();
     }
 }
-
-// TODO: Remaining:
-// * keypress/ui assigns DeleteRenderBox
-// * Assign bounding box during mesh loading
-// * button in inspector to render bbox
-// * implement geometry::box
 
 pub fn register_systems<'a, 'b>(builder: ExecutorBuilder<'a, 'b>) -> ExecutorBuilder<'a, 'b> {
     builder.with(
