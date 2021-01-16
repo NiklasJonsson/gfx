@@ -15,7 +15,7 @@ pub enum RenderMode {
     Wireframe,
 }
 
-#[derive(Debug, Copy, Clone, PartialEq, Inspect)]
+#[derive(Debug, Inspect)]
 pub struct RenderSettings {
     // Affects all entities
     pub render_mode: RenderMode,
@@ -35,12 +35,8 @@ impl Default for RenderSettings {
     }
 }
 
-impl RenderSettings {
-    pub const ID: &'static str = "RenderSettings";
-}
-
 fn get_input_context() -> Result<InputContext, InputContextError> {
-    Ok(InputContext::builder(RenderSettings::ID)
+    Ok(InputContext::builder(RenderSettingsSys::ID)
         .description("Input for changing render settings")
         .with_action(KeyCode::O, RENDER_MODE_SWITCH)?
         .with_action(KeyCode::P, RENDER_BOUNDING_BOX_SWITCH)?
@@ -54,6 +50,10 @@ const RELOAD_SHADERS: ActionId = ActionId(2);
 
 struct RenderSettingsSys {
     input_entity: Option<specs::Entity>,
+}
+
+impl RenderSettingsSys {
+    pub const ID: &'static str = "RenderSettingsSys";
 }
 
 impl<'a> System<'a> for RenderSettingsSys {
@@ -96,7 +96,7 @@ impl<'a> System<'a> for RenderSettingsSys {
             world
                 .create_entity()
                 .with(ctx)
-                .with(Name::from(RenderSettings::ID))
+                .with(Name::from(RenderSettingsSys::ID))
                 .build(),
         );
     }
@@ -106,10 +106,10 @@ pub fn register_systems<'a, 'b>(builder: ExecutorBuilder<'a, 'b>) -> ExecutorBui
     builder
         .with(
             RenderSettingsSys { input_entity: None },
-            RenderSettings::ID,
+            RenderSettingsSys::ID,
             &[],
         )
-        .with(ApplySettings, ApplySettings::ID, &[RenderSettings::ID])
+        .with(ApplySettings, ApplySettings::ID, &[RenderSettingsSys::ID])
 }
 
 pub(crate) fn build_ui<'a>(world: &mut World, ui: &imgui::Ui<'a>, pos: [f32; 2]) -> [f32; 2] {
@@ -183,22 +183,22 @@ impl<'a> System<'a> for ApplySettings {
 
         if render_settings.render_bounding_box {
             for (ent, _bbox) in (&entities, &bounding_boxes).join() {
-                render_bbox
-                    .insert(ent, render::bounding_box::RenderBoundingBox)
-                    .expect("Failed to insert");
+                if render_bbox.get(ent).is_none() {
+                    render_bbox
+                        .insert(ent, render::bounding_box::RenderBoundingBox)
+                        .expect("Failed to insert");
+                }
             }
-
-            render_settings.render_bounding_box = false;
         }
 
         if render_settings.render_light_volumes {
             for (ent, _light) in (&entities, &lights).join() {
-                render_light_cmds
-                    .insert(ent, render::light::RenderLightVolume)
-                    .expect("Failed to insert");
+                if render_light_cmds.get(ent).is_none() {
+                    render_light_cmds
+                        .insert(ent, render::light::RenderLightVolume)
+                        .expect("Failed to insert");
+                }
             }
-
-            render_settings.render_light_volumes = false;
         }
     }
 }
