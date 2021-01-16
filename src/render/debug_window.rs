@@ -35,10 +35,12 @@ impl Default for RenderSettings {
     }
 }
 
-const NAME: &str = "RenderSettingsSys";
+impl RenderSettings {
+    pub const ID: &'static str = "RenderSettings";
+}
 
 fn get_input_context() -> Result<InputContext, InputContextError> {
-    Ok(InputContext::builder(NAME)
+    Ok(InputContext::builder(RenderSettings::ID)
         .description("Input for changing render settings")
         .with_action(KeyCode::O, RENDER_MODE_SWITCH)?
         .with_action(KeyCode::P, RENDER_BOUNDING_BOX_SWITCH)?
@@ -94,23 +96,20 @@ impl<'a> System<'a> for RenderSettingsSys {
             world
                 .create_entity()
                 .with(ctx)
-                .with(Name::from(NAME))
+                .with(Name::from(RenderSettings::ID))
                 .build(),
         );
     }
 }
 
-pub const RENDER_SETTINGS_SYS_ID: &str = "render_settings_sys";
-
-// TODO: Merge these systems?
 pub fn register_systems<'a, 'b>(builder: ExecutorBuilder<'a, 'b>) -> ExecutorBuilder<'a, 'b> {
     builder
         .with(
             RenderSettingsSys { input_entity: None },
-            RENDER_SETTINGS_SYS_ID,
+            RenderSettings::ID,
             &[],
         )
-        .with(ApplySettings, ApplySettings::ID, &[RENDER_SETTINGS_SYS_ID])
+        .with(ApplySettings, ApplySettings::ID, &[RenderSettings::ID])
 }
 
 pub(crate) fn build_ui<'a>(world: &mut World, ui: &imgui::Ui<'a>, pos: [f32; 2]) -> [f32; 2] {

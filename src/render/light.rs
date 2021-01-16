@@ -80,7 +80,7 @@ impl<'a> System<'a> for RenderLightVolumes {
 
         for (ent, light, _) in (&entities, &lights, &command_markers).join() {
             let (radius, color) = if let Light::Point { range, color } = light {
-                *range
+                (*range, *color)
             } else {
                 continue;
             };
