@@ -9,7 +9,7 @@ layout(set = 0, binding = 0) uniform ViewData {
 #define MAX_NUM_PUNCTUAL_LIGHTS (16)
 #define PUNCTUAL_LIGHTS_BITS (0xF)
 struct PunctualLight {
-    vec4 pos;
+    vec4 pos_dir;
     vec4 color_range; // .w is the range
 };
 

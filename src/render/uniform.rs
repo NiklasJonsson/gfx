@@ -27,7 +27,7 @@ impl UniformBlock for UnlitUniformData {
 #[derive(Copy, Clone, Debug, Default)]
 #[repr(C, packed)]
 pub struct PunctualLight {
-    pub pos: [f32; 4],
+    pub pos_dir: [f32; 4],
     pub color_range: [f32; 4],
 }
 

@@ -103,22 +103,6 @@ impl App {
             .with(render::light::Light::Point {
                 color: math::Vec3 {
                     x: 1.0,
-                    y: 1.0,
-                    z: 1.0,
-                },
-                range: 20.0,
-            })
-            .with(math::Transform::pos(math::Vec3 {
-                x: 0.0,
-                y: 2.0,
-                z: 0.0,
-            }))
-            .build();
-        self.world
-            .create_entity()
-            .with(render::light::Light::Point {
-                color: math::Vec3 {
-                    x: 1.0,
                     y: 0.5,
                     z: 1.0,
                 },
@@ -127,8 +111,19 @@ impl App {
             .with(math::Transform::pos(math::Vec3 {
                 x: 2.0,
                 y: 1.0,
-                z: 0.0,
+                z: 3.0,
             }))
+            .build();
+        self.world
+            .create_entity()
+            .with(render::light::Light::Directional {
+                color: math::Vec3 {
+                    x: 1.0,
+                    y: 1.0,
+                    z: 1.0,
+                },
+            })
+            .with(math::Transform::identity())
             .build();
     }
 

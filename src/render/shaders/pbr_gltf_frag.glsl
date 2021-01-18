@@ -13,7 +13,7 @@ layout(set = 0, binding = 0) uniform ViewData {
 #define MAX_NUM_PUNCTUAL_LIGHTS (16)
 #define PUNCTUAL_LIGHTS_BITS (0xF)
 struct PunctualLight {
-    vec4 pos;
+    vec4 pos_dir; // if .w is 0.0, this is a directional light
     vec4 color_range; // .w is the range
 };
 
@@ -26,9 +26,11 @@ uint num_punctual_lights() {
     return min(lighting_data.num_lights & PUNCTUAL_LIGHTS_BITS, MAX_NUM_PUNCTUAL_LIGHTS);
 }
 
-float punctual_light_range(PunctualLight l) {
-    return l.color_range.w;
-}
+struct Light {
+    vec3 color;
+    float attenuation;
+    vec3 direction;
+};
 
 // This is based on the recommended impl for KHR_punctual_lights:
 // https://github.com/KhronosGroup/glTF/blob/master/extensions/2.0/Khronos/KHR_lights_punctual/README.md#range-property
@@ -46,6 +48,23 @@ float distance_attenuation(vec3 light_vec, float light_range) {
     float smooth_factor = pow(clamp(1.0 - pow(dist_sqr / range_sqr, 2.0), 0.0, 1.0), 2.0);
 
     return attenuation * smooth_factor;
+}
+
+Light unpack_light(PunctualLight l, vec3 world_pos) {
+    Light r;
+    r.color = l.color_range.xyz;
+    if (l.pos_dir.w == 0.0) {
+        // Directional
+        r.direction = normalize(-l.pos_dir.xyz);
+        r.attenuation = 1.0;
+    } else {
+        // Point
+        vec3 direction_unnormalized = l.pos_dir.xyz - world_pos;
+        r.direction = normalize(direction_unnormalized);
+        r.attenuation = distance_attenuation(direction_unnormalized,  l.color_range.w);
+    }
+
+    return r;
 }
 
 layout(location = 0) in vec3 world_normal;
@@ -183,13 +202,12 @@ void main() {
     vec3 color = vec3(0);
 
     for (uint i = 0; i < num_punctual_lights(); ++i) {
-        PunctualLight light = lighting_data.punctual_lights[i];
+        Light light = unpack_light(lighting_data.punctual_lights[i], world_pos);
 
-        vec3 unnormalized_light_dir = light.pos.xyz - world_pos;
-        vec3 light_dir = normalize(unnormalized_light_dir);
+        vec3 light_dir = light.direction;
         vec3 bisect_light_view = normalize(view_dir + light_dir);
-        vec3 light_color = light.color_range.xyz;
-        float attenuation = distance_attenuation(unnormalized_light_dir, punctual_light_range(light));
+        vec3 light_color = light.color;
+        float attenuation = light.attenuation;
 
         float n_dot_l = clamp(dot(normal, light_dir), 0.0, 1.0);
         float n_dot_h_unclamped = dot(normal, bisect_light_view);

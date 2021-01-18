@@ -396,21 +396,27 @@ pub fn draw_frame(world: &mut World, ui: &mut ui::UIContext, renderer: &mut Rend
         let lights = world.read_storage::<light::Light>();
         let transforms = world.read_storage::<Transform>();
         for (light, tfm) in (&lights, &transforms).join() {
-            match light {
-                light::Light::Point { color, range } => {
-                    if n_punctual >= uniform::MAX_NUM_PUNCTUAL_LIGHTS {
-                        log::warn!("Too many punctual lights, ignoring");
-                        continue;
-                    }
-
-                    data.punctual_lights[n_punctual].pos =
-                        [tfm.position.x, tfm.position.y, tfm.position.z, 1.0f32];
-                    data.punctual_lights[n_punctual].color_range =
-                        [color.x, color.y, color.z, *range];
-                    n_punctual += 1;
+            if n_punctual >= uniform::MAX_NUM_PUNCTUAL_LIGHTS {
+                log::warn!("Too many punctual lights, ignoring");
+                continue;
+            }
+            let (pos_dir, color_range) = match light {
+                light::Light::Point { color, range } => (
+                    [tfm.position.x, tfm.position.y, tfm.position.z, 1.0f32],
+                    [color.x, color.y, color.z, *range],
+                ),
+                light::Light::Directional { color } => {
+                    let direction = tfm.rotation * Vec3::new(0.0, -1.0, 0.0);
+                    (
+                        [direction.x, direction.y, direction.z, 0.0f32],
+                        [color.x, color.y, color.z, 0.0f32],
+                    )
                 }
                 _ => todo!(),
-            }
+            };
+            data.punctual_lights[n_punctual].pos_dir = pos_dir;
+            data.punctual_lights[n_punctual].color_range = color_range;
+            n_punctual += 1;
         }
 
         data.set_num_punctual_lights(n_punctual as u8);
