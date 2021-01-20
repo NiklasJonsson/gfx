@@ -2,7 +2,9 @@ use crate::ecs::prelude::*;
 use crate::math::{Transform, Vec3};
 
 use crate::graph::{sys::add_edge, sys::breadth_first, Children, Parent};
-use crate::render::{material::Material, material::PendingMaterial, mesh::PendingMesh};
+use crate::render::material::{Material, PendingMaterial};
+use crate::render::mesh::PendingMesh;
+use crate::render::uniform::{LightingData, PackedLight, MAX_NUM_LIGHTS};
 
 use trekanten::loader::ResourceLoader;
 use trekanten::uniform::OwningUniformBufferDescriptor;
@@ -21,7 +23,7 @@ pub struct LightVolumeRenderer;
 pub enum Light {
     Point { color: Vec3, range: f32 },
     Directional { color: Vec3 },
-    Spot { color: Vec3, angle: f32 },
+    Spot { color: Vec3, angle: f32, range: f32 },
 }
 
 pub struct RenderLightVolumes;
@@ -111,6 +113,48 @@ impl<'a> System<'a> for RenderLightVolumes {
             }
         }
     }
+}
+
+pub fn build_light_data_uniform(world: &World) -> LightingData {
+    let mut data = LightingData::default();
+    let lights = world.read_storage::<Light>();
+    let transforms = world.read_storage::<Transform>();
+    for (idx, (light, tfm)) in (&lights, &transforms).join().enumerate() {
+        if idx >= MAX_NUM_LIGHTS {
+            log::warn!("Too many punctual lights, skipping remaining");
+            break;
+        }
+        data.punctual_lights[idx] = match light {
+            Light::Directional { color } => {
+                let direction = tfm.rotation * Vec3::new(0.0, -1.0, 0.0);
+                PackedLight {
+                    pos: [0.0, 0.0, 0.0, 0.0],
+                    dir_cutoff: [direction.x, direction.y, direction.z, 0.0],
+                    color_range: [color.x, color.y, color.z, 0.0],
+                }
+            }
+            Light::Point { color, range } => PackedLight {
+                pos: [tfm.position.x, tfm.position.y, tfm.position.z, 1.0],
+                dir_cutoff: [0.0, 0.0, 0.0, 0.0],
+                color_range: [color.x, color.y, color.z, *range],
+            },
+            Light::Spot {
+                color,
+                angle,
+                range,
+            } => {
+                let direction = tfm.rotation * Vec3::new(0.0, -1.0, 0.0);
+                PackedLight {
+                    pos: [tfm.position.x, tfm.position.y, tfm.position.z, 1.0],
+                    dir_cutoff: [direction.x, direction.y, direction.z, angle.cos()],
+                    color_range: [color.x, color.y, color.z, *range],
+                }
+            }
+        };
+        data.num_lights = (idx + 1) as u32;
+    }
+
+    data
 }
 
 pub fn register_systems<'a, 'b>(builder: ExecutorBuilder<'a, 'b>) -> ExecutorBuilder<'a, 'b> {

@@ -125,6 +125,23 @@ impl App {
             })
             .with(math::Transform::identity())
             .build();
+        self.world
+            .create_entity()
+            .with(render::light::Light::Spot {
+                color: math::Vec3 {
+                    x: 1.0,
+                    y: 1.0,
+                    z: 1.0,
+                },
+                angle: std::f32::consts::FRAC_PI_4,
+                range: 5.0,
+            })
+            .with(math::Transform::pos(math::Vec3 {
+                x: 2.0,
+                y: 1.0,
+                z: -3.0,
+            }))
+            .build();
     }
 
     fn next_event(&self) -> Option<Event> {

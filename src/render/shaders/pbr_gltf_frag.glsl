@@ -10,20 +10,20 @@ layout(set = 0, binding = 0) uniform ViewData {
     vec4 view_pos;
 } view_data;
 
-#define MAX_NUM_PUNCTUAL_LIGHTS (16)
-#define PUNCTUAL_LIGHTS_BITS (0xF)
-struct PunctualLight {
-    vec4 pos_dir; // if .w is 0.0, this is a directional light
+#define MAX_NUM_LIGHTS (16)
+struct PackedLight {
+    vec4 pos;
+    vec4 dir_cutoff;
     vec4 color_range; // .w is the range
 };
 
 layout(set = 0, binding = 1) uniform LightingData {
-    PunctualLight punctual_lights[MAX_NUM_PUNCTUAL_LIGHTS];
+    PackedLight lights[MAX_NUM_LIGHTS];
     uint num_lights;
 } lighting_data;
 
-uint num_punctual_lights() {
-    return min(lighting_data.num_lights & PUNCTUAL_LIGHTS_BITS, MAX_NUM_PUNCTUAL_LIGHTS);
+uint num_lights() {
+    return min(lighting_data.num_lights, MAX_NUM_LIGHTS);
 }
 
 struct Light {
@@ -50,20 +50,38 @@ float distance_attenuation(vec3 light_vec, float light_range) {
     return attenuation * smooth_factor;
 }
 
-Light unpack_light(PunctualLight l, vec3 world_pos) {
+float remap(float x, float old_low, float old_high, float new_low, float new_high) {
+    return ((x - old_low) / (old_high - old_low)) * (new_high - new_low) + new_low;
+}
+
+Light unpack_light(PackedLight l, vec3 world_pos) {
     Light r;
     r.color = l.color_range.xyz;
-    if (l.pos_dir.w == 0.0) {
+    if (l.pos.w == 0.0) {
         // Directional
-        r.direction = normalize(-l.pos_dir.xyz);
+        r.direction = normalize(-l.dir_cutoff.xyz);
         r.attenuation = 1.0;
-    } else {
+    } else if (l.dir_cutoff.w == 0.0) {
         // Point
-        vec3 direction_unnormalized = l.pos_dir.xyz - world_pos;
+        vec3 direction_unnormalized = l.pos.xyz - world_pos;
         r.direction = normalize(direction_unnormalized);
-        r.attenuation = distance_attenuation(direction_unnormalized,  l.color_range.w);
+        r.attenuation = distance_attenuation(direction_unnormalized, l.color_range.w);
+    } else {
+        // Spot
+        vec3 direction_unnormalized = l.pos.xyz - world_pos;
+        r.direction = normalize(direction_unnormalized);
+        r.attenuation = 0.0;
+        vec3 spot_dir = normalize(-l.dir_cutoff.xyz);
+        float cos_angle = dot(r.direction, spot_dir);
+        if (cos_angle > l.dir_cutoff.w) {
+            r.attenuation = distance_attenuation(direction_unnormalized, l.color_range.w);
+            // Cone attenuation
+            float cos_angle_norm = remap(cos_angle, l.dir_cutoff.w, 1.0, 0.0, 1.0); 
+            // This is a function that has a steep incline at first and then goes to 1.0
+            // Making this depend on cutoff means that the wider the code, the earlier the cutoff starts
+            r.attenuation *= smoothstep(l.dir_cutoff.w, 1.0, cos_angle_norm + l.dir_cutoff.w);
+        }
     }
-
     return r;
 }
 
@@ -201,8 +219,8 @@ void main() {
 
     vec3 color = vec3(0);
 
-    for (uint i = 0; i < num_punctual_lights(); ++i) {
-        Light light = unpack_light(lighting_data.punctual_lights[i], world_pos);
+    for (uint i = 0; i < num_lights(); ++i) {
+        Light light = unpack_light(lighting_data.lights[i], world_pos);
 
         vec3 light_dir = light.direction;
         vec3 bisect_light_view = normalize(view_dir + light_dir);

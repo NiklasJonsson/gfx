@@ -26,24 +26,18 @@ impl UniformBlock for UnlitUniformData {
 
 #[derive(Copy, Clone, Debug, Default)]
 #[repr(C, packed)]
-pub struct PunctualLight {
-    pub pos_dir: [f32; 4],
-    pub color_range: [f32; 4],
+pub struct PackedLight {
+    pub pos: [f32; 4],         // position for point/spot light
+    pub dir_cutoff: [f32; 4], // direction for spot/directional light. .w is the cos(cutoff_angle) of the spotlight
+    pub color_range: [f32; 4], // color for all light types. .w is the range of point/spot lights
 }
 
-pub const MAX_NUM_PUNCTUAL_LIGHTS: usize = 16;
-pub const PUNCTUAL_LIGHTS_BITS: u32 = 0xF;
+pub const MAX_NUM_LIGHTS: usize = 16;
 #[derive(Copy, Clone, Debug, Default)]
 #[repr(C, packed)]
 pub struct LightingData {
-    pub punctual_lights: [PunctualLight; MAX_NUM_PUNCTUAL_LIGHTS],
-    pub num_lights: u32, // bitmask
-}
-
-impl LightingData {
-    pub fn set_num_punctual_lights(&mut self, n: u8) {
-        self.num_lights = (self.num_lights & !PUNCTUAL_LIGHTS_BITS) | n as u32;
-    }
+    pub punctual_lights: [PackedLight; MAX_NUM_LIGHTS],
+    pub num_lights: u32,
 }
 
 impl UniformBlock for LightingData {
