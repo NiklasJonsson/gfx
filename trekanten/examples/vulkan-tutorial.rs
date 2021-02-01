@@ -2,12 +2,12 @@ use glfw::{Action, Key};
 use nalgebra_glm as glm;
 
 use trekanten::descriptor::DescriptorSet;
+use trekanten::mem;
 use trekanten::mesh;
 use trekanten::pipeline;
 use trekanten::pipeline::ShaderDescriptor;
 use trekanten::pipeline::ShaderStage;
 use trekanten::texture;
-use trekanten::uniform;
 use trekanten::util;
 use trekanten::vertex::{VertexDefinition, VertexFormat};
 use trekanten::ResourceManager as _;
@@ -117,6 +117,7 @@ struct UniformBufferObject {
     view: glm::Mat4,
     proj: glm::Mat4,
 }
+impl mem::Uniform for UniformBufferObject {}
 
 fn get_fname(dir: &str, target: &str) -> std::path::PathBuf {
     let url = reqwest::Url::parse(target).expect("Bad url");
@@ -245,13 +246,13 @@ fn main() -> Result<(), trekanten::RenderError> {
     let mut renderer = trekanten::Renderer::new(&window, window.extents())?;
 
     let vertex_buffer_descriptor =
-        mesh::OwningVertexBufferDescriptor::from_vec(vertices, mesh::BufferMutability::Immutable);
+        mem::OwningVertexBufferDescriptor::from_vec(vertices, mem::BufferMutability::Immutable);
     let vertex_buffer = renderer
         .create_resource_blocking(vertex_buffer_descriptor)
         .expect("Failed to create vertex buffer");
 
     let index_buffer_descriptor =
-        mesh::OwningIndexBufferDescriptor::from_vec(indices, mesh::BufferMutability::Immutable);
+        mem::OwningIndexBufferDescriptor::from_vec(indices, mem::BufferMutability::Immutable);
     let index_buffer = renderer
         .create_resource_blocking(index_buffer_descriptor)
         .expect("Failed to create index buffer");
@@ -281,7 +282,7 @@ fn main() -> Result<(), trekanten::RenderError> {
     }];
 
     let uniform_buffer_desc =
-        uniform::OwningUniformBufferDescriptor::from_vec(data, mesh::BufferMutability::Mutable);
+        mem::OwningUniformBufferDescriptor::from_vec(data, mem::BufferMutability::Mutable);
 
     let uniform_buffer_handle = renderer
         .create_resource_blocking(uniform_buffer_desc)
@@ -298,8 +299,8 @@ fn main() -> Result<(), trekanten::RenderError> {
         .expect("Failed to create texture");
 
     let desc_set_handle = DescriptorSet::builder(&mut renderer)
-        .add_buffer(&uniform_buffer_handle, 0, ShaderStage::Vertex)
-        .add_texture(&texture_handle, 1, ShaderStage::Fragment)
+        .add_buffer(&uniform_buffer_handle, 0, ShaderStage::VERTEX)
+        .add_texture(&texture_handle, 1, ShaderStage::FRAGMENT)
         .build();
 
     let start = std::time::Instant::now();

@@ -3,12 +3,12 @@ use nalgebra_glm as glm;
 use resurs::Handle;
 
 use trekanten::descriptor::DescriptorSet;
+use trekanten::mem;
 use trekanten::mesh;
 use trekanten::pipeline;
 use trekanten::pipeline::ShaderDescriptor;
 use trekanten::pipeline::ShaderStage;
 use trekanten::texture;
-use trekanten::uniform;
 use trekanten::util;
 use trekanten::vertex::{VertexDefinition, VertexFormat};
 
@@ -120,6 +120,8 @@ struct UniformBufferObject {
     view: glm::Mat4,
     proj: glm::Mat4,
 }
+
+impl mem::Uniform for UniformBufferObject {}
 
 fn get_fname(dir: &str, target: &str) -> std::path::PathBuf {
     let url = reqwest::Url::parse(target).expect("Bad url");
@@ -251,15 +253,13 @@ fn main() -> Result<(), trekanten::RenderError> {
     std::thread::spawn(move || {
         let (vertices, indices) = load_viking_house();
 
-        let vertex_buffer_descriptor = mesh::OwningVertexBufferDescriptor::from_vec(
-            vertices,
-            mesh::BufferMutability::Immutable,
-        );
+        let vertex_buffer_descriptor =
+            mem::OwningVertexBufferDescriptor::from_vec(vertices, mem::BufferMutability::Immutable);
 
         let vertex_buffer = loader_clone.load(vertex_buffer_descriptor);
 
         let index_buffer_descriptor =
-            mesh::OwningIndexBufferDescriptor::from_vec(indices, mesh::BufferMutability::Immutable);
+            mem::OwningIndexBufferDescriptor::from_vec(indices, mem::BufferMutability::Immutable);
         let index_buffer = loader_clone.load(index_buffer_descriptor);
 
         let mesh = mesh::Mesh {
@@ -308,7 +308,7 @@ fn main() -> Result<(), trekanten::RenderError> {
     }];
 
     let uniform_buffer_desc =
-        uniform::OwningUniformBufferDescriptor::from_vec(data, mesh::BufferMutability::Mutable);
+        mem::OwningUniformBufferDescriptor::from_vec(data, mem::BufferMutability::Mutable);
 
     let uniform_buffer_handle = renderer
         .create_resource_blocking(uniform_buffer_desc)
@@ -338,8 +338,8 @@ fn main() -> Result<(), trekanten::RenderError> {
             if !is_pending && desc_set_handle.is_none() {
                 desc_set_handle = Some(
                     DescriptorSet::builder(&mut renderer)
-                        .add_buffer(&uniform_buffer_handle, 0, ShaderStage::Vertex)
-                        .add_texture(&texture_handle, 1, ShaderStage::Fragment)
+                        .add_buffer(&uniform_buffer_handle, 0, ShaderStage::VERTEX)
+                        .add_texture(&texture_handle, 1, ShaderStage::FRAGMENT)
                         .build(),
                 );
             }
