@@ -176,11 +176,12 @@ impl Texture {
         common: &DescriptorCommon,
         data: &'a [u8],
     ) -> Result<(Self, DeviceBuffer), TextureError> {
+        let allocator = device.allocator();
         let ((image, staging), mip_levels) = if let MipMaps::Generate = common.mipmaps {
             let mip_levels = (extent.max_dim() as f32).log2().floor() as u32 + 1;
             (
                 DeviceImage::device_local_mipmapped(
-                    device,
+                    &allocator,
                     command_buffer,
                     extent,
                     common.format,
@@ -191,7 +192,7 @@ impl Texture {
             )
         } else {
             (
-                DeviceImage::device_local(device, command_buffer, extent, common.format, data)?,
+                DeviceImage::device_local(&allocator, command_buffer, extent, common.format, data)?,
                 1,
             )
         };

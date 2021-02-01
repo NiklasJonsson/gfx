@@ -5,13 +5,12 @@ mod common;
 pub mod descriptor;
 mod error;
 pub mod loader;
-mod mem;
+pub mod mem;
 pub mod mesh;
 pub mod pipeline;
 mod render_pass;
 pub mod resource;
 pub mod texture;
-pub mod uniform;
 pub mod util;
 pub mod vertex;
 
@@ -88,7 +87,7 @@ impl<'a> Frame<'a> {
     // TODO: Could we use vkCmdUpdateBuffer instead? Note that it can't be inside a render pass
     pub fn update_uniform_blocking<T: Copy>(
         &mut self,
-        h: &BufferHandle<uniform::UniformBuffer>,
+        h: &BufferHandle<mem::UniformBuffer>,
         data: &T,
     ) -> Result<(), RenderError> {
         self.renderer.update_uniform(h, data)
@@ -172,7 +171,7 @@ macro_rules! impl_mut_buffer_manager_frame {
                     .expect("Fail")
                 {
                     // TODO: Increment generation of backing storage
-                    buf.recreate(&self.renderer.device, &descriptor)?;
+                    buf.recreate(&self.renderer.device.allocator(), &descriptor)?;
                     let handle = unsafe {
                         BufferHandle::from_buffer(
                             *handle.handle(),
@@ -192,14 +191,14 @@ macro_rules! impl_mut_buffer_manager_frame {
 }
 
 impl_mut_buffer_manager_frame!(
-    mesh::OwningVertexBufferDescriptor,
-    mesh::VertexBuffer,
+    mem::OwningVertexBufferDescriptor,
+    mem::VertexBuffer,
     vertex_buffers
 );
 
 impl_mut_buffer_manager_frame!(
-    mesh::OwningIndexBufferDescriptor,
-    mesh::IndexBuffer,
+    mem::OwningIndexBufferDescriptor,
+    mem::IndexBuffer,
     index_buffers
 );
 
@@ -226,17 +225,17 @@ macro_rules! impl_buffer_manager_frame {
 }
 
 impl_buffer_manager_frame!(
-    mesh::OwningVertexBufferDescriptor,
-    mesh::VertexBuffer,
-    BufferHandle<mesh::VertexBuffer>,
+    mem::OwningVertexBufferDescriptor,
+    mem::VertexBuffer,
+    BufferHandle<mem::VertexBuffer>,
     CreateVertexBuffer,
     vertex_buffers
 );
 
 impl_buffer_manager_frame!(
-    mesh::OwningIndexBufferDescriptor,
-    mesh::IndexBuffer,
-    BufferHandle<mesh::IndexBuffer>,
+    mem::OwningIndexBufferDescriptor,
+    mem::IndexBuffer,
+    BufferHandle<mem::IndexBuffer>,
     CreateIndexBuffer,
     index_buffers
 );
@@ -253,24 +252,24 @@ impl Resources {
 
 enum PendingResourceCommand {
     CreateVertexBuffer {
-        descriptor: mesh::OwningVertexBufferDescriptor,
-        handle: mem::BufferHandle<mesh::VertexBuffer>,
-        buffer0: mesh::VertexBuffer,
-        buffer1: Option<mesh::VertexBuffer>, // For double buffering
+        descriptor: mem::OwningVertexBufferDescriptor,
+        handle: mem::BufferHandle<mem::VertexBuffer>,
+        buffer0: mem::VertexBuffer,
+        buffer1: Option<mem::VertexBuffer>, // For double buffering
         transients: [Option<mem::DeviceBuffer>; 2],
     },
     CreateIndexBuffer {
-        descriptor: mesh::OwningIndexBufferDescriptor,
-        handle: mem::BufferHandle<mesh::IndexBuffer>,
-        buffer0: mesh::IndexBuffer,
-        buffer1: Option<mesh::IndexBuffer>, // For double buffering
+        descriptor: mem::OwningIndexBufferDescriptor,
+        handle: mem::BufferHandle<mem::IndexBuffer>,
+        buffer0: mem::IndexBuffer,
+        buffer1: Option<mem::IndexBuffer>, // For double buffering
         transients: [Option<mem::DeviceBuffer>; 2],
     },
     CreateUniformBuffer {
-        descriptor: uniform::OwningUniformBufferDescriptor,
-        handle: mem::BufferHandle<uniform::UniformBuffer>,
-        buffer0: uniform::UniformBuffer,
-        buffer1: Option<uniform::UniformBuffer>, // For double buffering
+        descriptor: mem::OwningUniformBufferDescriptor,
+        handle: mem::BufferHandle<mem::UniformBuffer>,
+        buffer0: mem::UniformBuffer,
+        buffer1: Option<mem::UniformBuffer>, // For double buffering
         transients: [Option<mem::DeviceBuffer>; 2],
     },
     CreateTexture {
@@ -374,7 +373,7 @@ macro_rules! process_buffer_creation {
     ($cmd:ident, $desc:ident, $self:ident, $cmd_buffer:ident, $handle:ident) => {{
         let (buf0, buf1) = $desc
             .enqueue(
-                &$self.device,
+                &$self.device.allocator(),
                 $cmd_buffer.expect("This needs a command buffer"),
             )
             .expect("Fail");
@@ -771,7 +770,7 @@ impl Renderer {
 impl Renderer {
     fn update_uniform<T: Copy>(
         &mut self,
-        h: &BufferHandle<uniform::UniformBuffer>,
+        h: &BufferHandle<mem::UniformBuffer>,
         data: &T,
     ) -> Result<(), RenderError> {
         let mut ubuf = self
@@ -851,23 +850,23 @@ macro_rules! impl_buffer_manager {
 }
 
 impl_buffer_manager!(
-    mesh::OwningVertexBufferDescriptor,
-    mesh::VertexBuffer,
-    BufferHandle<mesh::VertexBuffer>,
+    mem::OwningVertexBufferDescriptor,
+    mem::VertexBuffer,
+    BufferHandle<mem::VertexBuffer>,
     CreateVertexBuffer,
     vertex_buffers
 );
 impl_buffer_manager!(
-    mesh::OwningIndexBufferDescriptor,
-    mesh::IndexBuffer,
-    BufferHandle<mesh::IndexBuffer>,
+    mem::OwningIndexBufferDescriptor,
+    mem::IndexBuffer,
+    BufferHandle<mem::IndexBuffer>,
     CreateIndexBuffer,
     index_buffers
 );
 impl_buffer_manager!(
-    uniform::OwningUniformBufferDescriptor,
-    uniform::UniformBuffer,
-    BufferHandle<uniform::UniformBuffer>,
+    mem::OwningUniformBufferDescriptor,
+    mem::UniformBuffer,
+    BufferHandle<mem::UniformBuffer>,
     CreateUniformBuffer,
     uniform_buffers
 );

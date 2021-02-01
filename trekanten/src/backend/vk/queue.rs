@@ -3,8 +3,7 @@ use ash::vk;
 
 use thiserror::Error;
 
-use super::command::CommandBuffer;
-use super::device::{HasVkDevice, VkDeviceHandle};
+use super::device::{HasVkDevice};
 use super::sync::{Fence, SyncError};
 
 #[derive(Debug, Copy, Clone, Error)]
@@ -27,42 +26,33 @@ pub struct QueueFamilies {
     pub present: QueueFamily,
 }
 
-#[derive(Clone)]
+struct VkSubmitFn(extern "system" fn(queue: vk::Queue, submit_count: u32, p_submits: *const vk::SubmitInfo, fence: vk::Fence) -> vk::Result);
+unsafe impl Send for VkSubmitFn {}
+
 pub struct Queue {
-    vk_device: VkDeviceHandle,
+    vk_submit_fn: VkSubmitFn,
     vk_queue: vk::Queue,
 }
 
 impl Queue {
     pub fn new<D: HasVkDevice>(device: D, vk_queue: vk::Queue) -> Self {
+        let vk_device = device.vk_device();
+        let vk_submit_fn = VkSubmitFn(vk_device.fp_v1_0().queue_submit);
         Self {
-            vk_device: device.vk_device(),
+            vk_submit_fn,
             vk_queue,
         }
     }
 
     pub fn submit(&self, info: &vk::SubmitInfo, fence: &Fence) -> Result<(), QueueError> {
         let infos = [*info];
-        unsafe {
-            self.vk_device
-                .queue_submit(self.vk_queue, &infos, *fence.vk_fence())
-                .map_err(QueueError::Submit)?;
+        let result = (self.vk_submit_fn.0)(self.vk_queue, infos.len() as u32, infos.as_ptr(), *fence.vk_fence());
+
+        if result == vk::Result::SUCCESS {
+            Ok(())
+        } else {
+            Err(QueueError::Submit(result))
         }
-
-        Ok(())
-    }
-
-    pub fn submit_and_wait(&self, cmd_buf: &CommandBuffer) -> Result<(), QueueError> {
-        let bufs = [*cmd_buf.vk_command_buffer()];
-        let submit_info = vk::SubmitInfo::builder().command_buffers(&bufs);
-
-        let copied = Fence::unsignaled(&self.vk_device)?;
-        self.submit(&submit_info, &copied)?;
-
-        // TODO: Async
-        copied.blocking_wait()?;
-
-        Ok(())
     }
 
     pub fn vk_queue(&self) -> &vk::Queue {

@@ -1,23 +1,21 @@
 pub use resurs::*;
 
 use crate::mem;
-use crate::mesh;
 use crate::pipeline;
 use crate::texture;
-use crate::uniform;
 
 pub enum ResourceCommand {
     CreateVertexBuffer {
-        descriptor: mesh::OwningVertexBufferDescriptor,
-        handle: mem::BufferHandle<mesh::VertexBuffer>,
+        descriptor: mem::OwningVertexBufferDescriptor,
+        handle: mem::BufferHandle<mem::VertexBuffer>,
     },
     CreateIndexBuffer {
-        descriptor: mesh::OwningIndexBufferDescriptor,
-        handle: mem::BufferHandle<mesh::IndexBuffer>,
+        descriptor: mem::OwningIndexBufferDescriptor,
+        handle: mem::BufferHandle<mem::IndexBuffer>,
     },
     CreateUniformBuffer {
-        descriptor: uniform::OwningUniformBufferDescriptor,
-        handle: mem::BufferHandle<uniform::UniformBuffer>,
+        descriptor: mem::OwningUniformBufferDescriptor,
+        handle: mem::BufferHandle<mem::UniformBuffer>,
     },
     CreateTexture {
         descriptor: texture::TextureDescriptor,
@@ -31,9 +29,9 @@ pub enum ResourceCommand {
 
 #[derive(Default)]
 pub struct AsyncResources {
-    pub uniform_buffers: uniform::AsyncUniformBuffers,
-    pub vertex_buffers: mesh::AsyncVertexBuffers,
-    pub index_buffers: mesh::AsyncIndexBuffers,
+    pub uniform_buffers: mem::AsyncUniformBuffers,
+    pub vertex_buffers: mem::AsyncVertexBuffers,
+    pub index_buffers: mem::AsyncIndexBuffers,
     pub textures: texture::AsyncTextures,
     pub graphics_pipelines: pipeline::AsyncGraphicsPipelines,
 }

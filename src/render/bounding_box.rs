@@ -5,7 +5,7 @@ use crate::math::{BoundingBox, Transform, Vec3};
 use crate::render::{material::Material, material::PendingMaterial, mesh::PendingMesh};
 
 use trekanten::loader::ResourceLoader;
-use trekanten::uniform::OwningUniformBufferDescriptor;
+use trekanten::mem::OwningUniformBufferDescriptor;
 use trekanten::BufferMutability;
 
 #[derive(Default, Component)]
@@ -73,7 +73,7 @@ impl<'a> System<'a> for CreateRenderedBoundingBoxes {
                 color: [1.0, 0.0, 0.0, 1.0],
             };
 
-            let color_uniform = loader.load(OwningUniformBufferDescriptor::from_vec(
+            let color_uniform = loader.load(OwningUniformBufferDescriptor::from_vec2(
                 vec![uniform_data],
                 BufferMutability::Immutable,
             ));

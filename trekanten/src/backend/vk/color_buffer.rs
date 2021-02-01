@@ -33,7 +33,7 @@ impl ColorBuffer {
         let props = vk_mem::MemoryUsage::GpuOnly;
         let mip_levels = 1; // No mip maps
         let _image = DeviceImage::empty_2d(
-            device,
+            &device.allocator(),
             *extents,
             format,
             usage,

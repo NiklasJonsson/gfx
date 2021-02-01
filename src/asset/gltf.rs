@@ -3,12 +3,11 @@ use ecs::prelude::*;
 use std::path::{Path, PathBuf};
 
 use trekanten::loader::ResourceLoader;
-use trekanten::mesh::BufferMutability;
-use trekanten::mesh::{
-    IndexBuffer, OwningIndexBufferDescriptor, OwningVertexBufferDescriptor, VertexBuffer,
+use trekanten::mem::BufferMutability;
+use trekanten::mem::{
+    IndexBuffer, OwningIndexBufferDescriptor, OwningVertexBufferDescriptor, VertexBuffer, OwningUniformBufferDescriptor,
 };
 use trekanten::texture::{MipMaps, Texture, TextureDescriptor};
-use trekanten::uniform::OwningUniformBufferDescriptor;
 use trekanten::util;
 use trekanten::vertex::VertexFormat;
 use trekanten::BufferHandle;
@@ -535,7 +534,7 @@ impl<'a> System<'a> for GltfLoader {
             } = rec_ctx;
 
             let gpu_uniform_buffer_handles = loader
-                .load(OwningUniformBufferDescriptor::from_vec(
+                .load(OwningUniformBufferDescriptor::from_vec2(
                     material_buffer,
                     BufferMutability::Immutable,
                 ))

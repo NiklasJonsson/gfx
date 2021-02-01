@@ -4,7 +4,6 @@ use vk_mem::{Allocation, AllocationCreateInfo, AllocationInfo, MemoryUsage};
 
 use crate::command::CommandBuffer;
 use crate::device::AllocatorHandle;
-use crate::device::Device;
 use crate::util;
 
 use crate::mem::DeviceBuffer;
@@ -196,7 +195,7 @@ pub struct DeviceImage {
 
 impl DeviceImage {
     pub fn empty_2d(
-        device: &Device,
+        allocator: &AllocatorHandle,
         extent: util::Extent2D,
         format: util::Format,
         image_usage: vk::ImageUsageFlags,
@@ -230,13 +229,12 @@ impl DeviceImage {
             usage: mem_usage,
             ..Default::default()
         };
-        let allocator = device.allocator();
         let (vk_image, allocation, _allcation_info) = allocator
             .create_image(&info, &allocation_create_info)
             .map_err(MemoryError::ImageCreation)?;
 
         Ok(Self {
-            allocator,
+            allocator: AllocatorHandle::clone(allocator),
             vk_image,
             allocation,
             _allcation_info,
@@ -245,7 +243,7 @@ impl DeviceImage {
     }
 
     pub fn device_local(
-        device: &Device,
+        allocator: &AllocatorHandle,
         cmd_buf: &mut CommandBuffer,
         extent: util::Extent2D,
         format: util::Format,
@@ -253,11 +251,11 @@ impl DeviceImage {
     ) -> Result<(Self, DeviceBuffer), MemoryError> {
         // stride & alignment does not matter as long as they are the same.
         let staging =
-            DeviceBuffer::staging_with_data(device, data, 1 /*elem_size*/, 1 /*stride*/)?;
+            DeviceBuffer::staging_with_data(allocator, data, 1 /*elem_size*/, 1 /*stride*/)?;
         // Both src & dst as we use one mip level to create the next
         let usage = vk::ImageUsageFlags::TRANSFER_DST | vk::ImageUsageFlags::SAMPLED;
         let dst_image = Self::empty_2d(
-            device,
+            allocator,
             extent,
             format,
             usage,
@@ -290,7 +288,7 @@ impl DeviceImage {
 
     /// Create a device local image, generating mipmaps in the process
     pub fn device_local_mipmapped(
-        device: &Device,
+        allocator: &AllocatorHandle,
         cmd_buf: &mut CommandBuffer,
         extent: util::Extent2D,
         format: util::Format,
@@ -299,13 +297,13 @@ impl DeviceImage {
     ) -> Result<(Self, DeviceBuffer), MemoryError> {
         // stride & alignment does not matter as long as they are the same.
         let staging =
-            DeviceBuffer::staging_with_data(device, data, 1 /*elem_size*/, 1 /*stride*/)?;
+            DeviceBuffer::staging_with_data(allocator, data, 1 /*elem_size*/, 1 /*stride*/)?;
         // Both src & dst as we use one mip level to create the next
         let usage = vk::ImageUsageFlags::TRANSFER_SRC
             | vk::ImageUsageFlags::TRANSFER_DST
             | vk::ImageUsageFlags::SAMPLED;
         let dst_image = Self::empty_2d(
-            device,
+            allocator,
             extent,
             format,
             usage,

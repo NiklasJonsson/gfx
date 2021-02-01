@@ -13,7 +13,7 @@ use crate::mem::BufferHandle;
 use crate::pipeline::ShaderStage;
 use crate::resource::{BufferedStorage, Handle, ResourceManager};
 use crate::texture::Texture;
-use crate::uniform::UniformBuffer;
+use crate::mem::UniformBuffer;
 use crate::Renderer;
 
 use crate::common::MAX_FRAMES_IN_FLIGHT;

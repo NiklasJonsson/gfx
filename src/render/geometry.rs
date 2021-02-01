@@ -1,4 +1,4 @@
-use trekanten::mesh::{
+use trekanten::mem::{
     BufferMutability, OwningIndexBufferDescriptor, OwningVertexBufferDescriptor,
 };
 use trekanten::util::Format;

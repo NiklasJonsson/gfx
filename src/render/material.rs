@@ -1,6 +1,6 @@
 use trekanten::loader::ResourceLoader;
 use trekanten::texture;
-use trekanten::uniform::UniformBuffer;
+use trekanten::mem::UniformBuffer;
 use trekanten::{BufferHandle, Handle, Loader};
 
 use crate::ecs::prelude::*;

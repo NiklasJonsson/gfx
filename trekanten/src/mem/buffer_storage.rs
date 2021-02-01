@@ -195,3 +195,11 @@ impl<T> AsyncDeviceBufferStorage<T> {
         }
     }
 }
+
+use super::buffer::*;
+pub type UniformBuffers = DeviceBufferStorage<UniformBuffer>;
+pub type AsyncUniformBuffers = AsyncDeviceBufferStorage<UniformBuffer>;
+pub type VertexBuffers = DeviceBufferStorage<VertexBuffer>;
+pub type AsyncVertexBuffers = AsyncDeviceBufferStorage<VertexBuffer>;
+pub type IndexBuffers = DeviceBufferStorage<IndexBuffer>;
+pub type AsyncIndexBuffers = AsyncDeviceBufferStorage<IndexBuffer>;

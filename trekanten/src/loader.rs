@@ -1,10 +1,7 @@
 use crate::mem::BufferHandle;
-use crate::mesh::{
-    IndexBuffer, OwningIndexBufferDescriptor, OwningVertexBufferDescriptor, VertexBuffer,
-};
+use crate::mem::{OwningVertexBufferDescriptor, OwningIndexBufferDescriptor, IndexBuffer, VertexBuffer, OwningUniformBufferDescriptor, UniformBuffer};
 use crate::resource::{AsyncResources, Handle, ResourceCommand};
 use crate::texture::{Texture, TextureDescriptor};
-use crate::uniform::{OwningUniformBufferDescriptor, UniformBuffer};
 
 use std::sync::{mpsc::Receiver, mpsc::Sender, Arc, Mutex};
 

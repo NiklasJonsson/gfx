@@ -9,8 +9,7 @@ use super::queue::QueueFamily;
 use super::render_pass::RenderPass;
 
 use crate::descriptor::DescriptorSet;
-use crate::mesh::IndexBuffer;
-use crate::mesh::VertexBuffer;
+use crate::mem::{IndexBuffer, VertexBuffer};
 use crate::pipeline::GraphicsPipeline;
 use crate::pipeline::Pipeline;
 use crate::pipeline::ShaderStage;

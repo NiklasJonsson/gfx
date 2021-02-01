@@ -7,7 +7,7 @@ use crate::render::mesh::PendingMesh;
 use crate::render::uniform::{LightingData, PackedLight, MAX_NUM_LIGHTS};
 
 use trekanten::loader::ResourceLoader;
-use trekanten::uniform::OwningUniformBufferDescriptor;
+use trekanten::mem::OwningUniformBufferDescriptor;
 use trekanten::BufferMutability;
 
 #[derive(Default, Component)]
@@ -86,7 +86,7 @@ impl<'a> System<'a> for RenderLightVolumes {
                 color: [color.x, color.y, color.z, 1.0],
             };
 
-            let color_uniform = loader.load(OwningUniformBufferDescriptor::from_vec(
+            let color_uniform = loader.load(OwningUniformBufferDescriptor::from_vec2(
                 vec![uniform_data],
                 BufferMutability::Immutable,
             ));
