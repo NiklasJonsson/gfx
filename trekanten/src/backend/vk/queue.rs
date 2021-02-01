@@ -3,7 +3,7 @@ use ash::vk;
 
 use thiserror::Error;
 
-use super::device::{HasVkDevice};
+use super::device::HasVkDevice;
 use super::sync::{Fence, SyncError};
 
 #[derive(Debug, Copy, Clone, Error)]
@@ -26,7 +26,14 @@ pub struct QueueFamilies {
     pub present: QueueFamily,
 }
 
-struct VkSubmitFn(extern "system" fn(queue: vk::Queue, submit_count: u32, p_submits: *const vk::SubmitInfo, fence: vk::Fence) -> vk::Result);
+struct VkSubmitFn(
+    extern "system" fn(
+        queue: vk::Queue,
+        submit_count: u32,
+        p_submits: *const vk::SubmitInfo,
+        fence: vk::Fence,
+    ) -> vk::Result,
+);
 unsafe impl Send for VkSubmitFn {}
 
 pub struct Queue {
@@ -46,7 +53,12 @@ impl Queue {
 
     pub fn submit(&self, info: &vk::SubmitInfo, fence: &Fence) -> Result<(), QueueError> {
         let infos = [*info];
-        let result = (self.vk_submit_fn.0)(self.vk_queue, infos.len() as u32, infos.as_ptr(), *fence.vk_fence());
+        let result = (self.vk_submit_fn.0)(
+            self.vk_queue,
+            infos.len() as u32,
+            infos.as_ptr(),
+            *fence.vk_fence(),
+        );
 
         if result == vk::Result::SUCCESS {
             Ok(())

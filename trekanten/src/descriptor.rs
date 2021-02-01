@@ -10,10 +10,10 @@ use crate::device::Device;
 use crate::device::HasVkDevice;
 use crate::device::VkDeviceHandle;
 use crate::mem::BufferHandle;
+use crate::mem::UniformBuffer;
 use crate::pipeline::ShaderStage;
 use crate::resource::{BufferedStorage, Handle, ResourceManager};
 use crate::texture::Texture;
-use crate::mem::UniformBuffer;
 use crate::Renderer;
 
 use crate::common::MAX_FRAMES_IN_FLIGHT;

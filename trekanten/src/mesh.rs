@@ -1,4 +1,4 @@
-use crate::mem::{IndexBuffer, VertexBuffer, BufferHandle};
+use crate::mem::{BufferHandle, IndexBuffer, VertexBuffer};
 
 pub struct Mesh {
     pub vertex_buffer: BufferHandle<VertexBuffer>,

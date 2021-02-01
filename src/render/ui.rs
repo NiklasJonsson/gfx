@@ -1,5 +1,8 @@
 use trekanten::descriptor::DescriptorSet;
-use trekanten::mem::{BufferMutability, IndexBuffer, OwningIndexBufferDescriptor, OwningVertexBufferDescriptor, VertexBuffer};
+use trekanten::mem::{
+    BufferMutability, IndexBuffer, OwningIndexBufferDescriptor, OwningVertexBufferDescriptor,
+    VertexBuffer,
+};
 use trekanten::pipeline::{
     BlendState, DepthTest, GraphicsPipeline, GraphicsPipelineDescriptor, ShaderDescriptor,
     ShaderStage, TriangleCulling,

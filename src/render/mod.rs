@@ -3,12 +3,12 @@ use thiserror::Error;
 use crate::ecs::prelude::*;
 
 use trekanten::descriptor::DescriptorSet;
+use trekanten::mem::{BufferMutability, OwningUniformBufferDescriptor, UniformBuffer};
 use trekanten::pipeline::{
     GraphicsPipeline, GraphicsPipelineDescriptor, PipelineError, ShaderDescriptor,
 };
 use trekanten::resource::Handle;
 use trekanten::resource::ResourceManager;
-use trekanten::mem::{OwningUniformBufferDescriptor, UniformBuffer, BufferMutability};
 use trekanten::util;
 use trekanten::vertex::VertexFormat;
 use trekanten::BufferHandle;
@@ -450,7 +450,7 @@ pub fn setup_resources(world: &mut World, mut renderer: &mut Renderer) {
             num_lights: 0,
         }];
         let light_data =
-            OwningUniformBufferDescriptor::from_vec2(light_data, BufferMutability::Mutable);
+            OwningUniformBufferDescriptor::from_vec(light_data, BufferMutability::Mutable);
         let light_data = renderer.create_resource_blocking(light_data).expect("FAIL");
 
         let view_data = vec![uniform::ViewData {
@@ -458,7 +458,7 @@ pub fn setup_resources(world: &mut World, mut renderer: &mut Renderer) {
             view_pos: [0.0; 4],
         }];
         let view_data =
-            OwningUniformBufferDescriptor::from_vec2(view_data, BufferMutability::Mutable);
+            OwningUniformBufferDescriptor::from_vec(view_data, BufferMutability::Mutable);
         let view_data = renderer.create_resource_blocking(view_data).expect("FAIL");
 
         assert_eq!(uniform::LightingData::SET, uniform::ViewData::SET);

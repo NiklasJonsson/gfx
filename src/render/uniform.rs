@@ -1,3 +1,10 @@
+use trekanten::mem::Uniform;
+
+pub trait UniformBlock {
+    const SET: u32;
+    const BINDING: u32;
+}
+
 #[derive(Copy, Clone, Debug)]
 #[repr(C, packed)]
 pub struct PBRMaterialData {
@@ -13,6 +20,8 @@ impl UniformBlock for PBRMaterialData {
     const BINDING: u32 = 0;
 }
 
+impl Uniform for PBRMaterialData {}
+
 #[derive(Copy, Clone, Debug)]
 #[repr(C, packed)]
 pub struct UnlitUniformData {
@@ -23,6 +32,7 @@ impl UniformBlock for UnlitUniformData {
     const SET: u32 = 1;
     const BINDING: u32 = 0;
 }
+impl Uniform for UnlitUniformData {}
 
 #[derive(Copy, Clone, Debug, Default)]
 #[repr(C, packed)]
@@ -44,6 +54,7 @@ impl UniformBlock for LightingData {
     const SET: u32 = 0;
     const BINDING: u32 = 1;
 }
+impl Uniform for LightingData {}
 
 #[derive(Copy, Clone, Debug)]
 #[repr(C, packed)]
@@ -63,8 +74,4 @@ impl UniformBlock for ViewData {
     const SET: u32 = 0;
     const BINDING: u32 = 0;
 }
-
-pub trait UniformBlock {
-    const SET: u32;
-    const BINDING: u32;
-}
+impl Uniform for ViewData {}

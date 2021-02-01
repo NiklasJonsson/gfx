@@ -73,7 +73,7 @@ impl<'a> System<'a> for CreateRenderedBoundingBoxes {
                 color: [1.0, 0.0, 0.0, 1.0],
             };
 
-            let color_uniform = loader.load(OwningUniformBufferDescriptor::from_vec2(
+            let color_uniform = loader.load(OwningUniformBufferDescriptor::from_vec(
                 vec![uniform_data],
                 BufferMutability::Immutable,
             ));

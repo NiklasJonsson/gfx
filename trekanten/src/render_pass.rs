@@ -1,5 +1,5 @@
 use crate::mem::{BufferHandle, BufferStorageReadGuard, IndexBuffer, VertexBuffer};
-use crate::mesh::{Mesh};
+use crate::mesh::Mesh;
 use crate::resource::Handle;
 use crate::util;
 use crate::Renderer;

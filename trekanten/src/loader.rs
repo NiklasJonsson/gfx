@@ -1,5 +1,8 @@
 use crate::mem::BufferHandle;
-use crate::mem::{OwningVertexBufferDescriptor, OwningIndexBufferDescriptor, IndexBuffer, VertexBuffer, OwningUniformBufferDescriptor, UniformBuffer};
+use crate::mem::{
+    IndexBuffer, OwningIndexBufferDescriptor, OwningUniformBufferDescriptor,
+    OwningVertexBufferDescriptor, UniformBuffer, VertexBuffer,
+};
 use crate::resource::{AsyncResources, Handle, ResourceCommand};
 use crate::texture::{Texture, TextureDescriptor};
 

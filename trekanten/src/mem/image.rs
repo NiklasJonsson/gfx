@@ -250,8 +250,10 @@ impl DeviceImage {
         data: &[u8],
     ) -> Result<(Self, DeviceBuffer), MemoryError> {
         // stride & alignment does not matter as long as they are the same.
-        let staging =
-            DeviceBuffer::staging_with_data(allocator, data, 1 /*elem_size*/, 1 /*stride*/)?;
+        let staging = DeviceBuffer::staging_with_data(
+            allocator, data, 1, /*elem_size*/
+            1, /*stride*/
+        )?;
         // Both src & dst as we use one mip level to create the next
         let usage = vk::ImageUsageFlags::TRANSFER_DST | vk::ImageUsageFlags::SAMPLED;
         let dst_image = Self::empty_2d(
@@ -296,8 +298,10 @@ impl DeviceImage {
         data: &[u8],
     ) -> Result<(Self, DeviceBuffer), MemoryError> {
         // stride & alignment does not matter as long as they are the same.
-        let staging =
-            DeviceBuffer::staging_with_data(allocator, data, 1 /*elem_size*/, 1 /*stride*/)?;
+        let staging = DeviceBuffer::staging_with_data(
+            allocator, data, 1, /*elem_size*/
+            1, /*stride*/
+        )?;
         // Both src & dst as we use one mip level to create the next
         let usage = vk::ImageUsageFlags::TRANSFER_SRC
             | vk::ImageUsageFlags::TRANSFER_DST

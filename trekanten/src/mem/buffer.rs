@@ -5,10 +5,10 @@ use vk_mem::{Allocation, AllocationCreateInfo, MemoryUsage};
 use crate::command::CommandBuffer;
 use crate::device::AllocatorHandle;
 use crate::resource::Handle;
-use crate::vertex::{VertexFormat, VertexDefinition};
+use crate::vertex::{VertexDefinition, VertexFormat};
 
 use crate::mem::MemoryError;
-use crate::util::{ByteBuffer, as_byte_slice, as_bytes};
+use crate::util::{as_byte_slice, as_bytes, ByteBuffer};
 
 use std::sync::Arc;
 
@@ -137,14 +137,6 @@ impl<T> BufferHandle<T> {
         }
     }
 }
-
-/* Buffer refactor remaining: 
-   * fix from_vec2
-   * try to merge Borrowing and owning
-   * Can we simplify the descriptor traits?
-   * backend command buffer doesn't operator on TypedBuffer
-   * Move DeviceBuffer to backend
-*/
 
 pub struct DeviceBuffer {
     allocator: AllocatorHandle,
@@ -401,7 +393,9 @@ impl<BT: BufferType + Clone> BufferDescriptor for OwningBufferDescriptor<BT> {
     }
 
     fn elem_align(&self, allocator: &AllocatorHandle) -> u16 {
-        self.buffer_type.elem_align(allocator).unwrap_or(self.elem_size())
+        self.buffer_type
+            .elem_align(allocator)
+            .unwrap_or(self.elem_size())
     }
 
     fn n_elems(&self) -> u32 {
@@ -417,12 +411,8 @@ impl<BT: BufferType + Clone> BufferDescriptor for OwningBufferDescriptor<BT> {
         allocator: &AllocatorHandle,
         command_buffer: &mut CommandBuffer,
     ) -> Result<BufferResult<Self::Buffer>, MemoryError> {
-        let (buffer, transient) = Self::Buffer::create(
-            allocator,
-            command_buffer,
-            self,
-            self.buffer_type.clone()
-        )?;
+        let (buffer, transient) =
+            Self::Buffer::create(allocator, command_buffer, self, self.buffer_type.clone())?;
 
         Ok(BufferResult { buffer, transient })
     }
@@ -453,7 +443,9 @@ impl<'a, BT: BufferType + Clone> BufferDescriptor for BorrowingBufferDescriptor<
     }
 
     fn elem_align(&self, allocator: &AllocatorHandle) -> u16 {
-        self.buffer_type.elem_align(allocator).unwrap_or(self.elem_size())
+        self.buffer_type
+            .elem_align(allocator)
+            .unwrap_or(self.elem_size())
     }
 
     fn vk_usage_flags(&self) -> vk::BufferUsageFlags {
@@ -469,12 +461,8 @@ impl<'a, BT: BufferType + Clone> BufferDescriptor for BorrowingBufferDescriptor<
         allocator: &AllocatorHandle,
         command_buffer: &mut CommandBuffer,
     ) -> Result<BufferResult<Self::Buffer>, MemoryError> {
-        let (buffer, transient) = Self::Buffer::create(
-            allocator,
-            command_buffer,
-            self,
-            self.buffer_type.clone()
-        )?;
+        let (buffer, transient) =
+            Self::Buffer::create(allocator, command_buffer, self, self.buffer_type.clone())?;
 
         Ok(BufferResult { buffer, transient })
     }
@@ -485,14 +473,21 @@ pub struct UniformBufferType;
 impl BufferType for UniformBufferType {
     const USAGE: vk::BufferUsageFlags = vk::BufferUsageFlags::UNIFORM_BUFFER;
     fn elem_align(&self, allocator: &AllocatorHandle) -> Option<u16> {
-        Some(allocator.get_physical_device_properties().expect("Bad allocator").limits.min_uniform_buffer_offset_alignment as u16)
+        Some(
+            allocator
+                .get_physical_device_properties()
+                .expect("Bad allocator")
+                .limits
+                .min_uniform_buffer_offset_alignment as u16,
+        )
     }
 }
 
+pub trait Uniform {}
+
 pub type OwningUniformBufferDescriptor = OwningBufferDescriptor<UniformBufferType>;
 impl OwningUniformBufferDescriptor {
-    // TODO: Here there should be a trait that ensures std140 layout
-    pub fn from_vec2<T: Copy>(data: Vec<T>, mutability: BufferMutability) -> Self {
+    pub fn from_vec<T: Copy + Uniform>(data: Vec<T>, mutability: BufferMutability) -> Self {
         let n_elems = data.len() as u32;
         let data = unsafe { Arc::new(ByteBuffer::from_vec(data)) };
         Self {
@@ -542,9 +537,7 @@ impl OwningVertexBufferDescriptor {
             n_elems,
             elem_size: format.size() as u16,
             mutability,
-            buffer_type: VertexBufferType {
-                format,
-            },
+            buffer_type: VertexBufferType { format },
         }
     }
 }
@@ -562,9 +555,7 @@ impl<'a> BorrowingVertexBufferDescriptor<'a> {
             mutability,
             n_elems: slice.len() as u32,
             elem_size: format.size() as u16,
-            buffer_type: VertexBufferType {
-                format,
-            }
+            buffer_type: VertexBufferType { format },
         }
     }
 
@@ -575,9 +566,7 @@ impl<'a> BorrowingVertexBufferDescriptor<'a> {
             mutability,
             n_elems: data.len() as u32 / format.size(),
             elem_size: format.size() as u16,
-            buffer_type: VertexBufferType {
-                format,
-            }
+            buffer_type: VertexBufferType { format },
         }
     }
 }
@@ -628,12 +617,10 @@ impl OwningIndexBufferDescriptor {
         let data = unsafe { Arc::new(ByteBuffer::from_vec(data)) };
         Self {
             data,
-            n_elems, 
+            n_elems,
             elem_size: std::mem::size_of::<T>() as u16,
             mutability,
-            buffer_type: IndexBufferType {
-                index_size,
-            }
+            buffer_type: IndexBufferType { index_size },
         }
     }
 }
@@ -657,10 +644,8 @@ impl<'a> BorrowingIndexBufferDescriptor<'a> {
             data,
             mutability,
             n_elems,
-            elem_size, 
-            buffer_type: IndexBufferType {
-                index_size,
-            }
+            elem_size,
+            buffer_type: IndexBufferType { index_size },
         }
     }
 
@@ -676,9 +661,7 @@ impl<'a> BorrowingIndexBufferDescriptor<'a> {
             mutability,
             n_elems: data.len() as u32 / elem_size as u32,
             elem_size: elem_size as u16,
-            buffer_type: IndexBufferType {
-                index_size,
-            }
+            buffer_type: IndexBufferType { index_size },
         }
     }
 }
@@ -825,5 +808,3 @@ impl UniformBuffer {
         self.stride() as u64 * self.n_elems() as u64
     }
 }
-
-

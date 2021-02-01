@@ -86,7 +86,7 @@ impl<'a> System<'a> for RenderLightVolumes {
                 color: [color.x, color.y, color.z, 1.0],
             };
 
-            let color_uniform = loader.load(OwningUniformBufferDescriptor::from_vec2(
+            let color_uniform = loader.load(OwningUniformBufferDescriptor::from_vec(
                 vec![uniform_data],
                 BufferMutability::Immutable,
             ));
