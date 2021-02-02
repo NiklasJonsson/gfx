@@ -45,7 +45,7 @@ impl std::ops::Drop for CommandPool {
 }
 
 impl CommandPool {
-    fn new(device: &Device, qfam: QueueFamily) -> Result<Self, CommandError> {
+    pub fn new(device: &Device, qfam: QueueFamily) -> Result<Self, CommandError> {
         let info = vk::CommandPoolCreateInfo {
             queue_family_index: qfam.index,
             ..Default::default()
@@ -66,20 +66,12 @@ impl CommandPool {
         })
     }
 
-    pub fn graphics(device: &Device) -> Result<Self, CommandError> {
-        Self::new(device, device.graphics_queue_family().clone())
-    }
-
     pub fn reset(&mut self) -> Result<(), CommandError> {
         unsafe {
             self.vk_device
                 .reset_command_pool(self.vk_command_pool, vk::CommandPoolResetFlags::empty())
                 .map_err(CommandError::PoolReset)
         }
-    }
-
-    pub fn util(device: &Device) -> Result<Self, CommandError> {
-        Self::new(device, device.util_queue_family().clone())
     }
 
     pub fn create_command_buffer(

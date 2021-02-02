@@ -12,7 +12,7 @@ use trekanten::resource::ResourceManager;
 use trekanten::util;
 use trekanten::vertex::VertexFormat;
 use trekanten::BufferHandle;
-use trekanten::RenderPassBuilder;
+use trekanten::RenderPassEncoder;
 use trekanten::Renderer;
 
 mod bounding_box;
@@ -26,11 +26,13 @@ pub mod ui;
 pub mod uniform;
 
 pub use mesh::GpuMesh;
+use mesh::PendingMesh;
 
 use crate::camera::*;
 use crate::ecs;
 use crate::math::{Mat4, ModelMatrix, Transform, Vec3};
-use material::Material;
+use material::{GpuMaterial, PendingMaterial};
+use ramneryd_derive::Inspect;
 
 use debug_window::{RenderMode, RenderSettings};
 
@@ -99,10 +101,10 @@ pub struct RenderableMaterial {
 // TODO: Bindings here need to match with shader
 fn create_material_descriptor_set(
     renderer: &mut Renderer,
-    material: &Material,
+    material: &GpuMaterial,
 ) -> Handle<DescriptorSet> {
     match &material {
-        material::Material::PBR {
+        material::GpuMaterial::PBR {
             material_uniforms,
             normal_map,
             base_color_texture,
@@ -143,7 +145,7 @@ fn create_material_descriptor_set(
 
             desc_set_builder.build()
         }
-        material::Material::Unlit { color_uniform } => {
+        material::GpuMaterial::Unlit { color_uniform } => {
             let mut desc_set_builder = DescriptorSet::builder(renderer);
             desc_set_builder = desc_set_builder.add_buffer(
                 &color_uniform,
@@ -168,15 +170,13 @@ pub fn get_pipeline_for(
     renderer: &mut Renderer,
     world: &World,
     mesh: &GpuMesh,
-    mat: &material::Material,
+    mat: &material::GpuMaterial,
     global_render_mode: RenderMode,
 ) -> Result<Handle<GraphicsPipeline>, MaterialError> {
     // TODO: Infer from spirv?
     let vertex_format = renderer
         .get_resource(&mesh.vertex_buffer)
         .expect("Invalid handle")
-        .as_ref()
-        .expect("should be available")
         .format()
         .clone();
 
@@ -187,7 +187,7 @@ pub fn get_pipeline_for(
 
     let shader_compiler = world.read_resource::<pipeline::ShaderCompiler>();
     let pipe = match mat {
-        material::Material::PBR {
+        material::GpuMaterial::PBR {
             normal_map,
             base_color_texture,
             metallic_roughness_texture,
@@ -217,7 +217,7 @@ pub fn get_pipeline_for(
 
             renderer.create_resource_blocking(desc)?
         }
-        material::Material::Unlit { .. } => {
+        material::GpuMaterial::Unlit { .. } => {
             use std::path::PathBuf;
             let vertex = shader_compiler.compile(
                 &pipeline::Defines::empty(),
@@ -248,7 +248,7 @@ fn create_renderable(
     renderer: &mut Renderer,
     world: &World,
     mesh: &GpuMesh,
-    material: &Material,
+    material: &GpuMaterial,
     render_mode: RenderMode,
 ) -> RenderableMaterial {
     log::trace!("Creating renderable: {:?}, {:?}", material, render_mode);
@@ -267,7 +267,7 @@ fn create_renderables(renderer: &mut Renderer, world: &mut World, render_mode: R
     use specs::storage::StorageEntry;
 
     let meshes = world.read_storage::<GpuMesh>();
-    let materials = world.read_storage::<Material>();
+    let materials = world.read_storage::<GpuMaterial>();
     let mut should_reload = world.write_storage::<ReloadMaterial>();
     let mut renderables = world.write_storage::<RenderableMaterial>();
     let entities = world.entities();
@@ -308,7 +308,7 @@ fn create_renderables(renderer: &mut Renderer, world: &mut World, render_mode: R
 }
 
 #[profiling::function]
-fn draw_entities<'a>(world: &World, cmd_buf: &mut RenderPassBuilder<'a>) {
+fn draw_entities<'a>(world: &World, cmd_buf: &mut RenderPassEncoder<'a>) {
     let model_matrices = world.read_storage::<ModelMatrix>();
     let meshes = world.read_storage::<GpuMesh>();
     let renderables = world.read_storage::<RenderableMaterial>();
@@ -331,7 +331,7 @@ fn draw_entities<'a>(world: &World, cmd_buf: &mut RenderPassBuilder<'a>) {
                 trekanten::pipeline::ShaderStage::VERTEX,
                 &trn,
             )
-            .draw_mesh(&mesh);
+            .draw_mesh(&mesh.vertex_buffer, &mesh.index_buffer);
     }
 }
 
@@ -348,6 +348,7 @@ pub fn draw_frame(world: &mut World, ui: &mut ui::UIContext, renderer: &mut Rend
         render_settings.render_mode
     };
 
+    GpuUpload::resolve_pending(world, renderer);
     create_renderables(renderer, world, render_mode);
 
     let aspect_ratio = renderer.aspect_ratio();
@@ -436,7 +437,7 @@ pub fn setup_resources(world: &mut World, mut renderer: &mut Renderer) {
             pipeline::ShaderCompiler::new().expect("Failed to create shader compiler");
 
         world.insert(shader_compiler);
-        world.insert(renderer.loader());
+        world.insert(renderer.loader().unwrap());
     }
 
     let frame_data = {
@@ -509,14 +510,244 @@ pub fn setup_resources(world: &mut World, mut renderer: &mut Renderer) {
     log::trace!("Done");
 }
 
+#[derive(Debug, Clone, Inspect)]
+pub enum Pending<T1, T2> {
+    Pending(T1),
+    Available(T2),
+}
+
+#[derive(Component)]
+struct UploadAsync;
+struct GpuUpload;
+impl GpuUpload {
+    pub const ID: &'static str = "GpuUpload";
+}
+impl GpuUpload {
+    #[profiling::function]
+    fn resolve_pending(world: &mut World, renderer: &mut Renderer) {
+        use trekanten::loader::HandleMapping;
+        let mut loader = world.write_resource::<trekanten::Loader>();
+        let mut pending_materials = world.write_storage::<PendingMaterial>();
+        let mut pending_meshes = world.write_storage::<PendingMesh>();
+        let mut materials = world.write_storage::<GpuMaterial>();
+        let mut meshes = world.write_storage::<GpuMesh>();
+        let mut transfer_guard = loader.transfer(renderer);
+        for mapping in transfer_guard.iter() {
+            match mapping {
+                // TODO: drain_filter()
+                HandleMapping::UniformBuffer { old, new } => {
+                    for (ent, _) in (&world.entities(), &pending_materials.mask().clone()).join() {
+                        let pending = if let Some(pending) = pending_materials.get_mut(ent) {
+                            pending
+                        } else {
+                            log::warn!(
+                                "Uniform is done for entity {:?} but it is no longer pending",
+                                ent
+                            );
+                            continue;
+                        };
+
+                        match pending {
+                            PendingMaterial::Unlit { color_uniform } => {
+                                assert!(
+                                    std::matches!(color_uniform, Pending::Pending(prev) if *prev == old)
+                                );
+                                *color_uniform = Pending::Available(new);
+                            }
+                            PendingMaterial::PBR {
+                                material_uniforms, ..
+                            } => {
+                                assert!(
+                                    std::matches!(material_uniforms, Pending::Pending(prev) if *prev == old)
+                                );
+                                *material_uniforms = Pending::Available(new);
+                            }
+                        };
+
+                        if !pending.is_done() {
+                            continue;
+                        }
+
+                        let material = pending_materials
+                            .remove(ent)
+                            .expect("This is alive")
+                            .finish();
+                        materials.insert(ent, material).expect("This is alive");
+                    }
+                }
+                HandleMapping::VertexBuffer { old, new } => {
+                    for (ent, _) in (&world.entities(), &pending_meshes.mask().clone()).join() {
+                        let pending = if let Some(pending) = pending_meshes.get_mut(ent) {
+                            pending
+                        } else {
+                            log::warn!(
+                                "Vertex buffer is done for entity {:?} but it is no longer pending",
+                                ent
+                            );
+                            continue;
+                        };
+                        assert!(
+                            std::matches!(pending.vertex_buffer, Pending::Pending(prev) if prev == old)
+                        );
+                        pending.vertex_buffer = Pending::Available(new);
+
+                        if let Some(mesh) = pending.try_finish() {
+                            meshes.insert(ent, mesh).expect("I'm alive!");
+                            pending_meshes.remove(ent).expect("I'm alive!");
+                        }
+                    }
+                }
+                HandleMapping::IndexBuffer { old, new } => {
+                    for (ent, _) in (&world.entities(), &pending_meshes.mask().clone()).join() {
+                        let pending = if let Some(pending) = pending_meshes.get_mut(ent) {
+                            pending
+                        } else {
+                            log::warn!(
+                                "Index buffer is done for entity {:?} but it is no longer pending",
+                                ent
+                            );
+                            continue;
+                        };
+                        assert!(
+                            std::matches!(pending.index_buffer, Pending::Pending(prev) if prev == old)
+                        );
+                        pending.index_buffer = Pending::Available(new);
+
+                        if let Some(mesh) = pending.try_finish() {
+                            meshes.insert(ent, mesh).expect("I'm alive!");
+                            pending_meshes.remove(ent).expect("I'm alive!");
+                        }
+                    }
+                }
+                HandleMapping::Texture { old, new } => {
+                    for (ent, _) in (&world.entities(), &pending_materials.mask().clone()).join() {
+                        let pending = if let Some(pending) = pending_materials.get_mut(ent) {
+                            pending
+                        } else {
+                            log::warn!(
+                                "Uniform is done for entity {:?} but it is no longer pending",
+                                ent
+                            );
+                            continue;
+                        };
+
+                        match pending {
+                            PendingMaterial::PBR {
+                                normal_map,
+                                base_color_texture,
+                                metallic_roughness_texture,
+                                ..
+                            } => {
+                                let mut found = false;
+                                for tex in
+                                    [normal_map, base_color_texture, metallic_roughness_texture]
+                                        .iter_mut()
+                                {
+                                    if let Some(Pending::Pending(tex_inner)) = tex {
+                                        if tex_inner.handle == old {
+                                            found = true;
+                                            **tex =
+                                                Some(Pending::Available(material::TextureUse {
+                                                    handle: new,
+                                                    coord_set: tex_inner.coord_set,
+                                                }));
+                                            break;
+                                        }
+                                    }
+                                }
+                                assert!(found);
+                            }
+                            PendingMaterial::Unlit { .. } => {
+                                unreachable!("Can't have pending textures for this variant")
+                            }
+                        };
+
+                        if !pending.is_done() {
+                            continue;
+                        }
+
+                        let material = pending_materials
+                            .remove(ent)
+                            .expect("This is alive")
+                            .finish();
+                        materials.insert(ent, material).expect("This is alive");
+                    }
+                }
+            }
+        }
+    }
+}
+
+impl<'a> System<'a> for GpuUpload {
+    type SystemData = (
+        WriteExpect<'a, trekanten::Loader>,
+        WriteStorage<'a, material::Unlit>,
+        WriteStorage<'a, PendingMaterial>,
+        WriteStorage<'a, mesh::CpuMesh>,
+        WriteStorage<'a, PendingMesh>,
+        WriteStorage<'a, UploadAsync>,
+        Entities<'a>,
+    );
+
+    fn run(&mut self, data: Self::SystemData) {
+        use trekanten::loader::ResourceLoader;
+
+        let (
+            loader,
+            unlit_materials,
+            mut pending_mats,
+            cpu_meshes,
+            mut pending_meshes,
+            mut command_markers,
+            entities,
+        ) = data;
+
+        let mut ubuf = Vec::new();
+        for (ent, unlit) in (&entities, &unlit_materials).join() {
+            if let StorageEntry::Vacant(_) = pending_mats.entry(ent).unwrap() {
+                ubuf.push(uniform::UnlitUniformData {
+                    color: unlit.color.into_array(),
+                });
+            }
+        }
+
+        if !ubuf.is_empty() {
+            let async_handle = loader
+                .load(OwningUniformBufferDescriptor::from_vec(
+                    ubuf,
+                    BufferMutability::Immutable,
+                ))
+                .expect("Failed to load uniform buffer");
+            for (i, (ent, _unlit)) in (&entities, &unlit_materials).join().enumerate() {
+                if let StorageEntry::Vacant(entry) = pending_mats.entry(ent).unwrap() {
+                    entry.insert(PendingMaterial::Unlit {
+                        color_uniform: Pending::Pending(BufferHandle::sub_buffer(
+                            async_handle,
+                            i as u32,
+                            1,
+                        )),
+                    });
+                }
+            }
+        }
+
+        for (ent, mesh, _) in (&entities, &cpu_meshes, &command_markers).join() {
+            pending_meshes
+                .insert(ent, PendingMesh::load(&loader, &mesh))
+                .expect("I'm alive");
+        }
+
+        command_markers.clear();
+    }
+}
+
 pub fn register_systems<'a, 'b>(builder: ExecutorBuilder<'a, 'b>) -> ExecutorBuilder<'a, 'b> {
     [
         debug_window::register_systems,
         bounding_box::register_systems,
         light::register_systems,
-        mesh::register_systems,
-        material::register_systems,
     ]
     .iter()
     .fold(builder, |a, x| x(a))
+    .with(GpuUpload, GpuUpload::ID, &[])
 }

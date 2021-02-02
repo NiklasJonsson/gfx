@@ -42,11 +42,21 @@ impl std::ops::Deref for ByteBuffer {
     }
 }
 
+impl std::fmt::Debug for ByteBuffer {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let len = self.data.len();
+        let ptr = self.data.as_ptr();
+        write!(f, "({:?}, {:?})[{}]", ptr, ptr.wrapping_add(len), len)
+    }
+}
+
 impl ByteBuffer {
     // Requiring copy enforces that there is no custom drop that is needed
-    // Very unsafe. Does not call drop()
+    // Very unsafe. Does not call drop() for elements
     pub unsafe fn from_vec<T: Copy>(mut v: Vec<T>) -> Self {
-        assert!(!v.is_empty(), "can't be empty");
+        if v.is_empty() {
+            return Self::empty();
+        }
         // TODO: Static assertion
         assert!(std::mem::size_of::<T>() > 0, "ZST are not supported");
         let ptr = v.as_mut_ptr();
@@ -70,6 +80,14 @@ impl ByteBuffer {
         Self { data, layout }
     }
 
+    pub fn empty() -> Self {
+        let layout = unsafe { std::alloc::Layout::from_size_align_unchecked(0, 0) };
+        Self {
+            data: Vec::new(),
+            layout,
+        }
+    }
+
     pub fn len(&self) -> usize {
         self.data.len()
     }
@@ -77,6 +95,9 @@ impl ByteBuffer {
 
 impl Drop for ByteBuffer {
     fn drop(&mut self) {
+        if self.data.is_empty() {
+            return;
+        }
         let mut owned = std::mem::take(&mut self.data);
         let ptr = owned.as_mut_ptr();
         std::mem::forget(owned);

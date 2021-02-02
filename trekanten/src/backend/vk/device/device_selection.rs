@@ -7,7 +7,7 @@ use std::ffi::CString;
 use std::convert::{TryFrom, TryInto};
 
 use crate::instance::Instance;
-use crate::queue::{QueueFamilies, QueueFamily};
+use crate::queue::QueueFamily;
 use crate::surface::Surface;
 use crate::util;
 
@@ -47,23 +47,50 @@ fn required_device_extensions() -> Vec<CString> {
 }
 
 #[derive(Clone, Debug)]
+pub struct QueueSelection {
+    pub family: QueueFamily,
+    pub queue_index: u32,
+}
+
+#[derive(Clone, Debug)]
 struct QueueFamiliesQuery {
-    graphics: Option<QueueFamily>,
-    present: Option<QueueFamily>,
+    graphics: Option<QueueSelection>,
+    present: Option<QueueSelection>,
+    transfer: Option<QueueSelection>,
+}
+
+#[derive(Clone, Debug)]
+pub struct QueueFamilies {
+    pub graphics: QueueSelection,
+    pub present: QueueSelection,
+    pub transfer: QueueSelection,
 }
 
 impl TryFrom<QueueFamiliesQuery> for QueueFamilies {
     type Error = DeviceCreationError;
     fn try_from(v: QueueFamiliesQuery) -> Result<Self, Self::Error> {
-        match (v.graphics, v.present) {
-            (None, _) => Err(DeviceCreationError::UnsuitableDevice(
-                DeviceSuitability::MissingGraphicsQueue,
-            )),
-            (_, None) => Err(DeviceCreationError::UnsuitableDevice(
-                DeviceSuitability::MissingPresentQueue,
-            )),
-            (Some(graphics), Some(present)) => Ok(QueueFamilies { graphics, present }),
-        }
+        let present = v.present.ok_or(DeviceCreationError::UnsuitableDevice(
+            DeviceSuitability::MissingPresentQueue,
+        ))?;
+        let graphics = v.graphics.ok_or(DeviceCreationError::UnsuitableDevice(
+            DeviceSuitability::MissingGraphicsQueue,
+        ))?;
+        let transfer = v.transfer.ok_or(DeviceCreationError::UnsuitableDevice(
+            DeviceSuitability::MissingTransferQueue,
+        ))?;
+        assert!(
+            present.family.index != graphics.family.index
+                || present.queue_index == graphics.queue_index
+        );
+        assert!(
+            transfer.family.index != graphics.family.index
+                || transfer.queue_index != graphics.queue_index
+        );
+        Ok(QueueFamilies {
+            graphics,
+            present,
+            transfer,
+        })
     }
 }
 
@@ -89,30 +116,65 @@ fn find_queue_families(
     let mut families = QueueFamiliesQuery {
         graphics: None,
         present: None,
+        transfer: None,
     };
 
-    for (i, fam) in queue_fam_props.iter().enumerate() {
+    families.graphics = queue_fam_props.iter().enumerate().find_map(|(i, fam)| {
         assert!(i <= u32::MAX as usize);
         if fam.queue_flags.contains(vk::QueueFlags::GRAPHICS) {
-            families.graphics = Some(QueueFamily {
-                props: *fam,
-                index: i as u32,
-            });
+            Some(QueueSelection {
+                family: QueueFamily {
+                    props: *fam,
+                    index: i as u32,
+                },
+                queue_index: 0,
+            })
+        } else {
+            None
         }
+    });
 
-        let same_as_gfx = families
-            .graphics
-            .as_ref()
-            .map(|f| f.index as usize == i)
-            .unwrap_or(false);
-        // According to vulkan tutorial, "drawing and presentation" is more performant on the same
-        // queue
-        if surface.is_supported_by(device, i as u32)? && (same_as_gfx || families.present.is_none())
-        {
-            families.present = Some(QueueFamily {
-                props: *fam,
-                index: i as u32,
-            });
+    // According to vulkan tutorial, "drawing and presentation" is more performant on the same
+    // queue
+    if let Some(gfx_index) = families.graphics.as_ref().map(|s| s.family.index) {
+        for (i, fam) in queue_fam_props.iter().enumerate() {
+            // present queue
+            // If this is another family than graphics, we want the first queue.
+            // If this is the same family as graphics, we use the same queue as we don't multithread
+            // the access to the queue for drawing/presenting
+            let same_as_gfx = gfx_index as usize == i;
+            if surface.is_supported_by(device, i as u32)?
+                && (same_as_gfx || families.present.is_none())
+            {
+                families.present = Some(QueueSelection {
+                    family: QueueFamily {
+                        props: *fam,
+                        index: i as u32,
+                    },
+                    queue_index: 0,
+                });
+            }
+
+            // transfer queue
+            // We want the "solo" transfer queue family if possible, otherwise the same as graphics.
+            // We want a different queue though, as it is used to submit independently from different threads
+            let may_use_gfx_family = families.transfer.is_none() && fam.queue_count >= 2;
+            if fam.queue_flags.contains(vk::QueueFlags::TRANSFER)
+                && (!same_as_gfx || may_use_gfx_family)
+            {
+                let queue_index = if same_as_gfx && may_use_gfx_family {
+                    1
+                } else {
+                    0
+                };
+                families.transfer = Some(QueueSelection {
+                    family: QueueFamily {
+                        props: *fam,
+                        index: i as u32,
+                    },
+                    queue_index,
+                });
+            }
         }
     }
 
@@ -156,6 +218,7 @@ pub enum DeviceSuitability {
     MissingRequiredFeatures,
     MissingGraphicsQueue,
     MissingPresentQueue,
+    MissingTransferQueue,
     MissingDepthFormat,
     UnsuitableSwapchainFormat,
     UnsuitableSwapchainPresentMode,
@@ -242,6 +305,10 @@ fn check_device_suitability(
         return Ok(DeviceSuitability::MissingPresentQueue);
     }
 
+    if fams.transfer.is_none() {
+        return Ok(DeviceSuitability::MissingTransferQueue);
+    }
+
     let swapchain_query = surface.query_swapchain_support(device)?;
 
     if swapchain_query.formats.is_empty() {
@@ -279,52 +346,23 @@ fn score_device(
     Ok(score)
 }
 
-fn log_queue_family(fam: &QueueFamily) {
-    log::trace!("\tindex: {}", fam.index);
+fn log_queue_selection(sel: &QueueSelection) {
+    let fam = &sel.family;
+    log::trace!("\tfam_index: {}", fam.index);
     log::trace!("\tflags: {:?}", fam.props.queue_flags);
     log::trace!("\tqueue_count: {}", fam.props.queue_count);
+    log::trace!("\tqueue_index: {}", sel.queue_index);
 }
 
 fn log_queue_families(qfams: &QueueFamilies) {
     log::trace!("Graphics:");
-    log_queue_family(&qfams.graphics);
+    log_queue_selection(&qfams.graphics);
     log::trace!("Present:");
-    log_queue_family(&qfams.present);
+    log_queue_selection(&qfams.present);
+    log::trace!("Transfer");
+    log_queue_selection(&qfams.transfer);
 }
 
-fn create_infos_for_families(
-    queue_families: &QueueFamilies,
-    prio: &[f32],
-) -> Result<Vec<vk::DeviceQueueCreateInfo>, DeviceCreationError> {
-    let (gfx, present) = (&queue_families.graphics, &queue_families.present);
-    let queue_count = prio.len() as u32;
-
-    let infos = if gfx.index == present.index {
-        vec![vk::DeviceQueueCreateInfo {
-            queue_family_index: gfx.index,
-            p_queue_priorities: prio.as_ptr(),
-            queue_count,
-            ..Default::default()
-        }]
-    } else {
-        vec![
-            vk::DeviceQueueCreateInfo {
-                queue_family_index: gfx.index,
-                p_queue_priorities: prio.as_ptr(),
-                queue_count,
-                ..Default::default()
-            },
-            vk::DeviceQueueCreateInfo {
-                queue_family_index: present.index,
-                p_queue_priorities: prio.as_ptr(),
-                queue_count,
-                ..Default::default()
-            },
-        ]
-    };
-
-    Ok(infos)
-}
 pub fn device_selection(
     instance: &Instance,
     surface: &Surface,
@@ -372,9 +410,32 @@ pub fn device_selection(
 
     log::trace!("Choosing queue families:");
     log_queue_families(&queue_families);
-    let prio = [1.0];
-
-    let queue_infos = create_infos_for_families(&queue_families, &prio)?;
+    let mut fam_indices = [
+        queue_families.graphics.family.index,
+        queue_families.present.family.index,
+        queue_families.transfer.family.index,
+    ];
+    fam_indices.sort();
+    let mut queue_infos: Vec<vk::DeviceQueueCreateInfo> = Vec::with_capacity(3);
+    let prio_1 = [1.0];
+    let prio_2 = [1.0, 1.0];
+    let prio_3 = [1.0, 1.0, 1.0];
+    let prios: [&[f32]; 3] = [&prio_1, &prio_2, &prio_3];
+    for &fi in &fam_indices {
+        if queue_infos.len() == 0 || fi != queue_infos.last().unwrap().queue_family_index {
+            queue_infos.push(vk::DeviceQueueCreateInfo {
+                queue_family_index: fi,
+                p_queue_priorities: prio_1.as_ptr(),
+                queue_count: 1,
+                ..Default::default()
+            });
+        } else {
+            let prev = queue_infos.last_mut().unwrap();
+            assert_eq!(fi, prev.queue_family_index);
+            prev.queue_count += 1;
+            prev.p_queue_priorities = prios[prev.queue_count as usize - 1].as_ptr();
+        }
+    }
 
     // TODO: Cleanup handling layers together with instance
     let validation_layers = crate::instance::choose_validation_layers(instance.vk_entry());

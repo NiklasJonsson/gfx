@@ -4,7 +4,6 @@ use resurs::Handle;
 
 use trekanten::descriptor::DescriptorSet;
 use trekanten::mem;
-use trekanten::mesh;
 use trekanten::pipeline;
 use trekanten::pipeline::ShaderDescriptor;
 use trekanten::pipeline::ShaderStage;
@@ -262,12 +261,9 @@ fn main() -> Result<(), trekanten::RenderError> {
             mem::OwningIndexBufferDescriptor::from_vec(indices, mem::BufferMutability::Immutable);
         let index_buffer = loader_clone.load(index_buffer_descriptor);
 
-        let mesh = mesh::Mesh {
-            vertex_buffer,
-            index_buffer,
-        };
-
-        mesh_sender.send(mesh).expect("Failed to send");
+        mesh_sender
+            .send((vertex_buffer, index_buffer))
+            .expect("Failed to send");
     });
 
     let (texture_sender, texture_receiver) = std::sync::mpsc::channel();

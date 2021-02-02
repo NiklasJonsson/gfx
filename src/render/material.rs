@@ -1,106 +1,124 @@
-use trekanten::loader::ResourceLoader;
 use trekanten::mem::UniformBuffer;
-use trekanten::texture;
-use trekanten::{BufferHandle, Handle, Loader};
+use trekanten::texture::Texture;
+use trekanten::{BufferHandle, Handle};
+
+use crate::{math::Vec4, render::Pending};
 
 use crate::ecs::prelude::*;
 use ramneryd_derive::Inspect;
 
-#[derive(Debug, Clone, Inspect)]
-pub struct TextureUse {
-    pub handle: Handle<texture::Texture>,
-    pub coord_set: u32,
-}
+use trekanten::resource::Async;
 
 #[derive(Debug, Clone, Component)]
 #[component(inspect)]
-pub enum Material {
+pub struct Unlit {
+    pub color: Vec4,
+}
+
+#[derive(Debug, Clone, Inspect, PartialEq, Eq)]
+pub struct TextureUse<T> {
+    pub handle: Handle<T>,
+    pub coord_set: u32,
+}
+
+#[derive(Debug, Component)]
+#[component(inspect)]
+pub enum GpuMaterial {
     Unlit {
         color_uniform: BufferHandle<UniformBuffer>,
     },
     PBR {
         material_uniforms: BufferHandle<UniformBuffer>,
-        normal_map: Option<TextureUse>,
-        base_color_texture: Option<TextureUse>,
-        metallic_roughness_texture: Option<TextureUse>,
+        normal_map: Option<TextureUse<Texture>>,
+        base_color_texture: Option<TextureUse<Texture>>,
+        metallic_roughness_texture: Option<TextureUse<Texture>>,
         has_vertex_colors: bool,
     },
 }
 
-// Option is here to handle WriteStorage::remove() not returning the contents
-// TODO: Replace Option
-#[derive(Debug, Clone, Component)]
+#[derive(Debug, Component)]
 #[component(inspect)]
-pub struct PendingMaterial(Option<Material>);
+pub enum PendingMaterial {
+    Unlit {
+        color_uniform: Pending<BufferHandle<Async<UniformBuffer>>, BufferHandle<UniformBuffer>>,
+    },
+    PBR {
+        material_uniforms: Pending<BufferHandle<Async<UniformBuffer>>, BufferHandle<UniformBuffer>>,
+        normal_map: Option<Pending<TextureUse<Async<Texture>>, TextureUse<Texture>>>,
+        base_color_texture: Option<Pending<TextureUse<Async<Texture>>, TextureUse<Texture>>>,
+        metallic_roughness_texture:
+            Option<Pending<TextureUse<Async<Texture>>, TextureUse<Texture>>>,
+        has_vertex_colors: bool,
+    },
+}
 
-impl From<Material> for PendingMaterial {
-    fn from(m: Material) -> Self {
-        Self(Some(m))
+impl PendingMaterial {
+    pub fn is_done(&self) -> bool {
+        match self {
+            PendingMaterial::Unlit {
+                color_uniform: Pending::Available(_),
+            } => true,
+            PendingMaterial::PBR {
+                material_uniforms: Pending::Available(_),
+                normal_map,
+                base_color_texture,
+                metallic_roughness_texture,
+                ..
+            } => {
+                let is_done = |t: &Option<
+                    Pending<TextureUse<Async<Texture>>, TextureUse<Texture>>,
+                >|
+                 -> bool {
+                    match t {
+                        Some(Pending::Available(_)) | None => true,
+                        Some(Pending::Pending(_)) => false,
+                    }
+                };
+
+                is_done(normal_map)
+                    && is_done(base_color_texture)
+                    && is_done(metallic_roughness_texture)
+            }
+            _ => false,
+        }
     }
-}
 
-struct ResolvePending;
+    pub fn finish(self) -> GpuMaterial {
+        match self {
+            PendingMaterial::Unlit {
+                color_uniform: Pending::Available(color_uniform),
+            } => GpuMaterial::Unlit { color_uniform },
+            PendingMaterial::PBR {
+                material_uniforms: Pending::Available(material_uniforms),
+                normal_map,
+                base_color_texture,
+                metallic_roughness_texture,
+                has_vertex_colors,
+            } => {
+                let map_tex = |pend_tex: Pending<
+                    TextureUse<Async<Texture>>,
+                    TextureUse<Texture>,
+                >|
+                 -> Option<TextureUse<Texture>> {
+                    if let Pending::Available(tex_use) = pend_tex {
+                        Some(tex_use)
+                    } else {
+                        None
+                    }
+                };
 
-impl ResolvePending {
-    const ID: &'static str = "ResolvePending<Material>";
-}
-
-impl<'a> System<'a> for ResolvePending {
-    type SystemData = (
-        WriteStorage<'a, Material>,
-        WriteStorage<'a, PendingMaterial>,
-        Entities<'a>,
-        ReadExpect<'a, Loader>,
-    );
-
-    fn run(&mut self, data: Self::SystemData) {
-        let (mut materials, mut pending, entities, loader) = data;
-
-        let mut done = specs::BitSet::new();
-        for (ent, pend) in (&entities, &pending).join() {
-            let d = match pend.0.as_ref().unwrap() {
-                Material::Unlit { color_uniform } => {
-                    loader.is_done(color_uniform).expect("Bad handle")
-                }
-                Material::PBR {
+                let normal_map = normal_map.and_then(map_tex);
+                let base_color_texture = base_color_texture.and_then(map_tex);
+                let metallic_roughness_texture = metallic_roughness_texture.and_then(map_tex);
+                GpuMaterial::PBR {
                     material_uniforms,
                     normal_map,
                     base_color_texture,
                     metallic_roughness_texture,
-                    ..
-                } => {
-                    let tex_done = |tex: &Option<TextureUse>| -> bool {
-                        tex.as_ref()
-                            .map(|t| loader.is_done(&t.handle).expect("Bad handle"))
-                            .unwrap_or(true)
-                    };
-
-                    tex_done(normal_map)
-                        && tex_done(base_color_texture)
-                        && tex_done(metallic_roughness_texture)
-                        && loader.is_done(material_uniforms).expect("Bad handle")
+                    has_vertex_colors,
                 }
-            };
-
-            if d {
-                done.add(ent.id());
             }
-        }
-
-        for (ent, _) in (&entities, done).join() {
-            let mat = pending
-                .get_mut(ent)
-                .expect("bad bitset")
-                .0
-                .take()
-                .expect("This should be available here");
-
-            materials.insert(ent, mat).unwrap();
-            pending.remove(ent);
+            _ => unreachable!("Should be done by now"),
         }
     }
-}
-
-pub fn register_systems<'a, 'b>(builder: ExecutorBuilder<'a, 'b>) -> ExecutorBuilder<'a, 'b> {
-    builder.with(ResolvePending, ResolvePending::ID, &[])
 }

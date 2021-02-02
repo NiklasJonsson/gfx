@@ -10,7 +10,6 @@ use std::path::Path;
 use std::path::PathBuf;
 
 use crate::backend::render_pass::RenderPass;
-use crate::device::Device;
 use crate::device::HasVkDevice;
 use crate::device::VkDeviceHandle;
 use crate::resource::{CachedStorage, Handle};
@@ -72,7 +71,7 @@ impl std::ops::Drop for ShaderModule {
 }
 
 impl ShaderModule {
-    pub fn new(device: &Device, raw: &RawShader) -> Result<Self, PipelineError> {
+    pub fn new<D: HasVkDevice>(device: &D, raw: &RawShader) -> Result<Self, PipelineError> {
         let info = vk::ShaderModuleCreateInfo::builder().code(&raw.data);
 
         let vk_device = device.vk_device();
@@ -223,8 +222,8 @@ impl GraphicsPipeline {
         &self.vk_pipeline_layout
     }
 
-    fn shader(
-        device: &Device,
+    fn shader<D: HasVkDevice>(
+        device: &D,
         refl_data: &mut ReflectionData,
         desc: &ShaderDescriptor,
         stage: vk::ShaderStageFlags,
@@ -260,8 +259,8 @@ impl GraphicsPipeline {
         })
     }
 
-    fn create(
-        device: &Device,
+    fn create<D: HasVkDevice>(
+        device: &D,
         render_pass: &RenderPass,
         desc: &GraphicsPipelineDescriptor,
     ) -> Result<Self, PipelineError> {
@@ -468,14 +467,16 @@ impl GraphicsPipelineDescriptor {
         GraphicsPipelineDescriptorBuilder::default()
     }
 
-    pub fn create(
+    pub fn create<D: HasVkDevice>(
         &self,
-        device: &Device,
+        device: &D,
         render_pass: &RenderPass,
     ) -> Result<GraphicsPipeline, PipelineError> {
         GraphicsPipeline::create(device, render_pass, self)
     }
 }
+
+pub type GraphicsPipelines = CachedStorage<GraphicsPipelineDescriptor, GraphicsPipeline>;
 
 use crate::resource::Async;
 use parking_lot::{MappedRwLockReadGuard, RwLock, RwLockReadGuard};
@@ -496,7 +497,7 @@ impl AsyncGraphicsPipelines {
             .unwrap_async()
     }
 
-    pub fn cache(
+    pub fn cached(
         &self,
         descriptor: &GraphicsPipelineDescriptor,
     ) -> Option<Handle<GraphicsPipeline>> {

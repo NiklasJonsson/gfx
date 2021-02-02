@@ -7,7 +7,7 @@ use vk_mem::Allocator;
 use std::sync::Arc;
 
 use super::instance::Instance;
-use super::queue::{Queue, QueueFamilies, QueueFamily};
+use super::queue::{Queue, QueueFamily};
 use super::surface::Surface;
 use crate::util::lifetime::LifetimeToken;
 
@@ -39,9 +39,9 @@ struct PhysicalDeviceProperties {
 }
 
 struct QueueInfo {
-    queue_families: QueueFamilies,
-    graphics_queue: Queue,
-    present_queue: Queue,
+    graphics: Queue,
+    present: Queue,
+    transfer: Option<Queue>, // Ownership can be requested
 }
 
 // Use this to handle drop-order. Could have been done with unsafe/ManuallyDrop but this seems the easiest
@@ -146,17 +146,25 @@ impl Device {
         let (vk_device, vk_phys_device, queue_families) =
             device_selection::device_selection(instance, surface)?;
 
-        let (gfx, present) = unsafe {
-            (
-                vk_device.get_device_queue(queue_families.graphics.index, 0),
-                vk_device.get_device_queue(queue_families.present.index, 0),
-            )
-        };
+        let device_selection::QueueFamilies {
+            graphics: graphics_fam,
+            present: present_fam,
+            transfer: transfer_fam,
+        } = queue_families;
 
         let vk_device = VkDeviceHandle::new(vk_device);
+        let create_queue = |qsel: device_selection::QueueSelection| -> Queue {
+            let vk_queue =
+                unsafe { vk_device.get_device_queue(qsel.family.index, qsel.queue_index) };
 
-        let graphics_queue = Queue::new(VkDeviceHandle::clone(&vk_device), gfx);
-        let present_queue = Queue::new(VkDeviceHandle::clone(&vk_device), present);
+            Queue::new(VkDeviceHandle::clone(&vk_device), qsel.family, vk_queue)
+        };
+
+        let queue_info = QueueInfo {
+            graphics: create_queue(graphics_fam),
+            present: create_queue(present_fam),
+            transfer: Some(create_queue(transfer_fam)),
+        };
 
         let physical_device_properties = unsafe {
             let memory_properties = instance
@@ -184,12 +192,6 @@ impl Device {
             }
         };
 
-        let queue_info = QueueInfo {
-            queue_families,
-            graphics_queue,
-            present_queue,
-        };
-
         let allocator = AllocatorHandle::new(Allocator::new(&vk_mem::AllocatorCreateInfo {
             physical_device: vk_phys_device,
             device: (*vk_device).clone(),
@@ -210,27 +212,23 @@ impl Device {
     }
 
     pub fn graphics_queue_family(&self) -> &QueueFamily {
-        &self.queue_info.queue_families.graphics
-    }
-
-    pub fn util_queue_family(&self) -> &QueueFamily {
-        &self.queue_info.queue_families.graphics
+        &self.queue_info.graphics.family()
     }
 
     pub fn present_queue_family(&self) -> &QueueFamily {
-        &self.queue_info.queue_families.present
+        &self.queue_info.present.family()
     }
 
     pub fn graphics_queue(&self) -> &Queue {
-        &self.queue_info.graphics_queue
-    }
-
-    pub fn util_queue(&self) -> &Queue {
-        &self.queue_info.graphics_queue
+        &self.queue_info.graphics
     }
 
     pub fn present_queue(&self) -> &Queue {
-        &self.queue_info.present_queue
+        &self.queue_info.present
+    }
+
+    pub fn take_transfer_queue(&mut self) -> Option<Queue> {
+        self.queue_info.transfer.take()
     }
 
     pub fn wait_idle(&self) -> Result<(), DeviceError> {

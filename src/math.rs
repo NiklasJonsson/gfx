@@ -5,11 +5,6 @@ pub type Vec4 = vek::Vec4<f32>;
 pub type Mat4 = vek::Mat4<f32>;
 pub type Quat = vek::Quaternion<f32>;
 
-pub use vek::mat4;
-pub use vek::vec2;
-pub use vek::vec3;
-pub use vek::vec4;
-
 #[derive(Debug, Component, Copy, Clone)]
 #[component(inspect)]
 pub struct Transform {

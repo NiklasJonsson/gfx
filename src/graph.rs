@@ -153,17 +153,20 @@ pub mod sys {
 pub mod world {
     pub use super::*;
 
+    #[allow(dead_code)]
     pub fn add_edge(world: &mut World, parent: Entity, child: Entity) {
         let mut children_storage = world.write_storage::<Children>();
         let mut parent_storage = world.write_storage::<Parent>();
         super::sys::add_edge(&mut children_storage, &mut parent_storage, parent, child);
     }
 
+    #[allow(dead_code)]
     pub fn breadth_first(world: &World, root: Entity, visit_node: impl FnMut(Entity)) {
         let nodes_storage = world.read_storage::<Children>();
         super::sys::breadth_first(&nodes_storage, root, visit_node);
     }
 
+    #[allow(dead_code)]
     pub fn depth_first(world: &World, root: Entity, visit_node: impl FnMut(Entity)) {
         let nodes_storage = world.read_storage::<Children>();
         super::sys::depth_first(&nodes_storage, root, visit_node);
@@ -250,6 +253,7 @@ fn get_root_path(w: &World, node: Entity) -> Vec<Entity> {
 }
 
 /// Returns an iterator that walks the path from the root to the node
+#[allow(dead_code)]
 pub fn root_to_node_path(world: &World, node: Entity) -> impl ExactSizeIterator<Item = Entity> {
     let path = get_root_path(world, node);
     PathWalker {
@@ -259,6 +263,7 @@ pub fn root_to_node_path(world: &World, node: Entity) -> impl ExactSizeIterator<
 }
 
 /// Returns an iterator that walks the path from the root to the node
+#[allow(dead_code)]
 pub fn node_to_root_path(world: &World, node: Entity) -> impl ExactSizeIterator<Item = Entity> {
     let path = get_root_path(world, node);
     let len = path.len();

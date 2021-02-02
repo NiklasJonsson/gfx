@@ -96,6 +96,7 @@ impl MappedInput {
         self.contents.iter()
     }
 
+    #[allow(dead_code)]
     pub fn len(&self) -> usize {
         self.contents.len()
     }
@@ -205,7 +206,6 @@ impl<'a> System<'a> for InputManager {
         let mut cursor_positions = Vec::with_capacity(inputs.len());
 
         for (_ctx, ent) in (&contexts, &entities).join() {
-            use specs::storage::StorageEntry;
             match mapped.entry(ent).unwrap() {
                 StorageEntry::Occupied(mut entry) => entry.get_mut().clear(),
                 StorageEntry::Vacant(entry) => {

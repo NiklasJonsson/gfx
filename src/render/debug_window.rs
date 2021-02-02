@@ -152,7 +152,7 @@ impl<'a> System<'a> for ApplySettings {
     type SystemData = (
         Write<'a, RenderSettings>,
         Entities<'a>,
-        ReadStorage<'a, render::material::Material>,
+        ReadStorage<'a, render::material::GpuMaterial>,
         WriteStorage<'a, render::ReloadMaterial>,
         ReadStorage<'a, crate::math::BoundingBox>,
         WriteStorage<'a, render::bounding_box::RenderBoundingBox>,

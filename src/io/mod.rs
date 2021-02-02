@@ -22,6 +22,7 @@ pub fn window_extents(window: &winit::window::Window) -> trekanten::util::Extent
     trekanten::util::Extent2D { width, height }
 }
 
+#[allow(dead_code)]
 impl MainWindow {
     pub fn cursor_grab(&mut self, cursor_grab: bool) {
         self.window

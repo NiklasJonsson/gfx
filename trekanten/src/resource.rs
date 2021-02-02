@@ -1,5 +1,6 @@
 pub use resurs::*;
 
+use crate::descriptor;
 use crate::mem;
 use crate::pipeline;
 use crate::texture;
@@ -27,6 +28,10 @@ pub enum ResourceCommand {
     },
 }
 
+pub struct ResourceCommandBatch {
+    _commands: arrayvec::ArrayVec<[ResourceCommand; 64]>,
+}
+
 #[derive(Default)]
 pub struct AsyncResources {
     pub uniform_buffers: mem::AsyncUniformBuffers,
@@ -36,10 +41,18 @@ pub struct AsyncResources {
     pub graphics_pipelines: pipeline::AsyncGraphicsPipelines,
 }
 
-use parking_lot::MappedRwLockReadGuard;
+pub struct Resources {
+    pub uniform_buffers: mem::UniformBuffers,
+    pub vertex_buffers: mem::VertexBuffers,
+    pub index_buffers: mem::IndexBuffers,
+    pub textures: texture::Textures,
+    pub graphics_pipelines: pipeline::GraphicsPipelines,
+    pub descriptor_sets: descriptor::DescriptorSets,
+}
+
 pub trait ResourceManager<Descriptor, Resource, Handle> {
     type Error;
-    fn get_resource(&self, handle: &Handle) -> Option<MappedRwLockReadGuard<'_, Async<Resource>>>;
+    fn get_resource(&self, handle: &Handle) -> Option<&Resource>;
     fn create_resource_blocking(&mut self, descriptor: Descriptor) -> Result<Handle, Self::Error>;
 }
 

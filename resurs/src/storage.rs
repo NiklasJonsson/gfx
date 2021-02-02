@@ -19,6 +19,7 @@ enum ItemContent<T> {
 }
 
 impl<T> ItemContent<T> {
+    #[inline]
     pub fn as_ref(&self) -> ItemContent<&T> {
         match self {
             Self::Data(d) => ItemContent::Data(d),
@@ -26,6 +27,7 @@ impl<T> ItemContent<T> {
         }
     }
 
+    #[inline]
     pub fn as_mut(&mut self) -> ItemContent<&mut T> {
         match self {
             Self::Data(d) => ItemContent::Data(d),
@@ -33,6 +35,7 @@ impl<T> ItemContent<T> {
         }
     }
 
+    #[inline]
     pub fn data(self) -> Option<T> {
         match self {
             Self::Data(d) => Some(d),
@@ -47,6 +50,7 @@ struct Item<T> {
 }
 
 impl<T> Item<T> {
+    #[inline]
     pub fn as_ref(&self) -> Item<&T> {
         Item {
             content: self.content.as_ref(),
@@ -54,6 +58,7 @@ impl<T> Item<T> {
         }
     }
 
+    #[inline]
     pub fn as_mut(&mut self) -> Item<&mut T> {
         Item {
             content: self.content.as_mut(),
@@ -61,8 +66,72 @@ impl<T> Item<T> {
         }
     }
 
+    #[inline]
     pub fn data(self) -> Option<T> {
         self.content.data()
+    }
+}
+
+pub struct DrainFilter<'a, F, T>
+where
+    F: FnMut(&mut T) -> bool,
+{
+    storage: &'a mut Storage<T>,
+    i: u32,
+    pred: F,
+}
+
+impl<'a, F, T> DrainFilter<'a, F, T>
+where
+    F: FnMut(&mut T) -> bool,
+{
+    pub(crate) fn new(storage: &'a mut Storage<T>, pred: F) -> Self {
+        Self {
+            storage,
+            i: 0,
+            pred,
+        }
+    }
+}
+
+impl<'a, F, T> Iterator for DrainFilter<'a, F, T>
+where
+    F: FnMut(&mut T) -> bool,
+{
+    type Item = (Handle<T>, T);
+    fn next(&mut self) -> Option<Self::Item> {
+        while (self.i as usize) < self.storage.items.len() {
+            let mut handle: Option<Handle<T>> = None;
+            if let Item {
+                content: ItemContent::Data(data),
+                generation,
+            } = &mut self.storage.items[self.i as usize]
+            {
+                if (self.pred)(data) {
+                    handle = Some(Handle::<T>::new(ID {
+                        index: self.i as u32,
+                        generation: *generation,
+                    }));
+                }
+            }
+            if let Some(handle) = handle {
+                let data = self.storage.remove(handle).expect("Just checked this");
+                return Some((handle, data));
+            }
+            assert!(self.i < u32::MAX);
+            self.i += 1;
+        }
+
+        return None;
+    }
+}
+
+impl<'a, F, T> std::ops::Drop for DrainFilter<'a, F, T>
+where
+    F: FnMut(&mut T) -> bool,
+{
+    fn drop(&mut self) {
+        while let Some(_) = self.next() {}
     }
 }
 
@@ -207,6 +276,14 @@ impl<T> Storage<T> {
     #[inline]
     pub fn iter_mut(&mut self) -> impl Iterator<Item = &mut T> {
         self.items.iter_mut().filter_map(|x| x.as_mut().data())
+    }
+
+    #[inline]
+    pub fn drain_filter<F>(&mut self, f: F) -> DrainFilter<'_, F, T>
+    where
+        F: FnMut(&mut T) -> bool,
+    {
+        DrainFilter::new(self, f)
     }
 }
 
@@ -371,5 +448,43 @@ mod tests {
         check_with_cond(&m, &r1, |_| false);
         check_with_cond(&m, &r2, |_| true);
         check_with_cond(&m, &r3, |_| false);
+    }
+
+    #[test]
+    fn drain_filter() {
+        let mut m = Storage::default();
+        let data = [10, 13, 16, 14, 1000, 2003];
+        let mut handles = Vec::new();
+        for d in data.iter() {
+            handles.push(m.add(*d));
+        }
+        assert_eq!(m.len(), data.len());
+
+        let mut expected = vec![10, 16, 14, 1000];
+        for (_h, x) in m.drain_filter(|x| *x % 2 == 0) {
+            let idx = expected.iter().position(|&e| e == x);
+            assert!(idx.is_some());
+            expected.remove(idx.unwrap());
+        }
+        assert_eq!(m.len(), 2);
+    }
+
+    #[test]
+    fn drain_filter_drop() {
+        let mut m = Storage::default();
+        let data = [10, 13, 16, 14, 1000, 2003];
+        let mut handles = Vec::new();
+        for d in data.iter() {
+            handles.push(m.add(d));
+        }
+
+        {
+            let _df = m.drain_filter(|x| *x % 2 != 0);
+        }
+        let expected = [10, 16, 14, 1000];
+        assert_eq!(expected.len(), m.len());
+        for d in m.iter() {
+            assert!(expected.iter().find(|x| x == d).is_some());
+        }
     }
 }

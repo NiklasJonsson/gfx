@@ -1,12 +1,9 @@
 use crate::common::Name;
 use crate::ecs::prelude::*;
 use crate::graph::sys as graph;
-use crate::math::{BoundingBox, Transform, Vec3};
-use crate::render::{material::Material, material::PendingMaterial, mesh::PendingMesh};
+use crate::math::{BoundingBox, Transform, Vec3, Vec4};
 
-use trekanten::loader::ResourceLoader;
-use trekanten::mem::OwningUniformBufferDescriptor;
-use trekanten::BufferMutability;
+use super::mesh::CpuMesh;
 
 #[derive(Default, Component)]
 #[component(storage = "NullStorage")]
@@ -27,9 +24,8 @@ impl<'a> System<'a> for CreateRenderedBoundingBoxes {
         WriteStorage<'a, Transform>,
         WriteStorage<'a, Name>,
         WriteStorage<'a, BoundingBoxRenderer>,
-        WriteStorage<'a, super::mesh::PendingMesh>,
-        WriteStorage<'a, super::material::PendingMaterial>,
-        WriteExpect<'a, trekanten::Loader>,
+        WriteStorage<'a, CpuMesh>,
+        WriteStorage<'a, super::material::Unlit>,
     );
 
     fn run(
@@ -45,10 +41,8 @@ impl<'a> System<'a> for CreateRenderedBoundingBoxes {
             mut renderer_markers,
             mut meshes,
             mut materials,
-            loader,
         ): Self::SystemData,
     ) {
-        // TODO: Create one big buffer for each of vertex/index/uniform
         for (ent, bbox, _) in (&entities, &bounding_box_storage, &command_markers).join() {
             let mut found = false;
             graph::breadth_first(&children_storage, ent, |node| {
@@ -58,27 +52,16 @@ impl<'a> System<'a> for CreateRenderedBoundingBoxes {
                 continue;
             }
             let dims = bbox.max - bbox.min;
-            let (vertices, indices) = super::geometry::box_mesh(dims.x, dims.y, dims.z);
-            let vertex_buffer = loader.load(vertices);
-            let index_buffer = loader.load(indices);
-            let pending_mesh = PendingMesh(Some(super::GpuMesh {
-                mesh: trekanten::mesh::Mesh {
-                    vertex_buffer,
-                    index_buffer,
-                },
+            let (vertex_buffer, index_buffer) = super::geometry::box_mesh(dims.x, dims.y, dims.z);
+            let mesh = CpuMesh {
+                vertex_buffer,
+                index_buffer,
                 polygon_mode: trekanten::pipeline::PolygonMode::Line,
-            }));
-
-            let uniform_data = super::uniform::UnlitUniformData {
-                color: [1.0, 0.0, 0.0, 1.0],
             };
 
-            let color_uniform = loader.load(OwningUniformBufferDescriptor::from_vec(
-                vec![uniform_data],
-                BufferMutability::Immutable,
-            ));
-
-            let pending_material = PendingMaterial::from(Material::Unlit { color_uniform });
+            let material = super::material::Unlit {
+                color: Vec4::new(1.0, 0.0, 0.0, 1.0),
+            };
 
             let mut tfm = Transform::identity();
             tfm.position = Vec3 {
@@ -92,8 +75,8 @@ impl<'a> System<'a> for CreateRenderedBoundingBoxes {
                 .with(Name::from("BoundingBoxRenderer"), &mut names)
                 .with(tfm, &mut transforms)
                 .with(BoundingBoxRenderer, &mut renderer_markers)
-                .with(pending_mesh, &mut meshes)
-                .with(pending_material, &mut materials)
+                .with(mesh, &mut meshes)
+                .with(material, &mut materials)
                 .build();
 
             graph::add_edge(&mut children_storage, &mut parent_storage, ent, child);

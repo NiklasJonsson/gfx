@@ -1,6 +1,6 @@
 use proc_macro2::{Ident, Span, TokenStream};
 use quote::{format_ident, quote, quote_spanned};
-use syn::{spanned::Spanned as _, DeriveInput, Fields};
+use syn::{parse_quote, spanned::Spanned as _, DeriveInput, Fields, GenericParam, Generics};
 
 fn inspect_fn_name(is_mut: bool) -> syn::Ident {
     if is_mut {
@@ -21,6 +21,16 @@ fn maybe_mut(is_mut: bool) -> TokenStream {
 
     quote! {#(#maybe_mut)*}
 }
+
+fn add_trait_bounds(mut generics: Generics) -> Generics {
+    for param in &mut generics.params {
+        if let GenericParam::Type(ref mut type_param) = *param {
+            type_param.bounds.push(parse_quote!(crate::editor::Inspect));
+        }
+    }
+    generics
+}
+
 fn inspect_enum_body(data: &syn::DataEnum, is_mut: bool) -> TokenStream {
     let fn_name = inspect_fn_name(is_mut);
     let maybe_mut = maybe_mut(is_mut);
@@ -109,8 +119,10 @@ fn inspect_enum(di: &DeriveInput) -> TokenStream {
         _ => panic!("Internal error: should be enum"),
     };
 
+    let generics = add_trait_bounds(di.generics.clone());
+    let (impl_generics, ty_generics, where_clause) = generics.split_for_impl();
     quote! {
-        impl crate::editor::Inspect for #name {
+        impl #impl_generics crate::editor::Inspect for #name #ty_generics #where_clause {
             fn inspect<'a>(&self, ui: &imgui::Ui<'a>, name: &str) {
                 use crate::editor::Inspect;
                 if !name.is_empty() {
@@ -180,8 +192,10 @@ fn inspect_struct(di: &DeriveInput) -> TokenStream {
         _ => panic!("Internal error: should be struct"),
     };
 
+    let generics = add_trait_bounds(di.generics.clone());
+    let (impl_generics, ty_generics, where_clause) = generics.split_for_impl();
     quote! {
-        impl crate::editor::Inspect for #name {
+        impl #impl_generics crate::editor::Inspect for #name #ty_generics #where_clause {
             fn inspect<'a>(&self, ui: &imgui::Ui<'a>, name: &str) {
                 use crate::editor::Inspect;
                 crate::editor::inspect::inspect_struct(name, Some(stringify!(#name)),

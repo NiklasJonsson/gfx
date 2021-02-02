@@ -261,32 +261,6 @@ where
     }
 }
 
-impl Inspect for trekanten::mesh::Mesh {
-    fn inspect<'a>(&self, ui: &Ui<'a>, name: &str) {
-        inspect_struct(
-            name,
-            Some(std::any::type_name::<Self>()),
-            ui,
-            Some(|| {
-                self.vertex_buffer.inspect(ui, "vertex_buffer");
-                self.index_buffer.inspect(ui, "index_buffer");
-            }),
-        );
-    }
-
-    fn inspect_mut<'a>(&mut self, ui: &Ui<'a>, name: &str) {
-        inspect_struct(
-            name,
-            Some(std::any::type_name::<Self>()),
-            ui,
-            Some(|| {
-                self.vertex_buffer.inspect_mut(ui, "vertex_buffer");
-                self.index_buffer.inspect_mut(ui, "index_buffer");
-            }),
-        );
-    }
-}
-
 impl Inspect for trekanten::pipeline::PolygonMode {
     fn inspect<'a>(&self, ui: &Ui<'a>, name: &str) {
         if !name.is_empty() {
@@ -334,3 +308,40 @@ impl Inspect for usize {
         self.inspect(ui, name);
     }
 }
+
+impl<BT> Inspect for trekanten::mem::OwningBufferDescriptor<BT> {
+    fn inspect<'a>(&self, ui: &Ui<'a>, _name: &str) {
+        ui.text("TODO")
+    }
+
+    fn inspect_mut<'a>(&mut self, ui: &Ui<'a>, _name: &str) {
+        ui.text("TODO")
+    }
+}
+
+impl<T> Inspect for resurs::Async<T> {
+    fn inspect<'a>(&self, ui: &Ui<'a>, _name: &str) {
+        ui.text("TODO")
+    }
+
+    fn inspect_mut<'a>(&mut self, ui: &Ui<'a>, _name: &str) {
+        ui.text("TODO")
+    }
+}
+
+macro_rules! impl_todo_inspect {
+    ($ty:path) => {
+        impl Inspect for $ty {
+            fn inspect<'a>(&self, ui: &Ui<'a>, _name: &str) {
+                ui.text("TODO");
+            }
+
+            fn inspect_mut<'a>(&mut self, ui: &Ui<'a>, _name: &str) {
+                ui.text("TODO");
+            }
+        }
+    };
+}
+
+impl_todo_inspect!(trekanten::texture::TextureDescriptor);
+impl_todo_inspect!(trekanten::texture::Texture);

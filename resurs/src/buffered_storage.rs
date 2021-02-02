@@ -64,6 +64,13 @@ impl<T> BufferedStorage<T> {
     pub fn iter_mut(&mut self) -> impl Iterator<Item = &mut [T; N_STORAGE_BUFFERS]> {
         self.storage.iter_mut()
     }
+
+    pub fn drain_filter<F>(&mut self, f: F) -> super::storage::DrainFilter<'_, F, [T; 2]>
+    where
+        F: FnMut(&mut [T; 2]) -> bool,
+    {
+        super::storage::DrainFilter::new(&mut self.storage, f)
+    }
 }
 
 impl<T> Default for BufferedStorage<T> {

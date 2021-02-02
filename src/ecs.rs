@@ -13,6 +13,8 @@ pub mod prelude {
     pub use super::Component;
     pub use specs::world::Component;
 
+    pub use specs::storage::StorageEntry;
+
     pub use super::{Executor, ExecutorBuilder, System, World};
 }
 

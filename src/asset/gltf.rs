@@ -11,16 +11,16 @@ use trekanten::mem::{
 use trekanten::texture::{MipMaps, Texture, TextureDescriptor};
 use trekanten::util;
 use trekanten::vertex::VertexFormat;
-use trekanten::BufferHandle;
-use trekanten::Handle;
+use trekanten::{Async, BufferHandle, Handle};
 
 use crate::camera::Camera;
 use crate::common::Name;
 use crate::graph::sys as graph;
 use crate::math::*;
 use crate::render;
-use crate::render::material::{Material, TextureUse};
+use crate::render::material::TextureUse;
 use crate::render::uniform::PBRMaterialData;
+use crate::render::Pending;
 use ramneryd_derive::Inspect;
 
 fn load_texture(
@@ -28,7 +28,7 @@ fn load_texture(
     texture: &gltf::texture::Texture,
     coord_set: u32,
     format: util::Format,
-) -> Handle<Texture> {
+) -> Handle<Async<Texture>> {
     assert_eq!(coord_set, 0, "Not implemented!");
     assert_eq!(
         texture.sampler().wrap_s(),
@@ -52,11 +52,14 @@ fn load_texture(
         x => unimplemented!("Unsupported image source {:?}", x),
     };
 
-    ctx.data.loader.load(TextureDescriptor::file(
-        image_path,
-        format,
-        MipMaps::Generate,
-    ))
+    ctx.data
+        .loader
+        .load(TextureDescriptor::file(
+            image_path,
+            format,
+            MipMaps::Generate,
+        ))
+        .expect("Failed to load")
 }
 
 fn check_supported<'a>(primitive: &gltf::Primitive<'a>) {
@@ -175,9 +178,17 @@ fn load_primitive<'a>(ctx: &mut RecGltfCtx, primitive: &gltf::Primitive<'a>) -> 
 
     let triangle_index_data = reader.read_indices().expect("Found no indices");
 
-    let index = ctx.data.loader.load(to_index_buffer(triangle_index_data));
+    let index = ctx
+        .data
+        .loader
+        .load(to_index_buffer(triangle_index_data))
+        .expect("Failed to load index buffer");
     let (vertex, has_vertex_colors) = interleave_vertex_buffer(ctx, primitive);
-    let vertex = ctx.data.loader.load(vertex);
+    let vertex = ctx
+        .data
+        .loader
+        .load(vertex)
+        .expect("Failed to load vertex buffer");
 
     let mat = primitive.material();
     let pbr_mr = mat.pbr_metallic_roughness();
@@ -401,9 +412,9 @@ pub struct LoadGltfAsset {
 #[derive(Debug, Inspect)]
 struct GltfMaterial {
     material_idx: usize,
-    normal_map: Option<Handle<Texture>>,
-    base_color: Option<Handle<Texture>>,
-    metallic_roughness: Option<Handle<Texture>>,
+    normal_map: Option<Handle<Async<Texture>>>,
+    base_color: Option<Handle<Async<Texture>>>,
+    metallic_roughness: Option<Handle<Async<Texture>>>,
     has_vertex_colors: bool,
 }
 
@@ -411,8 +422,8 @@ struct GltfMaterial {
 #[component(inspect)]
 pub struct PendingGltfModel {
     mat: GltfMaterial,
-    index: BufferHandle<IndexBuffer>,
-    vertex: BufferHandle<VertexBuffer>,
+    index: BufferHandle<Async<IndexBuffer>>,
+    vertex: BufferHandle<Async<VertexBuffer>>,
 }
 
 struct GltfLoader;
@@ -539,6 +550,7 @@ impl<'a> System<'a> for GltfLoader {
                     material_buffer,
                     BufferMutability::Immutable,
                 ))
+                .expect("Failed to load uniform buffer")
                 .split();
 
             let map_cpu_to_gpu = |node: ecs::Entity| {
@@ -546,17 +558,22 @@ impl<'a> System<'a> for GltfLoader {
                     meshes
                         .insert(
                             node,
-                            render::mesh::PendingMesh::new(trekanten::mesh::Mesh {
-                                vertex_buffer: model.vertex.clone(),
-                                index_buffer: model.index.clone(),
-                            }),
+                            render::mesh::PendingMesh {
+                                vertex_buffer: render::Pending::Pending(model.vertex),
+                                index_buffer: render::Pending::Pending(model.index),
+                                polygon_mode: trekanten::pipeline::PolygonMode::Fill,
+                            },
                         )
                         .unwrap();
 
-                    let map_tex = |tex: &Option<Handle<Texture>>| -> Option<TextureUse> {
-                        tex.map(|t| TextureUse {
-                            handle: t.clone(),
-                            coord_set: 0,
+                    let map_tex = |tex: &Option<Handle<Async<Texture>>>| -> Option<
+                        Pending<TextureUse<Async<Texture>>, TextureUse<Texture>>,
+                    > {
+                        tex.map(|t| {
+                            Pending::Pending(TextureUse::<Async<Texture>> {
+                                handle: t,
+                                coord_set: 0,
+                            })
                         })
                     };
 
@@ -564,13 +581,15 @@ impl<'a> System<'a> for GltfLoader {
                     materials
                         .insert(
                             node,
-                            render::material::PendingMaterial::from(Material::PBR {
-                                material_uniforms: gpu_uniform_buffer_handles[idx],
+                            render::material::PendingMaterial::PBR {
+                                material_uniforms: Pending::Pending(
+                                    gpu_uniform_buffer_handles[idx],
+                                ),
                                 normal_map: map_tex(&model.mat.normal_map),
                                 base_color_texture: map_tex(&model.mat.base_color),
                                 metallic_roughness_texture: map_tex(&model.mat.metallic_roughness),
                                 has_vertex_colors: model.mat.has_vertex_colors,
-                            }),
+                            },
                         )
                         .unwrap();
                 }

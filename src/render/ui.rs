@@ -12,7 +12,7 @@ use trekanten::texture::{MipMaps, Texture, TextureDescriptor};
 use trekanten::util::{Extent2D, Format, Offset2D, Rect2D, Viewport};
 use trekanten::vertex::{VertexDefinition, VertexFormat};
 use trekanten::Frame;
-use trekanten::RenderPassBuilder;
+use trekanten::RenderPassEncoder;
 use trekanten::Renderer;
 use trekanten::{BufferHandle, Handle};
 
@@ -615,7 +615,7 @@ pub struct VertexShaderData {
 }
 
 impl UIDrawCommands {
-    pub fn record_draw_commands<'b>(self, cmd_buf: &mut RenderPassBuilder<'b>) {
+    pub fn record_draw_commands<'b>(self, cmd_buf: &mut RenderPassEncoder<'b>) {
         log::trace!("Recording draw commands!");
         let Self {
             per_frame_data:

@@ -257,11 +257,6 @@ fn main() -> Result<(), trekanten::RenderError> {
         .create_resource_blocking(index_buffer_descriptor)
         .expect("Failed to create index buffer");
 
-    let mesh = mesh::Mesh {
-        vertex_buffer,
-        index_buffer,
-    };
-
     let vert = ShaderDescriptor::FromRawSpirv(RAW_VERT_SPV.to_vec());
     let frag = ShaderDescriptor::FromRawSpirv(RAW_FRAG_SPV.to_vec());
     let pipeline_descriptor = pipeline::GraphicsPipelineDescriptor::builder()
@@ -339,7 +334,7 @@ fn main() -> Result<(), trekanten::RenderError> {
         builder
             .bind_graphics_pipeline(&gfx_pipeline_handle)
             .bind_shader_resource_group(0, &desc_set_handle, &gfx_pipeline_handle)
-            .draw_mesh(&mesh);
+            .draw_mesh(&vertex_buffer, &index_buffer);
 
         let cmd_buf = builder
             .build()

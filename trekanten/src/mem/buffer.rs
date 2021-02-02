@@ -60,7 +60,7 @@ pub trait BufferDescriptor {
         Ok((buf0, buf1))
     }
 }
-#[derive(Debug, PartialEq, Eq, Hash)]
+#[derive(Debug)]
 pub struct BufferHandle<T> {
     h: Handle<T>,
     mutability: BufferMutability,
@@ -77,6 +77,25 @@ impl<T> Clone for BufferHandle<T> {
 impl<T> Copy for BufferHandle<T> {}
 
 use crate::resource::Async;
+
+impl<T> PartialEq for BufferHandle<T> {
+    fn eq(&self, o: &Self) -> bool {
+        return self.h == o.h
+            && self.mutability == o.mutability
+            && self.idx == o.idx
+            && self.n_elems == o.n_elems;
+    }
+}
+impl<T> Eq for BufferHandle<T> {}
+
+impl<T> std::hash::Hash for BufferHandle<T> {
+    fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
+        self.h.hash(state);
+        self.mutability.hash(state);
+        self.idx.hash(state);
+        self.n_elems.hash(state);
+    }
+}
 
 impl<T> BufferHandle<T> {
     pub fn sub_buffer(h: Self, idx: u32, n_elems: u32) -> Self {
@@ -128,9 +147,22 @@ impl<T> BufferHandle<T> {
         self.n_elems
     }
 
+    // TODO: pub(crate)
     pub fn wrap_async(&self) -> BufferHandle<Async<T>> {
         BufferHandle::<Async<T>> {
             h: self.h.wrap_async(),
+            idx: self.idx,
+            n_elems: self.n_elems,
+            mutability: self.mutability,
+        }
+    }
+}
+
+impl<T> BufferHandle<Async<T>> {
+    // TODO: pub(crate)
+    pub fn unwrap_async(&self) -> BufferHandle<T> {
+        BufferHandle::<T> {
+            h: self.h.unwrap_async(),
             idx: self.idx,
             n_elems: self.n_elems,
             mutability: self.mutability,
@@ -370,6 +402,7 @@ pub trait BufferType {
     }
 }
 
+#[derive(Clone, Debug)]
 pub struct OwningBufferDescriptor<BT> {
     data: Arc<ByteBuffer>,
     mutability: BufferMutability,
@@ -495,6 +528,16 @@ impl OwningUniformBufferDescriptor {
             n_elems,
             elem_size: std::mem::size_of::<T>() as u16,
             mutability,
+            buffer_type: UniformBufferType,
+        }
+    }
+
+    pub fn empty() -> Self {
+        Self {
+            data: Arc::new(ByteBuffer::empty()),
+            n_elems: 0,
+            elem_size: 0,
+            mutability: BufferMutability::Immutable,
             buffer_type: UniformBufferType,
         }
     }

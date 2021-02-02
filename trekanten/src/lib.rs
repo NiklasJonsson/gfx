@@ -6,7 +6,6 @@ pub mod descriptor;
 mod error;
 pub mod loader;
 pub mod mem;
-pub mod mesh;
 pub mod pipeline;
 mod render_pass;
 pub mod resource;
@@ -18,16 +17,13 @@ pub use error::RenderError;
 pub use error::ResizeReason;
 pub use loader::Loader;
 pub use mem::{BufferHandle, BufferMutability};
-pub use render_pass::RenderPassBuilder;
-pub use resource::{Handle, MutResourceManager, ResourceManager};
+pub use render_pass::RenderPassEncoder;
+pub use resource::{Async, Handle, MutResourceManager, ResourceManager};
 
 use ash::version::DeviceV1_0;
 use backend::*;
 use common::MAX_FRAMES_IN_FLIGHT;
 use device::HasVkDevice;
-use resource::ResourceCommand;
-
-use std::sync::Arc;
 
 use crate::mem::BufferDescriptor as _;
 
@@ -39,7 +35,7 @@ use crate::mem::BufferDescriptor as _;
 // Whenever next_frame() is called, it can be thought of as binding one of the two frames to a particular swapchain image.
 // All rendering in that frame will be done on that swapchain image/framebuffer.
 
-pub struct FrameSynchronization {
+struct FrameSynchronization {
     image_available: sync::Semaphore,
     render_done: sync::Semaphore,
     in_flight: sync::Fence,
@@ -63,7 +59,6 @@ impl FrameSynchronization {
 
 pub struct Frame<'a> {
     renderer: &'a mut Renderer,
-    resources: Arc<resource::AsyncResources>,
     recorded_command_buffers: Vec<vk::CommandBuffer>,
     gfx_command_pool: command::CommandPool,
 }
@@ -93,10 +88,9 @@ impl<'a> Frame<'a> {
         self.renderer.update_uniform(h, data)
     }
 
-    // DrawList
     pub fn begin_render_pass(
         &'a self,
-    ) -> Result<render_pass::RenderPassBuilder<'a>, command::CommandError> {
+    ) -> Result<render_pass::RenderPassEncoder<'a>, command::CommandError> {
         let mut buf = self.new_raw_command_buffer()?;
         buf.begin_render_pass(
             self.renderer.render_pass(),
@@ -104,8 +98,8 @@ impl<'a> Frame<'a> {
             self.renderer.swapchain_extent(),
         );
 
-        Ok(render_pass::RenderPassBuilder::new(
-            self.renderer,
+        Ok(render_pass::RenderPassEncoder::new(
+            &self.renderer.resources,
             buf,
             self.renderer.frame_idx,
         ))
@@ -147,7 +141,6 @@ impl<'a> Frame<'a> {
     }
 }
 
-use parking_lot::MappedRwLockReadGuard;
 macro_rules! impl_mut_buffer_manager_frame {
     ($desc:ty, $resource:ty, $storage:ident) => {
         impl<'a> resource::MutResourceManager<$desc, $resource, BufferHandle<$resource>>
@@ -164,11 +157,11 @@ macro_rules! impl_mut_buffer_manager_frame {
                 descriptor: $desc,
             ) -> Result<BufferHandle<$resource>, Self::Error> {
                 assert_eq!(handle.mutability(), BufferMutability::Mutable);
-                if let resurs::Async::Available(ref mut buf) = &mut *self
+                if let Some(ref mut buf) = self
+                    .renderer
                     .resources
                     .$storage
                     .get_buffered_mut(&handle, self.renderer.frame_idx as usize)
-                    .expect("Fail")
                 {
                     // TODO: Increment generation of backing storage
                     buf.recreate(&self.renderer.device.allocator(), &descriptor)?;
@@ -207,10 +200,7 @@ macro_rules! impl_buffer_manager_frame {
         impl<'a> resource::ResourceManager<$desc, $resource, $handle> for Frame<'a> {
             type Error = mem::MemoryError;
 
-            fn get_resource(
-                &self,
-                handle: &$handle,
-            ) -> Option<MappedRwLockReadGuard<'_, resurs::Async<$resource>>> {
+            fn get_resource(&self, handle: &$handle) -> Option<&$resource> {
                 self.renderer.get_resource(handle)
             }
 
@@ -240,53 +230,81 @@ impl_buffer_manager_frame!(
     index_buffers
 );
 
-struct Resources {
-    descriptor_sets: descriptor::DescriptorSets,
-}
-
-impl Resources {
-    fn new(descriptor_sets: descriptor::DescriptorSets) -> Self {
-        Self { descriptor_sets }
-    }
-}
-
-enum PendingResourceCommand {
+// TODO: std::borrow::Cow here?
+pub enum SyncResourceCommand {
     CreateVertexBuffer {
         descriptor: mem::OwningVertexBufferDescriptor,
-        handle: mem::BufferHandle<mem::VertexBuffer>,
-        buffer0: mem::VertexBuffer,
-        buffer1: Option<mem::VertexBuffer>, // For double buffering
-        transients: [Option<mem::DeviceBuffer>; 2],
     },
     CreateIndexBuffer {
         descriptor: mem::OwningIndexBufferDescriptor,
-        handle: mem::BufferHandle<mem::IndexBuffer>,
-        buffer0: mem::IndexBuffer,
-        buffer1: Option<mem::IndexBuffer>, // For double buffering
-        transients: [Option<mem::DeviceBuffer>; 2],
     },
     CreateUniformBuffer {
         descriptor: mem::OwningUniformBufferDescriptor,
-        handle: mem::BufferHandle<mem::UniformBuffer>,
-        buffer0: mem::UniformBuffer,
-        buffer1: Option<mem::UniformBuffer>, // For double buffering
-        transients: [Option<mem::DeviceBuffer>; 2],
     },
     CreateTexture {
         descriptor: texture::TextureDescriptor,
+    },
+    CreatePipeline {
+        descriptor: pipeline::GraphicsPipelineDescriptor,
+    },
+}
+
+pub enum PendingSyncResourceCommand {
+    CreateVertexBuffer {
+        handle: mem::BufferHandle<mem::VertexBuffer>,
+        transients: [Option<mem::DeviceBuffer>; 2],
+    },
+    CreateIndexBuffer {
+        handle: mem::BufferHandle<mem::IndexBuffer>,
+        transients: [Option<mem::DeviceBuffer>; 2],
+    },
+    CreateUniformBuffer {
+        handle: mem::BufferHandle<mem::UniformBuffer>,
+        transients: [Option<mem::DeviceBuffer>; 2],
+    },
+    CreateTexture {
         handle: resurs::Handle<texture::Texture>,
-        image: texture::Texture,
         transients: mem::DeviceBuffer,
     },
 }
-struct PendingResourceJob {
-    batch: Vec<PendingResourceCommand>,
-    done: sync::Fence,
+
+impl PendingSyncResourceCommand {
+    fn done(self) -> FinishedResourceCommand {
+        match self {
+            Self::CreateVertexBuffer { handle, .. } => {
+                FinishedResourceCommand::CreateVertexBuffer { handle }
+            }
+            Self::CreateIndexBuffer { handle, .. } => {
+                FinishedResourceCommand::CreateIndexBuffer { handle }
+            }
+            Self::CreateUniformBuffer { handle, .. } => {
+                FinishedResourceCommand::CreateUniformBuffer { handle }
+            }
+            Self::CreateTexture { handle, .. } => FinishedResourceCommand::CreateTexture { handle },
+        }
+    }
+}
+
+pub enum FinishedResourceCommand {
+    CreateVertexBuffer {
+        handle: mem::BufferHandle<mem::VertexBuffer>,
+    },
+    CreateIndexBuffer {
+        handle: mem::BufferHandle<mem::IndexBuffer>,
+    },
+    CreateUniformBuffer {
+        handle: mem::BufferHandle<mem::UniformBuffer>,
+    },
+    CreateTexture {
+        handle: resurs::Handle<texture::Texture>,
+    },
+    CreatePipeline {
+        handle: resurs::Handle<pipeline::GraphicsPipeline>,
+    },
 }
 
 pub struct Renderer {
-    resources: Resources,
-    async_resources: Arc<resource::AsyncResources>,
+    resources: resource::Resources,
 
     // Swapchain-related
     // TODO: render pass should move to something like a render graph
@@ -298,9 +316,7 @@ pub struct Renderer {
     swapchain_image_idx: u32, // TODO: Bake this into the swapchain?
     image_to_frame_idx: Vec<Option<u32>>,
 
-    loader: loader::Loader,
-    resource_cmd_receive_queue: loader::ResourceCommandReceiver,
-    pending_resource_jobs: Vec<PendingResourceJob>,
+    loader: Option<Loader>,
 
     util_command_pool: command::CommandPool,
 
@@ -370,12 +386,9 @@ fn create_swapchain_and_co(
 }
 
 macro_rules! process_buffer_creation {
-    ($cmd:ident, $desc:ident, $self:ident, $cmd_buffer:ident, $handle:ident) => {{
+    ($cmd:ident, $desc:ident, $self:ident, $cmd_buffer:ident, $storage:ident) => {{
         let (buf0, buf1) = $desc
-            .enqueue(
-                &$self.device.allocator(),
-                $cmd_buffer.expect("This needs a command buffer"),
-            )
+            .enqueue(&$self.device.allocator(), $cmd_buffer)
             .expect("Fail");
 
         let (buffer1, transient1) = if let Some(buf1) = buf1 {
@@ -384,184 +397,102 @@ macro_rules! process_buffer_creation {
             (None, None)
         };
 
-        let buffer0 = buf0.buffer;
+        let handle = {
+            let inner_handle = $self.resources.$storage.add(buf0.buffer, buffer1);
+            unsafe {
+                BufferHandle::from_buffer(inner_handle, 0, $desc.n_elems(), $desc.mutability())
+            }
+        };
+
         let transients = [buf0.transient, transient1];
-        Some(PendingResourceCommand::$cmd {
-            descriptor: $desc,
-            handle: $handle,
-            buffer0,
-            buffer1,
-            transients,
-        })
+        Some(PendingSyncResourceCommand::$cmd { handle, transients })
     }};
 }
 
 // Resource-related
 impl Renderer {
-    fn process_command(
-        &self,
-        command: ResourceCommand,
-        cmd_buffer: Option<&mut command::CommandBuffer>,
-    ) -> Option<PendingResourceCommand> {
+    fn schedule_command(
+        &mut self,
+        command: SyncResourceCommand,
+        cmd_buffer: &mut command::CommandBuffer,
+    ) -> Option<PendingSyncResourceCommand> {
         match command {
-            ResourceCommand::CreateVertexBuffer { handle, descriptor } => {
-                process_buffer_creation!(CreateVertexBuffer, descriptor, self, cmd_buffer, handle)
-            }
-            ResourceCommand::CreateIndexBuffer { handle, descriptor } => {
-                process_buffer_creation!(CreateIndexBuffer, descriptor, self, cmd_buffer, handle)
-            }
-            ResourceCommand::CreateUniformBuffer { handle, descriptor } => {
-                process_buffer_creation!(CreateUniformBuffer, descriptor, self, cmd_buffer, handle)
-            }
-            ResourceCommand::CreateTexture { handle, descriptor } => {
-                let (image, transients) = descriptor
-                    .enqueue(
-                        &self.device,
-                        cmd_buffer.expect("texture creation needs command buffer"),
-                    )
-                    .expect("Fail");
-                Some(PendingResourceCommand::CreateTexture {
+            SyncResourceCommand::CreateVertexBuffer { descriptor } => {
+                process_buffer_creation!(
+                    CreateVertexBuffer,
                     descriptor,
-                    handle,
-                    image,
-                    transients,
-                })
+                    self,
+                    cmd_buffer,
+                    vertex_buffers
+                )
             }
-            ResourceCommand::CreatePipeline { handle, descriptor } => {
-                assert!(
-                    cmd_buffer.is_none(),
-                    "No need for a command buffer for pipeline creation"
-                );
-                self.async_resources.graphics_pipelines.insert(
-                    &handle,
-                    descriptor.create(&self.device, &self.render_pass).unwrap(),
-                );
-                None
+            SyncResourceCommand::CreateIndexBuffer { descriptor } => {
+                process_buffer_creation!(
+                    CreateIndexBuffer,
+                    descriptor,
+                    self,
+                    cmd_buffer,
+                    index_buffers
+                )
             }
+            SyncResourceCommand::CreateUniformBuffer { descriptor } => {
+                process_buffer_creation!(
+                    CreateUniformBuffer,
+                    descriptor,
+                    self,
+                    cmd_buffer,
+                    uniform_buffers
+                )
+            }
+            SyncResourceCommand::CreateTexture { descriptor } => {
+                let (image, transients) = descriptor
+                    .enqueue(&self.device.allocator(), &self.device, cmd_buffer)
+                    .expect("Fail");
+
+                let handle = self.resources.textures.add(&descriptor, image);
+                Some(PendingSyncResourceCommand::CreateTexture { handle, transients })
+            }
+            _ => unreachable!(),
         }
     }
 
-    fn finish_command(&self, command: PendingResourceCommand) {
-        // TODO: Pass the transients back to a free list in the allocator
-        match command {
-            PendingResourceCommand::CreateVertexBuffer {
-                handle,
-                buffer0,
-                buffer1,
-                transients: _transients,
-                descriptor: _descriptor,
-            } => self
-                .async_resources
-                .vertex_buffers
-                .insert(&handle, buffer0, buffer1),
-            PendingResourceCommand::CreateIndexBuffer {
-                handle,
-                buffer0,
-                buffer1,
-                transients: _transients,
-                descriptor: _descriptor,
-            } => self
-                .async_resources
-                .index_buffers
-                .insert(&handle, buffer0, buffer1),
-            PendingResourceCommand::CreateUniformBuffer {
-                handle,
-                buffer0,
-                buffer1,
-                transients: _transients,
-                descriptor: _descriptor,
-            } => self
-                .async_resources
-                .uniform_buffers
-                .insert(&handle, buffer0, buffer1),
-            PendingResourceCommand::CreateTexture {
-                handle,
-                image,
-                transients: _transients,
-                descriptor: _descriptor,
-            } => self.async_resources.textures.insert(&handle, image),
-        }
-    }
-
-    fn submit_resource_job(
-        &self,
-        batch: Vec<PendingResourceCommand>,
-        mut cmd_buffer: command::CommandBuffer,
-    ) -> PendingResourceJob {
+    fn submit_command_buffer(&self, mut cmd_buffer: command::CommandBuffer) -> sync::Fence {
         cmd_buffer.end().expect("Failed to end command buffer");
         let done = sync::Fence::unsignaled(&self.device).expect("Failed to create fence");
         let buffers = [*cmd_buffer.vk_command_buffer()];
         let info = vk::SubmitInfo::builder().command_buffers(&buffers);
 
         self.device
-            .util_queue()
+            .graphics_queue()
             .submit(&info, &done)
             .expect("Failed to submit");
 
-        PendingResourceJob { batch, done }
+        done
     }
 
-    fn execute_command(&self, command: ResourceCommand) -> Result<(), mem::MemoryError> {
-        let mut raw_cmd_buf = self.util_command_pool.begin_single_submit()?;
-        let pending_cmd = self
-            .process_command(command, Some(&mut raw_cmd_buf))
-            .expect("Should be pending");
-        let mut pending_job = self.submit_resource_job(vec![pending_cmd], raw_cmd_buf);
-        pending_job
-            .done
-            .blocking_wait()
-            .expect("Failed to wait for resource creation");
+    fn execute_command(
+        &mut self,
+        command: SyncResourceCommand,
+    ) -> Result<FinishedResourceCommand, mem::MemoryError> {
+        if let SyncResourceCommand::CreatePipeline { descriptor } = command {
+            let render_pass = &self.render_pass;
+            let device = &self.device;
+            let handle = self
+                .resources
+                .graphics_pipelines
+                .get_or_add(descriptor, |d| d.create(device, render_pass))
+                .unwrap();
+            Ok(FinishedResourceCommand::CreatePipeline { handle })
+        } else {
+            let mut raw_cmd_buf = self.util_command_pool.begin_single_submit()?;
+            let pending_cmd = self
+                .schedule_command(command, &mut raw_cmd_buf)
+                .expect("Should be pending");
 
-        assert_eq!(pending_job.batch.len(), 1);
-        self.finish_command(pending_job.batch.pop().expect("Expected one cmd"));
-        Ok(())
-    }
-
-    #[profiling::function]
-    fn process_commands(&mut self) {
-        // Start incoming
-        if let Ok(cmd) = self.resource_cmd_receive_queue.try_recv() {
-            // Don't create command buffer unless we actually need it
-            let mut cmd_buffer = self
-                .util_command_pool
-                .begin_single_submit()
-                .expect("Failed to create command buffer");
-            let mut batch = Vec::new();
-
-            if let Some(cmd) = self.process_command(cmd, Some(&mut cmd_buffer)) {
-                batch.push(cmd);
-            }
-
-            for cmd in self.resource_cmd_receive_queue.try_iter() {
-                if let Some(cmd) = self.process_command(cmd, Some(&mut cmd_buffer)) {
-                    batch.push(cmd);
-                }
-            }
-
-            if !batch.is_empty() {
-                self.pending_resource_jobs
-                    .push(self.submit_resource_job(batch, cmd_buffer));
-            }
-        }
-
-        // Query finished
-        // TODO: Use drain_filter here when not nightly
-        let mut i = 0;
-        while i < self.pending_resource_jobs.len() {
-            if self.pending_resource_jobs[i]
-                .done
-                .is_signaled()
-                .expect("Failed to check fence")
-            {
-                let PendingResourceJob { batch, done: _done } =
-                    self.pending_resource_jobs.remove(i);
-
-                for pending in batch.into_iter() {
-                    self.finish_command(pending);
-                }
-            } else {
-                i += 1;
-            }
+            let done = self.submit_command_buffer(raw_cmd_buf);
+            done.blocking_wait()
+                .expect("Failed to wait for resource creation");
+            Ok(pending_cmd.done())
         }
     }
 }
@@ -574,7 +505,7 @@ impl Renderer {
         let instance = instance::Instance::new(window)?;
         let _debug_utils = util::vk_debug::DebugUtils::new(&instance)?;
         let surface = surface::Surface::new(&instance, window)?;
-        let device = device::Device::new(&instance, &surface)?;
+        let mut device = device::Device::new(&instance, &surface)?;
 
         let SwapchainAndCo {
             swapchain,
@@ -590,11 +521,19 @@ impl Renderer {
             FrameSynchronization::new(&device)?,
         ];
 
-        let util_command_pool = command::CommandPool::util(&device)?;
+        let util_command_pool =
+            command::CommandPool::new(&device, device.graphics_queue_family().clone())?;
         let descriptor_sets = descriptor::DescriptorSets::new(&device)?;
-        let (sender, receiver) = std::sync::mpsc::channel();
-        let async_resources = Arc::new(resource::AsyncResources::default());
-        let loader_resources = Arc::clone(&async_resources);
+        let resources = resource::Resources {
+            uniform_buffers: mem::UniformBuffers::default(),
+            vertex_buffers: mem::VertexBuffers::default(),
+            index_buffers: mem::IndexBuffers::default(),
+            textures: texture::Textures::default(),
+            graphics_pipelines: pipeline::GraphicsPipelines::default(),
+            descriptor_sets,
+        };
+
+        let loader = Some(Loader::new(&mut device));
 
         Ok(Self {
             instance,
@@ -610,18 +549,14 @@ impl Renderer {
             frame_idx: 0,
             swapchain_image_idx: 0,
             _debug_utils,
-            resources: Resources::new(descriptor_sets),
-            async_resources,
+            resources,
             util_command_pool,
-            loader: loader::Loader::new(sender, loader_resources),
-            resource_cmd_receive_queue: receiver,
-            pending_resource_jobs: Vec::default(),
+            loader,
         })
     }
 
     #[profiling::function]
     pub fn next_frame<'a, 'b: 'a>(&'b mut self) -> Result<Frame<'a>, RenderError> {
-        self.process_commands();
         {
             let frame_sync = &mut self.frame_synchronization[self.frame_idx as usize];
             frame_sync.in_flight.blocking_wait()?;
@@ -640,12 +575,12 @@ impl Renderer {
 
         let frame_sync = &mut self.frame_synchronization[self.frame_idx as usize];
         let _ = std::mem::replace(&mut frame_sync.command_pool, None);
-        let gfx_command_pool = command::CommandPool::graphics(&self.device)?;
+        let gfx_command_pool =
+            command::CommandPool::new(&self.device, self.device.graphics_queue_family().clone())?;
 
         self.image_to_frame_idx[self.swapchain_image_idx as usize] = Some(self.frame_idx);
 
         Ok(Frame::<'a> {
-            resources: Arc::clone(&self.async_resources),
             renderer: self,
             recorded_command_buffers: Vec::new(),
             gfx_command_pool,
@@ -654,7 +589,6 @@ impl Renderer {
 
     #[profiling::function]
     pub fn submit(&mut self, frame: FinishedFrame) -> Result<(), RenderError> {
-        self.process_commands();
         assert!(
             !frame.recorded_command_buffers.is_empty(),
             "Needs atleast an empty render pass"
@@ -742,15 +676,6 @@ impl Renderer {
         Ok(())
     }
 
-    pub fn get_descriptor_set(
-        &self,
-        handle: &Handle<descriptor::DescriptorSet>,
-    ) -> Option<&descriptor::DescriptorSet> {
-        self.resources
-            .descriptor_sets
-            .get(handle, self.frame_idx as usize)
-    }
-
     pub fn aspect_ratio(&self) -> f32 {
         let util::Extent2D { width, height } = self.swapchain_extent();
 
@@ -761,31 +686,26 @@ impl Renderer {
         self.swapchain.info().extent
     }
 
-    pub fn loader(&self) -> loader::Loader {
-        self.loader.clone()
+    pub fn loader(&mut self) -> Option<Loader> {
+        self.loader.take()
     }
 }
 
-/// These are functions only used by Frame
+/// These are functions only used by other parts of this lib
 impl Renderer {
     fn update_uniform<T: Copy>(
         &mut self,
         h: &BufferHandle<mem::UniformBuffer>,
         data: &T,
     ) -> Result<(), RenderError> {
-        let mut ubuf = self
-            .async_resources
+        let ubuf = self
+            .resources
             .uniform_buffers
             .get_buffered_mut(h, self.frame_idx as usize)
             .ok_or_else(|| RenderError::InvalidHandle(h.handle().id()))?;
 
-        if let resurs::Async::Available(ubuf) = &mut *ubuf {
-            ubuf.update_with(data, h.idx() as u64)
-                .map_err(RenderError::UniformBuffer)
-        } else {
-            log::error!("Tried to update non-existing uniform buffer");
-            Ok(())
-        }
+        ubuf.update_with(data, h.idx() as u64)
+            .map_err(RenderError::UniformBuffer)
     }
 
     fn render_pass(&self) -> &backend::render_pass::RenderPass {
@@ -794,6 +714,10 @@ impl Renderer {
 
     fn framebuffer(&self) -> &framebuffer::Framebuffer {
         &self.swapchain_framebuffers[self.swapchain_image_idx as usize]
+    }
+
+    pub(crate) fn resources_mut(&mut self) -> &'_ mut resource::Resources {
+        &mut self.resources
     }
 }
 
@@ -824,26 +748,20 @@ macro_rules! impl_buffer_manager {
         impl resource::ResourceManager<$desc, $resource, $handle> for Renderer {
             type Error = mem::MemoryError;
 
-            fn get_resource(
-                &self,
-                handle: &$handle,
-            ) -> Option<MappedRwLockReadGuard<'_, resurs::Async<$resource>>> {
-                self.async_resources
-                    .$storage
-                    .get(handle, self.frame_idx as usize)
+            fn get_resource(&self, handle: &$handle) -> Option<&$resource> {
+                self.resources.$storage.get(handle, self.frame_idx as usize)
             }
 
             fn create_resource_blocking(
                 &mut self,
                 descriptor: $desc,
             ) -> Result<$handle, Self::Error> {
-                let handle = self.async_resources.$storage.allocate(&descriptor);
-                let cmd = ResourceCommand::$cmd_enum {
-                    descriptor,
-                    handle: handle.clone(),
-                };
-                self.execute_command(cmd)?;
-                Ok(handle)
+                let cmd = SyncResourceCommand::$cmd_enum { descriptor };
+                let finished = self.execute_command(cmd)?;
+                match finished {
+                    FinishedResourceCommand::$cmd_enum { handle } => Ok(handle),
+                    _ => unreachable!(),
+                }
             }
         }
     };
@@ -876,22 +794,24 @@ macro_rules! impl_resource_manager {
         impl resource::ResourceManager<$desc, $resource, $handle> for Renderer {
             type Error = $error;
 
-            fn get_resource(
-                &self,
-                handle: &$handle,
-            ) -> Option<MappedRwLockReadGuard<'_, resurs::Async<$resource>>> {
-                self.async_resources.$storage.get(handle)
+            fn get_resource(&self, handle: &$handle) -> Option<&$resource> {
+                self.resources.$storage.get(handle)
             }
 
-            // TODO: &self?
             fn create_resource_blocking(
                 &mut self,
                 descriptor: $desc,
             ) -> Result<$handle, Self::Error> {
-                let handle = self.async_resources.$storage.allocate(&descriptor);
-                let cmd = ResourceCommand::$cmd_enum { descriptor, handle };
-                self.execute_command(cmd)?;
-                Ok(handle)
+                if let Some(handle) = self.resources.$storage.cached(&descriptor) {
+                    return Ok(handle);
+                }
+
+                let cmd = SyncResourceCommand::$cmd_enum { descriptor };
+                let finished = self.execute_command(cmd).unwrap();
+                match finished {
+                    FinishedResourceCommand::$cmd_enum { handle } => Ok(handle),
+                    _ => unreachable!(),
+                }
             }
         }
     };
@@ -905,36 +825,7 @@ impl_resource_manager!(
     textures
 );
 
-macro_rules! impl_pipeline_manager {
-    ($desc:ty, $resource:ty, $handle:ty, $error:ty, $cmd_enum:ident, $storage:ident) => {
-        impl resource::ResourceManager<$desc, $resource, $handle> for Renderer {
-            type Error = $error;
-
-            fn get_resource(
-                &self,
-                handle: &$handle,
-            ) -> Option<MappedRwLockReadGuard<'_, resurs::Async<$resource>>> {
-                self.async_resources.$storage.get(handle)
-            }
-
-            // TODO: &self?
-            fn create_resource_blocking(
-                &mut self,
-                descriptor: $desc,
-            ) -> Result<$handle, Self::Error> {
-                let handle = self.async_resources.$storage.allocate(&descriptor);
-                let cmd = ResourceCommand::$cmd_enum { descriptor, handle };
-                let pending_cmd = self.process_command(cmd, None);
-                assert!(
-                    pending_cmd.is_none(),
-                    "Expected synchronous job for pipeline"
-                );
-                Ok(handle)
-            }
-        }
-    };
-}
-impl_pipeline_manager!(
+impl_resource_manager!(
     pipeline::GraphicsPipelineDescriptor,
     pipeline::GraphicsPipeline,
     Handle<pipeline::GraphicsPipeline>,

@@ -5,10 +5,8 @@ use ash::vk;
 
 use thiserror::Error;
 
+use crate::backend::{AllocatorHandle, HasVkDevice, VkDeviceHandle};
 use crate::command::CommandBuffer;
-use crate::device::Device;
-use crate::device::HasVkDevice;
-use crate::device::VkDeviceHandle;
 use crate::image::{ImageView, ImageViewError};
 use crate::mem::DeviceBuffer;
 use crate::mem::DeviceImage;
@@ -56,7 +54,7 @@ struct DescriptorCommon {
     mipmaps: MipMaps,
 }
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub enum TextureDescriptorTy {
     File(PathBuf),
     Raw {
@@ -65,7 +63,7 @@ pub enum TextureDescriptorTy {
     },
 }
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct TextureDescriptor {
     ty: TextureDescriptorTy,
     common: DescriptorCommon,
@@ -94,18 +92,24 @@ impl TextureDescriptor {
         }
     }
 
-    pub fn enqueue(
+    pub fn enqueue<D: HasVkDevice>(
         &self,
-        device: &Device,
+        allocator: &AllocatorHandle,
+        device: &D,
         command_buffer: &mut CommandBuffer,
     ) -> Result<(Texture, DeviceBuffer), TextureError> {
         match &self.ty {
             TextureDescriptorTy::File(pathbuf) => {
-                Texture::from_file(device, command_buffer, &self.common, &pathbuf)
+                Texture::from_file(device, allocator, command_buffer, &self.common, &pathbuf)
             }
-            TextureDescriptorTy::Raw { data, extent } => {
-                Texture::from_raw(device, command_buffer, *extent, &self.common, &data)
-            }
+            TextureDescriptorTy::Raw { data, extent } => Texture::from_raw(
+                device,
+                allocator,
+                command_buffer,
+                *extent,
+                &self.common,
+                &data,
+            ),
         }
     }
 }
@@ -117,7 +121,7 @@ pub struct Sampler {
 
 // TODO: Support other border color/address mode
 impl Sampler {
-    pub fn new(device: &Device) -> Result<Self, TextureError> {
+    pub fn new<D: HasVkDevice>(device: &D) -> Result<Self, TextureError> {
         let info = vk::SamplerCreateInfo::builder()
             .mag_filter(vk::Filter::LINEAR)
             .min_filter(vk::Filter::LINEAR)
@@ -169,14 +173,14 @@ pub struct Texture {
 }
 
 impl Texture {
-    fn from_raw<'a>(
-        device: &Device,
+    fn from_raw<'a, D: HasVkDevice>(
+        device: &D,
+        allocator: &AllocatorHandle,
         command_buffer: &mut CommandBuffer,
         extent: util::Extent2D,
         common: &DescriptorCommon,
         data: &'a [u8],
     ) -> Result<(Self, DeviceBuffer), TextureError> {
-        let allocator = device.allocator();
         let ((image, staging), mip_levels) = if let MipMaps::Generate = common.mipmaps {
             let mip_levels = (extent.max_dim() as f32).log2().floor() as u32 + 1;
             (
@@ -214,8 +218,9 @@ impl Texture {
         ))
     }
 
-    fn from_file(
-        device: &Device,
+    fn from_file<D: HasVkDevice>(
+        device: &D,
+        allocator: &AllocatorHandle,
         command_buffer: &mut CommandBuffer,
         common: &DescriptorCommon,
         path: &Path,
@@ -226,7 +231,14 @@ impl Texture {
             height: image.height(),
         };
         let raw_image_data = image.into_raw();
-        Self::from_raw(device, command_buffer, extent, common, &raw_image_data)
+        Self::from_raw(
+            device,
+            allocator,
+            command_buffer,
+            extent,
+            common,
+            &raw_image_data,
+        )
     }
 
     pub fn vk_image(&self) -> &vk::Image {
@@ -248,74 +260,57 @@ impl std::fmt::Debug for Texture {
     }
 }
 
-#[derive(Default)]
-pub struct Textures {
-    cache: Cache<PathBuf, Texture>,
-    storage: Storage<Async<Texture>>,
+pub struct TextureStorage<T> {
+    cache: Cache<PathBuf, T>,
+    storage: Storage<T>,
 }
 
-impl Textures {
+impl<T> TextureStorage<T> {
     pub fn new() -> Self {
         Self {
             cache: Cache::default(),
-            storage: Storage::<Async<Texture>>::new(),
+            storage: Storage::<T>::new(),
         }
     }
-}
 
-use crate::resource::Async;
-use parking_lot::{MappedRwLockReadGuard, RwLock, RwLockReadGuard};
+    pub fn get(&self, handle: &Handle<T>) -> Option<&T> {
+        self.storage.get(handle)
+    }
 
-pub type TextureStorageReadGuard<'a> = RwLockReadGuard<'a, Textures>;
+    pub fn get_mut(&mut self, handle: &Handle<T>) -> Option<&mut T> {
+        self.storage.get_mut(handle)
+    }
 
-#[derive(Default)]
-pub struct AsyncTextures {
-    inner: Arc<RwLock<Textures>>,
-}
-
-impl AsyncTextures {
-    pub fn allocate(&self, descriptor: &TextureDescriptor) -> Handle<Texture> {
-        let mut guard = self.inner.write();
-        let h = guard.storage.add(Async::<Texture>::Pending).unwrap_async();
+    pub fn add(&mut self, descriptor: &TextureDescriptor, t: T) -> Handle<T> {
+        let h = self.storage.add(t);
 
         if let TextureDescriptorTy::File(path) = &descriptor.ty {
-            guard.cache.add(path.clone(), h);
+            self.cache.add(path.clone(), h);
         }
 
         h
     }
 
-    pub fn cache(&self, descriptor: &TextureDescriptor) -> Option<Handle<Texture>> {
+    pub fn cached(&self, descriptor: &TextureDescriptor) -> Option<Handle<T>> {
         if let TextureDescriptorTy::File(path) = &descriptor.ty {
-            self.inner.read().cache.get(path).cloned()
+            self.cache.get(&path).cloned()
         } else {
             None
         }
     }
-
-    pub fn get(&self, h: &Handle<Texture>) -> Option<MappedRwLockReadGuard<'_, Async<Texture>>> {
-        let guard = self.inner.read();
-
-        if !guard.storage.has(&h.wrap_async()) {
-            return None;
-        }
-
-        Some(RwLockReadGuard::map(guard, |textures| {
-            textures.storage.get(&h.wrap_async()).unwrap()
-        }))
-    }
-
-    pub fn is_done(&self, h: &Handle<Texture>) -> Option<bool> {
-        self.inner
-            .read()
-            .storage
-            .get(&h.wrap_async())
-            .map(|x| !x.is_pending())
-    }
-
-    pub fn insert(&self, h: &Handle<Texture>, t: Texture) {
-        if let Some(x) = self.inner.write().storage.get_mut(&h.wrap_async()) {
-            *x = Async::<Texture>::Available(t);
-        }
+}
+impl<T> TextureStorage<Async<T>> {
+    pub fn allocate(&mut self, _desc: &TextureDescriptor) -> Handle<Async<T>> {
+        self.storage.add(Async::Pending)
     }
 }
+
+impl<T> Default for TextureStorage<T> {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+pub type Textures = TextureStorage<Texture>;
+use crate::resource::Async;
+pub type AsyncTextures = TextureStorage<Async<Texture>>;

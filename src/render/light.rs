@@ -1,14 +1,9 @@
 use crate::ecs::prelude::*;
-use crate::math::{Transform, Vec3};
+use crate::math::{Transform, Vec3, Vec4};
 
 use crate::graph::{sys::add_edge, sys::breadth_first, Children, Parent};
-use crate::render::material::{Material, PendingMaterial};
-use crate::render::mesh::PendingMesh;
+use crate::render::mesh::CpuMesh;
 use crate::render::uniform::{LightingData, PackedLight, MAX_NUM_LIGHTS};
-
-use trekanten::loader::ResourceLoader;
-use trekanten::mem::OwningUniformBufferDescriptor;
-use trekanten::BufferMutability;
 
 #[derive(Default, Component)]
 #[component(storage = "NullStorage")]
@@ -37,9 +32,8 @@ impl<'a> System<'a> for RenderLightVolumes {
         Entities<'a>,
         ReadStorage<'a, RenderLightVolume>,
         WriteStorage<'a, LightVolumeRenderer>,
-        WriteStorage<'a, PendingMesh>,
-        WriteStorage<'a, PendingMaterial>,
-        WriteExpect<'a, trekanten::Loader>,
+        WriteStorage<'a, CpuMesh>,
+        WriteStorage<'a, super::material::Unlit>,
     );
 
     fn run(&mut self, data: Self::SystemData) {
@@ -53,7 +47,6 @@ impl<'a> System<'a> for RenderLightVolumes {
             mut renderer_markers,
             mut meshes,
             mut materials,
-            loader,
         ) = data;
 
         for (ent, light, _) in (&entities, &lights, &command_markers).join() {
@@ -71,34 +64,23 @@ impl<'a> System<'a> for RenderLightVolumes {
                 continue;
             }
 
-            let (vertices, indices) = super::geometry::sphere_mesh(radius);
-            let vertex_buffer = loader.load(vertices);
-            let index_buffer = loader.load(indices);
-            let pending_mesh = PendingMesh(Some(super::GpuMesh {
-                mesh: trekanten::mesh::Mesh {
-                    vertex_buffer,
-                    index_buffer,
-                },
+            let (vertex_buffer, index_buffer) = super::geometry::sphere_mesh(radius);
+            let mesh = CpuMesh {
+                vertex_buffer,
+                index_buffer,
                 polygon_mode: trekanten::pipeline::PolygonMode::Line,
-            }));
-
-            let uniform_data = super::uniform::UnlitUniformData {
-                color: [color.x, color.y, color.z, 1.0],
             };
 
-            let color_uniform = loader.load(OwningUniformBufferDescriptor::from_vec(
-                vec![uniform_data],
-                BufferMutability::Immutable,
-            ));
-
-            let pending_material = PendingMaterial::from(Material::Unlit { color_uniform });
+            let material = super::material::Unlit {
+                color: Vec4::new(color.x, color.y, color.z, 1.0),
+            };
 
             let child = entities
                 .build_entity()
                 .with(Transform::identity(), &mut transforms)
                 .with(LightVolumeRenderer, &mut renderer_markers)
-                .with(pending_mesh, &mut meshes)
-                .with(pending_material, &mut materials)
+                .with(mesh, &mut meshes)
+                .with(material, &mut materials)
                 .build();
 
             add_edge(&mut children, &mut parents, ent, child);

@@ -19,13 +19,6 @@ pub struct QueueFamily {
     pub index: u32,
     pub props: vk::QueueFamilyProperties,
 }
-
-#[derive(Clone, Debug)]
-pub struct QueueFamilies {
-    pub graphics: QueueFamily,
-    pub present: QueueFamily,
-}
-
 struct VkSubmitFn(
     extern "system" fn(
         queue: vk::Queue,
@@ -39,15 +32,17 @@ unsafe impl Send for VkSubmitFn {}
 pub struct Queue {
     vk_submit_fn: VkSubmitFn,
     vk_queue: vk::Queue,
+    queue_family: QueueFamily,
 }
 
 impl Queue {
-    pub fn new<D: HasVkDevice>(device: D, vk_queue: vk::Queue) -> Self {
+    pub fn new<D: HasVkDevice>(device: D, queue_family: QueueFamily, vk_queue: vk::Queue) -> Self {
         let vk_device = device.vk_device();
         let vk_submit_fn = VkSubmitFn(vk_device.fp_v1_0().queue_submit);
         Self {
             vk_submit_fn,
             vk_queue,
+            queue_family,
         }
     }
 
@@ -69,5 +64,9 @@ impl Queue {
 
     pub fn vk_queue(&self) -> &vk::Queue {
         &self.vk_queue
+    }
+
+    pub fn family(&self) -> &QueueFamily {
+        &self.queue_family
     }
 }
