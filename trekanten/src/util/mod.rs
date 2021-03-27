@@ -29,80 +29,68 @@ pub fn as_bytes<T: Copy>(v: &T) -> &[u8] {
     unsafe { std::slice::from_raw_parts(ptr, size) }
 }
 
-/// Only deallocated memory
+fn drop_as_vec<T>(ptr: *const u8, len: usize, cap: usize) {
+    assert!(len % std::mem::size_of::<T>() == 0);
+    assert!(cap % std::mem::size_of::<T>() == 0);
+    std::mem::drop(unsafe {
+        Vec::from_raw_parts(
+            ptr as *mut T,
+            len / std::mem::size_of::<T>(),
+            cap / std::mem::size_of::<T>(),
+        )
+    })
+}
+
 pub struct ByteBuffer {
-    data: Vec<u8>,
-    layout: std::alloc::Layout,
+    ptr: *const u8,
+    len: usize,
+    cap: usize,
+    drop: fn(*const u8, usize, usize),
 }
 
 impl std::ops::Deref for ByteBuffer {
     type Target = [u8];
     fn deref(&self) -> &Self::Target {
-        &self.data
+        unsafe {
+            std::slice::from_raw_parts(self.ptr, self.len)
+        }
     }
 }
 
 impl std::fmt::Debug for ByteBuffer {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        let len = self.data.len();
-        let ptr = self.data.as_ptr();
+        let len = self.len;
+        let ptr = self.ptr;
         write!(f, "({:?}, {:?})[{}]", ptr, ptr.wrapping_add(len), len)
     }
 }
 
 impl ByteBuffer {
     // Requiring copy enforces that there is no custom drop that is needed
-    // Very unsafe. Does not call drop() for elements
-    pub unsafe fn from_vec<T: Copy>(mut v: Vec<T>) -> Self {
-        if v.is_empty() {
-            return Self::empty();
-        }
-        // TODO: Static assertion
-        assert!(std::mem::size_of::<T>() > 0, "ZST are not supported");
-        let ptr = v.as_mut_ptr();
-        let orig_len = v.len();
-        let orig_cap = v.capacity();
-        let len = orig_len * std::mem::size_of::<T>();
-        let cap = orig_cap * std::mem::size_of::<T>();
+    // Very unsafe
+    pub unsafe fn from_vec<T: Copy + 'static>(mut v: Vec<T>) -> Self {
+        let (ptr, len, cap) = (v.as_mut_ptr(), v.len(), v.capacity());
+        let drop = drop_as_vec::<T>;
         std::mem::forget(v);
 
-        // TODO: Use RawVec directly?
-        // From the implementation of alloc::raw_vec::RawVec which std::alloc::Vec uses
-        // internally:
-
-        // We have an allocated chunk of memory, so we can bypass runtime
-        // checks to get our current layout.
-        let align = std::mem::align_of::<T>();
-        let size = std::mem::size_of::<T>() * orig_cap;
-        let layout = std::alloc::Layout::from_size_align_unchecked(size, align);
-
-        let data: Vec<u8> = Vec::from_raw_parts(ptr as *mut u8, len, cap);
-        Self { data, layout }
-    }
-
-    pub fn empty() -> Self {
-        let layout = unsafe { std::alloc::Layout::from_size_align_unchecked(0, 0) };
         Self {
-            data: Vec::new(),
-            layout,
+            ptr: ptr as *const u8,
+            len: len * std::mem::size_of::<T>(),
+            cap: cap * std::mem::size_of::<T>(),
+            drop,
         }
     }
-
+    
     pub fn len(&self) -> usize {
-        self.data.len()
+        self.len
     }
 }
 
+unsafe impl Send for ByteBuffer {}
+unsafe impl Sync for ByteBuffer {}
+
 impl Drop for ByteBuffer {
     fn drop(&mut self) {
-        if self.data.is_empty() {
-            return;
-        }
-        let mut owned = std::mem::take(&mut self.data);
-        let ptr = owned.as_mut_ptr();
-        std::mem::forget(owned);
-        unsafe {
-            std::alloc::dealloc(ptr as *mut u8, self.layout);
-        }
+        (self.drop)(self.ptr, self.len, self.cap);
     }
 }
