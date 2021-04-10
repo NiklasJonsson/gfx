@@ -51,9 +51,7 @@ pub struct ByteBuffer {
 impl std::ops::Deref for ByteBuffer {
     type Target = [u8];
     fn deref(&self) -> &Self::Target {
-        unsafe {
-            std::slice::from_raw_parts(self.ptr, self.len)
-        }
+        unsafe { std::slice::from_raw_parts(self.ptr, self.len) }
     }
 }
 
@@ -80,7 +78,7 @@ impl ByteBuffer {
             drop,
         }
     }
-    
+
     pub fn len(&self) -> usize {
         self.len
     }

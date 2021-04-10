@@ -17,7 +17,7 @@ pub use error::RenderError;
 pub use error::ResizeReason;
 pub use loader::Loader;
 pub use mem::{BufferHandle, BufferMutability};
-pub use render_pass::RenderPassEncoder;
+pub use render_pass::{RenderPass, RenderPassEncoder};
 pub use resource::{Async, Handle, MutResourceManager, ResourceManager};
 
 use ash::version::DeviceV1_0;
@@ -90,13 +90,19 @@ impl<'a> Frame<'a> {
 
     pub fn begin_render_pass(
         &'a self,
+        render_pass: &Handle<render_pass::RenderPass>,
+        framebuffer: &framebuffer::Framebuffer,
+        extent: util::Extent2D,
+        clear_values: &[vk::ClearValue],
     ) -> Result<render_pass::RenderPassEncoder<'a>, command::CommandError> {
         let mut buf = self.new_raw_command_buffer()?;
-        buf.begin_render_pass(
-            self.renderer.render_pass(),
-            self.renderer.framebuffer(),
-            self.renderer.swapchain_extent(),
-        );
+        let render_pass = self
+            .renderer
+            .resources
+            .render_passes
+            .get(render_pass)
+            .expect("No such render pass");
+        buf.begin_render_pass(&render_pass.0, framebuffer, extent, clear_values);
 
         Ok(render_pass::RenderPassEncoder::new(
             &self.renderer.resources,
@@ -105,8 +111,29 @@ impl<'a> Frame<'a> {
         ))
     }
 
-    pub fn render_pass(&self) -> &backend::render_pass::RenderPass {
-        self.renderer.render_pass()
+    pub fn begin_presentation_pass(
+        &'a self,
+        render_pass: &Handle<render_pass::RenderPass>,
+    ) -> Result<render_pass::RenderPassEncoder<'a>, command::CommandError> {
+        let clear_values = [
+            vk::ClearValue {
+                color: vk::ClearColorValue {
+                    float32: [0.0, 0.0, 0.0, 1.0],
+                },
+            },
+            vk::ClearValue {
+                depth_stencil: vk::ClearDepthStencilValue {
+                    depth: 1.0,
+                    stencil: 0,
+                },
+            },
+        ];
+        self.begin_render_pass(
+            render_pass,
+            self.renderer.framebuffer(),
+            self.extent(),
+            &clear_values,
+        )
     }
 
     pub fn extent(&self) -> util::Extent2D {
@@ -119,12 +146,17 @@ impl<'a> Frame<'a> {
 
     pub fn finish(mut self) -> FinishedFrame {
         if self.recorded_command_buffers.is_empty() {
-            // Add something just to clear the screen
+            let render_pass = &self
+                .renderer
+                .presentation_render_target
+                .as_ref()
+                .expect("No presentation pass")
+                .render_pass;
             let buf = self
-                .begin_render_pass()
-                .expect("Failed to begin render pass")
+                .begin_presentation_pass(render_pass)
+                .expect("Failed to begin the empty render pass")
                 .build()
-                .expect("Failed to build render command buffer");
+                .expect("Failed to create empty render pass");
             self.add_raw_command_buffer(buf);
         }
 
@@ -230,7 +262,6 @@ impl_buffer_manager_frame!(
     index_buffers
 );
 
-// TODO: std::borrow::Cow here?
 pub enum SyncResourceCommand {
     CreateVertexBuffer {
         descriptor: mem::OwningVertexBufferDescriptor,
@@ -243,9 +274,6 @@ pub enum SyncResourceCommand {
     },
     CreateTexture {
         descriptor: texture::TextureDescriptor,
-    },
-    CreatePipeline {
-        descriptor: pipeline::GraphicsPipelineDescriptor,
     },
 }
 
@@ -298,20 +326,20 @@ pub enum FinishedResourceCommand {
     CreateTexture {
         handle: resurs::Handle<texture::Texture>,
     },
-    CreatePipeline {
-        handle: resurs::Handle<pipeline::GraphicsPipeline>,
-    },
+}
+
+struct PresentationRenderTarget {
+    render_pass: Handle<RenderPass>,
+    swapchain_framebuffers: Vec<framebuffer::Framebuffer>,
+    _depth_buffer: depth_buffer::DepthBuffer,
+    _color_buffer: color_buffer::ColorBuffer,
 }
 
 pub struct Renderer {
     resources: resource::Resources,
 
     // Swapchain-related
-    // TODO: render pass should move to something like a render graph
-    render_pass: backend::render_pass::RenderPass,
-    swapchain_framebuffers: Vec<framebuffer::Framebuffer>,
-    depth_buffer: depth_buffer::DepthBuffer,
-    color_buffer: color_buffer::ColorBuffer,
+    presentation_render_target: Option<PresentationRenderTarget>,
     swapchain: swapchain::Swapchain,
     swapchain_image_idx: u32, // TODO: Bake this into the swapchain?
     image_to_frame_idx: Vec<Option<u32>>,
@@ -343,11 +371,7 @@ impl std::ops::Drop for Renderer {
 // Result holder struct
 struct SwapchainAndCo {
     swapchain: swapchain::Swapchain,
-    depth_buffer: depth_buffer::DepthBuffer,
-    color_buffer: color_buffer::ColorBuffer,
-    swapchain_framebuffers: Vec<framebuffer::Framebuffer>,
     image_to_frame_idx: Vec<Option<u32>>,
-    render_pass: backend::render_pass::RenderPass,
 }
 
 fn create_swapchain_and_co(
@@ -357,31 +381,13 @@ fn create_swapchain_and_co(
     requested_extent: &util::Extent2D,
     old: Option<&swapchain::Swapchain>,
 ) -> Result<SwapchainAndCo, RenderError> {
-    let msaa_sample_count = device.max_msaa_sample_count();
     let swapchain =
         swapchain::Swapchain::new(&instance, &device, &surface, &requested_extent, old)?;
-    let render_pass =
-        backend::render_pass::RenderPass::new(&device, swapchain.info().format, msaa_sample_count)?;
 
     let image_to_frame_idx: Vec<Option<u32>> = (0..swapchain.num_images()).map(|_| None).collect();
-    let depth_buffer =
-        depth_buffer::DepthBuffer::new(device, &swapchain.info().extent, msaa_sample_count)?;
-    let color_buffer = color_buffer::ColorBuffer::new(
-        device,
-        swapchain.info().format.into(),
-        &swapchain.info().extent,
-        msaa_sample_count,
-    )?;
-    let swapchain_framebuffers =
-        swapchain.create_framebuffers_for(&render_pass, &depth_buffer, &color_buffer)?;
-
     Ok(SwapchainAndCo {
         swapchain,
-        depth_buffer,
-        color_buffer,
-        swapchain_framebuffers,
         image_to_frame_idx,
-        render_pass,
     })
 }
 
@@ -449,10 +455,9 @@ impl Renderer {
                     .enqueue(&self.device.allocator(), &self.device, cmd_buffer)
                     .expect("Fail");
 
-                let handle = self.resources.textures.add(&descriptor, image);
+                let handle = self.resources.textures.add(image);
                 Some(PendingSyncResourceCommand::CreateTexture { handle, transients })
             }
-            _ => unreachable!(),
         }
     }
 
@@ -474,26 +479,51 @@ impl Renderer {
         &mut self,
         command: SyncResourceCommand,
     ) -> Result<FinishedResourceCommand, mem::MemoryError> {
-        if let SyncResourceCommand::CreatePipeline { descriptor } = command {
-            let render_pass = &self.render_pass;
-            let device = &self.device;
-            let handle = self
-                .resources
-                .graphics_pipelines
-                .get_or_add(descriptor, |d| d.create(device, render_pass))
-                .unwrap();
-            Ok(FinishedResourceCommand::CreatePipeline { handle })
-        } else {
-            let mut raw_cmd_buf = self.util_command_pool.begin_single_submit()?;
-            let pending_cmd = self
-                .schedule_command(command, &mut raw_cmd_buf)
-                .expect("Should be pending");
+        let mut raw_cmd_buf = self.util_command_pool.begin_single_submit()?;
+        let pending_cmd = self
+            .schedule_command(command, &mut raw_cmd_buf)
+            .expect("Should be pending");
 
-            let done = self.submit_command_buffer(raw_cmd_buf);
-            done.blocking_wait()
-                .expect("Failed to wait for resource creation");
-            Ok(pending_cmd.done())
-        }
+        let done = self.submit_command_buffer(raw_cmd_buf);
+        done.blocking_wait()
+            .expect("Failed to wait for resource creation");
+        Ok(pending_cmd.done())
+    }
+
+    fn create_presentation_render_target(
+        &self,
+        format: util::Format,
+        render_pass_h: Handle<RenderPass>,
+    ) -> Result<PresentationRenderTarget, RenderError> {
+        let render_pass = self
+            .resources
+            .render_passes
+            .get(&render_pass_h)
+            .expect("No presentation pass handle");
+        let msaa_sample_count = render_pass.0.msaa_sample_count();
+        let _depth_buffer = depth_buffer::DepthBuffer::new(
+            &self.device,
+            &self.swapchain.info().extent,
+            msaa_sample_count,
+        )?;
+        let _color_buffer = color_buffer::ColorBuffer::new(
+            &self.device,
+            format,
+            &self.swapchain.info().extent,
+            msaa_sample_count,
+        )?;
+        let swapchain_framebuffers = self.swapchain.create_framebuffers_for(
+            &render_pass.0,
+            &_depth_buffer,
+            &_color_buffer,
+        )?;
+
+        Ok(PresentationRenderTarget {
+            render_pass: render_pass_h,
+            _color_buffer,
+            _depth_buffer,
+            swapchain_framebuffers,
+        })
     }
 }
 
@@ -509,11 +539,7 @@ impl Renderer {
 
         let SwapchainAndCo {
             swapchain,
-            swapchain_framebuffers,
-            depth_buffer,
-            color_buffer,
             image_to_frame_idx,
-            render_pass,
         } = create_swapchain_and_co(&instance, &device, &surface, &window_extent, None)?;
 
         let frame_synchronization = [
@@ -531,9 +557,11 @@ impl Renderer {
             textures: texture::Textures::default(),
             graphics_pipelines: pipeline::GraphicsPipelines::default(),
             descriptor_sets,
+            render_passes: resurs::Storage::default(),
         };
 
         let loader = Some(Loader::new(&mut device));
+        let presentation_render_target = None;
 
         Ok(Self {
             instance,
@@ -541,10 +569,7 @@ impl Renderer {
             device,
             swapchain,
             image_to_frame_idx,
-            render_pass,
-            swapchain_framebuffers,
-            depth_buffer,
-            color_buffer,
+            presentation_render_target,
             frame_synchronization,
             frame_idx: 0,
             swapchain_image_idx: 0,
@@ -653,11 +678,7 @@ impl Renderer {
 
         let SwapchainAndCo {
             swapchain,
-            swapchain_framebuffers,
-            depth_buffer,
-            color_buffer,
             image_to_frame_idx,
-            render_pass,
         } = create_swapchain_and_co(
             &self.instance,
             &self.device,
@@ -667,11 +688,15 @@ impl Renderer {
         )?;
 
         self.swapchain = swapchain;
-        self.swapchain_framebuffers = swapchain_framebuffers;
-        self.depth_buffer = depth_buffer;
-        self.color_buffer = color_buffer;
         self.image_to_frame_idx = image_to_frame_idx;
-        self.render_pass = render_pass;
+
+        if let Some(prt) = self.presentation_render_target.take() {
+            let rt = self.create_presentation_render_target(
+                util::Format::from(self.swapchain.info().format),
+                prt.render_pass,
+            )?;
+            self.presentation_render_target = Some(rt)
+        }
 
         Ok(())
     }
@@ -688,6 +713,30 @@ impl Renderer {
 
     pub fn loader(&mut self) -> Option<Loader> {
         self.loader.take()
+    }
+}
+
+/// Vulkan-specific
+impl Renderer {
+    pub fn presentation_render_pass(
+        &mut self,
+        msaa_sample_count: u8,
+    ) -> Result<Handle<RenderPass>, RenderError> {
+        let format = util::Format::from(self.swapchain.info().format);
+        let render_pass =
+            RenderPass::presentation_render_pass(&self.device, format, msaa_sample_count)?;
+        let render_pass = self.resources.render_passes.add(render_pass);
+        self.presentation_render_target =
+            Some(self.create_presentation_render_target(format, render_pass.clone())?);
+
+        Ok(render_pass)
+    }
+
+    pub fn create_render_pass(
+        &self,
+        create_info: &vk::RenderPassCreateInfo,
+    ) -> Result<RenderPass, RenderError> {
+        RenderPass::new_vk(&self.device, create_info)
     }
 }
 
@@ -708,12 +757,12 @@ impl Renderer {
             .map_err(RenderError::UniformBuffer)
     }
 
-    fn render_pass(&self) -> &backend::render_pass::RenderPass {
-        &self.render_pass
-    }
-
     fn framebuffer(&self) -> &framebuffer::Framebuffer {
-        &self.swapchain_framebuffers[self.swapchain_image_idx as usize]
+        &self
+            .presentation_render_target
+            .as_ref()
+            .expect("Framebuffer has to have been created here")
+            .swapchain_framebuffers[self.swapchain_image_idx as usize]
     }
 
     pub(crate) fn resources_mut(&mut self) -> &'_ mut resource::Resources {
@@ -825,11 +874,96 @@ impl_resource_manager!(
     textures
 );
 
-impl_resource_manager!(
-    pipeline::GraphicsPipelineDescriptor,
-    pipeline::GraphicsPipeline,
-    Handle<pipeline::GraphicsPipeline>,
-    pipeline::PipelineError,
-    CreatePipeline,
-    graphics_pipelines
-);
+use pipeline::{GraphicsPipeline, GraphicsPipelineDescriptor, PipelineError};
+
+impl Renderer {
+    pub fn get_pipeline(&self, handle: &Handle<GraphicsPipeline>) -> Option<&GraphicsPipeline> {
+        self.resources.graphics_pipelines.get(handle)
+    }
+
+    pub fn create_gfx_pipeline(
+        &mut self,
+        descriptor: GraphicsPipelineDescriptor,
+        render_pass: &Handle<RenderPass>,
+    ) -> Result<Handle<GraphicsPipeline>, PipelineError> {
+        let device = &self.device;
+        let render_pass = self
+            .resources
+            .render_passes
+            .get(render_pass)
+            .expect("No such pass");
+        let handle = self
+            .resources
+            .graphics_pipelines
+            .get_or_add(descriptor, |d| d.create(device, &render_pass.0))?;
+
+        Ok(handle)
+    }
+
+    pub fn generate_mipmaps(
+        &mut self,
+        handles: &[Handle<texture::Texture>],
+    ) -> Result<(), RenderError> {
+        if handles.is_empty() {
+            return Ok(());
+        }
+        let mut cmd_buf = self.util_command_pool.begin_single_submit()?;
+
+        // TODO(allocation): The old images need to be kept alive until we have submitted and waited for the cmd buffer
+        // Try to use a free queue here instead. Use ManuallyDrop?
+        let mut old_textures = Vec::new();
+        for handle in handles {
+            let texture = self
+                .resources
+                .textures
+                .get_mut(handle)
+                .ok_or(RenderError::InvalidHandle(handle.id()))?;
+            let extent = texture.extent();
+            let format = texture.format();
+            let mip_levels = texture::mip_levels_for(extent);
+            let usage = vk::ImageUsageFlags::TRANSFER_SRC
+                | vk::ImageUsageFlags::TRANSFER_DST
+                | vk::ImageUsageFlags::SAMPLED;
+            let dst_image = mem::DeviceImage::empty_2d(
+                &self.device.allocator(),
+                extent,
+                format,
+                usage,
+                vk_mem::MemoryUsage::GpuOnly,
+                mip_levels,
+                vk::SampleCountFlags::TYPE_1,
+            )
+            .expect("Failed to create dst image");
+            mem::transition_image_layout(
+                &mut cmd_buf,
+                texture.vk_image(),
+                1,
+                vk::ImageLayout::SHADER_READ_ONLY_OPTIMAL,
+                vk::ImageLayout::TRANSFER_SRC_OPTIMAL,
+            );
+            mem::transition_image_layout(
+                &mut cmd_buf,
+                dst_image.vk_image(),
+                mip_levels,
+                vk::ImageLayout::UNDEFINED,
+                vk::ImageLayout::TRANSFER_DST_OPTIMAL,
+            );
+            cmd_buf.copy_image(
+                texture.vk_image(),
+                vk::ImageLayout::TRANSFER_SRC_OPTIMAL,
+                dst_image.vk_image(),
+                vk::ImageLayout::TRANSFER_DST_OPTIMAL,
+                &extent,
+            );
+            mem::generate_mipmaps(&mut cmd_buf, dst_image.vk_image(), &extent, mip_levels);
+            let new =
+                texture::Texture::from_device_image(&self.device, dst_image, format, mip_levels)
+                    .expect("Failed to create mipmapped texture");
+            old_textures.push(std::mem::replace(texture, new));
+        }
+
+        let done = self.submit_command_buffer(cmd_buf);
+        done.blocking_wait().expect("Failed to wait for mipmapping");
+        Ok(())
+    }
+}

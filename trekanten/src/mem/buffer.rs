@@ -520,7 +520,10 @@ pub trait Uniform {}
 
 pub type OwningUniformBufferDescriptor = OwningBufferDescriptor<UniformBufferType>;
 impl OwningUniformBufferDescriptor {
-    pub fn from_vec<T: Copy + Uniform + 'static>(data: Vec<T>, mutability: BufferMutability) -> Self {
+    pub fn from_vec<T: Copy + Uniform + 'static>(
+        data: Vec<T>,
+        mutability: BufferMutability,
+    ) -> Self {
         let n_elems = data.len() as u32;
         let data = unsafe { Arc::new(ByteBuffer::from_vec(data)) };
         Self {
@@ -640,7 +643,10 @@ impl BufferType for IndexBufferType {
 pub type OwningIndexBufferDescriptor = OwningBufferDescriptor<IndexBufferType>;
 impl OwningIndexBufferDescriptor {
     // TODO: Custom trait here?
-    pub fn from_vec<T: num_traits::PrimInt + 'static>(data: Vec<T>, mutability: BufferMutability) -> Self {
+    pub fn from_vec<T: num_traits::PrimInt + 'static>(
+        data: Vec<T>,
+        mutability: BufferMutability,
+    ) -> Self {
         let index_size = match std::mem::size_of::<T>() {
             4 => IndexSize::Size32,
             2 => IndexSize::Size16,

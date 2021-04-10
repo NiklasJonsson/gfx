@@ -1,11 +1,12 @@
 use crate::device::Device;
 use crate::mem::BufferHandle;
 use crate::mem::{
-    BufferDescriptor, DeviceBuffer, DrainIterator, IndexBuffer, OwningIndexBufferDescriptor,
-    OwningUniformBufferDescriptor, OwningVertexBufferDescriptor, UniformBuffer, VertexBuffer,
+    BufferDescriptor, DeviceBuffer, DrainIterator as BufferDrainIterator, IndexBuffer,
+    OwningIndexBufferDescriptor, OwningUniformBufferDescriptor, OwningVertexBufferDescriptor,
+    UniformBuffer, VertexBuffer,
 };
 use crate::resource::{Async, AsyncResources, Handle, Resources};
-use crate::texture::{Texture, TextureDescriptor};
+use crate::texture::{DrainIterator as TextureDrainIterator, Texture, TextureDescriptor};
 use crate::Renderer;
 use crate::{
     backend::{
@@ -27,6 +28,7 @@ pub enum LoaderError {
     Command(#[from] command::CommandError),
     Queue(#[from] queue::QueueError),
     Sync(#[from] sync::SyncError),
+    InvalidDescriptor(String),
     Mutex,
 }
 
@@ -231,17 +233,33 @@ impl AsyncResources {
             .drain_available()
             .map(IntermediateIteratorItem::Index);
 
-        vbufs.chain(ubufs).chain(ibufs).map(move |item| match item {
-            IntermediateIteratorItem::Vertex(buf) => {
-                map_buffer!(resources, buf, VertexBuffer, vertex_buffers)
-            }
-            IntermediateIteratorItem::Index(buf) => {
-                map_buffer!(resources, buf, IndexBuffer, index_buffers)
-            }
-            IntermediateIteratorItem::Uniform(buf) => {
-                map_buffer!(resources, buf, UniformBuffer, uniform_buffers)
-            }
-        })
+        let textures = self
+            .textures
+            .drain_available()
+            .map(IntermediateIteratorItem::Texture);
+
+        vbufs
+            .chain(ubufs)
+            .chain(ibufs)
+            .chain(textures)
+            .map(move |item| match item {
+                IntermediateIteratorItem::Vertex(buf) => {
+                    map_buffer!(resources, buf, VertexBuffer, vertex_buffers)
+                }
+                IntermediateIteratorItem::Index(buf) => {
+                    map_buffer!(resources, buf, IndexBuffer, index_buffers)
+                }
+                IntermediateIteratorItem::Uniform(buf) => {
+                    map_buffer!(resources, buf, UniformBuffer, uniform_buffers)
+                }
+                IntermediateIteratorItem::Texture((handle, tex)) => {
+                    let new_handle = resources.textures.add(tex.expect("Should be available"));
+                    HandleMapping::Texture {
+                        old: handle,
+                        new: new_handle,
+                    }
+                }
+            })
     }
 }
 
@@ -251,9 +269,10 @@ pub struct TransferGuard<'mutex, 'renderer> {
 }
 
 enum IntermediateIteratorItem {
-    Vertex(<DrainIterator<'static, VertexBuffer> as Iterator>::Item),
-    Index(<DrainIterator<'static, IndexBuffer> as Iterator>::Item),
-    Uniform(<DrainIterator<'static, UniformBuffer> as Iterator>::Item),
+    Vertex(<BufferDrainIterator<'static, VertexBuffer> as Iterator>::Item),
+    Index(<BufferDrainIterator<'static, IndexBuffer> as Iterator>::Item),
+    Uniform(<BufferDrainIterator<'static, UniformBuffer> as Iterator>::Item),
+    Texture(<TextureDrainIterator<'static> as Iterator>::Item),
 }
 
 impl<'m, 'r> TransferGuard<'m, 'r> {
@@ -368,10 +387,30 @@ pub trait ResourceLoader<D, H> {
     fn load(&self, descriptor: D) -> Result<H, LoaderError>;
 }
 
+fn always_ok<T>(_: &T) -> Result<(), LoaderError> {
+    Result::Ok(())
+}
+
+fn validate_texture_descriptor(d: &TextureDescriptor) -> Result<(), LoaderError> {
+    if d.mipmaps() == crate::texture::MipMaps::Generate {
+        return Err(LoaderError::InvalidDescriptor(String::from(
+            "Can't generate mipmaps on loader queue",
+        )));
+    }
+
+    Ok(())
+}
+
 macro_rules! impl_loader {
     ($desc:ty, $handle:ty, $storage:ident, $cmd_enum:ident) => {
+        impl_loader!($desc, $handle, $storage, $cmd_enum, always_ok);
+    };
+
+    ($desc:ty, $handle:ty, $storage:ident, $cmd_enum:ident, $validate_fn:ident) => {
         impl ResourceLoader<$desc, $handle> for Loader {
             fn load(&self, descriptor: $desc) -> Result<$handle, LoaderError> {
+                $validate_fn(&descriptor)?;
+
                 let mut guard = self.locked.lock().map_err(|_| LoaderError::Mutex)?;
                 if let Some(handle) = guard.resources.$storage.cached(&descriptor) {
                     return Ok(handle);
@@ -425,5 +464,6 @@ impl_loader!(
     TextureDescriptor,
     Handle<Async<Texture>>,
     textures,
-    CreateTexture
+    CreateTexture,
+    validate_texture_descriptor
 );

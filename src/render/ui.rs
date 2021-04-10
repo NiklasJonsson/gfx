@@ -319,11 +319,14 @@ impl UIContext {
             .blend_state(BlendState::Enabled)
             .depth_testing(DepthTest::Disabled)
             .build()
-            .expect("Failed to builder graphics pipeline descriptor");
+            .expect("Failed to build graphics pipeline descriptor");
 
-        let pipeline = renderer
-            .create_resource_blocking(pipeline_descriptor)
-            .expect("Failed to create graphics pipeline");
+        let pipeline = {
+            let render_pass = &world.read_resource::<super::FrameData>().main_render_pass;
+            renderer
+                .create_gfx_pipeline(pipeline_descriptor, &render_pass)
+                .expect("Failed to create graphics pipeline")
+        };
 
         let desc_set = DescriptorSet::builder(renderer)
             .add_texture(&font_texture, 0, ShaderStage::FRAGMENT)

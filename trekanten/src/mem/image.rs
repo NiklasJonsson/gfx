@@ -2,18 +2,17 @@ use ash::vk;
 
 use vk_mem::{Allocation, AllocationCreateInfo, AllocationInfo, MemoryUsage};
 
-use crate::command::CommandBuffer;
+use crate::command::{CommandBuffer, CommandBufferType};
 use crate::device::AllocatorHandle;
 use crate::util;
 
 use crate::mem::DeviceBuffer;
 use crate::mem::MemoryError;
 
-fn transition_image_layout(
+pub fn transition_image_layout(
     cmd_buf: &mut CommandBuffer,
     vk_image: &vk::Image,
     mip_levels: u32,
-    _vk_format: vk::Format,
     old_layout: vk::ImageLayout,
     new_layout: vk::ImageLayout,
 ) {
@@ -31,12 +30,29 @@ fn transition_image_layout(
             vk::AccessFlags::TRANSFER_WRITE,
             vk::PipelineStageFlags::TRANSFER,
         ),
-        (vk::ImageLayout::TRANSFER_DST_OPTIMAL, vk::ImageLayout::SHADER_READ_ONLY_OPTIMAL) => (
+        (vk::ImageLayout::SHADER_READ_ONLY_OPTIMAL, vk::ImageLayout::TRANSFER_SRC_OPTIMAL) => (
+            vk::AccessFlags::empty(),
+            vk::PipelineStageFlags::TOP_OF_PIPE,
             vk::AccessFlags::TRANSFER_WRITE,
             vk::PipelineStageFlags::TRANSFER,
-            vk::AccessFlags::SHADER_READ,
-            vk::PipelineStageFlags::FRAGMENT_SHADER,
         ),
+        (vk::ImageLayout::TRANSFER_DST_OPTIMAL, vk::ImageLayout::SHADER_READ_ONLY_OPTIMAL) => {
+            if cmd_buf.ty() == CommandBufferType::Graphics {
+                (
+                    vk::AccessFlags::TRANSFER_WRITE,
+                    vk::PipelineStageFlags::TRANSFER,
+                    vk::AccessFlags::SHADER_READ,
+                    vk::PipelineStageFlags::FRAGMENT_SHADER,
+                )
+            } else {
+                (
+                    vk::AccessFlags::TRANSFER_WRITE,
+                    vk::PipelineStageFlags::TRANSFER,
+                    vk::AccessFlags::TRANSFER_READ,
+                    vk::PipelineStageFlags::TRANSFER,
+                )
+            }
+        }
         _ => unimplemented!("Unimplemented layout transition"),
     };
 
@@ -63,7 +79,7 @@ fn transition_image_layout(
 
 // TODO: This code depends on vk_image being TRANSFER_DST_OPTIMAL. We should track this together
 // with the image.
-fn generate_mipmaps(
+pub fn generate_mipmaps(
     cmd_buf: &mut CommandBuffer,
     vk_image: &vk::Image,
     extent: &util::Extent2D,
@@ -189,8 +205,9 @@ pub struct DeviceImage {
     allocator: AllocatorHandle,
     vk_image: vk::Image,
     allocation: Allocation,
-    _allcation_info: AllocationInfo,
-    _extent: util::Extent2D,
+    _allocation_info: AllocationInfo,
+    extent: util::Extent2D,
+    format: util::Format,
 }
 
 impl DeviceImage {
@@ -229,7 +246,7 @@ impl DeviceImage {
             usage: mem_usage,
             ..Default::default()
         };
-        let (vk_image, allocation, _allcation_info) = allocator
+        let (vk_image, allocation, _allocation_info) = allocator
             .create_image(&info, &allocation_create_info)
             .map_err(MemoryError::ImageCreation)?;
 
@@ -237,8 +254,9 @@ impl DeviceImage {
             allocator: AllocatorHandle::clone(allocator),
             vk_image,
             allocation,
-            _allcation_info,
-            _extent: extent,
+            _allocation_info,
+            format,
+            extent,
         })
     }
 
@@ -255,7 +273,9 @@ impl DeviceImage {
             1, /*stride*/
         )?;
         // Both src & dst as we use one mip level to create the next
-        let usage = vk::ImageUsageFlags::TRANSFER_DST | vk::ImageUsageFlags::SAMPLED;
+        let usage = vk::ImageUsageFlags::TRANSFER_DST
+            | vk::ImageUsageFlags::SAMPLED
+            | vk::ImageUsageFlags::TRANSFER_SRC;
         let dst_image = Self::empty_2d(
             allocator,
             extent,
@@ -270,7 +290,6 @@ impl DeviceImage {
             cmd_buf,
             &dst_image.vk_image,
             1,
-            format.into(),
             vk::ImageLayout::UNDEFINED,
             vk::ImageLayout::TRANSFER_DST_OPTIMAL,
         );
@@ -280,7 +299,6 @@ impl DeviceImage {
             cmd_buf,
             &dst_image.vk_image,
             1,
-            format.into(),
             vk::ImageLayout::TRANSFER_DST_OPTIMAL,
             vk::ImageLayout::SHADER_READ_ONLY_OPTIMAL,
         );
@@ -321,7 +339,6 @@ impl DeviceImage {
             cmd_buf,
             &dst_image.vk_image,
             mip_levels,
-            format.into(),
             vk::ImageLayout::UNDEFINED,
             vk::ImageLayout::TRANSFER_DST_OPTIMAL,
         );
@@ -336,6 +353,14 @@ impl DeviceImage {
 impl DeviceImage {
     pub fn vk_image(&self) -> &vk::Image {
         &self.vk_image
+    }
+
+    pub fn extent(&self) -> util::Extent2D {
+        self.extent
+    }
+
+    pub fn format(&self) -> util::Format {
+        self.format
     }
 }
 

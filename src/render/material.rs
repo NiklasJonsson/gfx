@@ -1,5 +1,5 @@
-use trekanten::mem::UniformBuffer;
 use trekanten::texture::Texture;
+use trekanten::{mem::UniformBuffer, texture::TextureDescriptor};
 use trekanten::{BufferHandle, Handle};
 
 use crate::{math::Vec4, render::Pending};
@@ -13,6 +13,26 @@ use trekanten::resource::Async;
 #[component(inspect)]
 pub struct Unlit {
     pub color: Vec4,
+}
+
+#[derive(Debug, Clone, Inspect)]
+pub struct TextureUse2 {
+    pub desc: TextureDescriptor,
+    pub coord_set: u32,
+}
+
+#[derive(Debug, Component)]
+#[component(inspect)]
+pub struct PhysicallyBased {
+    pub base_color_factor: Vec4,
+    pub metallic_factor: f32,
+    pub roughness_factor: f32,
+    pub normal_scale: f32,
+    pub normal_map: Option<TextureUse2>,
+    pub base_color_texture: Option<TextureUse2>,
+    pub metallic_roughness_texture: Option<TextureUse2>,
+    // TODO: Should this really be here?
+    pub has_vertex_colors: bool,
 }
 
 #[derive(Debug, Clone, Inspect, PartialEq, Eq)]

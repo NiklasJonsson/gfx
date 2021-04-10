@@ -42,7 +42,7 @@ pub fn load_image<P: AsRef<Path>>(p: &P) -> Result<image::RgbaImage, image::Imag
     Ok(image)
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum MipMaps {
     None,
     Generate,
@@ -70,6 +70,10 @@ pub struct TextureDescriptor {
 }
 
 impl TextureDescriptor {
+    pub fn mipmaps(&self) -> MipMaps {
+        self.common.mipmaps
+    }
+
     pub fn file(p: PathBuf, format: util::Format, mipmaps: MipMaps) -> Self {
         Self {
             ty: TextureDescriptorTy::File(p),
@@ -166,6 +170,10 @@ impl std::ops::Drop for Sampler {
     }
 }
 
+pub fn mip_levels_for(e: util::Extent2D) -> u32 {
+    (e.max_dim() as f32).log2().floor() as u32 + 1
+}
+
 pub struct Texture {
     sampler: Sampler,
     image_view: ImageView,
@@ -173,6 +181,24 @@ pub struct Texture {
 }
 
 impl Texture {
+    pub(crate) fn from_device_image<D: HasVkDevice>(
+        device: &D,
+        image: DeviceImage,
+        format: util::Format,
+        mip_levels: u32,
+    ) -> Result<Self, TextureError> {
+        let aspect = vk::ImageAspectFlags::COLOR;
+
+        let image_view = ImageView::new(device, image.vk_image(), format, aspect, mip_levels)?;
+
+        let sampler = Sampler::new(device)?;
+
+        Ok(Self {
+            image,
+            image_view,
+            sampler,
+        })
+    }
     fn from_raw<'a, D: HasVkDevice>(
         device: &D,
         allocator: &AllocatorHandle,
@@ -182,7 +208,7 @@ impl Texture {
         data: &'a [u8],
     ) -> Result<(Self, DeviceBuffer), TextureError> {
         let ((image, staging), mip_levels) = if let MipMaps::Generate = common.mipmaps {
-            let mip_levels = (extent.max_dim() as f32).log2().floor() as u32 + 1;
+            let mip_levels = mip_levels_for(extent);
             (
                 DeviceImage::device_local_mipmapped(
                     &allocator,
@@ -201,21 +227,8 @@ impl Texture {
             )
         };
 
-        let aspect = vk::ImageAspectFlags::COLOR;
-
-        let image_view =
-            ImageView::new(device, image.vk_image(), common.format, aspect, mip_levels)?;
-
-        let sampler = Sampler::new(device)?;
-
-        Ok((
-            Self {
-                image,
-                image_view,
-                sampler,
-            },
-            staging,
-        ))
+        let ret = Self::from_device_image(device, image, common.format, mip_levels)?;
+        Ok((ret, staging))
     }
 
     fn from_file<D: HasVkDevice>(
@@ -252,6 +265,14 @@ impl Texture {
     pub fn vk_sampler(&self) -> &vk::Sampler {
         &self.sampler.vk_sampler()
     }
+
+    pub fn extent(&self) -> util::Extent2D {
+        self.image.extent()
+    }
+
+    pub fn format(&self) -> util::Format {
+        self.image.format()
+    }
 }
 
 impl std::fmt::Debug for Texture {
@@ -261,14 +282,12 @@ impl std::fmt::Debug for Texture {
 }
 
 pub struct TextureStorage<T> {
-    cache: Cache<PathBuf, T>,
     storage: Storage<T>,
 }
 
 impl<T> TextureStorage<T> {
     pub fn new() -> Self {
         Self {
-            cache: Cache::default(),
             storage: Storage::<T>::new(),
         }
     }
@@ -281,29 +300,27 @@ impl<T> TextureStorage<T> {
         self.storage.get_mut(handle)
     }
 
-    pub fn add(&mut self, descriptor: &TextureDescriptor, t: T) -> Handle<T> {
-        let h = self.storage.add(t);
-
-        if let TextureDescriptorTy::File(path) = &descriptor.ty {
-            self.cache.add(path.clone(), h);
-        }
-
-        h
+    pub fn add(&mut self, t: T) -> Handle<T> {
+        self.storage.add(t)
     }
 
     pub fn cached(&self, descriptor: &TextureDescriptor) -> Option<Handle<T>> {
-        if let TextureDescriptorTy::File(path) = &descriptor.ty {
-            self.cache.get(&path).cloned()
-        } else {
-            None
-        }
+        None
     }
 }
-impl<T> TextureStorage<Async<T>> {
-    pub fn allocate(&mut self, _desc: &TextureDescriptor) -> Handle<Async<T>> {
+impl TextureStorage<Async<Texture>> {
+    pub fn allocate(&mut self, _desc: &TextureDescriptor) -> Handle<Async<Texture>> {
         self.storage.add(Async::Pending)
     }
+
+    pub fn drain_available(&mut self) -> DrainIterator<'_> {
+        self.storage
+            .drain_filter(|x: &mut Async<Texture>| std::matches!(x, Async::Available(_)))
+    }
 }
+
+pub type DrainIterator<'a> =
+    resurs::DrainFilter<'a, fn(&mut Async<Texture>) -> bool, Async<Texture>>;
 
 impl<T> Default for TextureStorage<T> {
     fn default() -> Self {

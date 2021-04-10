@@ -8,8 +8,8 @@ pub use async_storage::Async;
 pub use buffered_storage::BufferedStorage;
 pub use cache::Cache;
 pub use cached_storage::CachedStorage;
-pub use storage::Storage;
 pub use storage::ID;
+pub use storage::{DrainFilter, Storage};
 
 use std::marker::PhantomData;
 

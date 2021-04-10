@@ -50,6 +50,7 @@ pub struct FrameData {
     pub frame_set: Handle<DescriptorSet>,
     pub transforms_buffer: BufferHandle<UniformBuffer>,
     pub dummy_pipeline: Handle<GraphicsPipeline>,
+    pub main_render_pass: Handle<trekanten::RenderPass>,
 }
 
 fn get_view_data(world: &World) -> (Mat4, Vec3) {
@@ -185,6 +186,7 @@ pub fn get_pipeline_for(
         (RenderMode::Wireframe, _) => trekanten::pipeline::PolygonMode::Line,
     };
 
+    let frame_data = world.read_resource::<FrameData>();
     let shader_compiler = world.read_resource::<pipeline::ShaderCompiler>();
     let pipe = match mat {
         material::GpuMaterial::PBR {
@@ -215,7 +217,7 @@ pub fn get_pipeline_for(
                 .polygon_mode(polygon_mode)
                 .build()?;
 
-            renderer.create_resource_blocking(desc)?
+            renderer.create_gfx_pipeline(desc, &frame_data.main_render_pass)?
         }
         material::GpuMaterial::Unlit { .. } => {
             use std::path::PathBuf;
@@ -237,7 +239,7 @@ pub fn get_pipeline_for(
                 .polygon_mode(polygon_mode)
                 .build()?;
 
-            renderer.create_resource_blocking(desc)?
+            renderer.create_gfx_pipeline(desc, &frame_data.main_render_pass)?
         }
     };
 
@@ -372,6 +374,7 @@ pub fn draw_frame(world: &mut World, ui: &mut ui::UIContext, renderer: &mut Rend
         frame_set,
         transforms_buffer,
         dummy_pipeline,
+        main_render_pass,
     } = &*world.read_resource::<FrameData>();
 
     // View data
@@ -397,7 +400,7 @@ pub fn draw_frame(world: &mut World, ui: &mut ui::UIContext, renderer: &mut Rend
     // main render pass
     {
         let mut builder = frame
-            .begin_render_pass()
+            .begin_presentation_pass(main_render_pass)
             .expect("Failed to begin render pass");
 
         builder
@@ -497,11 +500,17 @@ pub fn setup_resources(world: &mut World, mut renderer: &mut Renderer) {
             .build()
             .expect("Failed to build graphics pipeline descriptor");
 
-        let dummy_pipeline = renderer.create_resource_blocking(desc).expect("FAIL");
+        let main_render_pass = renderer
+            .presentation_render_pass(8)
+            .expect("main render pass creation failed");
+        let dummy_pipeline = renderer
+            .create_gfx_pipeline(desc, &main_render_pass)
+            .expect("FAIL");
         FrameData {
             light_buffer: light_data,
             frame_set,
             transforms_buffer: view_data,
+            main_render_pass,
             dummy_pipeline,
         }
     };
@@ -532,149 +541,130 @@ impl GpuUpload {
         let mut materials = world.write_storage::<GpuMaterial>();
         let mut meshes = world.write_storage::<GpuMesh>();
         let mut transfer_guard = loader.transfer(renderer);
+        let mut generate_mipmaps = Vec::new();
         for mapping in transfer_guard.iter() {
             match mapping {
                 // TODO: drain_filter()
                 HandleMapping::UniformBuffer { old, new } => {
                     for (ent, _) in (&world.entities(), &pending_materials.mask().clone()).join() {
-                        let pending = if let Some(pending) = pending_materials.get_mut(ent) {
-                            pending
-                        } else {
-                            log::warn!(
-                                "Uniform is done for entity {:?} but it is no longer pending",
-                                ent
-                            );
-                            continue;
-                        };
-
-                        match pending {
-                            PendingMaterial::Unlit { color_uniform } => {
-                                assert!(
-                                    std::matches!(color_uniform, Pending::Pending(prev) if *prev == old)
-                                );
-                                *color_uniform = Pending::Available(new);
+                        if let Some(pending) = pending_materials.get_mut(ent) {
+                            match pending {
+                                PendingMaterial::Unlit { color_uniform } => match color_uniform {
+                                    Pending::Pending(prev) if prev.handle() == old.handle() => {
+                                        *color_uniform = Pending::Available(new);
+                                    }
+                                    _ => (),
+                                },
+                                PendingMaterial::PBR {
+                                    material_uniforms, ..
+                                } => match material_uniforms {
+                                    Pending::Pending(prev) if prev.handle() == old.handle() => {
+                                        *material_uniforms = Pending::Available(new);
+                                    }
+                                    _ => (),
+                                },
                             }
-                            PendingMaterial::PBR {
-                                material_uniforms, ..
-                            } => {
-                                assert!(
-                                    std::matches!(material_uniforms, Pending::Pending(prev) if *prev == old)
-                                );
-                                *material_uniforms = Pending::Available(new);
+                            if !pending.is_done() {
+                                continue;
                             }
-                        };
 
-                        if !pending.is_done() {
-                            continue;
+                            let material = pending_materials
+                                .remove(ent)
+                                .expect("This is alive")
+                                .finish();
+                            materials.insert(ent, material).expect("This is alive");
                         }
-
-                        let material = pending_materials
-                            .remove(ent)
-                            .expect("This is alive")
-                            .finish();
-                        materials.insert(ent, material).expect("This is alive");
                     }
                 }
                 HandleMapping::VertexBuffer { old, new } => {
                     for (ent, _) in (&world.entities(), &pending_meshes.mask().clone()).join() {
-                        let pending = if let Some(pending) = pending_meshes.get_mut(ent) {
-                            pending
-                        } else {
-                            log::warn!(
-                                "Vertex buffer is done for entity {:?} but it is no longer pending",
-                                ent
-                            );
-                            continue;
-                        };
-                        assert!(
-                            std::matches!(pending.vertex_buffer, Pending::Pending(prev) if prev == old)
-                        );
-                        pending.vertex_buffer = Pending::Available(new);
+                        if let Some(pending) = pending_meshes.get_mut(ent) {
+                            match pending.vertex_buffer {
+                                Pending::Pending(cur) if cur == old => {
+                                    pending.vertex_buffer = Pending::Available(new);
+                                }
+                                _ => (),
+                            }
 
-                        if let Some(mesh) = pending.try_finish() {
-                            meshes.insert(ent, mesh).expect("I'm alive!");
-                            pending_meshes.remove(ent).expect("I'm alive!");
+                            // TODO: is_done + remove().finish() here
+                            if let Some(mesh) = pending.try_finish() {
+                                meshes.insert(ent, mesh).expect("I'm alive!");
+                                pending_meshes.remove(ent).expect("I'm alive!");
+                            }
                         }
                     }
                 }
                 HandleMapping::IndexBuffer { old, new } => {
                     for (ent, _) in (&world.entities(), &pending_meshes.mask().clone()).join() {
-                        let pending = if let Some(pending) = pending_meshes.get_mut(ent) {
-                            pending
-                        } else {
-                            log::warn!(
-                                "Index buffer is done for entity {:?} but it is no longer pending",
-                                ent
-                            );
-                            continue;
-                        };
-                        assert!(
-                            std::matches!(pending.index_buffer, Pending::Pending(prev) if prev == old)
-                        );
-                        pending.index_buffer = Pending::Available(new);
+                        if let Some(pending) = pending_meshes.get_mut(ent) {
+                            match pending.index_buffer {
+                                Pending::Pending(cur) if cur == old => {
+                                    pending.index_buffer = Pending::Available(new);
+                                }
+                                _ => (),
+                            }
 
-                        if let Some(mesh) = pending.try_finish() {
-                            meshes.insert(ent, mesh).expect("I'm alive!");
-                            pending_meshes.remove(ent).expect("I'm alive!");
+                            if let Some(mesh) = pending.try_finish() {
+                                meshes.insert(ent, mesh).expect("I'm alive!");
+                                pending_meshes.remove(ent).expect("I'm alive!");
+                            }
                         }
                     }
                 }
                 HandleMapping::Texture { old, new } => {
                     for (ent, _) in (&world.entities(), &pending_materials.mask().clone()).join() {
-                        let pending = if let Some(pending) = pending_materials.get_mut(ent) {
-                            pending
-                        } else {
-                            log::warn!(
-                                "Uniform is done for entity {:?} but it is no longer pending",
-                                ent
-                            );
-                            continue;
-                        };
-
-                        match pending {
-                            PendingMaterial::PBR {
-                                normal_map,
-                                base_color_texture,
-                                metallic_roughness_texture,
-                                ..
-                            } => {
-                                let mut found = false;
-                                for tex in
-                                    [normal_map, base_color_texture, metallic_roughness_texture]
-                                        .iter_mut()
-                                {
-                                    if let Some(Pending::Pending(tex_inner)) = tex {
-                                        if tex_inner.handle == old {
-                                            found = true;
-                                            **tex =
-                                                Some(Pending::Available(material::TextureUse {
-                                                    handle: new,
-                                                    coord_set: tex_inner.coord_set,
-                                                }));
-                                            break;
+                        if let Some(pending) = pending_materials.get_mut(ent) {
+                            match pending {
+                                PendingMaterial::PBR {
+                                    normal_map,
+                                    base_color_texture,
+                                    metallic_roughness_texture,
+                                    ..
+                                } => {
+                                    for tex in &mut [
+                                        normal_map,
+                                        base_color_texture,
+                                        metallic_roughness_texture,
+                                    ] {
+                                        match tex {
+                                            Some(Pending::Pending(tex_inner))
+                                                if tex_inner.handle == old =>
+                                            {
+                                                generate_mipmaps.push(new);
+                                                **tex = Some(Pending::Available(
+                                                    material::TextureUse {
+                                                        handle: new,
+                                                        coord_set: tex_inner.coord_set,
+                                                    },
+                                                ));
+                                            }
+                                            _ => (),
                                         }
                                     }
                                 }
-                                assert!(found);
-                            }
-                            PendingMaterial::Unlit { .. } => {
-                                unreachable!("Can't have pending textures for this variant")
-                            }
-                        };
+                                PendingMaterial::Unlit { .. } => {
+                                    unreachable!("Can't have pending textures for this variant")
+                                }
+                            };
 
-                        if !pending.is_done() {
-                            continue;
+                            if !pending.is_done() {
+                                continue;
+                            }
+
+                            let material = pending_materials
+                                .remove(ent)
+                                .expect("This is alive")
+                                .finish();
+                            materials.insert(ent, material).expect("This is alive");
                         }
-
-                        let material = pending_materials
-                            .remove(ent)
-                            .expect("This is alive")
-                            .finish();
-                        materials.insert(ent, material).expect("This is alive");
                     }
                 }
             }
         }
+
+        renderer
+            .generate_mipmaps(&generate_mipmaps)
+            .expect("Failed to generate mipmaps");
     }
 }
 
@@ -682,10 +672,12 @@ impl<'a> System<'a> for GpuUpload {
     type SystemData = (
         WriteExpect<'a, trekanten::Loader>,
         WriteStorage<'a, material::Unlit>,
+        WriteStorage<'a, material::PhysicallyBased>,
         WriteStorage<'a, PendingMaterial>,
+        WriteStorage<'a, GpuMaterial>,
         WriteStorage<'a, mesh::CpuMesh>,
         WriteStorage<'a, PendingMesh>,
-        WriteStorage<'a, UploadAsync>,
+        WriteStorage<'a, mesh::GpuMesh>,
         Entities<'a>,
     );
 
@@ -695,49 +687,121 @@ impl<'a> System<'a> for GpuUpload {
         let (
             loader,
             unlit_materials,
+            physically_based_materials,
             mut pending_mats,
+            gpu_materials,
             cpu_meshes,
             mut pending_meshes,
-            mut command_markers,
+            gpu_meshes,
             entities,
         ) = data;
 
-        let mut ubuf = Vec::new();
-        for (ent, unlit) in (&entities, &unlit_materials).join() {
-            if let StorageEntry::Vacant(_) = pending_mats.entry(ent).unwrap() {
+        {
+            // Unlit
+            let mut ubuf = Vec::new();
+            for (_, unlit, _, _) in
+                (&entities, &unlit_materials, !&gpu_materials, !&pending_mats).join()
+            {
                 ubuf.push(uniform::UnlitUniformData {
                     color: unlit.color.into_array(),
                 });
             }
-        }
 
-        if !ubuf.is_empty() {
-            let async_handle = loader
-                .load(OwningUniformBufferDescriptor::from_vec(
-                    ubuf,
-                    BufferMutability::Immutable,
-                ))
-                .expect("Failed to load uniform buffer");
-            for (i, (ent, _unlit)) in (&entities, &unlit_materials).join().enumerate() {
-                if let StorageEntry::Vacant(entry) = pending_mats.entry(ent).unwrap() {
-                    entry.insert(PendingMaterial::Unlit {
-                        color_uniform: Pending::Pending(BufferHandle::sub_buffer(
-                            async_handle,
-                            i as u32,
-                            1,
-                        )),
-                    });
+            if !ubuf.is_empty() {
+                let async_handle = loader
+                    .load(OwningUniformBufferDescriptor::from_vec(
+                        ubuf,
+                        BufferMutability::Immutable,
+                    ))
+                    .expect("Failed to load uniform buffer");
+                for (i, (ent, _unlit, _)) in (&entities, &unlit_materials, !&gpu_materials)
+                    .join()
+                    .enumerate()
+                {
+                    if let StorageEntry::Vacant(entry) = pending_mats.entry(ent).unwrap() {
+                        entry.insert(PendingMaterial::Unlit {
+                            color_uniform: Pending::Pending(BufferHandle::sub_buffer(
+                                async_handle,
+                                i as u32,
+                                1,
+                            )),
+                        });
+                    }
                 }
             }
         }
 
-        for (ent, mesh, _) in (&entities, &cpu_meshes, &command_markers).join() {
-            pending_meshes
-                .insert(ent, PendingMesh::load(&loader, &mesh))
-                .expect("I'm alive");
+        {
+            // Physically based
+            let mut ubuf_pbr = Vec::new();
+            for (_, pb_mat, _, _) in (
+                &entities,
+                &physically_based_materials,
+                !&gpu_materials,
+                !&pending_mats,
+            )
+                .join()
+            {
+                ubuf_pbr.push(uniform::PBRMaterialData {
+                    base_color_factor: pb_mat.base_color_factor.into_array(),
+                    metallic_factor: pb_mat.metallic_factor,
+                    roughness_factor: pb_mat.roughness_factor,
+                    normal_scale: pb_mat.normal_scale,
+                    _padding: 0.0,
+                });
+            }
+
+            let map_tex = |inp: &Option<material::TextureUse2>| -> Option<
+                Pending<
+                    material::TextureUse<resurs::Async<trekanten::texture::Texture>>,
+                    material::TextureUse<trekanten::texture::Texture>,
+                >,
+            > {
+                inp.as_ref().map(|tex| {
+                    let handle = loader
+                        .load(tex.desc.clone())
+                        .expect("Failed to load texture");
+                    Pending::Pending(material::TextureUse {
+                        coord_set: tex.coord_set,
+                        handle,
+                    })
+                })
+            };
+
+            if !ubuf_pbr.is_empty() {
+                let async_handle = loader
+                    .load(OwningUniformBufferDescriptor::from_vec(
+                        ubuf_pbr,
+                        BufferMutability::Immutable,
+                    ))
+                    .expect("Failed to load uniform buffer");
+                for (i, (ent, pb_mat, _)) in
+                    (&entities, &physically_based_materials, !&gpu_materials)
+                        .join()
+                        .enumerate()
+                {
+                    if let StorageEntry::Vacant(entry) = pending_mats.entry(ent).unwrap() {
+                        entry.insert(PendingMaterial::PBR {
+                            material_uniforms: Pending::Pending(BufferHandle::sub_buffer(
+                                async_handle,
+                                i as u32,
+                                1,
+                            )),
+                            normal_map: map_tex(&pb_mat.normal_map),
+                            base_color_texture: map_tex(&pb_mat.base_color_texture),
+                            metallic_roughness_texture: map_tex(&pb_mat.metallic_roughness_texture),
+                            has_vertex_colors: pb_mat.has_vertex_colors,
+                        });
+                    }
+                }
+            }
         }
 
-        command_markers.clear();
+        for (ent, mesh, _) in (&entities, &cpu_meshes, !&gpu_meshes).join() {
+            if let StorageEntry::Vacant(entry) = pending_meshes.entry(ent).unwrap() {
+                entry.insert(PendingMesh::load(&loader, &mesh));
+            }
+        }
     }
 }
 

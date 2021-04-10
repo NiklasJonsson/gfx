@@ -15,6 +15,12 @@ use crate::pipeline::Pipeline;
 use crate::pipeline::ShaderStage;
 use crate::util;
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum CommandBufferType {
+    Graphics,
+    Compute,
+}
+
 #[derive(Debug, Error)]
 pub enum CommandError {
     #[error("Command pool creation failed: {0}")]
@@ -165,6 +171,14 @@ impl CommandBuffer {
         &self.vk_cmd_buffer
     }
 
+    pub fn ty(&self) -> CommandBufferType {
+        if self.queue_flags == vk::QueueFlags::GRAPHICS {
+            CommandBufferType::Graphics
+        } else {
+            CommandBufferType::Compute
+        }
+    }
+
     pub fn is_started(&self) -> bool {
         self.is_started
     }
@@ -183,6 +197,7 @@ impl CommandBuffer {
         render_pass: &RenderPass,
         framebuffer: &Framebuffer,
         extent: util::Extent2D,
+        clear_values: &[vk::ClearValue],
     ) -> &mut Self {
         let info = vk::RenderPassBeginInfo::builder()
             .render_pass(*render_pass.vk_render_pass())
@@ -191,7 +206,7 @@ impl CommandBuffer {
                 offset: vk::Offset2D { x: 0, y: 0 },
                 extent: extent.into(),
             })
-            .clear_values(render_pass.vk_clear_values());
+            .clear_values(clear_values);
 
         unsafe {
             self.vk_device.cmd_begin_render_pass(
@@ -386,6 +401,45 @@ impl CommandBuffer {
         self
     }
 
+    pub fn copy_image(
+        &mut self,
+        src: &vk::Image,
+        src_layout: vk::ImageLayout,
+        dst: &vk::Image,
+        dst_layout: vk::ImageLayout,
+        extent: &util::Extent2D,
+    ) -> &mut Self {
+        let extent = util::Extent3D::from_2d(*extent, 1);
+        let regions = [vk::ImageCopy {
+            src_subresource: vk::ImageSubresourceLayers {
+                aspect_mask: vk::ImageAspectFlags::COLOR,
+                mip_level: 0,
+                base_array_layer: 0,
+                layer_count: 1,
+            },
+            src_offset: vk::Offset3D { x: 0, y: 0, z: 0 },
+            dst_subresource: vk::ImageSubresourceLayers {
+                aspect_mask: vk::ImageAspectFlags::COLOR,
+                mip_level: 0,
+                base_array_layer: 0,
+                layer_count: 1,
+            },
+            dst_offset: vk::Offset3D { x: 0, y: 0, z: 0 },
+            extent: vk::Extent3D::from(extent),
+        }];
+        unsafe {
+            self.vk_device.cmd_copy_image(
+                self.vk_cmd_buffer,
+                *src,
+                src_layout,
+                *dst,
+                dst_layout,
+                &regions,
+            )
+        }
+        self
+    }
+
     pub fn pipeline_barrier(
         &mut self,
         barrier: &vk::ImageMemoryBarrier,
@@ -413,6 +467,7 @@ impl CommandBuffer {
         dst: &vk::Image,
         vk_image_blit: &vk::ImageBlit,
     ) -> &mut Self {
+        assert!(self.queue_flags.contains(vk::QueueFlags::GRAPHICS));
         unsafe {
             self.vk_device.cmd_blit_image(
                 self.vk_cmd_buffer,
