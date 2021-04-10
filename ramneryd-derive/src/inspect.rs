@@ -31,7 +31,7 @@ fn add_trait_bounds(mut generics: Generics) -> Generics {
     generics
 }
 
-fn inspect_enum_body(data: &syn::DataEnum, is_mut: bool) -> TokenStream {
+fn inspect_enum_body(data: &syn::DataEnum, name: &Ident, is_mut: bool) -> TokenStream {
     let fn_name = inspect_fn_name(is_mut);
     let maybe_mut = maybe_mut(is_mut);
 
@@ -85,9 +85,9 @@ fn inspect_enum_body(data: &syn::DataEnum, is_mut: bool) -> TokenStream {
         };
 
         let fields_rhs = quote! {
-            let ty = imgui::im_str!("enum {}::{}", std::any::type_name::<Self>(), stringify!(#id));
+            let ty = imgui::im_str!("enum {}::{}", stringify!(#name), stringify!(#id));
             if imgui::CollapsingHeader::new(&ty)
-                .default_open(true)
+                .default_open(!name.is_empty())
                 .leaf(#leaf)
                 .build(ui) {
                 ui.indent();
@@ -113,8 +113,8 @@ fn inspect_enum(di: &DeriveInput) -> TokenStream {
 
     let [body, body_mut] = match &di.data {
         syn::Data::Enum(data) => [
-            inspect_enum_body(data, false),
-            inspect_enum_body(data, true),
+            inspect_enum_body(data, name, false),
+            inspect_enum_body(data, name, true),
         ],
         _ => panic!("Internal error: should be enum"),
     };

@@ -162,7 +162,12 @@ impl Inspect for std::path::PathBuf {
 
 impl<T> Inspect for resurs::Handle<T> {
     fn inspect<'a>(&self, ui: &Ui<'a>, name: &str) {
-        let s = format!("{}: {}({})", name, std::any::type_name::<Self>(), self.id());
+        let s = format!(
+            "{}: Handle<{}>({})",
+            name,
+            std::any::type_name::<T>(),
+            self.id()
+        );
         ui.text(&s);
     }
 
@@ -181,7 +186,7 @@ impl<T> Inspect for trekanten::BufferHandle<T> {
 
         let ty = std::any::type_name::<T>();
         let s = format!(
-            "{}: &{}{}({})[{}..{}]",
+            "{}: &{}BufferHandle<{}>({})[{}..{}]",
             name,
             mut_str,
             ty,
