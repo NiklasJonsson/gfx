@@ -11,8 +11,9 @@ use crate::image::{ImageView, ImageViewError};
 use crate::mem::DeviceBuffer;
 use crate::mem::DeviceImage;
 use crate::mem::MemoryError;
-use crate::resource::{Cache, Handle, Storage};
+use crate::resource::{Handle, Storage};
 use crate::util;
+use util::Extent2D;
 
 use std::sync::Arc;
 
@@ -49,50 +50,101 @@ pub enum MipMaps {
 }
 
 #[derive(Debug, Clone)]
-struct DescriptorCommon {
-    format: util::Format,
-    mipmaps: MipMaps,
+pub struct DescriptorCommon {}
+
+bitflags::bitflags! {
+    pub struct TextureUsage: u8 {
+        const DEPTH_STENCIL_ATTACHMENT = 0b1;
+        const COLOR_ATTACHMENT = 0b10;
+        const TRANSFER_SRC = 0b100;
+        const TRANSFER_DST = 0b1000;
+    }
+}
+
+macro_rules! impl_flag_mapping {
+    ($result:ident, $input:ident, $flag:ident) => {
+        if !($input & TextureUsage::$flag).is_empty() {
+            $result |= vk::ImageUsageFlags::$flag;
+        }
+    };
+    ($result:ident, $input:ident, $flag:ident, $($rest:ident),*) => {
+        impl_flag_mapping!($result, $input, $flag);
+        impl_flag_mapping!($result, $input, $($rest),*)
+    };
+}
+
+impl From<TextureUsage> for vk::ImageUsageFlags {
+    fn from(o: TextureUsage) -> vk::ImageUsageFlags {
+        let mut ret = vk::ImageUsageFlags::empty();
+        impl_flag_mapping!(
+            ret,
+            o,
+            DEPTH_STENCIL_ATTACHMENT,
+            COLOR_ATTACHMENT,
+            TRANSFER_SRC,
+            TRANSFER_DST
+        );
+
+        ret
+    }
 }
 
 #[derive(Clone, Debug)]
-pub enum TextureDescriptorTy {
-    File(PathBuf),
+pub enum TextureDescriptor {
+    File {
+        path: PathBuf,
+        format: util::Format,
+        mipmaps: MipMaps,
+    },
     Raw {
         data: Arc<util::ByteBuffer>,
-        extent: util::Extent2D,
+        extent: Extent2D,
+        format: util::Format,
+        mipmaps: MipMaps,
     },
-}
-
-#[derive(Clone, Debug)]
-pub struct TextureDescriptor {
-    ty: TextureDescriptorTy,
-    common: DescriptorCommon,
+    Empty {
+        extent: Extent2D,
+        usage: TextureUsage,
+        format: util::Format,
+        sampler: SamplerDescriptor,
+    },
 }
 
 impl TextureDescriptor {
     pub fn mipmaps(&self) -> MipMaps {
-        self.common.mipmaps
+        match self {
+            Self::File { mipmaps, .. } | Self::Raw { mipmaps, .. } => *mipmaps,
+            Self::Empty { .. } => MipMaps::None,
+        }
     }
 
     pub fn file(p: PathBuf, format: util::Format, mipmaps: MipMaps) -> Self {
-        Self {
-            ty: TextureDescriptorTy::File(p),
-            common: DescriptorCommon { format, mipmaps },
+        Self::File {
+            path: p,
+            format,
+            mipmaps,
         }
     }
 
     pub fn from_vec(
         data: Vec<u8>,
-        extent: util::Extent2D,
+        extent: Extent2D,
         format: util::Format,
         mipmaps: MipMaps,
     ) -> Self {
-        Self {
-            ty: TextureDescriptorTy::Raw {
-                data: Arc::new(unsafe { util::ByteBuffer::from_vec(data) }),
-                extent,
-            },
-            common: DescriptorCommon { format, mipmaps },
+        Self::Raw {
+            data: Arc::new(unsafe { util::ByteBuffer::from_vec(data) }),
+            extent,
+            format,
+            mipmaps,
+        }
+    }
+
+    pub(crate) fn needs_command_buffer(&self) -> bool {
+        if let TextureDescriptor::Empty { .. } = self {
+            false
+        } else {
+            true
         }
     }
 
@@ -102,18 +154,123 @@ impl TextureDescriptor {
         device: &D,
         command_buffer: &mut CommandBuffer,
     ) -> Result<(Texture, DeviceBuffer), TextureError> {
-        match &self.ty {
-            TextureDescriptorTy::File(pathbuf) => {
-                Texture::from_file(device, allocator, command_buffer, &self.common, &pathbuf)
+        match self {
+            TextureDescriptor::File {
+                path,
+                format,
+                mipmaps,
+            } => {
+                let image = load_image(&path)?;
+                let extent = Extent2D {
+                    width: image.width(),
+                    height: image.height(),
+                };
+                let raw_image_data = image.into_raw();
+                Texture::from_raw(
+                    device,
+                    allocator,
+                    command_buffer,
+                    extent,
+                    *format,
+                    *mipmaps,
+                    &raw_image_data,
+                )
             }
-            TextureDescriptorTy::Raw { data, extent } => Texture::from_raw(
+            TextureDescriptor::Raw {
+                data,
+                extent,
+                format,
+                mipmaps,
+            } => Texture::from_raw(
                 device,
                 allocator,
                 command_buffer,
                 *extent,
-                &self.common,
+                *format,
+                *mipmaps,
                 &data,
             ),
+            _ => unreachable!("This should not be created with a command buffer"),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy)]
+pub enum Filter {
+    Linear,
+    Nearest,
+}
+
+impl From<Filter> for vk::Filter {
+    fn from(o: Filter) -> vk::Filter {
+        match o {
+            Filter::Linear => vk::Filter::LINEAR,
+            Filter::Nearest => vk::Filter::NEAREST,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy)]
+pub enum SamplerAddressMode {
+    Repeat,
+    MirroredRepeat,
+    ClampToEdge,
+    ClampToBorder,
+}
+
+impl From<SamplerAddressMode> for vk::SamplerAddressMode {
+    fn from(o: SamplerAddressMode) -> vk::SamplerAddressMode {
+        use vk::SamplerAddressMode as VSAM;
+        use SamplerAddressMode as SAM;
+        match o {
+            SAM::Repeat => VSAM::REPEAT,
+            SAM::MirroredRepeat => VSAM::MIRRORED_REPEAT,
+            SAM::ClampToEdge => VSAM::CLAMP_TO_EDGE,
+            SAM::ClampToBorder => VSAM::CLAMP_TO_BORDER,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy)]
+pub enum BorderColor {
+    FloatTransparentBlack,
+    IntTransparentBlack,
+    FloatOpaqueBlack,
+    IntOpaqueBlack,
+    FloatOpaqueWhite,
+    IntOpaqueWhite,
+}
+
+impl From<BorderColor> for vk::BorderColor {
+    fn from(o: BorderColor) -> vk::BorderColor {
+        use vk::BorderColor as VBC;
+        use BorderColor as BC;
+        match o {
+            BC::FloatOpaqueBlack => VBC::FLOAT_OPAQUE_BLACK,
+            BC::FloatOpaqueWhite => VBC::FLOAT_OPAQUE_WHITE,
+            BC::FloatTransparentBlack => VBC::FLOAT_TRANSPARENT_BLACK,
+            BC::IntOpaqueBlack => VBC::INT_OPAQUE_BLACK,
+            BC::IntOpaqueWhite => VBC::INT_OPAQUE_WHITE,
+            BC::IntTransparentBlack => VBC::INT_TRANSPARENT_BLACK,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy)]
+pub struct SamplerDescriptor {
+    pub filter: Filter,
+    pub address_mode: SamplerAddressMode,
+    pub max_anisotropy: Option<f32>,
+    pub border_color: BorderColor,
+}
+
+impl Default for SamplerDescriptor {
+    fn default() -> Self {
+        Self {
+            filter: Filter::Linear,
+            address_mode: SamplerAddressMode::Repeat,
+            max_anisotropy: Some(16.0),
+            border_color: BorderColor::IntOpaqueBlack,
         }
     }
 }
@@ -123,26 +280,31 @@ pub struct Sampler {
     vk_sampler: vk::Sampler,
 }
 
-// TODO: Support other border color/address mode
 impl Sampler {
-    pub fn new<D: HasVkDevice>(device: &D) -> Result<Self, TextureError> {
-        let info = vk::SamplerCreateInfo::builder()
-            .mag_filter(vk::Filter::LINEAR)
-            .min_filter(vk::Filter::LINEAR)
-            .address_mode_u(vk::SamplerAddressMode::REPEAT)
-            .address_mode_v(vk::SamplerAddressMode::REPEAT)
-            .address_mode_w(vk::SamplerAddressMode::REPEAT)
-            .anisotropy_enable(true)
-            .max_anisotropy(16.0)
-            .border_color(vk::BorderColor::INT_OPAQUE_BLACK)
+    pub fn new<D: HasVkDevice>(device: &D, desc: &SamplerDescriptor) -> Result<Self, TextureError> {
+        let filter = vk::Filter::from(desc.filter);
+        let address_mode = vk::SamplerAddressMode::from(desc.address_mode);
+        let border_color = vk::BorderColor::from(desc.border_color);
+        let mut info = vk::SamplerCreateInfo::builder()
+            .mag_filter(filter)
+            .min_filter(filter)
+            .address_mode_u(address_mode)
+            .address_mode_v(address_mode)
+            .address_mode_w(address_mode)
+            .border_color(border_color)
             .unnormalized_coordinates(false)
             .compare_enable(false)
-            .compare_op(vk::CompareOp::ALWAYS)
             .mipmap_mode(vk::SamplerMipmapMode::LINEAR)
             .mip_lod_bias(0.0)
             .min_lod(0.0)
             // From ARM Mali recommendations. 1000 is large enough for any texture
-            .max_lod(1000.0);
+            .max_lod(1000.0)
+            .build();
+
+        if let Some(anisotropy) = desc.max_anisotropy {
+            info.max_anisotropy = anisotropy;
+            info.anisotropy_enable = vk::TRUE;
+        }
 
         let vk_device = device.vk_device();
         let vk_sampler = unsafe {
@@ -170,7 +332,7 @@ impl std::ops::Drop for Sampler {
     }
 }
 
-pub fn mip_levels_for(e: util::Extent2D) -> u32 {
+pub fn mip_levels_for(e: Extent2D) -> u32 {
     (e.max_dim() as f32).log2().floor() as u32 + 1
 }
 
@@ -181,6 +343,50 @@ pub struct Texture {
 }
 
 impl Texture {
+    pub(crate) fn create_no_cmds<D: HasVkDevice>(
+        device: &D,
+        allocator: &AllocatorHandle,
+        descriptor: &TextureDescriptor,
+    ) -> Result<Self, TextureError> {
+        if let TextureDescriptor::Empty {
+            extent,
+            format,
+            usage,
+            sampler: sampler_descriptor,
+        } = descriptor
+        {
+            let image_usage = vk::ImageUsageFlags::from(*usage) | vk::ImageUsageFlags::SAMPLED;
+            let mem_usage = vk_mem::MemoryUsage::GpuOnly;
+            let mip_levels = 1;
+            let sample_count = vk::SampleCountFlags::TYPE_1;
+            let aspect_mask = if usage.contains(TextureUsage::DEPTH_STENCIL_ATTACHMENT) {
+                vk::ImageAspectFlags::DEPTH
+            } else {
+                vk::ImageAspectFlags::COLOR
+            };
+
+            let image = DeviceImage::empty_2d(
+                allocator,
+                *extent,
+                *format,
+                image_usage,
+                mem_usage,
+                mip_levels,
+                sample_count,
+            )?;
+            let image_view =
+                ImageView::new(device, image.vk_image(), *format, aspect_mask, mip_levels)?;
+            let sampler = Sampler::new(device, &sampler_descriptor)?;
+            Ok(Self {
+                image,
+                image_view,
+                sampler,
+            })
+        } else {
+            unreachable!("This needs a command buffer");
+        }
+    }
+
     pub(crate) fn from_device_image<D: HasVkDevice>(
         device: &D,
         image: DeviceImage,
@@ -191,7 +397,7 @@ impl Texture {
 
         let image_view = ImageView::new(device, image.vk_image(), format, aspect, mip_levels)?;
 
-        let sampler = Sampler::new(device)?;
+        let sampler = Sampler::new(device, &SamplerDescriptor::default())?;
 
         Ok(Self {
             image,
@@ -203,18 +409,19 @@ impl Texture {
         device: &D,
         allocator: &AllocatorHandle,
         command_buffer: &mut CommandBuffer,
-        extent: util::Extent2D,
-        common: &DescriptorCommon,
+        extent: Extent2D,
+        format: util::Format,
+        mipmaps: MipMaps,
         data: &'a [u8],
     ) -> Result<(Self, DeviceBuffer), TextureError> {
-        let ((image, staging), mip_levels) = if let MipMaps::Generate = common.mipmaps {
+        let ((image, staging), mip_levels) = if let MipMaps::Generate = mipmaps {
             let mip_levels = mip_levels_for(extent);
             (
                 DeviceImage::device_local_mipmapped(
                     &allocator,
                     command_buffer,
                     extent,
-                    common.format,
+                    format,
                     mip_levels,
                     data,
                 )?,
@@ -222,51 +429,28 @@ impl Texture {
             )
         } else {
             (
-                DeviceImage::device_local(&allocator, command_buffer, extent, common.format, data)?,
+                DeviceImage::device_local(&allocator, command_buffer, extent, format, data)?,
                 1,
             )
         };
 
-        let ret = Self::from_device_image(device, image, common.format, mip_levels)?;
+        let ret = Self::from_device_image(device, image, format, mip_levels)?;
         Ok((ret, staging))
     }
 
-    fn from_file<D: HasVkDevice>(
-        device: &D,
-        allocator: &AllocatorHandle,
-        command_buffer: &mut CommandBuffer,
-        common: &DescriptorCommon,
-        path: &Path,
-    ) -> Result<(Self, DeviceBuffer), TextureError> {
-        let image = load_image(&path)?;
-        let extent = util::Extent2D {
-            width: image.width(),
-            height: image.height(),
-        };
-        let raw_image_data = image.into_raw();
-        Self::from_raw(
-            device,
-            allocator,
-            command_buffer,
-            extent,
-            common,
-            &raw_image_data,
-        )
+    pub fn image_view(&self) -> &ImageView {
+        &self.image_view
     }
 
     pub fn vk_image(&self) -> &vk::Image {
         &self.image.vk_image()
     }
 
-    pub fn vk_image_view(&self) -> &vk::ImageView {
-        &self.image_view.vk_image_view()
-    }
-
     pub fn vk_sampler(&self) -> &vk::Sampler {
         &self.sampler.vk_sampler()
     }
 
-    pub fn extent(&self) -> util::Extent2D {
+    pub fn extent(&self) -> Extent2D {
         self.image.extent()
     }
 

@@ -217,13 +217,14 @@ impl<'a> DescriptorSetBuilder<'a> {
         tex_h: &Handle<Texture>,
         binding: u32,
         stage: ShaderStage,
+        is_depth: bool,
     ) -> Self {
         let tex = self
             .renderer
-            .get_resource(tex_h)
+            .get_texture(tex_h)
             .expect("Failed to get texture");
 
-        let image_view = *tex.vk_image_view();
+        let image_view = *tex.image_view().vk_image_view();
         let sampler = *tex.vk_sampler();
 
         self.add_binding(
@@ -232,9 +233,14 @@ impl<'a> DescriptorSetBuilder<'a> {
             vk::ShaderStageFlags::from(stage),
         );
 
+        let image_layout = if is_depth {
+            vk::ImageLayout::DEPTH_STENCIL_READ_ONLY_OPTIMAL
+        } else {
+            vk::ImageLayout::SHADER_READ_ONLY_OPTIMAL
+        };
         // TODO: Here we should use the layout from the image if we tracked it
         self.image_infos.push(vk::DescriptorImageInfo {
-            image_layout: vk::ImageLayout::SHADER_READ_ONLY_OPTIMAL,
+            image_layout,
             image_view,
             sampler,
         });

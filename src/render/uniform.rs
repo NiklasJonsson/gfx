@@ -42,11 +42,27 @@ pub struct PackedLight {
     pub color_range: [f32; 4], // color for all light types. .w is the range of point/spot lights
 }
 
+pub type Mat4 = [f32; 16];
+
 pub const MAX_NUM_LIGHTS: usize = 16;
+
+#[derive(Copy, Clone, Debug, Default)]
+#[repr(C, packed)]
+pub struct ShadowMatrices {
+    pub matrices: [Mat4; MAX_NUM_LIGHTS],
+    pub num_matrices: u32,
+}
+impl UniformBlock for ShadowMatrices {
+    const SET: u32 = 0;
+    const BINDING: u32 = 3;
+}
+impl Uniform for ShadowMatrices {}
+
 #[derive(Copy, Clone, Debug, Default)]
 #[repr(C, packed)]
 pub struct LightingData {
     pub punctual_lights: [PackedLight; MAX_NUM_LIGHTS],
+    pub ambient: [f32; 4],
     pub num_lights: u32,
 }
 
@@ -59,14 +75,14 @@ impl Uniform for LightingData {}
 #[derive(Copy, Clone, Debug)]
 #[repr(C, packed)]
 pub struct Model {
-    pub model: [[f32; 4]; 4],
-    pub model_it: [[f32; 4]; 4],
+    pub model: Mat4,
+    pub model_it: Mat4,
 }
 
-#[derive(Copy, Clone, Debug)]
+#[derive(Copy, Clone, Debug, Default)]
 #[repr(C, packed)]
 pub struct ViewData {
-    pub view_proj: [[f32; 4]; 4],
+    pub view_proj: Mat4,
     pub view_pos: [f32; 4],
 }
 

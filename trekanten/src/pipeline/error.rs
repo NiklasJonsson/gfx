@@ -15,5 +15,5 @@ pub enum PipelineError {
     #[error("Spirv reflection failed: {0}")]
     Reflection(#[from] SpirvError),
     #[error("Failed to build graphics pipeline: {0}")]
-    GraphicsPipelineBuilder(String),
+    GraphicsPipelineBuilder(super::GraphicsPipelineDescriptorBuilderError),
 }

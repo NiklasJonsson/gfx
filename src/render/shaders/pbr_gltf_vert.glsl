@@ -1,10 +1,21 @@
 #version 450
 #extension GL_ARB_separate_shader_objects : enable
 
+#define MAX_NUM_LIGHTS (16)
+
 layout(set = 0, binding = 0) uniform ViewData {
     mat4 view_proj;
     vec4 view_pos;
 } view_data;
+
+layout(set = 0, binding = 3) uniform ShadowMatrices {
+    mat4 matrices[MAX_NUM_LIGHTS];
+    uint num_matrices;
+} shadow_matrices;
+
+uint num_shadow_matrices() {
+    return min(MAX_NUM_LIGHTS, shadow_matrices.num_matrices);
+}
 
 layout(push_constant) uniform Model {
     mat4 model;
@@ -25,37 +36,53 @@ layout(location = VCOL_LOC) in vec4 color;
 layout(location = TAN_LOC) in vec4 tangent;
 #endif
 
-layout(location = 0) out vec3 world_normal;
-layout(location = 1) out vec3 world_pos;
+layout(location = 0) out VsOut {
+    vec3 world_normal;
+    vec3 world_pos;
+    vec4 shadow_coords[MAX_NUM_LIGHTS];
 
 #if HAS_TEX_COORDS
-layout(location = TEX_COORDS_LOC) out vec2 tex_coords_0;
+    vec2 tex_coords_0;
 #endif
 
 #if HAS_VERTEX_COLOR
-layout(location = VCOL_LOC) out vec3 color_0;
+    vec3 color_0;
 #endif
 
 #if HAS_TANGENTS
-layout(location = TAN_LOC) out vec3 world_tangent;
-layout(location = BITAN_LOC) out vec3 world_bitangent;
+    vec3 world_tangent;
+    vec3 world_bitangent;
 #endif
+} vs_out;
+
+// Map clip space coords [-w, w] to [0, w] so that perspective divide (done in fragment shader)
+// transforms it into [0, 1] (unit interval) which we can use to sample the shadow map.
+const mat4 clip_to_unit = mat4(
+    0.5, 0.0, 0.0, 0.0,
+    0.0, 0.5, 0.0, 0.0,
+    0.0, 0.0, 1.0, 0.0,
+    0.5, 0.5, 0.0, 1.0
+);
 
 void main() {
-    world_normal = normalize((model_tfm.model_it * vec4(normal, 0.0)).xyz);
-    world_pos = (model_tfm.model * vec4(position, 1.0)).xyz;
+    vs_out.world_normal = normalize((model_tfm.model_it * vec4(normal, 0.0)).xyz);
+    vs_out.world_pos = (model_tfm.model * vec4(position, 1.0)).xyz;
 #if HAS_TEX_COORDS
-    tex_coords_0 = tex_coords;
+    vs_out.tex_coords_0 = tex_coords;
 #endif
 
 #if HAS_VERTEX_COLOR
-    color_0 = color.rgb;
+    vs_out.color_0 = color.rgb;
 #endif
 
 #if HAS_TANGENTS
-    world_tangent = normalize((model_tfm.model * vec4(tangent.xyz, 0.0)).xyz);
-    world_bitangent = normalize(cross(world_normal, world_tangent) * tangent.w);
+    vs_out.world_tangent = normalize((model_tfm.model * vec4(tangent.xyz, 0.0)).xyz);
+    vs_out.world_bitangent = normalize(cross(vs_out.world_normal, vs_out.world_tangent) * tangent.w);
 #endif
 
-    gl_Position = view_data.view_proj * model_tfm.model * vec4(position, 1.0);
+    for (int i = 0; i < num_shadow_matrices(); ++i) {
+        vs_out.shadow_coords[i] = clip_to_unit * shadow_matrices.matrices[i] * vec4(vs_out.world_pos, 1.0);
+    }
+
+    gl_Position = view_data.view_proj * vec4(vs_out.world_pos, 1.0);
 }

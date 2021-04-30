@@ -9,6 +9,8 @@ use std::io;
 use std::path::Path;
 use std::path::PathBuf;
 
+use std::borrow::Cow;
+
 use crate::backend::render_pass::RenderPass;
 use crate::device::HasVkDevice;
 use crate::device::VkDeviceHandle;
@@ -29,6 +31,15 @@ bitflags::bitflags! {
     }
 }
 
+fn hash<T: std::hash::Hash>(t: &T) -> u64 {
+    use std::collections::hash_map::DefaultHasher;
+    use std::hash::Hasher;
+
+    let mut state = DefaultHasher::new();
+    t.hash(&mut state);
+    state.finish()
+}
+
 impl From<ShaderStage> for vk::ShaderStageFlags {
     fn from(s: ShaderStage) -> Self {
         let mut out = vk::ShaderStageFlags::default();
@@ -45,15 +56,18 @@ impl From<ShaderStage> for vk::ShaderStageFlags {
     }
 }
 
-struct RawShader {
-    pub data: Vec<u32>,
+#[derive(Debug, Hash)]
+struct RawShader<'a> {
+    pub data: Cow<'a, [u32]>,
 }
 
 fn read_shader(path: &Path) -> io::Result<RawShader> {
     log::trace!("Reading shader from {}", path.display());
     let mut file = File::open(path)?;
     let words = ash::util::read_spv(&mut file)?;
-    Ok(RawShader { data: words })
+    Ok(RawShader {
+        data: Cow::from(words),
+    })
 }
 
 struct ShaderModule {
@@ -61,8 +75,17 @@ struct ShaderModule {
     vk_shader_module: vk::ShaderModule,
 }
 
+impl std::fmt::Debug for ShaderModule {
+    fn fmt(&self, fmt: &mut std::fmt::Formatter) -> std::fmt::Result {
+        fmt.debug_tuple("ShaderModule")
+            .field(&self.vk_shader_module)
+            .finish()
+    }
+}
+
 impl std::ops::Drop for ShaderModule {
     fn drop(&mut self) {
+        log::trace!("Dropping shader module {:?}", self);
         unsafe {
             self.vk_device
                 .destroy_shader_module(self.vk_shader_module, None);
@@ -72,6 +95,7 @@ impl std::ops::Drop for ShaderModule {
 
 impl ShaderModule {
     pub fn new<D: HasVkDevice>(device: &D, raw: &RawShader) -> Result<Self, PipelineError> {
+        log::trace!("Creating shader module from data (hash) {:?}", hash(raw));
         let info = vk::ShaderModuleCreateInfo::builder().code(&raw.data);
 
         let vk_device = device.vk_device();
@@ -81,6 +105,8 @@ impl ShaderModule {
                 .create_shader_module(&info, None)
                 .map_err(|e| PipelineError::VulkanObjectCreation(e, "Shader module"))?
         };
+
+        log::trace!("Created shader module: {:?}", vk_shader_module);
 
         Ok(Self {
             vk_device,
@@ -208,7 +234,7 @@ impl std::ops::Drop for GraphicsPipeline {
 
 struct PipelineCreationInfo {
     create_info: vk::PipelineShaderStageCreateInfo,
-    _shader_module: ShaderModule,
+    shader_module: ShaderModule,
 }
 
 const DEFAULT_SPV_ENTRY_NAME_NULLED: &[u8] = b"main\0";
@@ -222,17 +248,19 @@ impl GraphicsPipeline {
         &self.vk_pipeline_layout
     }
 
-    fn shader<D: HasVkDevice>(
+    fn shader<'a, D: HasVkDevice>(
         device: &D,
         refl_data: &mut ReflectionData,
-        desc: &ShaderDescriptor,
+        desc: &'a ShaderDescriptor,
         stage: vk::ShaderStageFlags,
     ) -> Result<PipelineCreationInfo, PipelineError> {
         log::trace!("Creating shader for pipeline");
         let raw = match desc {
             ShaderDescriptor::FromRawSpirv(data) => {
                 log::trace!("from raw");
-                RawShader { data: data.clone() }
+                RawShader {
+                    data: Cow::from(data),
+                }
             }
             ShaderDescriptor::FromPath(path) => {
                 log::trace!("from path \"{}\"", path.display());
@@ -255,7 +283,7 @@ impl GraphicsPipeline {
 
         Ok(PipelineCreationInfo {
             create_info,
-            _shader_module: shader_module,
+            shader_module,
         })
     }
 
@@ -265,24 +293,37 @@ impl GraphicsPipeline {
         desc: &GraphicsPipelineDescriptor,
     ) -> Result<Self, PipelineError> {
         let mut reflection_data = ReflectionData::new();
-        let vert = Self::shader(
+        let PipelineCreationInfo {
+            shader_module: _vert_module,
+            create_info: vert_create_info,
+        } = Self::shader(
             device,
             &mut reflection_data,
             &desc.vert,
             vk::ShaderStageFlags::VERTEX,
         )?;
-        let frag = Self::shader(
-            device,
-            &mut reflection_data,
-            &desc.frag,
-            vk::ShaderStageFlags::FRAGMENT,
-        )?;
+        let frag = desc
+            .frag
+            .as_ref()
+            .map(|frag| {
+                Self::shader(
+                    device,
+                    &mut reflection_data,
+                    frag,
+                    vk::ShaderStageFlags::FRAGMENT,
+                )
+            })
+            .transpose()?;
         let vertex_input_state = vk::PipelineVertexInputStateCreateInfo::builder()
             .vertex_binding_descriptions(&desc.vertex_format.vk_binding_description())
             .vertex_attribute_descriptions(&desc.vertex_format.vk_attribute_description());
 
         let vk_device = device.vk_device();
-        let stages = [vert.create_info, frag.create_info];
+        // TODO(perf): allocation here
+        let mut stages = vec![vert_create_info.clone()];
+        if let Some(PipelineCreationInfo { create_info, .. }) = &frag {
+            stages.push(create_info.clone());
+        }
 
         let input_assembly_info = vk::PipelineInputAssemblyStateCreateInfo::builder()
             .topology(vk::PrimitiveTopology::TRIANGLE_LIST)
@@ -441,7 +482,8 @@ pub enum ShaderDescriptor {
 #[builder(build_fn(name = "generated_build"))]
 pub struct GraphicsPipelineDescriptor {
     pub vert: ShaderDescriptor,
-    pub frag: ShaderDescriptor,
+    #[builder(setter(strip_option), default)]
+    pub frag: Option<ShaderDescriptor>,
     pub vertex_format: VertexFormat,
     #[builder(default)]
     pub culling: TriangleCulling,

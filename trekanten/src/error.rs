@@ -29,6 +29,7 @@ pub enum RenderError {
     DepthBuffer(#[from] depth_buffer::DepthBufferError),
     Sync(#[from] sync::SyncError),
     Swapchain(swapchain::SwapchainError),
+    RenderTarget(#[from] framebuffer::FramebufferError),
     UniformBuffer(mem::MemoryError),
     VertexBuffer(mem::MemoryError),
     IndexBuffer(mem::MemoryError),

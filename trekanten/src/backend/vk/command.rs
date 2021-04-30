@@ -134,6 +134,7 @@ pub struct CommandBuffer {
     vk_cmd_buffer: vk::CommandBuffer,
     vk_device: VkDeviceHandle,
     is_started: bool,
+    is_ended: bool,
 }
 
 impl CommandBuffer {
@@ -164,6 +165,7 @@ impl CommandBuffer {
             vk_device,
             queue_flags,
             is_started: true,
+            is_ended: false,
         })
     }
 
@@ -184,11 +186,15 @@ impl CommandBuffer {
     }
 
     pub fn end(&mut self) -> Result<&mut Self, CommandError> {
+        if self.is_ended {
+            return Ok(self);
+        }
         unsafe {
             self.vk_device
                 .end_command_buffer(self.vk_cmd_buffer)
                 .map_err(CommandError::BufferEnd)?;
         }
+        self.is_ended = true;
         Ok(self)
     }
 

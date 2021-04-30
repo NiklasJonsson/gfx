@@ -15,6 +15,7 @@ mod render;
 mod time;
 
 use arg_parse::Args;
+use common::Name;
 use time::DeltaTime;
 
 use game_state::GameState;
@@ -100,6 +101,20 @@ impl App {
         asset::gltf::load_asset(&mut self.world, &args.gltf_path);
         self.world
             .create_entity()
+            .with(render::light::Light::Ambient {
+                color: math::Vec3 {
+                    x: 1.0,
+                    y: 1.0,
+                    z: 1.0,
+                },
+                strength: 0.01,
+            })
+            .with(math::Transform::pos( 2.0, 1.0, 3.0))
+            .with(Name::from("Ambient light"))
+            .build();
+        /*
+        self.world
+            .create_entity()
             .with(render::light::Light::Point {
                 color: math::Vec3 {
                     x: 1.0,
@@ -125,6 +140,7 @@ impl App {
             })
             .with(math::Transform::identity())
             .build();
+        */
         self.world
             .create_entity()
             .with(render::light::Light::Spot {
@@ -133,14 +149,15 @@ impl App {
                     y: 1.0,
                     z: 1.0,
                 },
-                angle: std::f32::consts::FRAC_PI_4,
+                angle: std::f32::consts::FRAC_PI_8,
                 range: 5.0,
             })
-            .with(math::Transform::pos(math::Vec3 {
-                x: 2.0,
-                y: 1.0,
-                z: -3.0,
-            }))
+            .with(math::Transform {
+                position: math::Vec3::new(0.0, 3.0, 0.0),
+                //rotation: math::Quat::rotation_from_to_3d(render::light::Light::DEFAULT_FACING, math::Vec3::new(0.0, -1.0, 0.0)),
+                ..Default::default()
+            })
+            .with(Name::from("Spot light"))
             .build();
     }
 

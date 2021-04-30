@@ -1,5 +1,7 @@
 use ash::vk;
 
+pub use ash::vk as raw_vk;
+
 mod backend;
 mod common;
 pub mod descriptor;
@@ -8,6 +10,7 @@ pub mod loader;
 pub mod mem;
 pub mod pipeline;
 mod render_pass;
+mod render_target;
 pub mod resource;
 pub mod texture;
 pub mod util;
@@ -18,7 +21,9 @@ pub use error::ResizeReason;
 pub use loader::Loader;
 pub use mem::{BufferHandle, BufferMutability};
 pub use render_pass::{RenderPass, RenderPassEncoder};
+pub use render_target::RenderTarget;
 pub use resource::{Async, Handle, MutResourceManager, ResourceManager};
+pub use texture::Texture;
 
 use ash::version::DeviceV1_0;
 use backend::*;
@@ -69,12 +74,13 @@ pub struct FinishedFrame {
 }
 
 impl<'a> Frame<'a> {
-    pub fn new_raw_command_buffer(&self) -> Result<command::CommandBuffer, command::CommandError> {
+    pub fn new_command_buffer(&self) -> Result<command::CommandBuffer, command::CommandError> {
         self.gfx_command_pool
             .create_command_buffer(command::CommandBufferSubmission::Single)
     }
 
-    pub fn add_raw_command_buffer(&mut self, cmd_buffer: command::CommandBuffer) {
+    pub fn add_command_buffer(&mut self, mut cmd_buffer: command::CommandBuffer) {
+        cmd_buffer.end().expect("Failed to end command buffer");
         self.recorded_command_buffers
             .push(*cmd_buffer.vk_command_buffer());
     }
@@ -90,19 +96,25 @@ impl<'a> Frame<'a> {
 
     pub fn begin_render_pass(
         &'a self,
+        mut buf: command::CommandBuffer,
         render_pass: &Handle<render_pass::RenderPass>,
-        framebuffer: &framebuffer::Framebuffer,
+        target: &Handle<render_target::RenderTarget>,
         extent: util::Extent2D,
         clear_values: &[vk::ClearValue],
     ) -> Result<render_pass::RenderPassEncoder<'a>, command::CommandError> {
-        let mut buf = self.new_raw_command_buffer()?;
         let render_pass = self
             .renderer
             .resources
             .render_passes
             .get(render_pass)
             .expect("No such render pass");
-        buf.begin_render_pass(&render_pass.0, framebuffer, extent, clear_values);
+        let target = self
+            .renderer
+            .resources
+            .render_targets
+            .get(target)
+            .expect("TODO: Return error here");
+        buf.begin_render_pass(&render_pass.0, &target.inner, extent, clear_values);
 
         Ok(render_pass::RenderPassEncoder::new(
             &self.renderer.resources,
@@ -113,6 +125,7 @@ impl<'a> Frame<'a> {
 
     pub fn begin_presentation_pass(
         &'a self,
+        buf: command::CommandBuffer,
         render_pass: &Handle<render_pass::RenderPass>,
     ) -> Result<render_pass::RenderPassEncoder<'a>, command::CommandError> {
         let clear_values = [
@@ -129,8 +142,9 @@ impl<'a> Frame<'a> {
             },
         ];
         self.begin_render_pass(
+            buf,
             render_pass,
-            self.renderer.framebuffer(),
+            self.renderer.current_present_target(),
             self.extent(),
             &clear_values,
         )
@@ -140,26 +154,8 @@ impl<'a> Frame<'a> {
         self.renderer.swapchain_extent()
     }
 
-    pub fn framebuffer(&self, _frame: &Frame) -> &framebuffer::Framebuffer {
-        self.renderer.framebuffer()
-    }
-
-    pub fn finish(mut self) -> FinishedFrame {
-        if self.recorded_command_buffers.is_empty() {
-            let render_pass = &self
-                .renderer
-                .presentation_render_target
-                .as_ref()
-                .expect("No presentation pass")
-                .render_pass;
-            let buf = self
-                .begin_presentation_pass(render_pass)
-                .expect("Failed to begin the empty render pass")
-                .build()
-                .expect("Failed to create empty render pass");
-            self.add_raw_command_buffer(buf);
-        }
-
+    pub fn finish(self) -> FinishedFrame {
+        assert!(!self.recorded_command_buffers.is_empty());
         let Frame {
             recorded_command_buffers,
             gfx_command_pool,
@@ -330,7 +326,7 @@ pub enum FinishedResourceCommand {
 
 struct PresentationRenderTarget {
     render_pass: Handle<RenderPass>,
-    swapchain_framebuffers: Vec<framebuffer::Framebuffer>,
+    swapchain_render_targets: Vec<Handle<render_target::RenderTarget>>,
     _depth_buffer: depth_buffer::DepthBuffer,
     _color_buffer: color_buffer::ColorBuffer,
 }
@@ -491,7 +487,7 @@ impl Renderer {
     }
 
     fn create_presentation_render_target(
-        &self,
+        &mut self,
         format: util::Format,
         render_pass_h: Handle<RenderPass>,
     ) -> Result<PresentationRenderTarget, RenderError> {
@@ -512,17 +508,22 @@ impl Renderer {
             &self.swapchain.info().extent,
             msaa_sample_count,
         )?;
-        let swapchain_framebuffers = self.swapchain.create_framebuffers_for(
-            &render_pass.0,
-            &_depth_buffer,
-            &_color_buffer,
-        )?;
+        let swapchain_render_targets = self
+            .swapchain
+            .create_framebuffers_for(&render_pass.0, &_depth_buffer, &_color_buffer)?
+            .into_iter()
+            .map(|fb| {
+                self.resources
+                    .render_targets
+                    .add(RenderTarget { inner: fb })
+            })
+            .collect();
 
         Ok(PresentationRenderTarget {
             render_pass: render_pass_h,
             _color_buffer,
             _depth_buffer,
-            swapchain_framebuffers,
+            swapchain_render_targets,
         })
     }
 }
@@ -558,6 +559,7 @@ impl Renderer {
             graphics_pipelines: pipeline::GraphicsPipelines::default(),
             descriptor_sets,
             render_passes: resurs::Storage::default(),
+            render_targets: resurs::Storage::default(),
         };
 
         let loader = Some(Loader::new(&mut device));
@@ -733,10 +735,11 @@ impl Renderer {
     }
 
     pub fn create_render_pass(
-        &self,
+        &mut self,
         create_info: &vk::RenderPassCreateInfo,
-    ) -> Result<RenderPass, RenderError> {
-        RenderPass::new_vk(&self.device, create_info)
+    ) -> Result<Handle<RenderPass>, RenderError> {
+        let rp = RenderPass::new_vk(&self.device, create_info)?;
+        Ok(self.resources.render_passes.add(rp))
     }
 }
 
@@ -757,12 +760,12 @@ impl Renderer {
             .map_err(RenderError::UniformBuffer)
     }
 
-    fn framebuffer(&self) -> &framebuffer::Framebuffer {
+    fn current_present_target(&self) -> &Handle<render_target::RenderTarget> {
         &self
             .presentation_render_target
             .as_ref()
             .expect("Framebuffer has to have been created here")
-            .swapchain_framebuffers[self.swapchain_image_idx as usize]
+            .swapchain_render_targets[self.swapchain_image_idx as usize]
     }
 
     pub(crate) fn resources_mut(&mut self) -> &'_ mut resource::Resources {
@@ -838,42 +841,6 @@ impl_buffer_manager!(
     uniform_buffers
 );
 
-macro_rules! impl_resource_manager {
-    ($desc:ty, $resource:ty, $handle:ty, $error:ty, $cmd_enum:ident, $storage:ident) => {
-        impl resource::ResourceManager<$desc, $resource, $handle> for Renderer {
-            type Error = $error;
-
-            fn get_resource(&self, handle: &$handle) -> Option<&$resource> {
-                self.resources.$storage.get(handle)
-            }
-
-            fn create_resource_blocking(
-                &mut self,
-                descriptor: $desc,
-            ) -> Result<$handle, Self::Error> {
-                if let Some(handle) = self.resources.$storage.cached(&descriptor) {
-                    return Ok(handle);
-                }
-
-                let cmd = SyncResourceCommand::$cmd_enum { descriptor };
-                let finished = self.execute_command(cmd).unwrap();
-                match finished {
-                    FinishedResourceCommand::$cmd_enum { handle } => Ok(handle),
-                    _ => unreachable!(),
-                }
-            }
-        }
-    };
-}
-impl_resource_manager!(
-    texture::TextureDescriptor,
-    texture::Texture,
-    Handle<texture::Texture>,
-    texture::TextureError,
-    CreateTexture,
-    textures
-);
-
 use pipeline::{GraphicsPipeline, GraphicsPipelineDescriptor, PipelineError};
 
 impl Renderer {
@@ -899,6 +866,30 @@ impl Renderer {
 
         Ok(handle)
     }
+}
+
+use crate::texture::{TextureDescriptor, TextureError};
+impl Renderer {
+    pub fn get_texture(&self, handle: &Handle<Texture>) -> Option<&Texture> {
+        self.resources.textures.get(handle)
+    }
+
+    pub fn create_texture(
+        &mut self,
+        descriptor: TextureDescriptor,
+    ) -> Result<Handle<Texture>, TextureError> {
+        if !descriptor.needs_command_buffer() {
+            let t = Texture::create_no_cmds(&self.device, &self.device.allocator(), &descriptor)?;
+            return Ok(self.resources.textures.add(t));
+        }
+
+        let cmd = SyncResourceCommand::CreateTexture { descriptor };
+        let finished = self.execute_command(cmd).unwrap();
+        match finished {
+            FinishedResourceCommand::CreateTexture { handle } => Ok(handle),
+            _ => unreachable!(),
+        }
+    }
 
     pub fn generate_mipmaps(
         &mut self,
@@ -909,7 +900,7 @@ impl Renderer {
         }
         let mut cmd_buf = self.util_command_pool.begin_single_submit()?;
 
-        // TODO(allocation): The old images need to be kept alive until we have submitted and waited for the cmd buffer
+        // TODO(perf): The old images need to be kept alive until we have submitted and waited for the cmd buffer
         // Try to use a free queue here instead. Use ManuallyDrop?
         let mut old_textures = Vec::new();
         for handle in handles {
@@ -965,5 +956,33 @@ impl Renderer {
         let done = self.submit_command_buffer(cmd_buf);
         done.blocking_wait().expect("Failed to wait for mipmapping");
         Ok(())
+    }
+}
+
+impl Renderer {
+    pub fn create_render_target(
+        &mut self,
+        render_pass: &Handle<RenderPass>,
+        attachments: &[&Handle<Texture>],
+    ) -> Result<Handle<RenderTarget>, RenderError> {
+        let render_pass = self
+            .resources
+            .render_passes
+            .get(render_pass)
+            .ok_or(RenderError::InvalidHandle(render_pass.id()))?;
+        let attachments: Result<Vec<&Texture>, RenderError> = attachments
+            .iter()
+            .map(|h| {
+                self.resources
+                    .textures
+                    .get(h)
+                    .ok_or(RenderError::InvalidHandle(h.id()))
+            })
+            .collect();
+        let attachments = attachments?;
+        let extent = attachments[0].extent();
+        let data = RenderTarget::new(&self.device, &attachments, render_pass, &extent)?;
+        let render_target = self.resources.render_targets.add(data);
+        Ok(render_target)
     }
 }

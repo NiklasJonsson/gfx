@@ -19,7 +19,8 @@ struct PackedLight {
 
 layout(set = 0, binding = 1) uniform LightingData {
     PackedLight lights[MAX_NUM_LIGHTS];
-    uint num_lights;
+    vec4 ambient; // vec3 color + float strength
+    uint num_lights; // The number of lights in the array
 } lighting_data;
 
 uint num_lights() {
@@ -31,6 +32,8 @@ struct Light {
     float attenuation;
     vec3 direction;
 };
+
+layout(set = 0, binding = 2) uniform sampler2D shadow_map;
 
 // This is based on the recommended impl for KHR_punctual_lights:
 // https://github.com/KhronosGroup/glTF/blob/master/extensions/2.0/Khronos/KHR_lights_punctual/README.md#range-property
@@ -85,20 +88,35 @@ Light unpack_light(PackedLight l, vec3 world_pos) {
     return r;
 }
 
-layout(location = 0) in vec3 world_normal;
-layout(location = 1) in vec3 world_pos;
+layout(location = 0) in VsOut {
+    vec3 world_normal;
+    vec3 world_pos;
+    vec4 shadow_coords[MAX_NUM_LIGHTS];
+
 #if HAS_TEX_COORDS
-layout(location = TEX_COORDS_LOC) in vec2 tex_coords_0;
+    vec2 tex_coords_0;
 #endif
 
 #if HAS_VERTEX_COLOR
-layout(location = VCOL_LOC) in vec3 color_0;
+    vec3 color_0;
 #endif
 
 #if HAS_TANGENTS
-layout(location = TAN_LOC) in vec3 world_tangent;
-layout(location = BITAN_LOC) in vec3 world_bitangent;
+    vec3 world_tangent;
+    vec3 world_bitangent;
 #endif
+} vs_out;
+
+float sample_shadow_map(uint idx) {
+    vec3 coords = vs_out.shadow_coords[0].xyz / vs_out.shadow_coords[0].w;
+    // This would have been clipped during shadow pass => not in shadow
+    // texture clamp_to_edge sampling mode handles xy clipping
+    if (coords.z > 1.0)
+        return 1.0;
+
+    float depth = texture(shadow_map, coords.xy).r;
+    return coords.z < depth ? 1.0 : 0.0;
+}
 
 layout(location = 0) out vec4 out_color;
 
@@ -146,13 +164,13 @@ float normal_distribution_function(float cos_angle, float alpha_roughness) {
 }
 
 void main() {
-    vec3 normal = normalize(world_normal);
+    vec3 normal = normalize(vs_out.world_normal);
 
 #if HAS_NORMAL_MAP
-    vec3 tangent = normalize(world_tangent);
-    vec3 bitangent = normalize(world_bitangent);
+    vec3 tangent = normalize(vs_out.world_tangent);
+    vec3 bitangent = normalize(vs_out.world_bitangent);
     mat3 tbn = mat3(tangent, bitangent, normal);
-    vec3 tex_normal = texture(normal_map, tex_coords_0).xyz * 2.0 - 1.0;
+    vec3 tex_normal = texture(normal_map, vs_out.tex_coords_0).xyz * 2.0 - 1.0;
     // Only scale .xy, as per the gltf spec
     tex_normal *= vec3(material_data.normal_scale, material_data.normal_scale, 1.0);
     normal = normalize(tbn * tex_normal);
@@ -179,11 +197,11 @@ void main() {
     vec3 black = vec3(0.0);
 
 #if HAS_BASE_COLOR_TEXTURE
-    base_color *= texture(base_color_texture, tex_coords_0).rgb;
+    base_color *= texture(base_color_texture, vs_out.tex_coords_0).rgb;
 #endif
 
 #if HAS_METALLIC_ROUGHNESS_TEXTURE
-    vec4 mr_tex = texture(metallic_roughness_texture, tex_coords_0);
+    vec4 mr_tex = texture(metallic_roughness_texture, vs_out.tex_coords_0);
     roughness *= mr_tex.g;
     metallic *= mr_tex.b;
 #endif
@@ -212,15 +230,22 @@ void main() {
 
     /* ----------------- VIEW ------------------ */
 
-    vec3 view_dir = normalize(view_data.view_pos.xyz - world_pos);
+    vec3 view_dir = normalize(view_data.view_pos.xyz - vs_out.world_pos);
     float n_dot_v = clamp(dot(normal, view_dir), 0.0, 1.0);
 
     /* ----------------- SHADING ------------------ */
 
     vec3 color = vec3(0);
 
+    // Ambient
+    color += lighting_data.ambient.xyz * diffuse_color * lighting_data.ambient.w;
+
+    // Lights
     for (uint i = 0; i < num_lights(); ++i) {
-        Light light = unpack_light(lighting_data.lights[i], world_pos);
+        Light light = unpack_light(lighting_data.lights[i], vs_out.world_pos);
+        float shadow_factor = sample_shadow_map(i);
+        if (shadow_factor == 0.0)
+            continue;
 
         vec3 light_dir = light.direction;
         vec3 bisect_light_view = normalize(view_dir + light_dir);
@@ -262,7 +287,7 @@ void main() {
         // If the light is modeled as rays, the distance between the points where the light
         // rays hit the surface decreases (=> light intensity increases) as the light vector
         // approaches the normal.
-        color += (f_diffuse + f_specular) * n_dot_l * light_color * attenuation;
+        color += (f_diffuse + f_specular) * n_dot_l * light_color * attenuation * shadow_factor;
     }
     // Punctual lights means the integral in the reflectance equation simplifies down to PI,
     // see real-time rendering 4, p. 316 eq. 9.14

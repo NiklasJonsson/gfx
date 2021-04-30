@@ -24,7 +24,7 @@ imgui = "0.6.1"
 shaderc = "0.6.2"
 
 # Math/Physics
-vek = "0.12.0"
+vek = "0.15.1"
 num-derive = "0.2.5"
 num-traits = "0.2.8"
 

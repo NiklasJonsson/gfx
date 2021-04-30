@@ -4,7 +4,6 @@ use std::hash::{Hash, Hasher};
 
 use arrayvec::ArrayVec;
 
-// TODO: vk agnostic
 #[derive(Debug, Clone)]
 pub struct VertexFormat {
     binding_description: ArrayVec<[vk::VertexInputBindingDescription; 8]>,
@@ -137,6 +136,11 @@ impl VertexFormatBuilder {
                 format: format.into(),
                 offset: self.format.size,
             });
+        self.format.size += size;
+        self
+    }
+
+    pub fn skip(mut self, size: u32) -> Self {
         self.format.size += size;
         self
     }

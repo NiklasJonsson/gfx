@@ -23,6 +23,8 @@ impl Format {
 
     pub const RGBA_SRGB: Self = Self(vk::Format::R8G8B8A8_SRGB);
     pub const RGBA_UNORM: Self = Self(vk::Format::R8G8B8A8_UNORM);
+
+    pub const D16_UNORM: Self = Self(vk::Format::D16_UNORM);
 }
 
 impl From<Format> for vk::Format {

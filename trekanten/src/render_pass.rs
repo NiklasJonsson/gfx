@@ -153,8 +153,8 @@ impl<'a> RenderPassEncoder<'a> {
         }
     }
 
-    pub fn build(mut self) -> Result<CommandBuffer, CommandError> {
-        self.command_buffer.end_render_pass().end()?;
+    pub fn end(mut self) -> Result<CommandBuffer, CommandError> {
+        self.command_buffer.end_render_pass();
         Ok(self.command_buffer)
     }
 

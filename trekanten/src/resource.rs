@@ -4,6 +4,7 @@ use crate::descriptor;
 use crate::mem;
 use crate::pipeline;
 use crate::render_pass;
+use crate::render_target;
 use crate::texture;
 
 pub enum ResourceCommand {
@@ -50,6 +51,7 @@ pub struct Resources {
     pub graphics_pipelines: pipeline::GraphicsPipelines,
     pub descriptor_sets: descriptor::DescriptorSets,
     pub render_passes: resurs::Storage<render_pass::RenderPass>,
+    pub render_targets: resurs::Storage<render_target::RenderTarget>,
 }
 
 pub trait ResourceManager<Descriptor, Resource, Handle> {

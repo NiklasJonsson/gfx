@@ -293,7 +293,7 @@ impl UIContext {
                 MipMaps::None,
             );
             renderer
-                .create_resource_blocking(tex_desc)
+                .create_texture(tex_desc)
                 .expect("Failed to create font texture")
         };
 
@@ -329,7 +329,7 @@ impl UIContext {
         };
 
         let desc_set = DescriptorSet::builder(renderer)
-            .add_texture(&font_texture, 0, ShaderStage::FRAGMENT)
+            .add_texture(&font_texture, 0, ShaderStage::FRAGMENT, false)
             .build();
 
         let input_entity = Self::init_entity(world);

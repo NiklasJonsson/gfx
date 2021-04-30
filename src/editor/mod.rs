@@ -84,6 +84,7 @@ pub fn build_ui<'a>(world: &mut World, ui: &imgui::Ui<'a>) {
                 .read_only(true)
                 .build();
             ui.text(im_str!("#components: {}", ecs::meta::ALL_COMPONENTS.len()));
+            ui.text(im_str!("Right handed coordinate system"));
         });
 
     {

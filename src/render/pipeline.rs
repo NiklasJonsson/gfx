@@ -182,12 +182,13 @@ impl ShaderCompiler {
         Ok(Self { compiler })
     }
 
-    pub fn compile(
+    pub fn compile<P: AsRef<Path>>(
         &self,
         defines: &Defines,
-        rel_path: &Path,
+        rel_path: P,
         ty: ShaderType,
     ) -> Result<SpvBinary, CompilerError> {
+        let rel_path = rel_path.as_ref();
         let mut options =
             shaderc::CompileOptions::new().expect("Failed to create compiler options");
         for d in defines.iter() {

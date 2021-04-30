@@ -276,7 +276,6 @@ pub fn node_to_root_path(world: &World, node: Entity) -> impl ExactSizeIterator<
 #[cfg(test)]
 mod tests {
     use super::world::*;
-    use super::*;
 
     #[derive(Debug, Component)]
     struct ID(usize);
