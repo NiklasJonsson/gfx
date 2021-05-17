@@ -289,12 +289,10 @@ fn shadow_pipeline_desc(
         pipeline::ShaderType::Vertex,
     )?;
 
-    // TODO: We might need another compare op for depth
-    // TODO: Cull mode
     Ok(GraphicsPipelineDescriptor::builder()
         .vertex_format(format)
         .vert(ShaderDescriptor::FromRawSpirv(vert.data()))
-        .culling(trekanten::pipeline::TriangleCulling::Back)
+        .culling(trekanten::pipeline::TriangleCulling::Front)
         .build()?)
 }
 
@@ -486,7 +484,6 @@ pub fn draw_frame(world: &mut World, ui: &mut ui::UIContext, renderer: &mut Rend
                     shadow_matrices.matrices[shadow_matrices.num_matrices as usize] =
                         view_data.view_proj;
                     shadow_matrices.num_matrices += 1;
-                    break;
                 }
                 _ => (),
             }

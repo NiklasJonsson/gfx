@@ -107,15 +107,18 @@ layout(location = 0) in VsOut {
 #endif
 } vs_out;
 
-float sample_shadow_map(uint idx) {
+float sample_shadow_map(uint idx, float n_dot_l) {
     vec3 coords = vs_out.shadow_coords[0].xyz / vs_out.shadow_coords[0].w;
     // This would have been clipped during shadow pass => not in shadow
     // texture clamp_to_edge sampling mode handles xy clipping
-    if (coords.z > 1.0)
+    if (coords.z > 1.0 || coords.z < -1.0)
         return 1.0;
 
     float depth = texture(shadow_map, coords.xy).r;
-    return coords.z < depth ? 1.0 : 0.0;
+    float max_bias = 0.05;
+    float min_bias = 0.005;
+    float bias = max(max_bias * (1.0 - n_dot_l), min_bias); 
+    return (coords.z - bias) < depth ? 1.0 : 0.0;
 }
 
 layout(location = 0) out vec4 out_color;
@@ -243,9 +246,6 @@ void main() {
     // Lights
     for (uint i = 0; i < num_lights(); ++i) {
         Light light = unpack_light(lighting_data.lights[i], vs_out.world_pos);
-        float shadow_factor = sample_shadow_map(i);
-        if (shadow_factor == 0.0)
-            continue;
 
         vec3 light_dir = light.direction;
         vec3 bisect_light_view = normalize(view_dir + light_dir);
@@ -256,6 +256,10 @@ void main() {
         float n_dot_h_unclamped = dot(normal, bisect_light_view);
         float n_dot_h = clamp(n_dot_h_unclamped, 0.0, 1.0);
         float h_dot_l = clamp(dot(bisect_light_view, light_dir), 0.0, 1.0);
+
+        float shadow_factor = sample_shadow_map(i, n_dot_l);
+        if (shadow_factor == 0.0)
+            continue;
 
         // Up until now, specific to gltf. From here on, wild west brdf
         // Define output as diffuse term + specular term
