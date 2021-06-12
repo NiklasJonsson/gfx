@@ -1,6 +1,9 @@
 use proc_macro2::{Ident, Span, TokenStream};
 use quote::{format_ident, quote, quote_spanned};
-use syn::{parse_quote, spanned::Spanned as _, DeriveInput, Fields, GenericParam, Generics};
+use syn::{
+    parse_quote, spanned::Spanned as _, DeriveInput, Fields, GenericParam, Generics, Meta,
+    NestedMeta, Path,
+};
 
 fn inspect_fn_name(is_mut: bool) -> syn::Ident {
     if is_mut {
@@ -152,6 +155,32 @@ fn inspect_struct_data(data: &syn::DataStruct, is_mut: bool) -> TokenStream {
     let n_fields = data.fields.len();
 
     let fields = data.fields.iter().enumerate().map(|(i, f)| {
+        // Ignore if needed
+        for attr in f.attrs.iter() {
+            if attr.path.is_ident("inspect") {
+                match attr.parse_meta() {
+                    Err(e) => {
+                        let msg = format!("Failed to parse component attributes: {}", e);
+                        let msg_ref: &str = &msg;
+                        return quote::quote_spanned! {attr.span()=>
+                            compile_error!(#msg_ref);
+                        };
+                    }
+                    Ok(Meta::List(list)) => {
+                        for nm in list.nested {
+                            if let NestedMeta::Meta(Meta::Path(path)) = nm {
+                                if path.is_ident("ignore") {
+                                    return quote::quote! {};
+                                }
+                            } else {
+                                unimplemented!()
+                            }
+                        }
+                    }
+                    _ => unimplemented!(),
+                }
+            }
+        }
         let field = f.ident.as_ref().map(|x| quote! {#x}).unwrap_or_else(|| {
             let i = syn::Index::from(i);
             quote! {#i}

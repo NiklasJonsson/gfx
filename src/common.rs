@@ -1,6 +1,6 @@
 use crate::ecs::prelude::*;
 
-#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Component)]
+#[derive(Debug, Default, Clone, PartialEq, Eq, PartialOrd, Ord, Component)]
 #[component(inspect)]
 pub struct Name(pub String);
 

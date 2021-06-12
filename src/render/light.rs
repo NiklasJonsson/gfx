@@ -1,7 +1,7 @@
 use crate::ecs::prelude::*;
 use crate::math::{perspective_vk, Mat4, Quat, Transform, Vec3, Vec4};
 
-use trekanten::{CommandBuffer, ResourceManager};
+use trekanten::CommandBuffer;
 
 use crate::graph::{sys::add_edge, sys::breadth_first, Children, Parent};
 use crate::render::mesh::CpuMesh;
@@ -34,6 +34,20 @@ impl Light {
         y: 0.0,
         z: -1.0,
     };
+}
+
+impl Default for Light {
+    fn default() -> Self {
+        Self::Spot {
+            color: Vec3 {
+                x: 1.0,
+                y: 1.0,
+                z: 1.0,
+            },
+            angle: std::f32::consts::FRAC_PI_8,
+            range: 5.0,
+        }
+    }
 }
 
 pub struct RenderLightVolumes;
