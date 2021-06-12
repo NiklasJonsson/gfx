@@ -38,6 +38,7 @@ clap = "2.33.0"
 thiserror = "1.0.20"
 resurs = {path = "resurs"}
 linkme = "0.2.2"
+serde = "1.0"
 
 # Threading
 crossbeam = "0.7.3"

@@ -2,7 +2,7 @@ use proc_macro2::{Ident, Span, TokenStream};
 use quote::{format_ident, quote, quote_spanned};
 use syn::{
     parse_quote, spanned::Spanned as _, DeriveInput, Fields, GenericParam, Generics, Meta,
-    NestedMeta, Path,
+    NestedMeta,
 };
 
 fn inspect_fn_name(is_mut: bool) -> syn::Ident {

@@ -4,6 +4,8 @@ pub type Vec3 = vek::Vec3<f32>;
 pub type Vec4 = vek::Vec4<f32>;
 pub type Mat4 = vek::Mat4<f32>;
 pub type Quat = vek::Quaternion<f32>;
+pub type Rgb = vek::Rgb<f32>;
+pub type Rgba = vek::Rgba<f32>;
 
 #[derive(Debug, Component, Copy, Clone, PartialEq)]
 #[component(inspect)]
@@ -90,7 +92,7 @@ impl std::ops::Mul for Transform {
             scale: self.scale * rhs.scale,
         };
 
-        assert!(
+        debug_assert!(
             verify_compose(&self, &rhs, &n),
             "Bad transform multiplication"
         );

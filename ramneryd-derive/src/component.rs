@@ -85,7 +85,7 @@ pub(crate) fn impl_component(di: &DeriveInput) -> TokenStream {
         quote! {}
     };
 
-    // TODO: meta() can be const when we have function pointer (+ std::any::type_name()) as const
+    // TODO: meta() can be const when we have function pointer as const
     quote! {
         /// specs
         impl #impl_generics crate::ecs::prelude::Component for #name #ty_generics #where_clause {

@@ -1914,6 +1914,7 @@ dependencies = [
  "puffin-imgui",
  "ramneryd-derive",
  "resurs",
+ "serde",
  "shaderc",
  "specs",
  "specs-hierarchy",

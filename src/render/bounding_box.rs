@@ -1,7 +1,7 @@
 use crate::common::Name;
 use crate::ecs::prelude::*;
 use crate::graph::sys as graph;
-use crate::math::{BoundingBox, Transform, Vec3, Vec4};
+use crate::math::{BoundingBox, Rgba, Transform, Vec3};
 
 use super::mesh::CpuMesh;
 
@@ -60,7 +60,7 @@ impl<'a> System<'a> for CreateRenderedBoundingBoxes {
             };
 
             let material = super::material::Unlit {
-                color: Vec4::new(1.0, 0.0, 0.0, 1.0),
+                color: Rgba::new(1.0, 0.0, 0.0, 1.0),
             };
 
             let mut tfm = Transform::identity();

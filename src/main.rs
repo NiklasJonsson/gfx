@@ -102,52 +102,47 @@ impl App {
         self.world
             .create_entity()
             .with(render::light::Light::Ambient {
-                color: math::Vec3 {
-                    x: 1.0,
-                    y: 1.0,
-                    z: 1.0,
+                color: math::Rgb {
+                    r: 1.0,
+                    g: 1.0,
+                    b: 1.0,
                 },
                 strength: 0.01,
             })
             .with(math::Transform::pos(2.0, 1.0, 3.0))
             .with(Name::from("Ambient light"))
             .build();
-        /*
         self.world
             .create_entity()
             .with(render::light::Light::Point {
-                color: math::Vec3 {
-                    x: 1.0,
-                    y: 0.5,
-                    z: 1.0,
+                color: math::Rgb {
+                    r: 1.0,
+                    g: 0.5,
+                    b: 1.0,
                 },
                 range: 5.0,
             })
-            .with(math::Transform::pos(math::Vec3 {
-                x: 2.0,
-                y: 1.0,
-                z: 3.0,
-            }))
+            .with(Name::from("Point light"))
+            .with(math::Transform::pos(2.0, 1.0, 3.0))
             .build();
         self.world
             .create_entity()
             .with(render::light::Light::Directional {
-                color: math::Vec3 {
-                    x: 1.0,
-                    y: 1.0,
-                    z: 1.0,
+                color: math::Rgb {
+                    r: 1.0,
+                    g: 1.0,
+                    b: 1.0,
                 },
             })
             .with(math::Transform::identity())
             .build();
-        */
         self.world
             .create_entity()
             .with(render::light::Light::Spot {
-                color: math::Vec3 {
-                    x: 1.0,
-                    y: 1.0,
-                    z: 1.0,
+                color: math::Rgb {
+                    r: 1.0,
+                    g: 1.0,
+                    b: 1.0,
                 },
                 angle: std::f32::consts::FRAC_PI_8,
                 range: 5.0,
@@ -166,10 +161,10 @@ impl App {
         self.world
             .create_entity()
             .with(render::light::Light::Spot {
-                color: math::Vec3 {
-                    x: 1.0,
-                    y: 1.0,
-                    z: 1.0,
+                color: math::Rgb {
+                    r: 1.0,
+                    g: 1.0,
+                    b: 1.0,
                 },
                 angle: std::f32::consts::FRAC_PI_8,
                 range: 5.0,
@@ -185,10 +180,10 @@ impl App {
         self.world
             .create_entity()
             .with(render::light::Light::Spot {
-                color: math::Vec3 {
-                    x: 1.0,
-                    y: 1.0,
-                    z: 1.0,
+                color: math::Rgb {
+                    r: 1.0,
+                    g: 1.0,
+                    b: 1.0,
                 },
                 angle: std::f32::consts::FRAC_PI_8,
                 range: 5.0,
@@ -203,26 +198,6 @@ impl App {
             })
             .with(Name::from("Spot light 3"))
             .build();
-        /*
-        self.world
-            .create_entity()
-            .with(render::light::Light::Spot {
-                color: math::Vec3 {
-                    x: 1.0,
-                    y: 1.0,
-                    z: 1.0,
-                },
-                angle: std::f32::consts::FRAC_PI_8,
-                range: 5.0,
-            })
-            .with(math::Transform {
-                position: math::Vec3::new(0.0, 3.0, 0.0),
-                rotation: math::Quat::rotation_from_to_3d(render::light::Light::DEFAULT_FACING, math::Vec3::new(0.0, -1.0, 0.0)),
-                ..Default::default()
-            })
-            .with(Name::from("Spot light 2"))
-            .build();
-            */
     }
 
     fn next_event(&self) -> Option<Event> {

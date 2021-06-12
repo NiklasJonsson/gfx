@@ -64,7 +64,9 @@ macro_rules! impl_inspect_vec {
 }
 
 impl_inspect_vec!(Vec3, InputFloat3, 3);
+impl_inspect_vec!(Rgb, InputFloat3, 3);
 impl_inspect_vec!(Vec4, InputFloat4, 4);
+impl_inspect_vec!(Rgba, InputFloat4, 4);
 
 fn inspect_mat<'a>(m: &crate::math::Mat4, ui: &Ui<'a>, _name: &str) -> [[f32; 4]; 4] {
     let mut rows = m.into_row_arrays();

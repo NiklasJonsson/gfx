@@ -1,7 +1,7 @@
 use crate::common::Name;
 use crate::ecs::prelude::*;
 use crate::io::input::{ActionId, InputContext, InputContextError, KeyCode, MappedInput};
-use crate::math::{Transform, Vec3};
+use crate::math::{Rgb, Transform};
 use crate::render;
 
 use crate::editor;
@@ -183,34 +183,34 @@ pub(crate) fn build_ui<'a>(world: &mut World, ui: &imgui::Ui<'a>, pos: [f32; 2])
                         let name = Name::from(items[idx].to_string());
                         let light = match idx {
                             0 => render::light::Light::Point {
-                                color: Vec3 {
-                                    x: 1.0,
-                                    y: 1.0,
-                                    z: 1.0,
+                                color: Rgb {
+                                    r: 1.0,
+                                    g: 1.0,
+                                    b: 1.0,
                                 },
                                 range: 5.0,
                             },
                             1 => render::light::Light::Directional {
-                                color: Vec3 {
-                                    x: 1.0,
-                                    y: 1.0,
-                                    z: 1.0,
+                                color: Rgb {
+                                    r: 1.0,
+                                    g: 1.0,
+                                    b: 1.0,
                                 },
                             },
                             2 => render::light::Light::Spot {
-                                color: Vec3 {
-                                    x: 1.0,
-                                    y: 1.0,
-                                    z: 1.0,
+                                color: Rgb {
+                                    r: 1.0,
+                                    g: 1.0,
+                                    b: 1.0,
                                 },
                                 angle: std::f32::consts::FRAC_PI_8,
                                 range: 5.0,
                             },
                             3 => render::light::Light::Ambient {
-                                color: Vec3 {
-                                    x: 1.0,
-                                    y: 1.0,
-                                    z: 1.0,
+                                color: Rgb {
+                                    r: 1.0,
+                                    g: 1.0,
+                                    b: 1.0,
                                 },
                                 strength: 0.05,
                             },

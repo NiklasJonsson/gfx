@@ -1,5 +1,5 @@
 use crate::ecs::prelude::*;
-use crate::math::{perspective_vk, Mat4, Quat, Transform, Vec3, Vec4};
+use crate::math::{perspective_vk, Mat4, Quat, Rgb, Rgba, Transform, Vec3};
 
 use trekanten::CommandBuffer;
 
@@ -19,11 +19,11 @@ pub struct LightVolumeRenderer;
 #[component(inspect)]
 pub enum Light {
     // Range is the radius of the sphere
-    Point { color: Vec3, range: f32 },
-    Directional { color: Vec3 },
+    Point { color: Rgb, range: f32 },
+    Directional { color: Rgb },
     // Angle is from the center line of the cone & range the height of the cone
-    Spot { color: Vec3, angle: f32, range: f32 },
-    Ambient { color: Vec3, strength: f32 },
+    Spot { color: Rgb, angle: f32, range: f32 },
+    Ambient { color: Rgb, strength: f32 },
 }
 
 impl Light {
@@ -39,10 +39,10 @@ impl Light {
 impl Default for Light {
     fn default() -> Self {
         Self::Spot {
-            color: Vec3 {
-                x: 1.0,
-                y: 1.0,
-                z: 1.0,
+            color: Rgb {
+                r: 1.0,
+                g: 1.0,
+                b: 1.0,
             },
             angle: std::f32::consts::FRAC_PI_8,
             range: 5.0,
@@ -122,7 +122,7 @@ impl<'a> System<'a> for RenderLightVolumes {
             };
 
             let material = super::material::Unlit {
-                color: Vec4::new(color.x, color.y, color.z, 1.0),
+                color: Rgba::from_opaque(*color),
             };
 
             let child = entities
@@ -188,7 +188,7 @@ pub fn light_and_shadow_pass(
             if n_ambients > 0 {
                 log::warn!("Too many ambient lights, skipping all but first");
             } else {
-                lighting_data.ambient = [color.x, color.y, color.z, *strength];
+                lighting_data.ambient = [color.r, color.g, color.b, *strength];
                 n_ambients = 1;
             }
             continue;
@@ -207,7 +207,7 @@ pub fn light_and_shadow_pass(
                 *packed_light = PackedLight {
                     pos: [tfm.position.x, tfm.position.y, tfm.position.z, 1.0],
                     dir_cutoff: [direction.x, direction.y, direction.z, angle.cos()],
-                    color_range: [color.x, color.y, color.z, *range],
+                    color_range: [color.r, color.g, color.b, *range],
                     shadow_idx: [shadow_matrices.num_matrices; 4],
                 };
                 let shadow_idx = packed_light.shadow_idx[0] as usize;
@@ -248,7 +248,7 @@ pub fn light_and_shadow_pass(
                 lighting_data.punctual_lights[lighting_data.num_lights as usize] = PackedLight {
                     pos: [0.0, 0.0, 0.0, 0.0],
                     dir_cutoff: [direction.x, direction.y, direction.z, 0.0],
-                    color_range: [color.x, color.y, color.z, 0.0],
+                    color_range: [color.r, color.g, color.b, 0.0],
                     ..Default::default()
                 }
             }
@@ -256,7 +256,7 @@ pub fn light_and_shadow_pass(
                 lighting_data.punctual_lights[lighting_data.num_lights as usize] = PackedLight {
                     pos: [tfm.position.x, tfm.position.y, tfm.position.z, 1.0],
                     dir_cutoff: [0.0, 0.0, 0.0, 0.0],
-                    color_range: [color.x, color.y, color.z, *range],
+                    color_range: [color.r, color.g, color.b, *range],
                     ..Default::default()
                 };
             }

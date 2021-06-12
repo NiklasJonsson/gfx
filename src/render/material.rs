@@ -2,7 +2,8 @@ use trekanten::texture::Texture;
 use trekanten::{mem::UniformBuffer, texture::TextureDescriptor};
 use trekanten::{BufferHandle, Handle};
 
-use crate::{math::Vec4, render::Pending};
+use crate::math::{Rgba, Vec4};
+use crate::render::Pending;
 
 use crate::ecs::prelude::*;
 use ramneryd_derive::Inspect;
@@ -12,7 +13,7 @@ use trekanten::resource::Async;
 #[derive(Debug, Clone, Component)]
 #[component(inspect)]
 pub struct Unlit {
-    pub color: Vec4,
+    pub color: Rgba,
 }
 
 #[derive(Debug, Clone, Inspect)]
