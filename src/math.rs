@@ -37,9 +37,9 @@ impl vek::approx::AbsDiffEq for Transform {
     }
 
     fn abs_diff_eq(&self, other: &Self, epsilon: Self::Epsilon) -> bool {
-        self.position.abs_diff_eq(&other.position, epsilon) &&
-        self.rotation.abs_diff_eq(&other.rotation, epsilon) &&
-        self.scale.abs_diff_eq(&other.scale, epsilon)
+        self.position.abs_diff_eq(&other.position, epsilon)
+            && self.rotation.abs_diff_eq(&other.rotation, epsilon)
+            && self.scale.abs_diff_eq(&other.scale, epsilon)
     }
 }
 
@@ -51,7 +51,8 @@ impl Default for Transform {
 
 impl From<Transform> for Mat4 {
     fn from(t: Transform) -> Self {
-        Self::translation_3d(t.position) * (Self::from(t.rotation.normalized()) * Self::scaling_3d(t.scale))
+        Self::translation_3d(t.position)
+            * (Self::from(t.rotation.normalized()) * Self::scaling_3d(t.scale))
     }
 }
 
@@ -89,7 +90,10 @@ impl std::ops::Mul for Transform {
             scale: self.scale * rhs.scale,
         };
 
-        assert!(verify_compose(&self, &rhs, &n), "Bad transform multiplication");
+        assert!(
+            verify_compose(&self, &rhs, &n),
+            "Bad transform multiplication"
+        );
         n
     }
 }
@@ -162,15 +166,14 @@ pub fn perspective_vk(fov_y_radians: f32, aspect_ratio: f32, near: f32, far: f32
     // inverted (right-handed upside-down).
     m[(1, 1)] *= -1.0;
 
-    m 
+    m
 }
-
 
 #[cfg(test)]
 mod tests {
 
-    use super::{Mat4, Vec3, Quat, Transform};
-    use vek::approx::{assert_abs_diff_eq};
+    use super::{Mat4, Quat, Transform, Vec3};
+    use vek::approx::assert_abs_diff_eq;
     const EPS: f32 = 0.00001;
 
     fn verify_transform_composition(lhs: Mat4, rhs: Mat4, result: Mat4) {
@@ -179,8 +182,16 @@ mod tests {
     }
 
     fn verify_composed(lhs: &Transform, rhs: &Transform, result: &Transform) {
-        verify_transform_composition(Mat4::from(lhs.rotation), Mat4::from(rhs.rotation), Mat4::from(result.rotation));
-        verify_transform_composition(Mat4::scaling_3d(Vec3::from(lhs.scale)), Mat4::scaling_3d(Vec3::from(rhs.scale)), Mat4::scaling_3d(Vec3::from(result.scale)));
+        verify_transform_composition(
+            Mat4::from(lhs.rotation),
+            Mat4::from(rhs.rotation),
+            Mat4::from(result.rotation),
+        );
+        verify_transform_composition(
+            Mat4::scaling_3d(Vec3::from(lhs.scale)),
+            Mat4::scaling_3d(Vec3::from(rhs.scale)),
+            Mat4::scaling_3d(Vec3::from(result.scale)),
+        );
         verify_transform_composition(Mat4::from(*lhs), Mat4::from(*rhs), Mat4::from(*result));
 
         let vek_tfm_lhs = vek::Transform::from(*lhs);
@@ -194,8 +205,8 @@ mod tests {
 
     #[test]
     fn compose_pos() {
-        let lhs = Transform::pos(Vec3::new(1.0, 2.0, 3.0));
-        let rhs = Transform::pos(Vec3::new(5.0, 6.0, 7.0));
+        let lhs = Transform::pos(1.0, 2.0, 3.0);
+        let rhs = Transform::pos(5.0, 6.0, 7.0);
 
         let out = lhs * rhs;
         assert_abs_diff_eq!(out.position, Vec3::new(6.0, 8.0, 10.0));
@@ -204,7 +215,7 @@ mod tests {
     #[test]
     fn compose_pos_ident() {
         let lhs = Transform::identity();
-        let rhs = Transform::pos(Vec3::new(5.0, 6.0, 7.0));
+        let rhs = Transform::pos(5.0, 6.0, 7.0);
 
         let out = lhs * rhs;
         assert_abs_diff_eq!(out, rhs);
@@ -214,7 +225,14 @@ mod tests {
     fn compose_rot_ident() {
         let lhs = Transform::identity();
         let rhs = Transform {
-            rotation: Quat::rotation_3d(std::f32::consts::PI / 2.0, Vec3 {x: 0.0, y: 1.0, z: 0.0}),
+            rotation: Quat::rotation_3d(
+                std::f32::consts::PI / 2.0,
+                Vec3 {
+                    x: 0.0,
+                    y: 1.0,
+                    z: 0.0,
+                },
+            ),
             ..Default::default()
         };
 
@@ -224,8 +242,22 @@ mod tests {
 
     #[test]
     fn compose_rot() {
-        let rot_lhs = Quat::rotation_3d(std::f32::consts::PI / 2.0, Vec3 {x: 1.0, y: 1.0, z: 0.0});
-        let rot_rhs = Quat::rotation_3d(std::f32::consts::PI / 4.0, Vec3 {x: 0.0, y: 1.0, z: 0.0}); 
+        let rot_lhs = Quat::rotation_3d(
+            std::f32::consts::PI / 2.0,
+            Vec3 {
+                x: 1.0,
+                y: 1.0,
+                z: 0.0,
+            },
+        );
+        let rot_rhs = Quat::rotation_3d(
+            std::f32::consts::PI / 4.0,
+            Vec3 {
+                x: 0.0,
+                y: 1.0,
+                z: 0.0,
+            },
+        );
         let lhs = Transform {
             rotation: rot_lhs,
             ..Default::default()
@@ -249,7 +281,14 @@ mod tests {
     fn compose_pos_rot_ident() {
         let lhs = Transform::identity();
         let rhs = Transform {
-            rotation: Quat::rotation_3d(std::f32::consts::PI / 2.0, Vec3 {x: 0.0, y: 1.0, z: 0.0}),
+            rotation: Quat::rotation_3d(
+                std::f32::consts::PI / 2.0,
+                Vec3 {
+                    x: 0.0,
+                    y: 1.0,
+                    z: 0.0,
+                },
+            ),
             position: Vec3::new(23.0, 56.0, 2.0),
             ..Default::default()
         };
@@ -262,12 +301,26 @@ mod tests {
     #[test]
     fn compose_pos_rot() {
         let lhs = Transform {
-            rotation: Quat::rotation_3d(std::f32::consts::PI / 2.0, Vec3 {x: 0.31, y: 1.0, z: 0.0}),
+            rotation: Quat::rotation_3d(
+                std::f32::consts::PI / 2.0,
+                Vec3 {
+                    x: 0.31,
+                    y: 1.0,
+                    z: 0.0,
+                },
+            ),
             position: Vec3::new(2.0, 10.0, 100.0),
             ..Default::default()
         };
         let rhs = Transform {
-            rotation: Quat::rotation_3d(std::f32::consts::PI / 5.32, Vec3 {x: 0.0, y: 1.0, z: 0.32}),
+            rotation: Quat::rotation_3d(
+                std::f32::consts::PI / 5.32,
+                Vec3 {
+                    x: 0.0,
+                    y: 1.0,
+                    z: 0.32,
+                },
+            ),
             position: Vec3::new(-10.0, 56.0, 2.0),
             ..Default::default()
         };
@@ -278,8 +331,24 @@ mod tests {
 
     #[test]
     fn compose_pos_rot2() {
-        let lhs = Transform { position: Vec3 { x: 0.0, y: 2.0, z: 0.0 }, ..Default::default() };
-        let rhs = Transform { rotation: Quat { x: -0.7071068, y: 0.0, z: 0.0, w: 0.7071068 }.normalized(), ..Default::default() };
+        let lhs = Transform {
+            position: Vec3 {
+                x: 0.0,
+                y: 2.0,
+                z: 0.0,
+            },
+            ..Default::default()
+        };
+        let rhs = Transform {
+            rotation: Quat {
+                x: -0.7071068,
+                y: 0.0,
+                z: 0.0,
+                w: 0.7071068,
+            }
+            .normalized(),
+            ..Default::default()
+        };
 
         let out = lhs * rhs;
         verify_composed(&lhs, &rhs, &out);
@@ -287,8 +356,29 @@ mod tests {
 
     #[test]
     fn compose_pos_rot3() {
-        let lhs = Transform { position: Vec3 { x: 0.0, y: 2.0, z: 0.0 }, rotation: Quat { x: 0.2, y: 0.0, z: 0.0, w: 1.0 }.normalized(), scale: 1.0 };
-        let rhs = Transform { position: Vec3 { x: 0.0, y: -5.0, z: 0.0 }, ..Default::default() };
+        let lhs = Transform {
+            position: Vec3 {
+                x: 0.0,
+                y: 2.0,
+                z: 0.0,
+            },
+            rotation: Quat {
+                x: 0.2,
+                y: 0.0,
+                z: 0.0,
+                w: 1.0,
+            }
+            .normalized(),
+            scale: 1.0,
+        };
+        let rhs = Transform {
+            position: Vec3 {
+                x: 0.0,
+                y: -5.0,
+                z: 0.0,
+            },
+            ..Default::default()
+        };
         let result = lhs * rhs;
 
         verify_composed(&lhs, &rhs, &result);

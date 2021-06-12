@@ -20,7 +20,7 @@ pub mod prelude {
 
 pub type Entity = specs::Entity;
 
-pub fn try_get_singleton_entity<C>(w: &World) -> Option<Entity>
+pub fn find_singleton_entity<C>(w: &World) -> Option<Entity>
 where
     C: specs::Component,
 {
@@ -39,7 +39,7 @@ pub fn get_singleton_entity<C>(w: &World) -> Entity
 where
     C: specs::Component,
 {
-    try_get_singleton_entity::<C>(w).expect("Expected an entity!")
+    find_singleton_entity::<C>(w).expect("Expected an entity!")
 }
 
 pub trait System<'a> {

@@ -15,6 +15,7 @@ struct PackedLight {
     vec4 pos;
     vec4 dir_cutoff;
     vec4 color_range; // .w is the range
+    uvec4 shadow_idx; // x is the index
 };
 
 layout(set = 0, binding = 1) uniform LightingData {
@@ -31,9 +32,11 @@ struct Light {
     vec3 color;
     float attenuation;
     vec3 direction;
+    uint shadow_idx;
 };
 
-layout(set = 0, binding = 2) uniform sampler2D shadow_map;
+#define NUM_SPOTLIGHT_SHADOW_MAPS (16)
+layout(set = 0, binding = 2) uniform sampler2D spotlight_shadow_maps[NUM_SPOTLIGHT_SHADOW_MAPS];
 
 // This is based on the recommended impl for KHR_punctual_lights:
 // https://github.com/KhronosGroup/glTF/blob/master/extensions/2.0/Khronos/KHR_lights_punctual/README.md#range-property
@@ -60,6 +63,7 @@ float remap(float x, float old_low, float old_high, float new_low, float new_hig
 Light unpack_light(PackedLight l, vec3 world_pos) {
     Light r;
     r.color = l.color_range.xyz;
+    r.shadow_idx = l.shadow_idx.x;
     if (l.pos.w == 0.0) {
         // Directional
         r.direction = normalize(-l.dir_cutoff.xyz);
@@ -108,13 +112,14 @@ layout(location = 0) in VsOut {
 } vs_out;
 
 float sample_shadow_map(uint idx, float n_dot_l) {
-    vec3 coords = vs_out.shadow_coords[0].xyz / vs_out.shadow_coords[0].w;
+    vec3 coords = vs_out.shadow_coords[idx].xyz / vs_out.shadow_coords[idx].w;
+    // Texture sample is done before 'if' to remain within uniform ctrl-flow 
+    float depth = texture(spotlight_shadow_maps[idx], coords.xy).r;
     // This would have been clipped during shadow pass => not in shadow
     // texture clamp_to_edge sampling mode handles xy clipping
     if (coords.z > 1.0 || coords.z < -1.0)
         return 1.0;
 
-    float depth = texture(shadow_map, coords.xy).r;
     float max_bias = 0.05;
     float min_bias = 0.005;
     float bias = max(max_bias * (1.0 - n_dot_l), min_bias); 
@@ -257,7 +262,10 @@ void main() {
         float n_dot_h = clamp(n_dot_h_unclamped, 0.0, 1.0);
         float h_dot_l = clamp(dot(bisect_light_view, light_dir), 0.0, 1.0);
 
-        float shadow_factor = sample_shadow_map(i, n_dot_l);
+        float shadow_factor = 1.0;
+        if (light.shadow_idx != 0xFFFFFFFF)
+            shadow_factor = sample_shadow_map(light.shadow_idx, n_dot_l);
+
         if (shadow_factor == 0.0)
             continue;
 

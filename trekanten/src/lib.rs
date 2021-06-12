@@ -25,6 +25,8 @@ pub use render_target::RenderTarget;
 pub use resource::{Async, Handle, MutResourceManager, ResourceManager};
 pub use texture::Texture;
 
+pub use command::CommandBuffer;
+
 use ash::version::DeviceV1_0;
 use backend::*;
 use common::MAX_FRAMES_IN_FLIGHT;
@@ -166,6 +168,13 @@ impl<'a> Frame<'a> {
             recorded_command_buffers,
             gfx_command_pool,
         }
+    }
+}
+
+// TODO: Refactor?
+impl<'a> Frame<'a> {
+    pub fn get_texture(&self, handle: &Handle<Texture>) -> Option<&Texture> {
+        self.renderer.get_texture(handle)
     }
 }
 

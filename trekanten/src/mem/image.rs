@@ -74,7 +74,7 @@ pub fn transition_image_layout(
         ..Default::default()
     };
 
-    cmd_buf.pipeline_barrier(&barrier, src_stage, dst_stage);
+    cmd_buf.pipeline_barrier(&[barrier], src_stage, dst_stage);
 }
 
 // TODO: This code depends on vk_image being TRANSFER_DST_OPTIMAL. We should track this together
@@ -159,13 +159,13 @@ pub fn generate_mipmaps(
 
         cmd_buf
             .pipeline_barrier(
-                &barrier,
+                &[barrier],
                 vk::PipelineStageFlags::TRANSFER,
                 vk::PipelineStageFlags::TRANSFER,
             )
             .blit_image(vk_image, vk_image, &image_blit)
             .pipeline_barrier(
-                &transistion_src_barrier,
+                &[transistion_src_barrier],
                 vk::PipelineStageFlags::TRANSFER,
                 vk::PipelineStageFlags::FRAGMENT_SHADER,
             );
@@ -195,7 +195,7 @@ pub fn generate_mipmaps(
     };
 
     cmd_buf.pipeline_barrier(
-        &last_mip_level_transition,
+        &[last_mip_level_transition],
         vk::PipelineStageFlags::TRANSFER,
         vk::PipelineStageFlags::FRAGMENT_SHADER,
     );

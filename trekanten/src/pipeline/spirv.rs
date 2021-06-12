@@ -156,7 +156,7 @@ pub fn parse_spirv(spv_data: &[u32]) -> Result<ReflectionData, SpirvError> {
             .map(|refl_binding| vk::DescriptorSetLayoutBinding {
                 binding: refl_binding.binding,
                 descriptor_type: map_descriptor_type(&refl_binding.descriptor_type),
-                descriptor_count: 1,
+                descriptor_count: refl_binding.count,
                 stage_flags,
                 ..Default::default()
             })
@@ -256,6 +256,25 @@ mod tests {
         frag
     );
 
+    static ARRAY_TEX_SPV_FRAG: &[u32] = inline_spirv::inline_spirv!(
+        r"
+        #version 450
+        #extension GL_ARB_separate_shader_objects : enable
+
+        layout(set = 0, binding = 0) uniform sampler2D texs[8];
+
+        layout(location = 0) in vec3 fragColor;
+        layout(location = 1) in vec2 fragTexCoord;
+
+        layout(location = 0) out vec4 outColor;
+
+        void main() {
+            outColor = texture(texs[0], fragTexCoord).xxyy * vec4(fragColor, 1.0) + vec4(fragTexCoord, 1.0, 0.0);
+        }
+    ",
+        frag
+    );
+
     use super::*;
 
     #[test]
@@ -307,6 +326,26 @@ mod tests {
         assert_eq!(pc0.offset, 0);
         assert_eq!(pc0.size, 128);
         assert_eq!(pc0.stage_flags, vk::ShaderStageFlags::FRAGMENT);
+    }
+
+    #[test]
+    fn parse_array_of_textures() {
+        let res = parse_spirv(ARRAY_TEX_SPV_FRAG).expect("Failed to parse!");
+        assert_eq!(res.desc_layouts.len(), 1);
+        assert_eq!(res.push_constants.len(), 0);
+
+        assert_eq!(res.desc_layouts[0].bindings.len(), 1);
+        assert_eq!(res.desc_layouts[0].set_idx, 0);
+
+        let binding: vk::DescriptorSetLayoutBinding = res.desc_layouts[0].bindings[0];
+
+        assert_eq!(
+            binding.descriptor_type,
+            vk::DescriptorType::COMBINED_IMAGE_SAMPLER
+        );
+        assert_eq!(binding.binding, 1);
+        assert_eq!(binding.descriptor_count, 8);
+        assert_eq!(binding.stage_flags, vk::ShaderStageFlags::FRAGMENT);
     }
 
     #[test]

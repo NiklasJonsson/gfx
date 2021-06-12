@@ -1,3 +1,5 @@
+use std::mem::MaybeUninit;
+
 use thiserror::Error;
 
 use crate::ecs::prelude::*;
@@ -33,11 +35,9 @@ use mesh::PendingMesh;
 
 use crate::camera::*;
 use crate::ecs;
-use crate::math::{Mat4, ModelMatrix, Transform, Vec3, Quat};
+use crate::math::{Mat4, ModelMatrix, Transform, Vec3};
 use material::{GpuMaterial, PendingMaterial};
 use ramneryd_derive::Inspect;
-
-use self::light::Light;
 
 pub fn camera_pos(world: &World) -> Vec3 {
     let camera_entity = ecs::get_singleton_entity::<Camera>(world);
@@ -48,13 +48,19 @@ pub fn camera_pos(world: &World) -> Vec3 {
         .position
 }
 
-struct ShadowData {
-    render_pass: Handle<trekanten::RenderPass>,
+struct SpotlightShadow {
     render_target: Handle<trekanten::RenderTarget>,
-    texture: Handle<trekanten::Texture>,
     view_data_buffer: BufferHandle<UniformBuffer>,
     view_data_desc_set: Handle<DescriptorSet>,
+    texture: Handle<trekanten::Texture>,
+}
+
+const NUM_SPOTLIGHT_SHADOW_MAPS: usize = 16;
+
+struct ShadowData {
+    render_pass: Handle<trekanten::RenderPass>,
     dummy_pipeline: Handle<GraphicsPipeline>,
+    spotlights: [SpotlightShadow; NUM_SPOTLIGHT_SHADOW_MAPS],
 }
 
 struct UnlitFrameUniformResources {
@@ -437,7 +443,7 @@ fn draw_entities<'a>(world: &World, cmd_buf: &mut RenderPassEncoder<'a>, mode: D
 
 #[profiling::function]
 pub fn draw_frame(world: &mut World, ui: &mut ui::UIContext, renderer: &mut Renderer) {
-    let cam_entity = ecs::try_get_singleton_entity::<Camera>(world);
+    let cam_entity = ecs::find_singleton_entity::<Camera>(world);
     if cam_entity.is_none() {
         log::warn!("Did not find a camera entity, can't render");
         return;
@@ -462,74 +468,14 @@ pub fn draw_frame(world: &mut World, ui: &mut ui::UIContext, renderer: &mut Rend
 
     let ui_draw_commands = ui.build_ui(world, &mut frame);
 
-    let frame_resources = &*world.read_resource::<FrameData>();
+    let frame_resources = &*world.write_resource::<FrameData>();
 
-    let mut cmd_buffer = frame
+    let cmd_buffer = frame
         .new_command_buffer()
         .expect("Failed to create command buffer");
 
-    // Shadows
-    {
-        let lights = world.read_storage::<light::Light>();
-        let transforms = world.read_storage::<Transform>();
-        let mut view_data = uniform::ViewData::default();
-        let mut shadow_matrices = uniform::ShadowMatrices::default();
-        for (light, tfm) in (&lights, &transforms).join() {
-            match light {
-                light::Light::Spot { angle, range, .. } => {
-                    let proj = crate::math::perspective_vk(angle * 2.0, 1.0, 1.0, *range);
-                    let view = Mat4::from(*tfm).inverted();
-                    view_data.view_pos = [tfm.position[0], tfm.position[1], tfm.position[2], 1.0];
-                    view_data.view_proj = (proj * view).into_col_array();
-                    shadow_matrices.matrices[shadow_matrices.num_matrices as usize] =
-                        view_data.view_proj;
-                    shadow_matrices.num_matrices += 1;
-                }
-                _ => (),
-            }
-        }
-
-        let FrameData {
-            shadow:
-                ShadowData {
-                    view_data_buffer,
-                    render_pass,
-                    render_target,
-                    dummy_pipeline,
-                    view_data_desc_set,
-                    ..
-                },
-            pbr_resources,
-            ..
-        } = frame_resources;
-        frame
-            .update_uniform_blocking(view_data_buffer, &view_data)
-            .expect("Failed to update uniform for shadow pass");
-
-        frame
-            .update_uniform_blocking(&pbr_resources.shadow_matrices_buffer, &shadow_matrices)
-            .expect("Failed to update matrices for shadow coords");
-        let clear_values = [trekanten::raw_vk::ClearValue {
-            depth_stencil: trekanten::raw_vk::ClearDepthStencilValue {
-                depth: 1.0,
-                stencil: 0,
-            },
-        }];
-        let mut shadow_rp = frame
-            .begin_render_pass(
-                cmd_buffer,
-                render_pass,
-                render_target,
-                SHADOW_MAP_EXTENT,
-                &clear_values,
-            )
-            .expect("Failed to shadow begin render pass");
-        shadow_rp
-            .bind_graphics_pipeline(dummy_pipeline)
-            .bind_shader_resource_group(0u32, view_data_desc_set, dummy_pipeline);
-        draw_entities(world, &mut shadow_rp, DrawMode::ShadowsOnly);
-        cmd_buffer = shadow_rp.end().expect("Failed to end shadow render pass");
-    }
+    let mut cmd_buffer =
+        light::light_and_shadow_pass(world, &mut frame, &frame_resources, cmd_buffer);
 
     // View data main render pass
     {
@@ -543,11 +489,6 @@ pub fn draw_frame(world: &mut World, ui: &mut ui::UIContext, renderer: &mut Rend
         frame
             .update_uniform_blocking(&frame_resources.main_camera_view_data, &view_data)
             .expect("Failed to update uniform");
-
-        let data = light::build_light_data_uniform(world);
-        frame
-            .update_uniform_blocking(&frame_resources.pbr_resources.light_buffer, &data)
-            .expect("Failed to update light");
     }
 
     {
@@ -677,8 +618,8 @@ fn shadow_render_pass(renderer: &mut Renderer) -> Handle<trekanten::RenderPass> 
 
 // TODO: Runtime
 const SHADOW_MAP_EXTENT: trekanten::util::Extent2D = trekanten::util::Extent2D {
-    width: 2048,
-    height: 2048,
+    width: 1024,
+    height: 1024,
 };
 
 fn shadow_render_target(
@@ -713,12 +654,44 @@ fn shadow_render_target(
 fn build_shadow_data(
     shader_compiler: &pipeline::ShaderCompiler,
     renderer: &mut Renderer,
-    shadow_view_data: BufferHandle<UniformBuffer>,
 ) -> ShadowData {
     use uniform::UniformBlock as _;
 
     let shadow_render_pass = shadow_render_pass(renderer);
-    let (shadow_map, shadow_render_target) = shadow_render_target(renderer, &shadow_render_pass);
+    let view_data = vec![
+        uniform::ViewData {
+            view_proj: [0.0; 16],
+            view_pos: [0.0; 4],
+        };
+        NUM_SPOTLIGHT_SHADOW_MAPS
+    ];
+    let view_data = OwningUniformBufferDescriptor::from_vec(view_data, BufferMutability::Mutable);
+    let view_data_buffer_handles = renderer
+        .create_resource_blocking(view_data)
+        .expect("FAIL")
+        .split();
+    let spotlights: [SpotlightShadow; NUM_SPOTLIGHT_SHADOW_MAPS] = {
+        let mut data: [MaybeUninit<SpotlightShadow>; NUM_SPOTLIGHT_SHADOW_MAPS] =
+            unsafe { MaybeUninit::uninit().assume_init() };
+        for i in 0..NUM_SPOTLIGHT_SHADOW_MAPS {
+            let (texture, render_target) = shadow_render_target(renderer, &shadow_render_pass);
+            let view_data_buffer = view_data_buffer_handles[i];
+            let sh_view_data_set = DescriptorSet::builder(renderer)
+                .add_buffer(
+                    &view_data_buffer,
+                    uniform::ViewData::BINDING,
+                    trekanten::pipeline::ShaderStage::VERTEX,
+                )
+                .build();
+            data[i] = MaybeUninit::new(SpotlightShadow {
+                texture,
+                render_target,
+                view_data_buffer,
+                view_data_desc_set: sh_view_data_set,
+            });
+        }
+        unsafe { std::mem::transmute(data) }
+    };
     let shadow_dummy_pipeline = {
         let pos_only_vertex_format = VertexFormat::builder()
             .add_attribute(util::Format::FLOAT3)
@@ -730,21 +703,10 @@ fn build_shadow_data(
             .expect("Failed to create pipeline for shadow")
     };
 
-    let sh_view_data_set = DescriptorSet::builder(renderer)
-        .add_buffer(
-            &shadow_view_data,
-            uniform::ViewData::BINDING,
-            trekanten::pipeline::ShaderStage::VERTEX,
-        )
-        .build();
-
     ShadowData {
-        render_target: shadow_render_target,
         render_pass: shadow_render_pass,
-        texture: shadow_map,
-        view_data_buffer: shadow_view_data,
-        view_data_desc_set: sh_view_data_set,
         dummy_pipeline: shadow_dummy_pipeline,
+        spotlights,
     }
 }
 
@@ -769,7 +731,7 @@ pub fn setup_resources(world: &mut World, mut renderer: &mut Renderer) {
             .presentation_render_pass(8)
             .expect("main render pass creation failed");
 
-        const N_VIEW_DATA: usize = 2;
+        const N_VIEW_DATA: usize = 1;
         let view_data = vec![
             uniform::ViewData {
                 view_proj: [0.0; 16],
@@ -779,13 +741,8 @@ pub fn setup_resources(world: &mut World, mut renderer: &mut Renderer) {
         ];
         let view_data =
             OwningUniformBufferDescriptor::from_vec(view_data, BufferMutability::Mutable);
-        let view_data = renderer
-            .create_resource_blocking(view_data)
-            .expect("FAIL")
-            .split();
-        let main_camera_view_data = view_data[0];
-        let shadow_view_data = view_data[1];
-        let shadow_data = build_shadow_data(&shader_compiler, renderer, shadow_view_data);
+        let main_camera_view_data = renderer.create_resource_blocking(view_data).expect("FAIL");
+        let shadow_data = build_shadow_data(&shader_compiler, renderer);
 
         let pbr_resources = {
             let vertex_format = VertexFormat::builder()
@@ -833,6 +790,7 @@ pub fn setup_resources(world: &mut World, mut renderer: &mut Renderer) {
                 .expect("Failed to create shadow matrix uniform buffer");
 
             assert_eq!(uniform::LightingData::SET, uniform::ViewData::SET);
+            let texture_itr = shadow_data.spotlights.iter().map(|x| (x.texture, true));
             let shader_resource_group = DescriptorSet::builder(&mut renderer)
                 .add_buffer(
                     &main_camera_view_data,
@@ -844,7 +802,7 @@ pub fn setup_resources(world: &mut World, mut renderer: &mut Renderer) {
                     uniform::LightingData::BINDING,
                     ShaderStage::FRAGMENT,
                 )
-                .add_texture(&shadow_data.texture, 2, ShaderStage::FRAGMENT, true)
+                .add_textures(texture_itr, 2, ShaderStage::FRAGMENT)
                 .add_buffer(&shadow_matrices_buffer, 3, ShaderStage::VERTEX)
                 .build();
 
@@ -903,8 +861,6 @@ pub enum Pending<T1, T2> {
     Available(T2),
 }
 
-#[derive(Component)]
-struct UploadAsync;
 struct GpuUpload;
 impl GpuUpload {
     pub const ID: &'static str = "GpuUpload";

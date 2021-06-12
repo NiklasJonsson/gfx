@@ -448,7 +448,7 @@ impl CommandBuffer {
 
     pub fn pipeline_barrier(
         &mut self,
-        barrier: &vk::ImageMemoryBarrier,
+        image_barriers: &[vk::ImageMemoryBarrier],
         src_stage: vk::PipelineStageFlags,
         dst_stage: vk::PipelineStageFlags,
     ) -> &mut Self {
@@ -460,7 +460,7 @@ impl CommandBuffer {
                 vk::DependencyFlags::empty(),
                 &[],
                 &[],
-                &[*barrier],
+                image_barriers,
             );
         }
 

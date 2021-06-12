@@ -133,13 +133,13 @@ impl<'a> DescriptorSetBuilder<'a> {
     }
 }
 
-// TOOD: Builder should fail if any of the resources are still pending
 impl<'a> DescriptorSetBuilder<'a> {
     fn add_binding(
         &mut self,
         ty: vk::DescriptorType,
         binding: u32,
         stage_flags: vk::ShaderStageFlags,
+        count: u32,
     ) {
         let idx = if let vk::DescriptorType::UNIFORM_BUFFER = ty {
             self.buffer_infos.len()
@@ -151,7 +151,7 @@ impl<'a> DescriptorSetBuilder<'a> {
             vk::DescriptorSetLayoutBinding {
                 binding,
                 descriptor_type: ty,
-                descriptor_count: 1,
+                descriptor_count: count,
                 stage_flags,
                 ..Default::default()
             },
@@ -191,6 +191,7 @@ impl<'a> DescriptorSetBuilder<'a> {
             vk::DescriptorType::UNIFORM_BUFFER,
             binding,
             vk::ShaderStageFlags::from(stage),
+            1,
         );
 
         // TODO: This should check mutability of buffer
@@ -231,6 +232,7 @@ impl<'a> DescriptorSetBuilder<'a> {
             vk::DescriptorType::COMBINED_IMAGE_SAMPLER,
             binding,
             vk::ShaderStageFlags::from(stage),
+            1,
         );
 
         let image_layout = if is_depth {
@@ -238,7 +240,6 @@ impl<'a> DescriptorSetBuilder<'a> {
         } else {
             vk::ImageLayout::SHADER_READ_ONLY_OPTIMAL
         };
-        // TODO: Here we should use the layout from the image if we tracked it
         self.image_infos.push(vk::DescriptorImageInfo {
             image_layout,
             image_view,
@@ -249,19 +250,66 @@ impl<'a> DescriptorSetBuilder<'a> {
         self
     }
 
+    pub fn add_textures<I>(mut self, itr: I, binding: u32, stage: ShaderStage) -> Self
+    where
+        I: Iterator<Item = (Handle<Texture>, bool)> + ExactSizeIterator,
+    {
+        self.add_binding(
+            vk::DescriptorType::COMBINED_IMAGE_SAMPLER,
+            binding,
+            vk::ShaderStageFlags::from(stage),
+            itr.len() as u32,
+        );
+
+        for (tex_handle, is_depth) in itr {
+            let tex = self
+                .renderer
+                .get_texture(&tex_handle)
+                .expect("Failed to get texture");
+
+            let image_view = *tex.image_view().vk_image_view();
+            let sampler = *tex.vk_sampler();
+
+            let image_layout = if is_depth {
+                vk::ImageLayout::DEPTH_STENCIL_READ_ONLY_OPTIMAL
+            } else {
+                vk::ImageLayout::SHADER_READ_ONLY_OPTIMAL
+            };
+            self.image_infos.push(vk::DescriptorImageInfo {
+                image_layout,
+                image_view,
+                sampler,
+            });
+        }
+
+        self
+    }
+
     pub fn build(self) -> Handle<DescriptorSet> {
         let bindings_only = self.bindings.iter().map(|(x, _)| *x).collect::<Vec<_>>();
         let (handle, sets) = self.renderer.allocate_descriptor_sets(&bindings_only);
         let mut writes = Vec::new();
+
         for (bind_idx, (bind, info_idx)) in self.bindings.into_iter().enumerate() {
             for (set_idx, set) in sets.iter().enumerate() {
                 if bind.descriptor_type == vk::DescriptorType::UNIFORM_BUFFER {
-                    writes.push(
-                        set.write_buffer(&self.buffer_infos[info_idx][set_idx], bind_idx as u32),
-                    );
+                    writes.push(set.write_buffer(
+                        &self.buffer_infos[info_idx][set_idx],
+                        bind_idx as u32,
+                        1,
+                    ));
                 } else {
                     assert!(bind.descriptor_type == vk::DescriptorType::COMBINED_IMAGE_SAMPLER);
-                    writes.push(set.write_image(&self.image_infos[info_idx], bind_idx as u32));
+                    assert!(self.image_infos.len() >= (info_idx + bind.descriptor_count as usize));
+                    let write = vk::WriteDescriptorSet {
+                        dst_set: set.vk_descriptor_set,
+                        dst_binding: bind_idx as u32,
+                        descriptor_count: bind.descriptor_count,
+                        descriptor_type: vk::DescriptorType::COMBINED_IMAGE_SAMPLER,
+                        p_image_info: &self.image_infos[info_idx] as *const vk::DescriptorImageInfo,
+                        ..Default::default()
+                    };
+                    writes.push(write);
                 }
             }
         }
@@ -290,28 +338,14 @@ impl DescriptorSet {
         &self,
         buffer: &vk::DescriptorBufferInfo,
         dst_binding: u32,
+        count: u32,
     ) -> vk::WriteDescriptorSet {
         vk::WriteDescriptorSet {
             dst_set: self.vk_descriptor_set,
             dst_binding,
-            descriptor_count: 1,
+            descriptor_count: count,
             descriptor_type: vk::DescriptorType::UNIFORM_BUFFER,
             p_buffer_info: buffer as *const vk::DescriptorBufferInfo,
-            ..Default::default()
-        }
-    }
-
-    fn write_image(
-        &self,
-        image: &vk::DescriptorImageInfo,
-        dst_binding: u32,
-    ) -> vk::WriteDescriptorSet {
-        vk::WriteDescriptorSet {
-            dst_set: self.vk_descriptor_set,
-            dst_binding,
-            descriptor_count: 1,
-            descriptor_type: vk::DescriptorType::COMBINED_IMAGE_SAMPLER,
-            p_image_info: image as *const vk::DescriptorImageInfo,
             ..Default::default()
         }
     }

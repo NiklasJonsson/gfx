@@ -76,8 +76,6 @@ impl<T> Clone for BufferHandle<T> {
 }
 impl<T> Copy for BufferHandle<T> {}
 
-use crate::resource::Async;
-
 impl<T> PartialEq for BufferHandle<T> {
     fn eq(&self, o: &Self) -> bool {
         return self.h == o.h
@@ -145,28 +143,6 @@ impl<T> BufferHandle<T> {
 
     pub fn n_elems(&self) -> u32 {
         self.n_elems
-    }
-
-    // TODO: pub(crate)
-    pub fn wrap_async(&self) -> BufferHandle<Async<T>> {
-        BufferHandle::<Async<T>> {
-            h: self.h.wrap_async(),
-            idx: self.idx,
-            n_elems: self.n_elems,
-            mutability: self.mutability,
-        }
-    }
-}
-
-impl<T> BufferHandle<Async<T>> {
-    // TODO: pub(crate)
-    pub fn unwrap_async(&self) -> BufferHandle<T> {
-        BufferHandle::<T> {
-            h: self.h.unwrap_async(),
-            idx: self.idx,
-            n_elems: self.n_elems,
-            mutability: self.mutability,
-        }
     }
 }
 

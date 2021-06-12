@@ -34,12 +34,24 @@ impl UniformBlock for UnlitUniformData {
 }
 impl Uniform for UnlitUniformData {}
 
-#[derive(Copy, Clone, Debug, Default)]
+#[derive(Copy, Clone, Debug)]
 #[repr(C, packed)]
 pub struct PackedLight {
     pub pos: [f32; 4],         // position for point/spot light
     pub dir_cutoff: [f32; 4], // direction for spot/directional light. .w is the cos(cutoff_angle) of the spotlight
     pub color_range: [f32; 4], // color for all light types. .w is the range of point/spot lights
+    pub shadow_idx: [u32; 4],
+}
+
+impl Default for PackedLight {
+    fn default() -> Self {
+        Self {
+            pos: [0.0; 4],
+            dir_cutoff: [0.0; 4],
+            color_range: [0.0; 4],
+            shadow_idx: [u32::MAX; 4],
+        }
+    }
 }
 
 pub type Mat4 = [f32; 16];

@@ -488,7 +488,7 @@ impl<T> TextureStorage<T> {
         self.storage.add(t)
     }
 
-    pub fn cached(&self, descriptor: &TextureDescriptor) -> Option<Handle<T>> {
+    pub fn cached(&self, _descriptor: &TextureDescriptor) -> Option<Handle<T>> {
         None
     }
 }
