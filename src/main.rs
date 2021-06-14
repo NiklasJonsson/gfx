@@ -1,5 +1,7 @@
 use std::sync::Arc;
 
+#[macro_use]
+mod macros;
 mod arg_parse;
 mod asset;
 mod camera;
@@ -15,7 +17,6 @@ mod render;
 mod time;
 
 use arg_parse::Args;
-use common::Name;
 use time::DeltaTime;
 
 use game_state::GameState;
@@ -70,17 +71,10 @@ impl App {
     fn init_dispatchers<'a, 'b>() -> (Executor<'a, 'b>, Executor<'a, 'b>) {
         let control_builder = ExecutorBuilder::new();
         // Input needs to go before as most systems depends on it
-        let control_builder = io::input::register_systems(control_builder);
-        let control_builder = game_state::register_systems(control_builder);
-
-        let control = control_builder.build();
+        let control = register_module_systems!(control_builder, io::input, game_state).build();
 
         let engine_builder = ExecutorBuilder::new();
-        let engine_builder = asset::register_systems(engine_builder);
-        let engine_builder = camera::register_systems(engine_builder);
-        let engine_builder = render::register_systems(engine_builder);
-
-        let engine = engine_builder
+        let engine = register_module_systems!(engine_builder, asset, camera, render)
             .with_barrier()
             .with(
                 graph::TransformPropagation,
@@ -98,106 +92,12 @@ impl App {
 
     fn populate_world(&mut self, args: &Args) {
         self.setup_resources();
-        asset::gltf::load_asset(&mut self.world, &args.gltf_path);
-        self.world
-            .create_entity()
-            .with(render::light::Light::Ambient {
-                color: math::Rgb {
-                    r: 1.0,
-                    g: 1.0,
-                    b: 1.0,
-                },
-                strength: 0.01,
-            })
-            .with(math::Transform::pos(2.0, 1.0, 3.0))
-            .with(Name::from("Ambient light"))
-            .build();
-        self.world
-            .create_entity()
-            .with(render::light::Light::Point {
-                color: math::Rgb {
-                    r: 1.0,
-                    g: 0.5,
-                    b: 1.0,
-                },
-                range: 5.0,
-            })
-            .with(Name::from("Point light"))
-            .with(math::Transform::pos(2.0, 1.0, 3.0))
-            .build();
-        self.world
-            .create_entity()
-            .with(render::light::Light::Directional {
-                color: math::Rgb {
-                    r: 1.0,
-                    g: 1.0,
-                    b: 1.0,
-                },
-            })
-            .with(math::Transform::identity())
-            .build();
-        self.world
-            .create_entity()
-            .with(render::light::Light::Spot {
-                color: math::Rgb {
-                    r: 1.0,
-                    g: 1.0,
-                    b: 1.0,
-                },
-                angle: std::f32::consts::FRAC_PI_8,
-                range: 5.0,
-            })
-            .with(math::Transform {
-                position: math::Vec3::new(0.0, 3.0, 0.0),
-                rotation: math::Quat::rotation_from_to_3d(
-                    render::light::Light::DEFAULT_FACING,
-                    math::Vec3::new(0.0, -1.0, 0.0),
-                ),
-                ..Default::default()
-            })
-            .with(Name::from("Spot light 1"))
-            .build();
-
-        self.world
-            .create_entity()
-            .with(render::light::Light::Spot {
-                color: math::Rgb {
-                    r: 1.0,
-                    g: 1.0,
-                    b: 1.0,
-                },
-                angle: std::f32::consts::FRAC_PI_8,
-                range: 5.0,
-            })
-            .with(math::Transform {
-                position: math::Vec3::new(0.0, 3.0, 0.0),
-                //rotation: math::Quat::rotation_from_to_3d(render::light::Light::DEFAULT_FACING, math::Vec3::new(0.0, -1.0, 0.0)),
-                ..Default::default()
-            })
-            .with(Name::from("Spot light 2"))
-            .build();
-
-        self.world
-            .create_entity()
-            .with(render::light::Light::Spot {
-                color: math::Rgb {
-                    r: 1.0,
-                    g: 1.0,
-                    b: 1.0,
-                },
-                angle: std::f32::consts::FRAC_PI_8,
-                range: 5.0,
-            })
-            .with(math::Transform {
-                position: math::Vec3::new(0.0, 3.0, 0.0),
-                rotation: math::Quat::rotation_from_to_3d(
-                    render::light::Light::DEFAULT_FACING,
-                    -render::light::Light::DEFAULT_FACING,
-                ),
-                ..Default::default()
-            })
-            .with(Name::from("Spot light 3"))
-            .build();
+        if let Some(p) = &args.gltf_path {
+            asset::gltf::load_asset(&mut self.world, p);
+        }
+        for p in &args.rsf_paths {
+            asset::rsf::load_asset(&mut self.world, p);
+        }
     }
 
     fn next_event(&self) -> Option<Event> {
@@ -306,6 +206,7 @@ impl App {
         let mut world = World::new();
         ecs::meta::register_all_components(&mut world);
 
+        ecs::serde::setup_resources(&mut world);
         render::setup_resources(&mut world, &mut renderer);
 
         let (mut control_systems, mut engine_systems) = Self::init_dispatchers();

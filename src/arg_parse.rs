@@ -1,7 +1,8 @@
 use std::path::PathBuf;
 
 pub struct Args {
-    pub gltf_path: PathBuf,
+    pub gltf_path: Option<PathBuf>,
+    pub rsf_paths: Vec<PathBuf>,
     pub use_scene_camera: bool,
     pub run_n_frames: Option<usize>,
     pub scene_out_file: Option<PathBuf>,
@@ -17,10 +18,8 @@ pub fn parse() -> Option<Args> {
                 .long("view-gltf")
                 .value_name("GLTF-FILE")
                 .help("Reads a gltf file and renders it.")
-                .takes_value(true)
-                .required(true),
+                .takes_value(true),
         )
-        // TODO: This can only be used if we are passing a scene from the command line
         .arg(
             clap::Arg::with_name("use-scene-camera")
                 .long("use-scene-camera")
@@ -42,14 +41,16 @@ pub fn parse() -> Option<Args> {
                 .takes_value(true)
                 .help("Run only N frames"),
         )
+        .arg(
+            clap::Arg::with_name("rsf-file")
+                .long("rsf-file")
+                .takes_value(true)
+                .multiple(true)
+                .number_of_values(1),
+        )
         .get_matches();
 
-    let path = matches.value_of("view-gltf").expect("This is required!");
-    let path_buf = PathBuf::from(path);
-    if !path_buf.exists() {
-        println!("No such path: {}!", path_buf.as_path().display());
-        return None;
-    }
+    let gltf_path = matches.value_of("view-gltf").map(|x| PathBuf::from(x));
 
     let use_scene_camera = matches.is_present("use-scene-camera");
 
@@ -66,9 +67,14 @@ pub fn parse() -> Option<Args> {
     };
 
     let scene_out_file = matches.value_of("scene-out-file").map(PathBuf::from);
+    let rsf_paths = matches
+        .values_of("rsf-file")
+        .map(|x| x.map(PathBuf::from).collect())
+        .unwrap_or_default();
 
     Some(Args {
-        gltf_path: path_buf,
+        rsf_paths,
+        gltf_path,
         use_scene_camera,
         run_n_frames,
         scene_out_file,

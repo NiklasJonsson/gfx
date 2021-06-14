@@ -1,5 +1,7 @@
 use crate::ecs::prelude::*;
 
+use serde::{Deserialize, Serialize};
+
 pub type Vec3 = vek::Vec3<f32>;
 pub type Vec4 = vek::Vec4<f32>;
 pub type Mat4 = vek::Mat4<f32>;
@@ -7,7 +9,7 @@ pub type Quat = vek::Quaternion<f32>;
 pub type Rgb = vek::Rgb<f32>;
 pub type Rgba = vek::Rgba<f32>;
 
-#[derive(Debug, Component, Copy, Clone, PartialEq)]
+#[derive(Debug, Copy, Component, Clone, PartialEq, Serialize, Deserialize)]
 #[component(inspect)]
 pub struct Transform {
     pub position: Vec3,

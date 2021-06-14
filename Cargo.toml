@@ -15,7 +15,7 @@ ramneryd-derive = { path = "ramneryd-derive" }
 
 # ECS
 specs-hierarchy = "0.6.0"
-specs = { version = "0.16.1", features = ["specs-derive"] }
+specs = { version = "0.16.1", features = ["specs-derive", "serde"] }
 
 # Rendering/Graphics
 winit = "0.22.2"
@@ -24,12 +24,13 @@ imgui = "0.6.1"
 shaderc = "0.6.2"
 
 # Math/Physics
-vek = "0.15.1"
+vek = { version = "0.15.1", features = ["serde"] }
 num-derive = "0.2.5"
 num-traits = "0.2.8"
 
 # Resources/Assets
 gltf = "0.14.0"
+ron = "0.6.2"
 
 # Util
 log = "0.4.8"

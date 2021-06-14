@@ -1141,12 +1141,9 @@ impl<'a> System<'a> for GpuUpload {
 }
 
 pub fn register_systems<'a, 'b>(builder: ExecutorBuilder<'a, 'b>) -> ExecutorBuilder<'a, 'b> {
-    [
-        debug_window::register_systems,
-        bounding_box::register_systems,
-        light::register_systems,
-    ]
-    .iter()
-    .fold(builder, |a, x| x(a))
-    .with(GpuUpload, GpuUpload::ID, &[])
+    register_module_systems!(builder, debug_window, bounding_box, light).with(
+        GpuUpload,
+        GpuUpload::ID,
+        &[],
+    )
 }

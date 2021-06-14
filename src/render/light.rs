@@ -15,7 +15,7 @@ pub struct RenderLightVolume;
 #[component(storage = "NullStorage")]
 pub struct LightVolumeRenderer;
 
-#[derive(Component)]
+#[derive(Component, serde::Serialize, serde::Deserialize, Clone, Debug)]
 #[component(inspect)]
 pub enum Light {
     // Range is the radius of the sphere

@@ -1,6 +1,10 @@
 use crate::ecs::prelude::*;
 
-#[derive(Debug, Default, Clone, PartialEq, Eq, PartialOrd, Ord, Component)]
+use serde::{Deserialize, Serialize};
+
+#[derive(
+    Debug, Default, Clone, PartialEq, Eq, PartialOrd, Ord, Component, Serialize, Deserialize,
+)]
 #[component(inspect)]
 pub struct Name(pub String);
 

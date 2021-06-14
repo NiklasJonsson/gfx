@@ -18,6 +18,61 @@ pub mod prelude {
     pub use super::{Executor, ExecutorBuilder, System, World};
 }
 
+pub mod serde {
+    use super::prelude::*;
+    use specs::saveload::{SimpleMarker, SimpleMarkerAllocator};
+
+    #[derive(Debug)]
+    pub enum Error {
+        Ron(ron::Error),
+    }
+
+    impl std::fmt::Display for Error {
+        fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
+            match *self {
+                Self::Ron(ref e) => write!(f, "{}", e),
+            }
+        }
+    }
+
+    impl From<ron::Error> for Error {
+        fn from(x: ron::Error) -> Self {
+            Self::Ron(x)
+        }
+    }
+
+    // This cannot be called.
+    impl From<std::convert::Infallible> for Error {
+        fn from(_: std::convert::Infallible) -> Self {
+            unreachable!()
+        }
+    }
+
+    impl From<specs::error::NoError> for Error {
+        fn from(_: specs::error::NoError) -> Self {
+            unreachable!()
+        }
+    }
+
+    pub struct DoSerialize;
+    pub type Marker = SimpleMarker<DoSerialize>;
+    pub type MarkerAllocator = SimpleMarkerAllocator<DoSerialize>;
+
+    #[derive(SystemData)]
+    pub struct Data<'a> {
+        pub entities: Entities<'a>,
+        pub markers: WriteStorage<'a, Marker>,
+        pub allocator: Write<'a, MarkerAllocator>,
+        pub transforms: WriteStorage<'a, crate::math::Transform>,
+        pub lights: WriteStorage<'a, crate::render::light::Light>,
+        pub names: WriteStorage<'a, crate::common::Name>,
+    }
+
+    pub fn setup_resources(world: &mut World) {
+        world.insert(MarkerAllocator::new())
+    }
+}
+
 pub type Entity = specs::Entity;
 
 pub fn find_singleton_entity<C>(w: &World) -> Option<Entity>
@@ -148,6 +203,8 @@ pub mod meta {
     }
 
     pub fn register_all_components(world: &mut super::World) {
+        use specs::WorldExt;
+        world.register::<super::serde::Marker>();
         for comp in ALL_COMPONENTS {
             (comp.register)(world);
         }
