@@ -154,6 +154,12 @@ pub enum ShaderType {
     Fragment,
 }
 
+#[cfg(windows)]
+const SHADER_PATH: &str = concat!(env!("OUT_DIR"), "\\builtin-shaders");
+
+#[cfg(not(windows))]
+const SHADER_PATH: &str = concat!(env!("OUT_DIR"), "/builtin-shaders");
+
 #[derive(Debug, Error)]
 pub enum CompilerError {
     #[error("Failed to initialize")]
@@ -202,11 +208,7 @@ impl ShaderCompiler {
             ShaderType::Vertex => shaderc::ShaderKind::Vertex,
         };
 
-        let path = PathBuf::new()
-            .join("src")
-            .join("render")
-            .join("shaders")
-            .join(rel_path);
+        let path = PathBuf::from(SHADER_PATH).join(rel_path);
 
         let source = std::fs::read_to_string(path)?;
 

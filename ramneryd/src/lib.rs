@@ -2,22 +2,20 @@ use std::sync::Arc;
 
 #[macro_use]
 mod macros;
-mod arg_parse;
-mod asset;
+pub mod asset;
 mod camera;
-mod common;
-mod ecs;
+pub mod common;
+pub mod ecs;
 mod editor;
 mod game_state;
 mod graph;
 mod io;
-mod math;
+pub mod math;
 mod profile;
-mod render;
+pub mod render;
 mod time;
 
-use arg_parse::Args;
-use time::DeltaTime;
+use time::Time;
 
 use game_state::GameState;
 
@@ -25,32 +23,30 @@ use ecs::prelude::*;
 use io::event::Event;
 
 #[derive(Debug, PartialEq, Eq)]
-enum AppState {
+enum State {
     Focused,
     Unfocused,
 }
 
 #[derive(Debug, PartialEq, Eq)]
-enum AppAction {
+enum Action {
     Quit,
     SkipFrame,
     ContinueFrame,
 }
 
-struct App {
+struct Engine {
     world: World,
     event_queue: Arc<io::EventQueue>,
-    renderer: trekanten::Renderer,
     ui: render::ui::UIContext,
-    state: AppState,
+    state: State,
     control_systems: ecs::Executor<'static, 'static>,
     engine_systems: ecs::Executor<'static, 'static>,
-    frame_count: usize,
-    timer: time::Timer,
+    renderer: trekanten::Renderer,
 }
 
 /* Unused for now
-impl App {
+impl Engine {
     fn take_cursor(&mut self) {
         self.cursor_grab(true);
     }
@@ -67,7 +63,7 @@ impl App {
 }
 */
 
-impl App {
+impl Engine {
     fn init_dispatchers<'a, 'b>() -> (Executor<'a, 'b>, Executor<'a, 'b>) {
         let control_builder = ExecutorBuilder::new();
         // Input needs to go before as most systems depends on it
@@ -84,20 +80,6 @@ impl App {
             .build();
 
         (control, engine)
-    }
-
-    fn setup_resources(&mut self) {
-        self.world.insert(DeltaTime::zero());
-    }
-
-    fn populate_world(&mut self, args: &Args) {
-        self.setup_resources();
-        if let Some(p) = &args.gltf_path {
-            asset::gltf::load_asset(&mut self.world, p);
-        }
-        for p in &args.rsf_paths {
-            asset::rsf::load_asset(&mut self.world, p);
-        }
     }
 
     fn next_event(&self) -> Option<Event> {
@@ -117,35 +99,20 @@ impl App {
     }
 
     #[profiling::function]
-    fn post_frame(&mut self, args: &arg_parse::Args) -> AppAction {
+    fn post_frame(&mut self) {
         self.world.maintain();
-
-        let mut cur_inputs = self
-            .world
-            .write_resource::<io::input::CurrentFrameExternalInputs>();
-        cur_inputs.0.clear();
-
-        self.frame_count += 1;
-        if let Some(n_frames) = args.run_n_frames {
-            assert!(self.frame_count <= n_frames);
-            if self.frame_count == n_frames {
-                return AppAction::Quit;
-            }
-        }
-
-        AppAction::ContinueFrame
+        io::post_frame(&mut self.world);
     }
 
     #[profiling::function]
-    fn pre_frame(&mut self) -> AppAction {
-        self.timer.tick();
-        *self.world.write_resource::<DeltaTime>() = self.timer.delta();
+    fn pre_frame(&mut self) -> Action {
+        self.world.write_resource::<Time>().tick();
 
         match self.next_event() {
-            Some(Event::Quit) => return AppAction::Quit,
-            Some(Event::Focus) => self.state = AppState::Focused,
+            Some(Event::Quit) => return Action::Quit,
+            Some(Event::Focus) => self.state = State::Focused,
             Some(Event::Unfocus) => {
-                self.state = AppState::Unfocused;
+                self.state = State::Unfocused;
                 *self.world.write_resource::<GameState>() = GameState::Paused;
             }
             Some(Event::Input(input)) => {
@@ -158,28 +125,25 @@ impl App {
             None | Some(Event::Resize(_)) => (),
         }
 
-        let focused = self.state == AppState::Focused;
+        let focused = self.state == State::Focused;
 
         if !focused {
-            return AppAction::SkipFrame;
+            return Action::SkipFrame;
         }
 
         self.ui.pre_frame(&self.world);
 
-        AppAction::ContinueFrame
+        Action::ContinueFrame
     }
 
     #[profiling::function]
-    fn run(&mut self, args: arg_parse::Args) {
-        self.populate_world(&args);
-        self.timer.start();
-
+    fn run(&mut self) {
         loop {
             profiling::scope!("main_loop");
             match self.pre_frame() {
-                AppAction::Quit => return,
-                AppAction::SkipFrame => continue,
-                AppAction::ContinueFrame => (),
+                Action::Quit => return,
+                Action::SkipFrame => continue,
+                Action::ContinueFrame => (),
             }
 
             self.control_systems.execute(&self.world);
@@ -189,58 +153,24 @@ impl App {
             }
             render::draw_frame(&mut self.world, &mut self.ui, &mut self.renderer);
 
-            if let AppAction::Quit = self.post_frame(&args) {
-                return;
-            }
-
+            self.post_frame();
             profiling::finish_frame!();
-        }
-    }
-
-    #[profiling::function]
-    fn new(
-        mut renderer: trekanten::Renderer,
-        window: winit::window::Window,
-        event_queue: Arc<io::EventQueue>,
-    ) -> Self {
-        let mut world = World::new();
-        ecs::meta::register_all_components(&mut world);
-
-        ecs::serde::setup_resources(&mut world);
-        render::setup_resources(&mut world, &mut renderer);
-
-        let (mut control_systems, mut engine_systems) = Self::init_dispatchers();
-        control_systems.setup(&mut world);
-        engine_systems.setup(&mut world);
-        io::setup(&mut world, window);
-        profile::setup(&mut world);
-
-        let ui = render::ui::UIContext::new(&mut renderer, &mut world);
-
-        App {
-            world,
-            renderer,
-            ui,
-            event_queue,
-            state: AppState::Focused,
-            control_systems,
-            engine_systems,
-            frame_count: 0,
-            timer: time::Timer::default(),
         }
     }
 }
 
-fn main() {
+#[allow(unused_variables)]
+pub trait Module: Send {
+    fn init(&mut self, world: &mut World) {}
+}
+
+pub struct Modules(pub Vec<Box<dyn Module>>);
+
+pub fn run(modules: Modules) -> ! {
     env_logger::init();
 
     #[cfg(feature = "profile-with-puffin")]
     profiling::puffin::set_scopes_on(true);
-
-    let args = match arg_parse::parse() {
-        None => return,
-        Some(args) => args,
-    };
 
     let event_loop = winit::event_loop::EventLoop::new();
     let window = winit::window::WindowBuilder::new()
@@ -248,9 +178,10 @@ fn main() {
         .build(&event_loop)
         .expect("Failed to create window");
 
-    let event_queue = Arc::new(io::EventQueue::new());
-    let event_queue2 = Arc::clone(&event_queue);
-
+    let event_queue_recv = Arc::new(io::EventQueue::new());
+    let event_queue_send = Arc::clone(&event_queue_recv);
+    let mut renderer = trekanten::Renderer::new(&window, io::window_extents(&window))
+        .expect("Failed to create renderer");
     let (send, recv) = std::sync::mpsc::channel();
 
     // Thread runs the app while main takes the event loop
@@ -259,13 +190,37 @@ fn main() {
         .name("ramneryd::engine".to_string())
         .spawn(move || {
             profiling::register_thread!("ramneryd::engine");
-            match trekanten::Renderer::new(&window, io::window_extents(&window)) {
-                Ok(renderer) => {
-                    let mut app = App::new(renderer, window, event_queue2);
-                    app.run(args);
-                }
-                Err(e) => log::error!("Failed to create renderer: {}", e),
+
+            let mut world = World::new();
+            let (mut control_systems, mut engine_systems) = Engine::init_dispatchers();
+
+            ecs::meta::register_all_components(&mut world);
+
+            world.insert(Time::default());
+            ecs::serde::setup_resources(&mut world);
+
+            control_systems.setup(&mut world);
+            engine_systems.setup(&mut world);
+            io::setup(&mut world, window);
+            profile::setup(&mut world);
+            render::setup_resources(&mut world, &mut renderer);
+            let ui = render::ui::UIContext::new(&mut renderer, &mut world);
+
+            for mut m in modules.0.into_iter() {
+                m.init(&mut world);
             }
+
+            Engine {
+                world,
+                ui,
+                event_queue: event_queue_recv,
+                state: State::Focused,
+                control_systems,
+                engine_systems,
+                renderer,
+            }
+            .run();
+
             if let Err(e) = send.send(io::Command::Quit) {
                 log::error!("Failed to send quit command to event thread: {}", e);
             }
@@ -278,7 +233,7 @@ fn main() {
     event_loop.run(move |winit_event, _, control_flow| {
         io::event::event_thread_work(
             &mut event_manager,
-            Arc::clone(&event_queue),
+            Arc::clone(&event_queue_send),
             &recv,
             winit_event,
             control_flow,

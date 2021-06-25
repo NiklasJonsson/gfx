@@ -20,7 +20,7 @@ use crate::common::Name;
 use crate::io::input;
 use crate::io::input::KeyCode;
 use crate::render::pipeline::{Defines, ShaderCompiler, ShaderType};
-use crate::time::DeltaTime;
+use crate::time::Time;
 
 use specs::world::WorldExt;
 use specs::World;
@@ -351,7 +351,7 @@ impl UIContext {
     }
 
     pub fn pre_frame(&mut self, world: &World) {
-        let dt = *world.read_resource::<DeltaTime>();
+        let dt = world.read_resource::<Time>().delta_sim();
         self.imgui
             .io_mut()
             .update_delta_time(std::time::Duration::from(dt));

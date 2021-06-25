@@ -1,5 +1,6 @@
 pub mod event;
 pub mod input;
+use crate::ecs::prelude::*;
 
 use winit::window::Window;
 
@@ -39,4 +40,9 @@ impl MainWindow {
 pub fn setup(world: &mut World, window: winit::window::Window) {
     world.insert(input::CurrentFrameExternalInputs(Vec::new()));
     world.insert(MainWindow { window });
+}
+
+pub fn post_frame(world: &mut World) {
+    let mut cur_inputs = world.write_resource::<input::CurrentFrameExternalInputs>();
+    cur_inputs.0.clear()
 }

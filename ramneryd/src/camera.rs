@@ -7,7 +7,7 @@ use crate::io::input::{
     Sensitivity, StateId,
 };
 use crate::math::{Mat4, Transform, Vec3};
-use crate::time::DeltaTime;
+use crate::time::Time;
 use ecs::prelude::*;
 
 use num_traits::cast::FromPrimitive;
@@ -244,11 +244,11 @@ impl<'a> ecs::System<'a> for FreeFlyCameraController {
         WriteStorage<'a, MappedInput>,
         WriteStorage<'a, Transform>,
         WriteStorage<'a, CameraRotationState>,
-        Read<'a, DeltaTime>,
+        ReadExpect<'a, Time>,
     );
 
     fn run(&mut self, data: Self::SystemData) {
-        let (mut mapped_inputs, mut transforms, mut cam_rot_state, delta_time) = data;
+        let (mut mapped_inputs, mut transforms, mut cam_rot_state, time) = data;
 
         for (mi, transform, rotation_state) in
             (&mut mapped_inputs, &mut transforms, &mut cam_rot_state).join()
@@ -279,7 +279,7 @@ impl<'a> ecs::System<'a> for FreeFlyCameraController {
                         let CameraOrientation { view_direction, up } =
                             FreeFlyCameraController::get_orientation_from(&rotation_state);
                         use CameraMovement::*;
-                        let dir = *delta_time
+                        let dir = time.delta_sim()
                             * MOVEMENT_SPEED
                             * match (*id).into() {
                                 Forward => view_direction,

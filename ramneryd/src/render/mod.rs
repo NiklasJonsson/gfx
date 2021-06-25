@@ -30,8 +30,10 @@ pub mod pipeline;
 pub mod ui;
 pub mod uniform;
 
-pub use mesh::GpuMesh;
+pub use light::Light;
+
 use mesh::PendingMesh;
+use mesh::GpuMesh;
 
 use crate::camera::*;
 use crate::ecs;

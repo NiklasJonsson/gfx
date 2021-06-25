@@ -1,0 +1,49 @@
+[package]
+name = "ramneryd"
+version = "0.1.0"
+authors = ["Niklas Jonsson <niklasandersjonsson@gmail.com>"]
+edition = "2018"
+
+[dependencies]
+ramneryd-derive = { path = "../ramneryd-derive" }
+
+# ECS
+specs-hierarchy = "0.6.0"
+specs = { version = "0.16.1", features = ["specs-derive", "serde"] }
+
+# Rendering/Graphics
+winit = "0.22.2"
+trekanten = { path = "../trekanten" }
+imgui = "0.6.1"
+shaderc = "0.6.2"
+
+# Math/Physics
+vek = { version = "0.15.1", features = ["serde"] }
+num-derive = "0.2.5"
+num-traits = "0.2.8"
+
+# Resources/Assets
+gltf = "0.14.0"
+ron = "0.6.2"
+
+# Util
+log = "0.4.8"
+env_logger = "0.6.2"
+thiserror = "1.0.20"
+resurs = { path = "../resurs" }
+linkme = "0.2.2"
+serde = "1.0"
+
+# Threading
+crossbeam = "0.7.3"
+
+# Perf
+profiling = "0.1.7"
+puffin-imgui = "0.5.0"
+
+[features]
+profile-with-puffin = ["profiling/profile-with-puffin", "trekanten/profile-with-puffin"]
+profile-with-optick = ["profiling/profile-with-optick", "trekanten/profile-with-optick"]
+profile-with-superluminal = ["profiling/profile-with-superluminal", "trekanten/profile-with-superluminal"]
+profile-with-tracing = ["profiling/profile-with-tracing", "trekanten/profile-with-tracing"]
+profile-with-tracy = ["profiling/profile-with-tracy", "trekanten/profile-with-tracy"]

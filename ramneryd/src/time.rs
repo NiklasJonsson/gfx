@@ -1,6 +1,6 @@
 use std::time::{Duration, Instant};
 
-#[derive(Default, Debug, Copy, Clone)]
+#[derive(Debug, Copy, Clone)]
 pub struct DeltaTime(Duration);
 
 impl DeltaTime {
@@ -40,29 +40,33 @@ impl std::ops::Mul<f32> for DeltaTime {
     }
 }
 
-pub struct Timer {
+#[allow(dead_code)]
+pub struct Time {
     delta: DeltaTime,
     prev: Instant,
     start: Instant,
 }
 
-impl Timer {
-    pub fn start(&mut self) {
-        self.start = Instant::now();
-    }
-
-    pub fn tick(&mut self) {
+impl Time {
+    pub fn tick(&mut self) -> DeltaTime {
         let now = Instant::now();
         self.delta = DeltaTime(now - self.prev);
         self.prev = now;
+        self.delta
     }
 
-    pub fn delta(&self) -> DeltaTime {
+    #[allow(dead_code)]
+    pub fn delta_sim(&self) -> DeltaTime {
         self.delta
+    }
+
+    #[allow(dead_code)]
+    pub fn elapsed_real(&self) -> DeltaTime {
+        DeltaTime(Instant::now() - self.start)
     }
 }
 
-impl Default for Timer {
+impl Default for Time {
     fn default() -> Self {
         Self {
             delta: DeltaTime::zero(),

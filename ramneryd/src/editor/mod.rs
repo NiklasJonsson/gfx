@@ -70,7 +70,7 @@ struct SelectedEntity {
 }
 
 pub fn build_ui<'a>(world: &mut World, ui: &imgui::Ui<'a>) {
-    let dt = *world.read_resource::<crate::time::DeltaTime>();
+    let dt = world.read_resource::<crate::time::Time>().delta_sim();
     let size = [400.0, 300.0];
     let pos = [0.0, 0.0];
     imgui::Window::new(im_str!("Overview"))
