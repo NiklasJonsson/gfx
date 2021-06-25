@@ -322,6 +322,8 @@ impl<'a> System<'a> for ApplySettings {
                         .expect("Failed to insert");
                 }
             }
+        } else {
+            render_light_cmds.clear();
         }
     }
 }

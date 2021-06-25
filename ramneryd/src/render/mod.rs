@@ -32,8 +32,8 @@ pub mod uniform;
 
 pub use light::Light;
 
-use mesh::PendingMesh;
 use mesh::GpuMesh;
+use mesh::PendingMesh;
 
 use crate::camera::*;
 use crate::ecs;
