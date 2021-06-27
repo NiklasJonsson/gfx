@@ -399,12 +399,21 @@ fn draw_entities<'a>(world: &World, cmd_buf: &mut RenderPassEncoder<'a>, mode: D
     let renderables = world.read_storage::<RenderableMaterial>();
     use trekanten::pipeline::ShaderStage;
 
+    let mut prev_handle: Option<Handle<GraphicsPipeline>> = None;
+    let mut bind_pipeline = |enc: &mut RenderPassEncoder<'a>, handle: &Handle<GraphicsPipeline>| {
+        if prev_handle.map(|h| h != *handle).unwrap_or(true) {
+            enc.bind_graphics_pipeline(handle);
+            prev_handle = Some(*handle);
+        }
+    };
+
     // TODO(perf): Don't rebind pipeline for every entity
     for (mesh, renderable, mtx) in (&meshes, &renderables, &model_matrices).join() {
         let tfm = uniform::Model {
             model: mtx.0.into_col_array(),
             model_it: mtx.0.inverted().transposed().into_col_array(),
         };
+
         match (renderable, mode) {
             (
                 RenderableMaterial::PBR {
@@ -412,8 +421,8 @@ fn draw_entities<'a>(world: &World, cmd_buf: &mut RenderPassEncoder<'a>, mode: D
                 },
                 DrawMode::ShadowsOnly,
             ) => {
+                bind_pipeline(cmd_buf, shadow_pipeline);
                 cmd_buf
-                    .bind_graphics_pipeline(shadow_pipeline)
                     .bind_push_constant(shadow_pipeline, ShaderStage::VERTEX, &tfm)
                     .draw_mesh(&mesh.vertex_buffer, &mesh.index_buffer);
             }
@@ -432,8 +441,8 @@ fn draw_entities<'a>(world: &World, cmd_buf: &mut RenderPassEncoder<'a>, mode: D
                 },
                 DrawMode::Unlit,
             ) => {
+                bind_pipeline(cmd_buf, gfx_pipeline);
                 cmd_buf
-                    .bind_graphics_pipeline(gfx_pipeline)
                     .bind_shader_resource_group(1, material_descriptor_set, gfx_pipeline)
                     .bind_push_constant(gfx_pipeline, ShaderStage::VERTEX, &tfm)
                     .draw_mesh(&mesh.vertex_buffer, &mesh.index_buffer);

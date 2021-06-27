@@ -5,7 +5,6 @@ pub mod lifetime;
 pub mod offset;
 pub mod rect;
 pub mod viewport;
-pub mod vk_debug;
 
 pub use extent::*;
 pub use format::*;

@@ -437,8 +437,8 @@ pub fn device_selection(
         }
     }
 
-    // TODO: Cleanup handling layers together with instance
-    let validation_layers = crate::instance::choose_validation_layers(instance.vk_entry());
+    let validation_layers =
+        super::super::validation_layers::choose_validation_layers(instance.vk_entry());
     let layers_ptrs = util::ffi::vec_cstring_to_raw(validation_layers);
 
     let extensions = required_device_extensions();

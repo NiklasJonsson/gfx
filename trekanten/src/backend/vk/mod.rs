@@ -11,6 +11,7 @@ pub mod render_pass;
 pub mod surface;
 pub mod swapchain;
 pub mod sync;
+pub mod validation_layers;
 
 pub fn n_to_sample_count(n: u8) -> ash::vk::SampleCountFlags {
     match n {

@@ -4,7 +4,6 @@ use crate::backend::*;
 use crate::descriptor;
 use crate::mem;
 use crate::pipeline;
-use crate::util;
 
 use crate::resource::ID;
 
@@ -18,7 +17,7 @@ pub enum ResizeReason {
 pub enum RenderError {
     Command(#[from] command::CommandError),
     Instance(#[from] instance::InstanceError),
-    DebugUtils(#[from] util::vk_debug::DebugUtilsError),
+    DebugUtils(#[from] validation_layers::DebugUtilsError),
     Surface(#[from] surface::SurfaceError),
     Device(#[from] device::DeviceError),
     RenderPass(#[from] render_pass::RenderPassError),

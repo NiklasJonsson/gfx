@@ -1,6 +1,6 @@
 use ash::version::InstanceV1_0; // For destroy_instance
 use ash::{version::EntryV1_0, vk, Entry};
-use std::ffi::{CStr, CString};
+use std::ffi::CStr;
 
 use crate::util::ffi::{c_char, log_cstrings, vec_cstring_from_raw, vec_cstring_to_raw};
 use crate::util::lifetime::LifetimeToken;
@@ -53,54 +53,6 @@ fn check_extensions<T: AsRef<CStr>>(
     Ok(())
 }
 
-const DISABLE_VALIDATION_LAYERS_ENV_VAR: &str = "TREK_DISABLE_VALIDATION_LAYERS";
-
-fn validation_layers() -> Vec<CString> {
-    vec![CString::new("VK_LAYER_KHRONOS_validation").expect("Failed to create CString")]
-}
-
-fn use_vk_validation() -> bool {
-    std::env::var(DISABLE_VALIDATION_LAYERS_ENV_VAR).is_err()
-}
-
-pub fn choose_validation_layers(entry: &Entry) -> Vec<CString> {
-    if use_vk_validation() {
-        let requested = validation_layers();
-        log::trace!("Requested vk layers:");
-        log_cstrings(&requested);
-
-        let layers = match entry.enumerate_instance_layer_properties() {
-            Ok(l) => l,
-            Err(_) => return Vec::new(),
-        };
-
-        if layers.is_empty() {
-            log::trace!("Found no layers");
-        }
-
-        for req in requested.iter() {
-            let mut found = false;
-            for layer in layers.iter() {
-                let l = unsafe { CStr::from_ptr(layer.layer_name.as_ptr()) };
-                log::trace!("Found vk layer: {:?}", layer);
-                if l == req.as_c_str() {
-                    found = true;
-                }
-            }
-
-            if !found {
-                return Vec::new();
-            }
-        }
-
-        log::trace!("Choosing layers:");
-        log_cstrings(&requested);
-        requested
-    } else {
-        Vec::new()
-    }
-}
-
 fn choose_instance_extensions<W: raw_window_handle::HasRawWindowHandle>(
     entry: &Entry,
     window: &W,
@@ -115,7 +67,7 @@ fn choose_instance_extensions<W: raw_window_handle::HasRawWindowHandle>(
         )
     })?;
 
-    if use_vk_validation() {
+    if super::validation_layers::use_vk_validation() {
         required.push(ash::extensions::ext::DebugUtils::name());
     }
 
@@ -140,7 +92,7 @@ impl Instance {
 
         let extensions_ptrs = choose_instance_extensions(&entry, window)?;
 
-        let validation_layers = choose_validation_layers(&entry);
+        let validation_layers = super::validation_layers::choose_validation_layers(&entry);
         let layers_ptrs = vec_cstring_to_raw(validation_layers);
 
         let create_info = vk::InstanceCreateInfo::builder()

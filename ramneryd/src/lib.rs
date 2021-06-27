@@ -11,7 +11,6 @@ mod game_state;
 mod graph;
 mod io;
 pub mod math;
-mod profile;
 pub mod render;
 mod time;
 
@@ -202,7 +201,6 @@ pub fn run(modules: Modules) -> ! {
             control_systems.setup(&mut world);
             engine_systems.setup(&mut world);
             io::setup(&mut world, window);
-            profile::setup(&mut world);
             render::setup_resources(&mut world, &mut renderer);
             let ui = render::ui::UIContext::new(&mut renderer, &mut world);
 

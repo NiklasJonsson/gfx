@@ -10,7 +10,7 @@ use crate::device::VkDeviceHandle;
 use crate::mem::BufferHandle;
 use crate::mem::UniformBuffer;
 use crate::pipeline::ShaderStage;
-use crate::resource::{BufferedStorage, Handle, ResourceManager};
+use crate::resource::{BufferedStorage, Handle};
 use crate::texture::Texture;
 use crate::Renderer;
 

@@ -354,7 +354,7 @@ pub struct Renderer {
     util_command_pool: command::CommandPool,
 
     // Needs to be kept-alive
-    _debug_utils: util::vk_debug::DebugUtils,
+    _debug_utils: backend::validation_layers::DebugUtils,
 
     frame_synchronization: [FrameSynchronization; MAX_FRAMES_IN_FLIGHT],
     frame_idx: u32,
@@ -543,7 +543,7 @@ impl Renderer {
         W: raw_window_handle::HasRawWindowHandle,
     {
         let instance = instance::Instance::new(window)?;
-        let _debug_utils = util::vk_debug::DebugUtils::new(&instance)?;
+        let _debug_utils = backend::validation_layers::DebugUtils::new(&instance)?;
         let surface = surface::Surface::new(&instance, window)?;
         let mut device = device::Device::new(&instance, &surface)?;
 
@@ -594,6 +594,7 @@ impl Renderer {
     #[profiling::function]
     pub fn next_frame<'a, 'b: 'a>(&'b mut self) -> Result<Frame<'a>, RenderError> {
         {
+            profiling::scope!("wait_and_acquire");
             let frame_sync = &mut self.frame_synchronization[self.frame_idx as usize];
             frame_sync.in_flight.blocking_wait()?;
 
@@ -604,6 +605,7 @@ impl Renderer {
 
         // This means that we received an image that might be in the process of rendering
         if let Some(mapped_frame_idx) = self.image_to_frame_idx[self.swapchain_image_idx as usize] {
+            profiling::scope!("wait_image_in_use");
             self.frame_synchronization[mapped_frame_idx as usize]
                 .in_flight
                 .blocking_wait()?;
