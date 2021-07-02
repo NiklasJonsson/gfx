@@ -137,7 +137,7 @@ impl<'a> System<'a> for RenderLightVolumes {
         }
         for (ent, _marker) in (&entities, &renderer_markers).join() {
             if let Some(Parent { parent }) = parents.get(ent) {
-                if !command_markers.get(*parent).is_some() {
+                if command_markers.get(*parent).is_none() {
                     entities.delete(ent).unwrap();
                 }
             } else {

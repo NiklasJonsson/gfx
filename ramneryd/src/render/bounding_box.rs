@@ -84,7 +84,7 @@ impl<'a> System<'a> for CreateRenderedBoundingBoxes {
 
         for (ent, _marker) in (&entities, &renderer_markers).join() {
             if let Some(graph::Parent { parent }) = parent_storage.get(ent) {
-                if !command_markers.get(*parent).is_some() {
+                if command_markers.get(*parent).is_none() {
                     entities.delete(ent).unwrap();
                 }
             } else {

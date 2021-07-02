@@ -122,7 +122,7 @@ where
             self.i += 1;
         }
 
-        return None;
+        None
     }
 }
 
@@ -131,7 +131,7 @@ where
     F: FnMut(&mut T) -> bool,
 {
     fn drop(&mut self) {
-        while let Some(_) = self.next() {}
+        for _ in self {}
     }
 }
 
@@ -205,7 +205,7 @@ impl<T> Storage<T> {
             return false;
         }
 
-        return true;
+        true
     }
 
     #[inline]
@@ -233,11 +233,7 @@ impl<T> Storage<T> {
             return false;
         }
 
-        if let ItemContent::Data(_) = self.items[id.index as usize].content {
-            true
-        } else {
-            false
-        }
+        std::matches!(self.items[id.index as usize].content, ItemContent::Data(_))
     }
 
     #[inline]

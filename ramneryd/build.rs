@@ -23,10 +23,13 @@ fn main() {
     let dest_path = Path::new(&out_dir).join("builtin-shaders");
     if !dest_path.is_dir() {
         if dest_path.exists() {
-            std::fs::remove_file(&dest_path).expect(&format!(
-                "Failed to remove file (it should be a dir) {}",
-                dest_path.display()
-            ));
+            std::fs::remove_file(&dest_path).unwrap_or_else(|err| {
+                panic!(
+                    "Failed to remove file {} (it should be a dir) due to {}",
+                    dest_path.display(),
+                    err
+                )
+            });
         }
         std::fs::create_dir_all(&dest_path).expect("Failed to create dirs for shaders");
     }

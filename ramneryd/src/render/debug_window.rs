@@ -218,7 +218,7 @@ pub(crate) fn build_ui<'a>(world: &mut World, ui: &imgui::Ui<'a>, pos: [f32; 2])
                         };
                         modal_state = Some(AddLightModalState {
                             choice: light,
-                            idx: idx,
+                            idx,
                             tfm,
                             name,
                         });

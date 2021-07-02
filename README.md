@@ -10,9 +10,11 @@ Rendering controls:
 * R to reload all shaders
 
 Renders:
-Box
-BoxTextured
-BoxVertexColors
-Cube
-Sponza
+
+[x] Box
+[x] BoxTextured
+[x] BoxVertexColors
+[x] Cube
+[x] Sponza
+
 from https://github.com/KhronosGroup/glTF-Sample-Models

@@ -102,7 +102,7 @@ impl MappedInput {
     }
 
     pub fn drain(&mut self) -> Vec<Input> {
-        std::mem::replace(&mut self.contents, Vec::new())
+        std::mem::take(&mut self.contents)
     }
 }
 

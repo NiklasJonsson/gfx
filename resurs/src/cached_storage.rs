@@ -42,7 +42,7 @@ where
         let h = match self.cache.get(&descriptor) {
             Some(h) => {
                 self.stats.hits += 1;
-                h.clone()
+                *h
             }
             None => {
                 self.stats.misses += 1;

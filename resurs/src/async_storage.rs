@@ -43,10 +43,7 @@ impl<R> Async<R> {
     }
 
     pub fn is_pending(&self) -> bool {
-        match self {
-            Self::Pending => true,
-            _ => false,
-        }
+        std::matches!(self, Self::Pending)
     }
 
     pub fn expect(self, msg: &str) -> R {

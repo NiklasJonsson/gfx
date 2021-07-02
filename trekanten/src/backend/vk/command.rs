@@ -105,7 +105,7 @@ impl CommandPool {
                 .map_err(CommandError::BufferAlloc)?
         };
 
-        Ok(allocated
+        allocated
             .into_iter()
             .map(|vk_cmd_buf| {
                 CommandBuffer::new(
@@ -115,7 +115,7 @@ impl CommandPool {
                     submission_type,
                 )
             })
-            .collect::<Result<Vec<CommandBuffer>, CommandError>>()?)
+            .collect::<Result<Vec<CommandBuffer>, CommandError>>()
     }
 
     pub fn begin_single_submit(&self) -> Result<CommandBuffer, CommandError> {
@@ -123,6 +123,7 @@ impl CommandPool {
     }
 }
 
+#[allow(dead_code)]
 #[derive(Copy, Clone, Debug)]
 pub enum CommandBufferSubmission {
     Single,

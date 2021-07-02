@@ -324,6 +324,7 @@ fn load_node_rec(ctx: &mut RecGltfCtx, src: &gltf::Node) -> ecs::Entity {
     node
 }
 
+#[allow(dead_code)]
 fn get_cam_transform(
     gltf_doc: gltf::Document,
     world: &World,
@@ -423,6 +424,7 @@ struct CtxData<'a, 'b> {
     names: &'b mut WriteStorage<'a, Name>,
     meshes: &'b mut WriteStorage<'a, CpuMesh>,
     pb_materials: &'b mut WriteStorage<'a, render::material::PhysicallyBased>,
+    #[allow(dead_code)]
     cameras: &'b mut WriteStorage<'a, Camera>,
     bboxes: &'b mut WriteStorage<'a, BoundingBox>,
 }

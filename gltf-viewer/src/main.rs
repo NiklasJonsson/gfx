@@ -21,8 +21,7 @@ impl Module for GltfViewer {
 
         ramneryd::asset::gltf::load_asset(world, &self.file);
 
-        #[cfg(not(windows))]
-        {
+        if false {
             world
                 .create_entity()
                 .with(Light::Directional {
