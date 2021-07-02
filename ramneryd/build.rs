@@ -39,9 +39,29 @@ fn main() {
             path.strip_prefix(&shader_sources)
                 .expect("Failed to relative dir"),
         );
-        std::fs::create_dir_all(&dest.parent().expect("No parent"))
-            .expect("Failed to created dirs");
-        eprintln!("{}", dest.display());
+        eprintln!("dest: {}", dest.display());
+        let dest_dir = dest
+            .parent()
+            .expect("Expected parent dir for destination path");
+        if dest_dir.is_file() {
+            std::fs::remove_file(&dest_dir).unwrap_or_else(|e| {
+                panic!(
+                    "{} is a file and can't be replaced by dir {}",
+                    dest_dir.display(),
+                    e
+                )
+            });
+        }
+        assert!(
+            !dest_dir.exists() || dest_dir.is_dir(),
+            "{} exists but is not a dir",
+            dest_dir.display()
+        );
+        match std::fs::create_dir_all(&dest_dir) {
+            Ok(_) => (),
+            Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => (),
+            Err(e) => panic!("failed to create destination directory for shaders {}", e),
+        }
         std::fs::copy(&path, &dest).expect("Failed to copy shader source");
         println!("cargo:rerun-if-changed={}", path.display());
     }

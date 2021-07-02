@@ -400,6 +400,8 @@ fn draw_entities<'a>(world: &World, cmd_buf: &mut RenderPassEncoder<'a>, mode: D
     use trekanten::pipeline::ShaderStage;
 
     let mut prev_handle: Option<Handle<GraphicsPipeline>> = None;
+
+    // Only bind the pipeline if we need to
     let mut bind_pipeline = |enc: &mut RenderPassEncoder<'a>, handle: &Handle<GraphicsPipeline>| {
         if prev_handle.map(|h| h != *handle).unwrap_or(true) {
             enc.bind_graphics_pipeline(handle);
@@ -407,7 +409,6 @@ fn draw_entities<'a>(world: &World, cmd_buf: &mut RenderPassEncoder<'a>, mode: D
         }
     };
 
-    // TODO(perf): Don't rebind pipeline for every entity
     for (mesh, renderable, mtx) in (&meshes, &renderables, &model_matrices).join() {
         let tfm = uniform::Model {
             model: mtx.0.into_col_array(),

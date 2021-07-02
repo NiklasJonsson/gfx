@@ -111,12 +111,12 @@ pub mod pbr_gltf {
         let defines = def.defines();
         let vert = compiler.compile(
             &defines,
-            Path::new("pbr_gltf_vert.glsl"),
+            Path::new("pbr/vert.glsl"),
             ShaderType::Vertex,
         )?;
         let frag = compiler.compile(
             &defines,
-            Path::new("pbr_gltf_frag.glsl"),
+            Path::new("pbr/frag.glsl"),
             ShaderType::Fragment,
         )?;
 
