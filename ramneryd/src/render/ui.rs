@@ -28,7 +28,6 @@ use specs::World;
 
 use imgui::im_str;
 
-use std::borrow::BorrowMut;
 use std::path::Path;
 
 struct ImGuiVertex {
@@ -423,7 +422,7 @@ impl UIContext {
         for inp in mapped_input.drain().into_iter() {
             match inp {
                 Input::State(state_id) if is_mouse_button(state_id) => {
-                    log::debug!("imgui mouse button: {}", mouse_stateid_idx(state_id));
+                    log::trace!("imgui mouse button: {}", mouse_stateid_idx(state_id));
                     io.mouse_down[mouse_stateid_idx(state_id) as usize] = true
                 }
                 Input::State(StateId(key)) if is_keyboard_button(key) => {
@@ -442,7 +441,7 @@ impl UIContext {
                     }
                 }
                 Input::CursorPos(pos) => {
-                    log::debug!("imgui got cursor pos: {:?}", pos.0);
+                    log::trace!("imgui got cursor pos: {:?}", pos.0);
                     io.mouse_pos = [pos.x() as f32, pos.y() as f32];
                 }
                 i => unreachable!("{:?}", i),

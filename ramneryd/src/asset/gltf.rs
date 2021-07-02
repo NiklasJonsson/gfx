@@ -211,7 +211,7 @@ fn load_primitive<'a>(ctx: &mut RecGltfCtx, primitive: &gltf::Primitive<'a>) -> 
     });
 
     let material = PhysicallyBased {
-        base_color_factor: Vec4::from(pbr_mr.base_color_factor()),
+        base_color_factor: Rgba::from(pbr_mr.base_color_factor()),
         metallic_factor: pbr_mr.metallic_factor(),
         roughness_factor: pbr_mr.roughness_factor(),
         normal_scale: mat.normal_texture().map(|nm| nm.scale()).unwrap_or(1.0),

@@ -30,6 +30,7 @@ pub mod pipeline;
 pub mod ui;
 pub mod uniform;
 
+pub use geometry::Shape;
 pub use light::Light;
 
 use mesh::GpuMesh;
@@ -877,6 +878,21 @@ struct GpuUpload;
 impl GpuUpload {
     pub const ID: &'static str = "GpuUpload";
 }
+
+use resurs::Async;
+fn map_pending_buffer_handle<BT>(
+    h: &mut Pending<BufferHandle<Async<BT>>, BufferHandle<BT>>,
+    old: BufferHandle<Async<BT>>,
+    new: BufferHandle<BT>,
+) {
+    match h {
+        Pending::Pending(cur) if cur.handle() == old.handle() => {
+            *h = Pending::Available(BufferHandle::sub_buffer(new, cur.idx(), cur.n_elems()));
+        }
+        _ => (),
+    }
+}
+
 impl GpuUpload {
     #[profiling::function]
     fn resolve_pending(world: &mut World, renderer: &mut Renderer) {
@@ -894,22 +910,14 @@ impl GpuUpload {
                 HandleMapping::UniformBuffer { old, new } => {
                     for (ent, _) in (&world.entities(), &pending_materials.mask().clone()).join() {
                         if let Some(pending) = pending_materials.get_mut(ent) {
-                            match pending {
-                                PendingMaterial::Unlit { color_uniform } => match color_uniform {
-                                    Pending::Pending(prev) if prev.handle() == old.handle() => {
-                                        *color_uniform = Pending::Available(new);
-                                    }
-                                    _ => (),
-                                },
+                            let handle = match pending {
+                                PendingMaterial::Unlit { color_uniform } => color_uniform,
                                 PendingMaterial::PBR {
                                     material_uniforms, ..
-                                } => match material_uniforms {
-                                    Pending::Pending(prev) if prev.handle() == old.handle() => {
-                                        *material_uniforms = Pending::Available(new);
-                                    }
-                                    _ => (),
-                                },
-                            }
+                                } => material_uniforms,
+                            };
+                            map_pending_buffer_handle(handle, old, new);
+
                             if !pending.is_done() {
                                 continue;
                             }
@@ -925,12 +933,7 @@ impl GpuUpload {
                 HandleMapping::VertexBuffer { old, new } => {
                     for (ent, _) in (&world.entities(), &pending_meshes.mask().clone()).join() {
                         if let Some(pending) = pending_meshes.get_mut(ent) {
-                            match pending.vertex_buffer {
-                                Pending::Pending(cur) if cur == old => {
-                                    pending.vertex_buffer = Pending::Available(new);
-                                }
-                                _ => (),
-                            }
+                            map_pending_buffer_handle(&mut pending.vertex_buffer, old, new);
 
                             // TODO: is_done + remove().finish() here
                             if let Some(mesh) = pending.try_finish() {
@@ -943,12 +946,7 @@ impl GpuUpload {
                 HandleMapping::IndexBuffer { old, new } => {
                     for (ent, _) in (&world.entities(), &pending_meshes.mask().clone()).join() {
                         if let Some(pending) = pending_meshes.get_mut(ent) {
-                            match pending.index_buffer {
-                                Pending::Pending(cur) if cur == old => {
-                                    pending.index_buffer = Pending::Available(new);
-                                }
-                                _ => (),
-                            }
+                            map_pending_buffer_handle(&mut pending.index_buffer, old, new);
 
                             if let Some(mesh) = pending.try_finish() {
                                 meshes.insert(ent, mesh).expect("I'm alive!");
@@ -1153,7 +1151,7 @@ impl<'a> System<'a> for GpuUpload {
 }
 
 pub fn register_systems<'a, 'b>(builder: ExecutorBuilder<'a, 'b>) -> ExecutorBuilder<'a, 'b> {
-    register_module_systems!(builder, debug_window, bounding_box, light).with(
+    register_module_systems!(builder, debug_window, bounding_box, light, geometry).with(
         GpuUpload,
         GpuUpload::ID,
         &[],

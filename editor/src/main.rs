@@ -1,5 +1,10 @@
+use ramneryd::math;
+use ramneryd::math::Rgba;
+use ramneryd::render;
+
+use ramneryd::common::Name;
 use ramneryd::ecs::prelude::*;
-use ramneryd::{Module, Modules};
+use ramneryd::Module;
 
 use structopt::StructOpt;
 
@@ -25,8 +30,62 @@ impl Module for EditorArgs {
     }
 }
 
+struct Spawn;
+
+impl Module for Spawn {
+    fn init(&mut self, world: &mut World) {
+        let plane_side = 1000.0;
+        let plane_height = 1.0;
+        world
+            .create_entity()
+            .with(Name::from("Plane"))
+            .with(math::Transform::pos(0.0, -plane_height / 2.0, 0.0))
+            .with(render::Shape::Box {
+                width: plane_side,
+                height: plane_height,
+                depth: plane_side,
+            })
+            .with(render::material::PhysicallyBased {
+                base_color_factor: Rgba {
+                    r: 0.3,
+                    g: 0.3,
+                    b: 0.3,
+                    a: 1.0,
+                },
+                metallic_factor: 0.0,
+                roughness_factor: 0.7,
+                ..Default::default()
+            })
+            .build();
+
+        world
+            .create_entity()
+            .with(Name::from("Cube"))
+            .with(math::Transform::pos(0.0, 3.0, 0.0))
+            .with(render::Shape::Box {
+                width: 1.0,
+                height: 1.0,
+                depth: 1.0,
+            })
+            .with(render::material::PhysicallyBased {
+                base_color_factor: Rgba {
+                    r: 0.3,
+                    g: 0.6,
+                    b: 0.3,
+                    a: 1.0,
+                },
+                metallic_factor: 0.0,
+                roughness_factor: 0.7,
+                ..Default::default()
+            })
+            .build();
+    }
+}
+
 fn main() {
-    let viewer = Box::new(EditorArgs::from_args());
-    let modules = Modules(vec![viewer]);
-    ramneryd::run(modules);
+    ramneryd::EngineSpec::builder()
+        .with_module(EditorArgs::from_args())
+        .with_module(Spawn)
+        .build()
+        .run();
 }

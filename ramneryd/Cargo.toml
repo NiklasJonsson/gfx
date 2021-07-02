@@ -47,3 +47,4 @@ profile-with-optick = ["profiling/profile-with-optick", "trekanten/profile-with-
 profile-with-superluminal = ["profiling/profile-with-superluminal", "trekanten/profile-with-superluminal"]
 profile-with-tracing = ["profiling/profile-with-tracing", "trekanten/profile-with-tracing"]
 profile-with-tracy = ["profiling/profile-with-tracy", "trekanten/profile-with-tracy"]
+validation-layers = ["trekanten/validation-layers"]

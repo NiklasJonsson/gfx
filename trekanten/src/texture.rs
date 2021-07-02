@@ -33,7 +33,7 @@ pub fn load_image<P: AsRef<Path>>(p: &P) -> Result<image::RgbaImage, image::Imag
     let path = p.as_ref();
 
     log::trace!("Trying to load image from {}", path.display());
-    let image = image::open(path)?.to_rgba();
+    let image = image::open(path)?.to_rgba8();
 
     log::trace!(
         "Loaded RGBA image with dimensions: {:?}",

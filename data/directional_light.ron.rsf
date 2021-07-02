@@ -1,0 +1,25 @@
+[
+	EntityData(
+		marker: SimpleMarker(0),
+		components: (Some(Transform(
+			position: Vec3(
+				x: 0,
+				y: 10,
+				z: 0,
+			),
+			rotation: Quaternion(
+				x: -0.383,
+				y: 0,
+				z: 0,
+				w: 0.924,
+			),
+			scale: 1,
+		)), Some(Directional(
+			color: Rgb(
+				r: 1,
+				g: 1,
+				b: 1,
+			),
+		)), Some(Name("Directional light"))),
+	),
+]

@@ -1,5 +1,7 @@
 use crate::ecs::prelude::*;
-use crate::math::{perspective_vk, Mat4, Quat, Rgb, Rgba, Transform, Vec3};
+use crate::math::{
+    orthographic_vk, perspective_vk, FrustrumPlanes, Mat4, Quat, Rgb, Rgba, Transform, Vec3,
+};
 
 use trekanten::CommandBuffer;
 
@@ -194,75 +196,106 @@ pub fn light_and_shadow_pass(
             continue;
         }
 
-        match light {
+        let direction = tfm.rotation * Light::DEFAULT_FACING;
+        let (packed_light, shadow_view_data) = match light {
             Light::Spot {
                 angle,
                 range,
                 color,
             } => {
-                let direction = tfm.rotation * Light::DEFAULT_FACING;
-                let packed_light =
-                    &mut lighting_data.punctual_lights[lighting_data.num_lights as usize];
-
-                *packed_light = PackedLight {
-                    pos: [tfm.position.x, tfm.position.y, tfm.position.z, 1.0],
-                    dir_cutoff: [direction.x, direction.y, direction.z, angle.cos()],
-                    color_range: [color.r, color.g, color.b, *range],
-                    shadow_idx: [shadow_matrices.num_matrices; 4],
-                };
-                let shadow_idx = packed_light.shadow_idx[0] as usize;
-                shadow_matrices.num_matrices += 1;
-
-                let mut view_data = ViewData::default();
                 let proj = perspective_vk(angle * 2.0, 1.0, 1.0, *range);
                 let view = Mat4::from(*tfm).inverted();
-                view_data.view_pos = [tfm.position[0], tfm.position[1], tfm.position[2], 1.0];
-                view_data.view_proj = (proj * view).into_col_array();
-                shadow_matrices.matrices[shadow_idx] = view_data.view_proj;
-                frame
-                    .update_uniform_blocking(&spotlights[shadow_idx].view_data_buffer, &view_data)
-                    .expect("Failed to update view data for shadow pass");
+                let pos = tfm.position.with_w(1.0).into_array();
 
-                let mut shadow_rp = frame
-                    .begin_render_pass(
-                        cmd_buffer,
-                        render_pass,
-                        &spotlights[shadow_idx].render_target,
-                        super::SHADOW_MAP_EXTENT,
-                        &clear_values,
-                    )
-                    .expect("Failed to shadow begin render pass");
-
-                shadow_rp
-                    .bind_graphics_pipeline(dummy_pipeline)
-                    .bind_shader_resource_group(
-                        0u32,
-                        &spotlights[shadow_idx].view_data_desc_set,
-                        dummy_pipeline,
-                    );
-                super::draw_entities(world, &mut shadow_rp, super::DrawMode::ShadowsOnly);
-                cmd_buffer = shadow_rp.end().expect("Failed to end shadow render pass");
+                (
+                    PackedLight {
+                        pos,
+                        dir_cutoff: [direction.x, direction.y, direction.z, angle.cos()],
+                        color_range: [color.r, color.g, color.b, *range],
+                        ..Default::default()
+                    },
+                    Some(ViewData {
+                        view_pos: pos,
+                        view_proj: (proj * view).into_col_array(),
+                    }),
+                )
             }
             Light::Directional { color } => {
-                let direction = tfm.rotation * Light::DEFAULT_FACING;
-                lighting_data.punctual_lights[lighting_data.num_lights as usize] = PackedLight {
-                    pos: [0.0, 0.0, 0.0, 0.0],
-                    dir_cutoff: [direction.x, direction.y, direction.z, 0.0],
-                    color_range: [color.r, color.g, color.b, 0.0],
-                    ..Default::default()
-                }
+                let proj: Mat4 = orthographic_vk(FrustrumPlanes {
+                    left: -10.0,
+                    right: 10.0,
+                    bottom: -10.0,
+                    top: 10.0,
+                    near: 1.0,
+                    far: 10.0,
+                });
+                let view = Mat4::from(*tfm).inverted();
+
+                (
+                    PackedLight {
+                        pos: [0.0, 0.0, 0.0, 0.0],
+                        dir_cutoff: [direction.x, direction.y, direction.z, 0.0],
+                        color_range: [color.r, color.g, color.b, 0.0],
+                        ..Default::default()
+                    },
+                    Some(ViewData {
+                        view_pos: tfm.position.with_w(1.0).into_array(),
+                        view_proj: (proj * view).into_col_array(),
+                    }),
+                )
             }
-            Light::Point { color, range } => {
-                lighting_data.punctual_lights[lighting_data.num_lights as usize] = PackedLight {
-                    pos: [tfm.position.x, tfm.position.y, tfm.position.z, 1.0],
+            Light::Point { color, range } => (
+                PackedLight {
+                    pos: tfm.position.with_w(1.0).into_array(),
                     dir_cutoff: [0.0, 0.0, 0.0, 0.0],
                     color_range: [color.r, color.g, color.b, *range],
                     ..Default::default()
-                };
-            }
+                },
+                None,
+            ),
             Light::Ambient { .. } => unreachable!("Should have been handled already"),
-        }
+        };
+        lighting_data.punctual_lights[lighting_data.num_lights as usize] = packed_light;
         lighting_data.num_lights += 1;
+
+        if let Some(shadow_view_data) = shadow_view_data {
+            let shadow_idx = shadow_matrices.num_matrices;
+            shadow_matrices.num_matrices += 1;
+
+            assert!(lighting_data.num_lights > 0);
+            lighting_data.punctual_lights[(lighting_data.num_lights - 1) as usize].shadow_idx =
+                [shadow_idx; 4];
+
+            let shadow_idx = shadow_idx as usize;
+
+            shadow_matrices.matrices[shadow_idx] = shadow_view_data.view_proj;
+            frame
+                .update_uniform_blocking(
+                    &spotlights[shadow_idx].view_data_buffer,
+                    &shadow_view_data,
+                )
+                .expect("Failed to update view data for shadow pass");
+
+            let mut shadow_rp = frame
+                .begin_render_pass(
+                    cmd_buffer,
+                    render_pass,
+                    &spotlights[shadow_idx].render_target,
+                    super::SHADOW_MAP_EXTENT,
+                    &clear_values,
+                )
+                .expect("Failed to shadow begin render pass");
+
+            shadow_rp
+                .bind_graphics_pipeline(dummy_pipeline)
+                .bind_shader_resource_group(
+                    0u32,
+                    &spotlights[shadow_idx].view_data_desc_set,
+                    dummy_pipeline,
+                );
+            super::draw_entities(world, &mut shadow_rp, super::DrawMode::ShadowsOnly);
+            cmd_buffer = shadow_rp.end().expect("Failed to end shadow render pass");
+        }
     }
 
     let num_shadows = shadow_matrices.num_matrices;

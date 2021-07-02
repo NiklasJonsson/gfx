@@ -72,6 +72,7 @@ impl CommandPool {
         })
     }
 
+    #[allow(dead_code)]
     pub fn reset(&mut self) -> Result<(), CommandError> {
         unsafe {
             self.vk_device

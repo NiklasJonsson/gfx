@@ -108,15 +108,21 @@ impl Inspect for crate::math::Quat {
         let id = format!("QuatEdit {}", name);
         let imgui_id = imgui::ImString::from(id.clone());
         if ui.inner().button(im_str!("edit"), [0.0, 0.0]) {
-            println!("Click");
             ui.inner().open_popup(&imgui_id);
             ui.storage().insert(id.clone(), QuatEditState::default());
         }
         ui.inner().popup_modal(&imgui_id).build(|| {
             let mut storage = ui.storage();
-            let state: &mut QuatEditState = storage.get_mut(&id).expect("Got quat edit modal but no state resource");
+            let state: &mut QuatEditState = storage
+                .get_mut(&id)
+                .expect("Got quat edit modal but no state resource");
             imgui::InputFloat3::new(ui.inner(), im_str!("axis"), &mut state.axis).build();
-            imgui::InputFloat::new(ui.inner(), im_str!("angle (radians)"), &mut state.angle_radians).build();
+            imgui::InputFloat::new(
+                ui.inner(),
+                im_str!("angle (radians)"),
+                &mut state.angle_radians,
+            )
+            .build();
 
             if ui.inner().button(im_str!("Apply"), [0.0; 2]) {
                 *self = crate::math::Quat::rotation_3d(state.angle_radians, state.axis);

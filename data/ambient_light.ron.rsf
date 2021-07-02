@@ -1,0 +1,26 @@
+[
+	EntityData(
+		marker: SimpleMarker(0),
+		components: (Some(Transform(
+			position: Vec3(
+				x: 2,
+				y: 1,
+				z: 3,
+			),
+			rotation: Quaternion(
+				x: 0,
+				y: 0,
+				z: 0,
+				w: 1,
+			),
+			scale: 1,
+		)), Some(Ambient(
+			color: Rgb(
+				r: 1,
+				g: 1,
+				b: 1,
+			),
+			strength: 0.01,
+		)), Some(Name("Ambient light"))),
+	),
+]

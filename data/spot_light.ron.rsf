@@ -1,0 +1,27 @@
+[
+	EntityData(
+		marker: SimpleMarker(2),
+		components: (Some(Transform(
+			position: Vec3(
+				x: 0,
+				y: 3,
+				z: 0,
+			),
+			rotation: Quaternion(
+				x: -0.70710677,
+				y: 0,
+				z: 0,
+				w: 0.70710677,
+			),
+			scale: 1,
+		)), Some(Spot(
+			color: Rgb(
+				r: 1,
+				g: 1,
+				b: 1,
+			),
+			angle: 0.3926991,
+			range: 5,
+		)), Some(Name("Spot light 1"))),
+	),
+]

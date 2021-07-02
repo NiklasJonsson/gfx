@@ -5,7 +5,7 @@ authors = ["Niklas Jonsson <niklasandersjonsson@gmail.com>"]
 edition = "2018"
 
 [dependencies]
-ramneryd = {path = "../ramneryd" }
+ramneryd = { path = "../ramneryd", features = ["validation-layers"] }
 structopt = "*"
 
 [features]

@@ -8,6 +8,7 @@ pub type Mat4 = vek::Mat4<f32>;
 pub type Quat = vek::Quaternion<f32>;
 pub type Rgb = vek::Rgb<f32>;
 pub type Rgba = vek::Rgba<f32>;
+pub type FrustrumPlanes = vek::FrustumPlanes<f32>;
 
 #[derive(Debug, Copy, Component, Clone, PartialEq, Serialize, Deserialize)]
 #[component(inspect)]
@@ -113,8 +114,14 @@ impl std::ops::MulAssign for Transform {
 pub struct ModelMatrix(pub Mat4);
 
 impl From<Mat4> for ModelMatrix {
-    fn from(x: Mat4) -> Self {
-        Self(x)
+    fn from(m: Mat4) -> Self {
+        Self(m)
+    }
+}
+
+impl From<Transform> for ModelMatrix {
+    fn from(t: Transform) -> Self {
+        Self(Mat4::from(t))
     }
 }
 
@@ -169,6 +176,22 @@ pub fn perspective_vk(fov_y_radians: f32, aspect_ratio: f32, near: f32, far: f32
     // vulkan has the y-axis
     // inverted (right-handed upside-down).
     m[(1, 1)] *= -1.0;
+
+    m
+}
+
+// https://github.com/PacktPublishing/Vulkan-Cookbook/blob/master/Library/Source%20Files/10%20Helper%20Recipes/05%20Preparing%20an%20orthographic%20projection%20matrix.cpp
+pub fn orthographic_vk(planes: FrustrumPlanes) -> Mat4 {
+    let mut m = Mat4::identity();
+    m[(0, 0)] = 2.0 / (planes.right - planes.left);
+    m[(1, 1)] = 2.0 / (planes.bottom - planes.top);
+    m[(2, 2)] = 1.0 / (planes.near - planes.far);
+    m.cols[3] = Vec4 {
+        x: -(planes.right + planes.left) / (planes.right - planes.left),
+        y: -(planes.bottom + planes.top) / (planes.bottom - planes.top),
+        z: planes.near / (planes.near - planes.far),
+        w: 1.0,
+    };
 
     m
 }

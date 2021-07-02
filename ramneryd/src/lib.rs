@@ -42,6 +42,8 @@ struct Engine {
     control_systems: ecs::Executor<'static, 'static>,
     engine_systems: ecs::Executor<'static, 'static>,
     renderer: trekanten::Renderer,
+    #[allow(dead_code)]
+    spec: EngineSpec,
 }
 
 /* Unused for now
@@ -163,9 +165,44 @@ pub trait Module: Send {
     fn init(&mut self, world: &mut World) {}
 }
 
-pub struct Modules(pub Vec<Box<dyn Module>>);
+#[derive(Default)]
+struct Modules(pub Vec<Box<dyn Module>>);
 
-pub fn run(modules: Modules) -> ! {
+pub struct EngineSpecBuilder {
+    modules: Modules,
+}
+
+impl EngineSpecBuilder {
+    pub fn with_module(mut self, module: impl Module + 'static) -> Self {
+        self.modules.0.push(Box::new(module));
+
+        self
+    }
+
+    pub fn build(self) -> EngineSpec {
+        EngineSpec {
+            modules: self.modules,
+        }
+    }
+}
+
+pub struct EngineSpec {
+    modules: Modules,
+}
+
+impl EngineSpec {
+    pub fn builder() -> EngineSpecBuilder {
+        EngineSpecBuilder {
+            modules: Modules::default(),
+        }
+    }
+
+    pub fn run(self) -> ! {
+        run(self);
+    }
+}
+
+fn run(mut spec: EngineSpec) -> ! {
     env_logger::init();
 
     #[cfg(feature = "profile-with-puffin")]
@@ -205,7 +242,7 @@ pub fn run(modules: Modules) -> ! {
             let ui_modules = vec![editor::ui_module()];
             let ui = render::ui::UIContext::new(&mut renderer, &mut world, ui_modules);
 
-            for mut m in modules.0.into_iter() {
+            for m in spec.modules.0.iter_mut() {
                 m.init(&mut world);
             }
 
@@ -217,6 +254,7 @@ pub fn run(modules: Modules) -> ! {
                 control_systems,
                 engine_systems,
                 renderer,
+                spec,
             }
             .run();
 

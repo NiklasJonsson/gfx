@@ -431,6 +431,7 @@ pub struct BorrowingBufferDescriptor<'a, BT> {
     data: &'a [u8],
     mutability: BufferMutability,
     elem_size: u16,
+    #[allow(dead_code)]
     n_elems: u32,
     buffer_type: BT,
 }

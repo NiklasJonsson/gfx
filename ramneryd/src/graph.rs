@@ -71,20 +71,21 @@ impl<'a> System<'a> for TransformPropagation {
         &mut self,
         (entities, parent_storage, children_storage, transforms, mut model_matrices): Self::SystemData,
     ) {
-        for (ent, _, children, transform) in
-            (&entities, !&parent_storage, &children_storage, &transforms).join()
-        {
+        for (ent, transform, _) in (&entities, &transforms, !&parent_storage).join() {
             model_matrices
-                .insert(ent, ModelMatrix(Mat4::from(*transform)))
+                .insert(ent, ModelMatrix::from(*transform))
                 .unwrap();
-            for child in children.iter() {
-                TransformPropagation::propagate_transforms_rec(
-                    *child,
-                    &children_storage,
-                    &transforms,
-                    &mut model_matrices,
-                    *transform,
-                );
+
+            if let Some(children) = children_storage.get(ent) {
+                for child in children.iter() {
+                    TransformPropagation::propagate_transforms_rec(
+                        *child,
+                        &children_storage,
+                        &transforms,
+                        &mut model_matrices,
+                        *transform,
+                    );
+                }
             }
         }
     }

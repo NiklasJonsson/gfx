@@ -1,5 +1,5 @@
 use ramneryd::ecs::prelude::*;
-use ramneryd::{Module, Modules};
+use ramneryd::Module;
 
 use structopt::StructOpt;
 
@@ -98,7 +98,8 @@ impl Module for GltfViewer {
 }
 
 fn main() {
-    let viewer = Box::new(GltfViewer::from_args());
-    let modules = Modules(vec![viewer]);
-    ramneryd::run(modules);
+    ramneryd::EngineSpec::builder()
+        .with_module(GltfViewer::from_args())
+        .build()
+        .run();
 }

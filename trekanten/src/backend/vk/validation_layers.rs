@@ -13,7 +13,7 @@ use std::fmt::Write;
 use std::os::raw::c_char;
 
 #[allow(dead_code)]
-const DISABLE_VALIDATION_LAYERS_ENV_VAR: &str = "TREK_DISABLE_VALIDATION_LAYERS";
+const DISABLE_VALIDATION_LAYERS_ENV_VAR: &str = "TREKANTEN_DISABLE_VALIDATION_LAYERS";
 
 fn validation_layers() -> Vec<CString> {
     vec![CString::new("VK_LAYER_KHRONOS_validation").expect("Failed to create CString")]
@@ -43,7 +43,7 @@ pub fn choose_validation_layers(entry: &Entry) -> Vec<CString> {
         };
 
         if layers.is_empty() {
-            log::trace!("Found no layers");
+            log::warn!("Layers requested but found no layers");
         }
 
         for req in requested.iter() {

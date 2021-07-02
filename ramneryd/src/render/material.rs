@@ -2,7 +2,7 @@ use trekanten::texture::Texture;
 use trekanten::{mem::UniformBuffer, texture::TextureDescriptor};
 use trekanten::{BufferHandle, Handle};
 
-use crate::math::{Rgba, Vec4};
+use crate::math::Rgba;
 use crate::render::Pending;
 
 use crate::ecs::prelude::*;
@@ -22,10 +22,10 @@ pub struct TextureUse2 {
     pub coord_set: u32,
 }
 
-#[derive(Debug, Component)]
+#[derive(Debug, Component, Default)]
 #[component(inspect)]
 pub struct PhysicallyBased {
-    pub base_color_factor: Vec4,
+    pub base_color_factor: Rgba,
     pub metallic_factor: f32,
     pub roughness_factor: f32,
     pub normal_scale: f32,

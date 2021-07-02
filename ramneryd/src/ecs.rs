@@ -54,6 +54,28 @@ pub mod serde {
         }
     }
 
+    pub fn from_ron_str<'a>(ron: &str, serde_data: &mut Data<'a>) -> Result<(), Error> {
+        let Data {
+            entities,
+            markers,
+            allocator,
+            transforms,
+            lights,
+            names,
+        } = serde_data;
+        let mut ron_deserializer = ron::Deserializer::from_str(&ron)?;
+        let r = specs::saveload::DeserializeComponents::<crate::ecs::serde::Error, _>::deserialize(
+            &mut (transforms, lights, names),
+            &entities,
+            markers,
+            allocator,
+            &mut ron_deserializer,
+        )?;
+        markers.clear();
+
+        Ok(r)
+    }
+
     pub struct DoSerialize;
     pub type Marker = SimpleMarker<DoSerialize>;
     pub type MarkerAllocator = SimpleMarkerAllocator<DoSerialize>;
