@@ -92,10 +92,10 @@ fn inspect_enum_body(data: &syn::DataEnum, name: &Ident, is_mut: bool) -> TokenS
             if imgui::CollapsingHeader::new(&ty)
                 .default_open(!name.is_empty())
                 .leaf(#leaf)
-                .build(ui) {
-                ui.indent();
+                .build(ui.inner()) {
+                ui.inner().indent();
                 #(#fields_rhs)*
-                ui.unindent();
+                ui.inner().unindent();
             }
         };
 
@@ -126,21 +126,21 @@ fn inspect_enum(di: &DeriveInput) -> TokenStream {
     let (impl_generics, ty_generics, where_clause) = generics.split_for_impl();
     quote! {
         impl #impl_generics crate::editor::Inspect for #name #ty_generics #where_clause {
-            fn inspect<'a>(&self, ui: &imgui::Ui<'a>, name: &str) {
+            fn inspect<'a>(&self, ui: & crate::render::ui::UiFrame<'a>, name: &str) {
                 use crate::editor::Inspect;
                 if !name.is_empty() {
-                    ui.text(format!("{}:", name));
-                    ui.same_line(0.0);
+                    ui.inner().text(format!("{}:", name));
+                    ui.inner().same_line(0.0);
                 }
 
                 #body
             }
 
-            fn inspect_mut<'a>(&mut self, ui: &imgui::Ui<'a>, name: &str) {
+            fn inspect_mut<'a>(&mut self, ui: & crate::render::ui::UiFrame<'a>, name: &str) {
                 use crate::editor::Inspect;
                 if !name.is_empty() {
-                    ui.text(format!("{}:", name));
-                    ui.same_line(0.0);
+                    ui.inner().text(format!("{}:", name));
+                    ui.inner().same_line(0.0);
                 }
 
                 #body_mut
@@ -193,7 +193,9 @@ fn inspect_struct_data(data: &syn::DataStruct, is_mut: bool) -> TokenStream {
         };
 
         quote_spanned! {f.span()=>
+            {
             <#ty as crate::editor::Inspect>::#fn_name(&#maybe_mut self.#field, ui, #name);
+            }
         }
     });
 
@@ -225,13 +227,13 @@ fn inspect_struct(di: &DeriveInput) -> TokenStream {
     let (impl_generics, ty_generics, where_clause) = generics.split_for_impl();
     quote! {
         impl #impl_generics crate::editor::Inspect for #name #ty_generics #where_clause {
-            fn inspect<'a>(&self, ui: &imgui::Ui<'a>, name: &str) {
+            fn inspect<'a>(&self, ui: & crate::render::ui::UiFrame<'a>, name: &str) {
                 use crate::editor::Inspect;
                 crate::editor::inspect::inspect_struct(name, Some(stringify!(#name)),
                     ui, #body);
             }
 
-            fn inspect_mut<'a>(&mut self, ui: &imgui::Ui<'a>, name: &str) {
+            fn inspect_mut<'a>(&mut self, ui: & crate::render::ui::UiFrame<'a>, name: &str) {
                 use crate::editor::Inspect;
                 crate::editor::inspect::inspect_struct(name, Some(stringify!(#name)),
                     ui, #body_mut);

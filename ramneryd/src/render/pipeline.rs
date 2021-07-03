@@ -109,16 +109,8 @@ pub mod pbr_gltf {
     ) -> Result<(SpvBinary, SpvBinary), CompilerError> {
         assert!(def.is_valid());
         let defines = def.defines();
-        let vert = compiler.compile(
-            &defines,
-            Path::new("pbr/vert.glsl"),
-            ShaderType::Vertex,
-        )?;
-        let frag = compiler.compile(
-            &defines,
-            Path::new("pbr/frag.glsl"),
-            ShaderType::Fragment,
-        )?;
+        let vert = compiler.compile(&defines, Path::new("pbr/vert.glsl"), ShaderType::Vertex)?;
+        let frag = compiler.compile(&defines, Path::new("pbr/frag.glsl"), ShaderType::Fragment)?;
 
         Ok((vert, frag))
     }

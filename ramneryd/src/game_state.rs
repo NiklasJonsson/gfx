@@ -77,7 +77,11 @@ pub fn register_systems<'a, 'b>(builder: ExecutorBuilder<'a, 'b>) -> ExecutorBui
     )
 }
 
-pub fn build_ui<'a>(world: &mut World, ui: &imgui::Ui<'a>, pos: [f32; 2]) -> [f32; 2] {
+pub fn build_ui<'a>(
+    world: &mut World,
+    ui: &crate::render::ui::UiFrame<'a>,
+    pos: [f32; 2],
+) -> [f32; 2] {
     let state = world.read_resource::<GameState>();
 
     let size = [300.0, 50.0];
@@ -85,8 +89,8 @@ pub fn build_ui<'a>(world: &mut World, ui: &imgui::Ui<'a>, pos: [f32; 2]) -> [f3
     imgui::Window::new(imgui::im_str!("Game state"))
         .position(pos, imgui::Condition::FirstUseEver)
         .size(size, imgui::Condition::FirstUseEver)
-        .build(&ui, || {
-            ui.text(imgui::im_str!("Game state: {:?}", *state));
+        .build(ui.inner(), || {
+            ui.inner().text(imgui::im_str!("Game state: {:?}", *state));
         });
 
     size

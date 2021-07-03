@@ -130,17 +130,21 @@ pub fn register_systems<'a, 'b>(builder: ExecutorBuilder<'a, 'b>) -> ExecutorBui
         .with(ApplySettings, ApplySettings::ID, &[RenderSettingsSys::ID])
 }
 
-pub(crate) fn build_ui<'a>(world: &mut World, ui: &imgui::Ui<'a>, pos: [f32; 2]) -> [f32; 2] {
+pub(crate) fn build_ui<'a>(
+    world: &mut World,
+    ui: &crate::render::ui::UiFrame<'a>,
+    pos: [f32; 2],
+) -> [f32; 2] {
     let size = [300.0, 85.0];
 
     imgui::Window::new(imgui::im_str!("Render debug"))
         .position(pos, imgui::Condition::FirstUseEver)
         .size(size, imgui::Condition::FirstUseEver)
-        .build(&ui, || {
+        .build(ui.inner(), || {
             {
                 let mut settings = world.write_resource::<RenderSettings>();
                 settings.inspect_mut(ui, "");
-                ui.text("Lights");
+                ui.inner().text("Lights");
                 let mut lights = world.write_storage::<render::light::Light>();
                 let mut transforms = world.write_storage::<crate::math::Transform>();
                 for (i, (light, tfm)) in (&mut lights, &mut transforms).join().enumerate() {
@@ -159,10 +163,10 @@ pub(crate) fn build_ui<'a>(world: &mut World, ui: &imgui::Ui<'a>, pos: [f32; 2])
 
             {
                 let modal_id = imgui::im_str!("New light");
-                if ui.button(imgui::im_str!("Add light"), [0.0, 0.0]) {
-                    ui.open_popup(modal_id);
+                if ui.inner().button(imgui::im_str!("Add light"), [0.0, 0.0]) {
+                    ui.inner().open_popup(modal_id);
                 }
-                ui.popup_modal(modal_id).build(|| {
+                ui.inner().popup_modal(modal_id).build(|| {
                     let mut modal_state = world
                         .write_resource::<RenderSettings>()
                         .state
@@ -176,8 +180,11 @@ pub(crate) fn build_ui<'a>(world: &mut World, ui: &imgui::Ui<'a>, pos: [f32; 2])
                         imgui::im_str!("Ambient"),
                     ];
                     let mut idx = modal_state.as_ref().map(|x| x.idx).unwrap_or(0);
-                    let selected = imgui::ComboBox::new(imgui::im_str!(""))
-                        .build_simple_string(ui, &mut idx, &items);
+                    let selected = imgui::ComboBox::new(imgui::im_str!("")).build_simple_string(
+                        ui.inner(),
+                        &mut idx,
+                        &items,
+                    );
                     if selected || modal_state.is_none() {
                         let tfm = Transform::default();
                         let name = Name::from(items[idx].to_string());
@@ -232,14 +239,14 @@ pub(crate) fn build_ui<'a>(world: &mut World, ui: &imgui::Ui<'a>, pos: [f32; 2])
                         tfm.inspect_mut(ui, "transform");
                         name.inspect_mut(ui, "name");
 
-                        if ui.button(imgui::im_str!("Create"), [0.0, 0.0]) {
+                        if ui.inner().button(imgui::im_str!("Create"), [0.0, 0.0]) {
                             create = true;
-                            ui.close_current_popup();
+                            ui.inner().close_current_popup();
                         }
-                        ui.same_line(0.0);
-                        if ui.button(imgui::im_str!("Cancel"), [0.0, 0.0]) {
+                        ui.inner().same_line(0.0);
+                        if ui.inner().button(imgui::im_str!("Cancel"), [0.0, 0.0]) {
                             create = false;
-                            ui.close_current_popup();
+                            ui.inner().close_current_popup();
                         }
                     }
                     if create {

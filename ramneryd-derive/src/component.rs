@@ -74,7 +74,7 @@ pub(crate) fn impl_component(di: &DeriveInput) -> TokenStream {
             #inspect_trait_impl
 
             impl #impl_generics #name #ty_generics #where_clause {
-                fn inspect(world: &mut crate::ecs::World, ent: crate::ecs::Entity, ui: &imgui::Ui<'_>) {
+                fn inspect(world: &mut crate::ecs::World, ent: crate::ecs::Entity, ui: &crate::render::ui::UiFrame<'_>) {
                     use crate::ecs::prelude::WorldExt;
                     use crate::editor::Inspect;
                     world.write_storage::<Self>().get_mut(ent).expect("Failed to get component").inspect_mut(ui, "");

@@ -1,3 +1,4 @@
+use polymap::polymap;
 use trekanten::descriptor::DescriptorSet;
 use trekanten::mem::{
     BufferMutability, IndexBuffer, OwningIndexBufferDescriptor, OwningVertexBufferDescriptor,
@@ -27,6 +28,7 @@ use specs::World;
 
 use imgui::im_str;
 
+use std::borrow::BorrowMut;
 use std::path::Path;
 
 struct ImGuiVertex {
@@ -53,6 +55,11 @@ struct PerFrameData {
     fb_height: f32,
 }
 
+pub type UIModules = Vec<Box<dyn UIModule>>;
+
+pub type UiStateStorage = std::cell::RefCell<polymap::PolyMap<String>>;
+
+/// The main ui context. Holds gpu resource pointers and imgui context. Should live as long as application
 pub struct UIContext {
     imgui: imgui::Context,
     _font_texture: Handle<Texture>,
@@ -60,6 +67,28 @@ pub struct UIContext {
     desc_set: Handle<DescriptorSet>,
     input_entity: specs::Entity,
     per_frame_data: Option<PerFrameData>,
+    storage: UiStateStorage,
+    modules: UIModules,
+}
+
+/// The data for one frame of the ui. Ui modules get this and register ui draw calls
+pub struct UiFrame<'a> {
+    imgui: imgui::Ui<'a>,
+    storage: &'a UiStateStorage,
+}
+
+impl<'a> UiFrame<'a> {
+    pub fn inner(&self) -> &imgui::Ui<'a> {
+        &self.imgui
+    }
+
+    pub fn storage(&self) -> std::cell::RefMut<'_, polymap::PolyMap<String>> {
+        self.storage.borrow_mut()
+    }
+}
+
+pub trait UIModule {
+    fn draw(&mut self, world: &mut World, frame: &UiFrame);
 }
 
 /* TODO:
@@ -272,7 +301,7 @@ impl UIContext {
             .build()
     }
 
-    pub fn new(renderer: &mut Renderer, world: &mut World) -> Self {
+    pub fn new(renderer: &mut Renderer, world: &mut World, modules: UIModules) -> Self {
         log::trace!("Setup ui resources");
 
         let mut imgui_ctx = Self::init_imgui_ctx();
@@ -341,6 +370,8 @@ impl UIContext {
             _font_texture: font_texture,
             input_entity,
             per_frame_data: None,
+            modules,
+            storage: std::cell::RefCell::new(polymap::PolyMap::default()),
         };
 
         ui_ctx.resize(renderer.swapchain_extent());
@@ -428,10 +459,13 @@ impl UIContext {
         self.resize(frame.extent());
         self.forward_input(world);
 
-        let ui = self.imgui.frame();
-        crate::editor::build_ui(world, &ui);
+        let mut ui = UiFrame {
+            imgui: self.imgui.frame(),
+            storage: &self.storage,
+        };
+        self.modules.iter_mut().for_each(|m| m.draw(world, &mut ui));
 
-        let draw_data = ui.render();
+        let draw_data = ui.imgui.render();
         let fb_width = draw_data.display_size[0] * draw_data.framebuffer_scale[0];
         let fb_height = draw_data.display_size[1] * draw_data.framebuffer_scale[1];
 

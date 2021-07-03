@@ -202,7 +202,8 @@ pub fn run(modules: Modules) -> ! {
             engine_systems.setup(&mut world);
             io::setup(&mut world, window);
             render::setup_resources(&mut world, &mut renderer);
-            let ui = render::ui::UIContext::new(&mut renderer, &mut world);
+            let ui_modules = vec![editor::ui_module()];
+            let ui = render::ui::UIContext::new(&mut renderer, &mut world, ui_modules);
 
             for mut m in modules.0.into_iter() {
                 m.init(&mut world);
