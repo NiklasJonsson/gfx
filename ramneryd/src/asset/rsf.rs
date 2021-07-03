@@ -1,5 +1,6 @@
 use crate::ecs::prelude::*;
 
+use ramneryd_derive::Visitable;
 use std::path::{Path, PathBuf};
 
 #[derive(Default, Component)]
@@ -7,8 +8,7 @@ struct LoadRsfAsset {
     path: PathBuf,
 }
 
-#[derive(Default, Component)]
-#[component(inspect)]
+#[derive(Default, Component, Visitable)]
 pub struct RsfAsset {
     path: PathBuf,
 }

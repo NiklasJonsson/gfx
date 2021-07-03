@@ -10,6 +10,8 @@ use crate::math::{Mat4, Transform, Vec3};
 use crate::time::Time;
 use ecs::prelude::*;
 
+use ramneryd_derive::Visitable;
+
 use num_traits::cast::FromPrimitive;
 
 #[derive(Debug)]
@@ -23,8 +25,8 @@ const MAX_PITCH: f32 = 0.99 * std::f32::consts::FRAC_PI_2;
 const MIN_PITCH: f32 = 0.99 * -std::f32::consts::FRAC_PI_2;
 // TODO: Inheret clamping for the fields?
 // TOOD: Modulus for yaw?
-#[derive(Debug, Component)]
-#[component(storage = "HashMapStorage", inspect)]
+#[derive(Debug, Component, Visitable)]
+#[component(storage = "HashMapStorage")]
 pub struct CameraRotationState {
     yaw: f32,
     pitch: f32,

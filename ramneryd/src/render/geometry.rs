@@ -6,6 +6,8 @@ use trekanten::vertex::{VertexDefinition, VertexFormat};
 
 use super::mesh::Mesh;
 
+use ramneryd_derive::Visitable;
+
 #[derive(Copy, Clone)]
 struct Vertex {
     _pos: [f32; 3],
@@ -272,8 +274,7 @@ pub fn cone_mesh(radius: f32, height: f32) -> Mesh {
     Mesh::new(vertices, indices)
 }
 
-#[derive(Debug, Component, Clone, Copy)]
-#[component(inspect)]
+#[derive(Debug, Component, Visitable, Clone, Copy)]
 pub enum Shape {
     Box { width: f32, height: f32, depth: f32 },
     Sphere { radius: f32 },

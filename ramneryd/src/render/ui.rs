@@ -54,7 +54,7 @@ struct PerFrameData {
 
 pub type UIModules = Vec<Box<dyn UIModule>>;
 
-pub type UiStateStorage = std::cell::RefCell<polymap::PolyMap<String>>;
+type UiStateStorage = std::cell::RefCell<polymap::PolyMap<String>>;
 
 /// The main ui context. Holds gpu resource pointers and imgui context. Should live as long as application
 pub struct UIContext {
@@ -64,6 +64,8 @@ pub struct UIContext {
     desc_set: Handle<DescriptorSet>,
     input_entity: specs::Entity,
     per_frame_data: Option<PerFrameData>,
+
+    /// Borrowed by the UiFrame each frame for permanent storage
     storage: UiStateStorage,
     modules: UIModules,
 }
@@ -88,7 +90,7 @@ pub trait UIModule {
     fn draw(&mut self, world: &mut World, frame: &UiFrame);
 }
 
-/* TODO:
+/* TODO: remaining imgui integration
     /// Render preparation callback.
     ///
     /// Call this before calling the imgui-rs UI `render_with`/`render` function.

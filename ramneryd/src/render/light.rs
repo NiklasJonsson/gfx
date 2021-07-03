@@ -17,8 +17,9 @@ pub struct RenderLightVolume;
 #[component(storage = "NullStorage")]
 pub struct LightVolumeRenderer;
 
-#[derive(Component, serde::Serialize, serde::Deserialize, Clone, Debug)]
-#[component(inspect)]
+#[derive(
+    Component, ramneryd_derive::Visitable, serde::Serialize, serde::Deserialize, Clone, Debug,
+)]
 pub enum Light {
     // Range is the radius of the sphere
     Point { color: Rgb, range: f32 },

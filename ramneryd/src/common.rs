@@ -2,10 +2,20 @@ use crate::ecs::prelude::*;
 
 use serde::{Deserialize, Serialize};
 
+use ramneryd_derive::Visitable;
 #[derive(
-    Debug, Default, Clone, PartialEq, Eq, PartialOrd, Ord, Component, Serialize, Deserialize,
+    Debug,
+    Default,
+    Clone,
+    PartialEq,
+    Eq,
+    PartialOrd,
+    Ord,
+    Component,
+    Serialize,
+    Deserialize,
+    Visitable,
 )]
-#[component(inspect)]
 pub struct Name(pub String);
 
 impl<S> From<S> for Name

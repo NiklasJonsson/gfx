@@ -39,10 +39,10 @@ use crate::camera::*;
 use crate::ecs;
 use crate::math::{Mat4, ModelMatrix, Transform, Vec3};
 use material::{GpuMaterial, PendingMaterial};
-use ramneryd_derive::Inspect;
+use ramneryd_derive::Visitable;
 
 /// Utility for working with asynchronously uploaded gpu resources
-#[derive(Inspect)]
+#[derive(Debug, Clone, Visitable)]
 pub enum GpuResource<InFlightT, AvailT> {
     None,
     InFlight(InFlightT),
@@ -124,8 +124,7 @@ fn get_proj_matrix(aspect_ratio: f32) -> Mat4 {
 #[component(storage = "NullStorage")]
 pub struct ReloadMaterial;
 
-#[derive(Component)]
-#[component(inspect)]
+#[derive(Component, Visitable)]
 pub enum RenderableMaterial {
     PBR {
         gfx_pipeline: Handle<GraphicsPipeline>,
@@ -866,7 +865,7 @@ pub fn setup_resources(world: &mut World, mut renderer: &mut Renderer) {
     log::trace!("Done");
 }
 
-#[derive(Debug, Clone, Inspect)]
+#[derive(Debug, Clone, Visitable)]
 pub enum Pending<T1, T2> {
     Pending(T1),
     Available(T2),

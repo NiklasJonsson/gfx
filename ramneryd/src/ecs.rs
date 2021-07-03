@@ -226,10 +226,6 @@ pub mod meta {
         pub size: usize,
         pub has: fn(world: &super::World, ent: super::Entity) -> bool,
         pub register: fn(world: &mut super::World),
-
-        pub inspect: Option<
-            fn(world: &mut super::World, ent: super::Entity, ui: &crate::render::ui::UiFrame<'_>),
-        >,
     }
 
     pub fn register_all_components(world: &mut super::World) {

@@ -5,14 +5,14 @@ use std::collections::VecDeque;
 
 use crate::math::{Mat4, ModelMatrix, Transform};
 
-#[derive(Debug, Clone, Eq, Ord, PartialEq, PartialOrd, Component)]
-#[component(inspect)]
+use ramneryd_derive::Visitable;
+
+#[derive(Debug, Clone, Eq, Ord, PartialEq, PartialOrd, Component, Visitable)]
 pub struct Parent {
     pub parent: Entity,
 }
 
-#[derive(Debug, Clone, Eq, Ord, PartialEq, PartialOrd, Component)]
-#[component(inspect)]
+#[derive(Debug, Clone, Eq, Ord, PartialEq, PartialOrd, Component, Visitable)]
 pub struct Children {
     pub children: Vec<Entity>,
 }

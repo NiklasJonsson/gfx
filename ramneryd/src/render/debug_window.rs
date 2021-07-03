@@ -3,14 +3,14 @@ use crate::ecs::prelude::*;
 use crate::io::input::{ActionId, InputContext, InputContextError, KeyCode, MappedInput};
 use crate::math::{Rgb, Transform};
 use crate::render;
+use crate::visit::{Meta, MetaOrigin, Visitor};
+use render::Light;
 
-use crate::editor;
-use editor::Inspect as _;
-use ramneryd_derive::Inspect;
+use ramneryd_derive::Visitable;
 
 use num_derive::FromPrimitive;
 
-#[derive(Debug, Copy, Clone, PartialEq, Eq, FromPrimitive, Inspect)]
+#[derive(Debug, Copy, Clone, PartialEq, Eq, FromPrimitive, Visitable)]
 pub enum RenderMode {
     Opaque,
     Wireframe,
@@ -19,7 +19,7 @@ pub enum RenderMode {
 #[derive(Default)]
 struct AddLightModalState {
     idx: usize,
-    choice: render::light::Light,
+    choice: Light,
     name: Name,
     tfm: Transform,
 }
@@ -29,7 +29,7 @@ struct RenderSettingsState {
     add_light_modal: Option<AddLightModalState>,
 }
 
-#[derive(Inspect)]
+#[derive(Visitable)]
 pub struct RenderSettings {
     // Affects all entities
     pub render_mode: RenderMode,
@@ -37,7 +37,7 @@ pub struct RenderSettings {
     pub reload_shaders: bool,
     pub render_light_volumes: bool,
 
-    #[inspect(ignore)]
+    #[visitable(ignore)]
     state: RenderSettingsState,
 }
 
@@ -130,33 +130,44 @@ pub fn register_systems<'a, 'b>(builder: ExecutorBuilder<'a, 'b>) -> ExecutorBui
         .with(ApplySettings, ApplySettings::ID, &[RenderSettingsSys::ID])
 }
 
+#[derive(Visitable)]
+struct LightInfo {
+    transform: Transform,
+    light: Light,
+}
+
 pub(crate) fn build_ui<'a>(
     world: &mut World,
     ui: &crate::render::ui::UiFrame<'a>,
     pos: [f32; 2],
 ) -> [f32; 2] {
+    use crate::visit::Visitable;
     let size = [300.0, 85.0];
 
+    let mut visitor = crate::editor::inspector::ImguiVisitor::new(ui);
     imgui::Window::new(imgui::im_str!("Render debug"))
         .position(pos, imgui::Condition::FirstUseEver)
         .size(size, imgui::Condition::FirstUseEver)
         .build(ui.inner(), || {
             {
                 let mut settings = world.write_resource::<RenderSettings>();
-                settings.inspect_mut(ui, "");
+                settings.visit_fields_mut(&mut visitor);
                 ui.inner().text("Lights");
-                let mut lights = world.write_storage::<render::light::Light>();
+                let mut lights = world.write_storage::<Light>();
                 let mut transforms = world.write_storage::<crate::math::Transform>();
                 for (i, (light, tfm)) in (&mut lights, &mut transforms).join().enumerate() {
-                    let id = format!("Light##{}", i);
-                    editor::inspect::inspect_struct(
-                        "",
-                        Some(&id),
-                        ui,
-                        Some(|| {
-                            tfm.inspect_mut(ui, "transform");
-                            light.inspect_mut(ui, "light");
-                        }),
+                    let mut l = LightInfo {
+                        transform: *tfm,
+                        light: light.clone(),
+                    };
+
+                    visitor.visit_mut(
+                        &mut l,
+                        &Meta {
+                            type_name: "Light",
+                            range: None,
+                            origin: MetaOrigin::TupleField { idx: i },
+                        },
                     );
                 }
             }
@@ -189,7 +200,7 @@ pub(crate) fn build_ui<'a>(
                         let tfm = Transform::default();
                         let name = Name::from(items[idx].to_string());
                         let light = match idx {
-                            0 => render::light::Light::Point {
+                            0 => Light::Point {
                                 color: Rgb {
                                     r: 1.0,
                                     g: 1.0,
@@ -197,14 +208,14 @@ pub(crate) fn build_ui<'a>(
                                 },
                                 range: 5.0,
                             },
-                            1 => render::light::Light::Directional {
+                            1 => Light::Directional {
                                 color: Rgb {
                                     r: 1.0,
                                     g: 1.0,
                                     b: 1.0,
                                 },
                             },
-                            2 => render::light::Light::Spot {
+                            2 => Light::Spot {
                                 color: Rgb {
                                     r: 1.0,
                                     g: 1.0,
@@ -213,7 +224,7 @@ pub(crate) fn build_ui<'a>(
                                 angle: std::f32::consts::FRAC_PI_8,
                                 range: 5.0,
                             },
-                            3 => render::light::Light::Ambient {
+                            3 => Light::Ambient {
                                 color: Rgb {
                                     r: 1.0,
                                     g: 1.0,
@@ -235,9 +246,9 @@ pub(crate) fn build_ui<'a>(
                         choice, name, tfm, ..
                     }) = &mut modal_state
                     {
-                        choice.inspect_mut(ui, "properties");
-                        tfm.inspect_mut(ui, "transform");
-                        name.inspect_mut(ui, "name");
+                        visitor.visit_mut(choice, &Meta::field("properties"));
+                        visitor.visit_mut(tfm, &Meta::field("transform"));
+                        visitor.visit_mut(name, &Meta::field("name"));
 
                         if ui.inner().button(imgui::im_str!("Create"), [0.0, 0.0]) {
                             create = true;
@@ -286,7 +297,7 @@ impl<'a> System<'a> for ApplySettings {
         WriteStorage<'a, render::ReloadMaterial>,
         ReadStorage<'a, crate::math::BoundingBox>,
         WriteStorage<'a, render::bounding_box::RenderBoundingBox>,
-        ReadStorage<'a, render::light::Light>,
+        ReadStorage<'a, Light>,
         WriteStorage<'a, render::light::RenderLightVolume>,
     );
 

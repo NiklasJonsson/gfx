@@ -13,6 +13,7 @@ mod io;
 pub mod math;
 pub mod render;
 mod time;
+mod visit;
 
 use time::Time;
 

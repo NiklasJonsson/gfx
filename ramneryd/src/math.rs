@@ -1,5 +1,4 @@
 use crate::ecs::prelude::*;
-
 use serde::{Deserialize, Serialize};
 
 pub type Vec3 = vek::Vec3<f32>;
@@ -10,8 +9,9 @@ pub type Rgb = vek::Rgb<f32>;
 pub type Rgba = vek::Rgba<f32>;
 pub type FrustrumPlanes = vek::FrustumPlanes<f32>;
 
-#[derive(Debug, Copy, Component, Clone, PartialEq, Serialize, Deserialize)]
-#[component(inspect)]
+use ramneryd_derive::Visitable;
+
+#[derive(Debug, Copy, Component, Clone, PartialEq, Serialize, Deserialize, Visitable)]
 pub struct Transform {
     pub position: Vec3,
     pub rotation: Quat,
@@ -109,8 +109,7 @@ impl std::ops::MulAssign for Transform {
     }
 }
 
-#[derive(Debug, Component, Clone, Copy)]
-#[component(inspect)]
+#[derive(Debug, Component, Clone, Copy, Visitable)]
 pub struct ModelMatrix(pub Mat4);
 
 impl From<Mat4> for ModelMatrix {
@@ -137,8 +136,7 @@ impl std::fmt::Display for ModelMatrix {
     }
 }
 
-#[derive(Debug, Clone, Copy, Component)]
-#[component(inspect)]
+#[derive(Debug, Clone, Copy, Component, Visitable)]
 pub struct BoundingBox {
     pub min: Vec3,
     pub max: Vec3,

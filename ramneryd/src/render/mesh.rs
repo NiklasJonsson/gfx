@@ -6,8 +6,9 @@ use trekanten::loader::{Loader, ResourceLoader};
 use trekanten::resource::Async;
 use trekanten::{BufferHandle, BufferMutability};
 
-#[derive(Component)]
-#[component(inspect)]
+use ramneryd_derive::Visitable;
+
+#[derive(Component, Visitable)]
 pub struct Mesh {
     pub cpu_vertex_buffer: HostVertexBuffer,
     pub cpu_index_buffer: HostIndexBuffer,

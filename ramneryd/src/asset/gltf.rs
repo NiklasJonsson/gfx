@@ -7,6 +7,8 @@ use trekanten::texture::{MipMaps, TextureDescriptor};
 use trekanten::util;
 use trekanten::vertex::VertexFormat;
 
+use ramneryd_derive::Visitable;
+
 use crate::camera::Camera;
 use crate::common::Name;
 use crate::graph::sys as graph;
@@ -379,8 +381,7 @@ pub fn load_asset(world: &mut World, path: &Path) {
         .build();
 }
 
-#[derive(Default, Component)]
-#[component(inspect)]
+#[derive(Default, Component, Visitable)]
 pub struct GltfAsset {
     path: PathBuf,
 }
@@ -390,8 +391,7 @@ pub struct LoadGltfAsset {
     path: PathBuf,
 }
 
-#[derive(Component)]
-#[component(inspect)]
+#[derive(Component, Visitable)]
 pub struct PendingGltfModel {
     mesh: Mesh,
     material: PhysicallyBased,

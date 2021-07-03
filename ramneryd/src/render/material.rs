@@ -6,25 +6,23 @@ use crate::math::Rgba;
 use crate::render::Pending;
 
 use crate::ecs::prelude::*;
-use ramneryd_derive::Inspect;
 
+use ramneryd_derive::Visitable;
 use trekanten::resource::Async;
 
-#[derive(Debug, Clone, Component)]
-#[component(inspect)]
+#[derive(Debug, Clone, Component, Visitable)]
 pub struct Unlit {
     pub color: Rgba,
     pub polygon_mode: PolygonMode,
 }
 
-#[derive(Debug, Clone, Inspect)]
+#[derive(Debug, Clone, Visitable)]
 pub struct TextureUse2 {
     pub desc: TextureDescriptor,
     pub coord_set: u32,
 }
 
-#[derive(Debug, Component, Default)]
-#[component(inspect)]
+#[derive(Debug, Component, Default, Visitable)]
 pub struct PhysicallyBased {
     pub base_color_factor: Rgba,
     pub metallic_factor: f32,
@@ -36,14 +34,13 @@ pub struct PhysicallyBased {
     pub has_vertex_colors: bool,
 }
 
-#[derive(Debug, Clone, Inspect, PartialEq, Eq)]
+#[derive(Debug, Clone, Visitable, PartialEq, Eq)]
 pub struct TextureUse<T> {
     pub handle: Handle<T>,
     pub coord_set: u32,
 }
 
-#[derive(Debug, Component)]
-#[component(inspect)]
+#[derive(Debug, Component, Visitable)]
 pub enum GpuMaterial {
     Unlit {
         color_uniform: BufferHandle<DeviceUniformBuffer>,
@@ -58,8 +55,7 @@ pub enum GpuMaterial {
     },
 }
 
-#[derive(Debug, Component)]
-#[component(inspect)]
+#[derive(Debug, Component, Visitable)]
 pub enum PendingMaterial {
     Unlit {
         color_uniform:
