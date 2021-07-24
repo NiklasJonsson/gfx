@@ -1,7 +1,7 @@
-use crate::device::Device;
-use crate::mem::BufferHandle;
-use crate::mem::{
-    BufferDescriptor, DeviceBuffer, DrainIterator as BufferDrainIterator, IndexBuffer,
+use crate::backend;
+
+use crate::buffer::{
+    BufferDescriptor, BufferHandle, DrainIterator as BufferDrainIterator, IndexBuffer,
     OwningIndexBufferDescriptor, OwningUniformBufferDescriptor, OwningVertexBufferDescriptor,
     UniformBuffer, VertexBuffer,
 };
@@ -14,6 +14,8 @@ use crate::{
     },
     BufferMutability,
 };
+use backend::buffer::DeviceBuffer;
+use backend::device::Device;
 
 // TODO: Don't use vk directly here
 use ash::vk;

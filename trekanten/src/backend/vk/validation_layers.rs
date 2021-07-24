@@ -1,4 +1,4 @@
-use crate::instance::Instance;
+use crate::backend::instance::Instance;
 use crate::util::lifetime::LifetimeToken;
 
 use ash::{version::EntryV1_0, Entry};

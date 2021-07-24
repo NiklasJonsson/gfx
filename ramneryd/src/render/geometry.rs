@@ -1,6 +1,8 @@
 use crate::ecs::prelude::*;
 use crate::math::Vec3;
-use trekanten::mem::{BufferMutability, OwningIndexBufferDescriptor, OwningVertexBufferDescriptor};
+use trekanten::buffer::{
+    BufferMutability, OwningIndexBufferDescriptor, OwningVertexBufferDescriptor,
+};
 use trekanten::util::Format;
 use trekanten::vertex::{VertexDefinition, VertexFormat};
 

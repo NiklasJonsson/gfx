@@ -5,14 +5,14 @@ use ash::vk;
 
 use thiserror::Error;
 
-use crate::backend::{AllocatorHandle, HasVkDevice, VkDeviceHandle};
-use crate::command::CommandBuffer;
-use crate::image::{ImageView, ImageViewError};
-use crate::mem::DeviceBuffer;
-use crate::mem::DeviceImage;
-use crate::mem::MemoryError;
+use crate::backend;
+
 use crate::resource::{Handle, Storage};
 use crate::util;
+use backend::buffer::DeviceBuffer;
+use backend::command::CommandBuffer;
+use backend::image::{DeviceImage, ImageView, ImageViewError};
+use backend::{AllocatorHandle, HasVkDevice, MemoryError, VkDeviceHandle};
 use util::Extent2D;
 
 use std::sync::Arc;

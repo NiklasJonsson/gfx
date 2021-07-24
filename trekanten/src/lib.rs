@@ -3,11 +3,11 @@ use ash::vk;
 pub use ash::vk as raw_vk;
 
 mod backend;
+pub mod buffer;
 mod common;
 pub mod descriptor;
 mod error;
 pub mod loader;
-pub mod mem;
 pub mod pipeline;
 mod render_pass;
 mod render_target;
@@ -16,23 +16,23 @@ pub mod texture;
 pub mod util;
 pub mod vertex;
 
+pub use backend::command::CommandBuffer;
+pub use buffer::{BufferHandle, BufferMutability};
 pub use error::RenderError;
 pub use error::ResizeReason;
 pub use loader::Loader;
-pub use mem::{BufferHandle, BufferMutability};
 pub use render_pass::{RenderPass, RenderPassEncoder};
 pub use render_target::RenderTarget;
 pub use resource::{Async, Handle, MutResourceManager, ResourceManager};
 pub use texture::Texture;
 
-pub use command::CommandBuffer;
-
 use ash::version::DeviceV1_0;
-use backend::*;
+use backend::device::HasVkDevice as _;
+use backend::{color_buffer, command, depth_buffer, device, instance, surface, swapchain, sync};
 use common::MAX_FRAMES_IN_FLIGHT;
-use device::HasVkDevice;
 
-use crate::mem::BufferDescriptor as _;
+use crate::backend::vk::{buffer::DeviceBuffer, image::DeviceImage, MemoryError};
+use crate::buffer::BufferDescriptor as _;
 
 // Notes:
 // We can have N number of swapchain images, it depends on the backing presentation implementation.
@@ -88,9 +88,9 @@ impl<'a> Frame<'a> {
     }
 
     // TODO: Could we use vkCmdUpdateBuffer instead? Note that it can't be inside a render pass
-    pub fn update_uniform_blocking<T: Copy>(
+    pub fn update_uniform_blocking<T: Copy + buffer::Uniform>(
         &mut self,
-        h: &BufferHandle<mem::UniformBuffer>,
+        h: &BufferHandle<buffer::UniformBuffer>,
         data: &T,
     ) -> Result<(), RenderError> {
         self.renderer.update_uniform(h, data)
@@ -183,7 +183,7 @@ macro_rules! impl_mut_buffer_manager_frame {
         impl<'a> resource::MutResourceManager<$desc, $resource, BufferHandle<$resource>>
             for Frame<'a>
         {
-            type Error = mem::MemoryError;
+            type Error = MemoryError;
 
             /// Recreates a whole buffer, regardless if the buffer handle is only a subslice
             /// Any handles pointing to this are invalidated and only the returned value should be
@@ -221,21 +221,21 @@ macro_rules! impl_mut_buffer_manager_frame {
 }
 
 impl_mut_buffer_manager_frame!(
-    mem::OwningVertexBufferDescriptor,
-    mem::VertexBuffer,
+    buffer::OwningVertexBufferDescriptor,
+    buffer::VertexBuffer,
     vertex_buffers
 );
 
 impl_mut_buffer_manager_frame!(
-    mem::OwningIndexBufferDescriptor,
-    mem::IndexBuffer,
+    buffer::OwningIndexBufferDescriptor,
+    buffer::IndexBuffer,
     index_buffers
 );
 
 macro_rules! impl_buffer_manager_frame {
     ($desc:ty, $resource:ty, $handle:ty, $cmd_enum:ident, $storage:ident) => {
         impl<'a> resource::ResourceManager<$desc, $resource, $handle> for Frame<'a> {
-            type Error = mem::MemoryError;
+            type Error = MemoryError;
 
             fn get_resource(&self, handle: &$handle) -> Option<&$resource> {
                 self.renderer.get_resource(handle)
@@ -252,30 +252,30 @@ macro_rules! impl_buffer_manager_frame {
 }
 
 impl_buffer_manager_frame!(
-    mem::OwningVertexBufferDescriptor,
-    mem::VertexBuffer,
-    BufferHandle<mem::VertexBuffer>,
+    buffer::OwningVertexBufferDescriptor,
+    buffer::VertexBuffer,
+    BufferHandle<buffer::VertexBuffer>,
     CreateVertexBuffer,
     vertex_buffers
 );
 
 impl_buffer_manager_frame!(
-    mem::OwningIndexBufferDescriptor,
-    mem::IndexBuffer,
-    BufferHandle<mem::IndexBuffer>,
+    buffer::OwningIndexBufferDescriptor,
+    buffer::IndexBuffer,
+    BufferHandle<buffer::IndexBuffer>,
     CreateIndexBuffer,
     index_buffers
 );
 
 pub enum SyncResourceCommand {
     CreateVertexBuffer {
-        descriptor: mem::OwningVertexBufferDescriptor,
+        descriptor: buffer::OwningVertexBufferDescriptor,
     },
     CreateIndexBuffer {
-        descriptor: mem::OwningIndexBufferDescriptor,
+        descriptor: buffer::OwningIndexBufferDescriptor,
     },
     CreateUniformBuffer {
-        descriptor: mem::OwningUniformBufferDescriptor,
+        descriptor: buffer::OwningUniformBufferDescriptor,
     },
     CreateTexture {
         descriptor: texture::TextureDescriptor,
@@ -284,20 +284,20 @@ pub enum SyncResourceCommand {
 
 pub enum PendingSyncResourceCommand {
     CreateVertexBuffer {
-        handle: mem::BufferHandle<mem::VertexBuffer>,
-        transients: [Option<mem::DeviceBuffer>; 2],
+        handle: buffer::BufferHandle<buffer::VertexBuffer>,
+        transients: [Option<DeviceBuffer>; 2],
     },
     CreateIndexBuffer {
-        handle: mem::BufferHandle<mem::IndexBuffer>,
-        transients: [Option<mem::DeviceBuffer>; 2],
+        handle: buffer::BufferHandle<buffer::IndexBuffer>,
+        transients: [Option<DeviceBuffer>; 2],
     },
     CreateUniformBuffer {
-        handle: mem::BufferHandle<mem::UniformBuffer>,
-        transients: [Option<mem::DeviceBuffer>; 2],
+        handle: buffer::BufferHandle<buffer::UniformBuffer>,
+        transients: [Option<DeviceBuffer>; 2],
     },
     CreateTexture {
         handle: resurs::Handle<texture::Texture>,
-        transients: mem::DeviceBuffer,
+        transients: DeviceBuffer,
     },
 }
 
@@ -320,13 +320,13 @@ impl PendingSyncResourceCommand {
 
 pub enum FinishedResourceCommand {
     CreateVertexBuffer {
-        handle: mem::BufferHandle<mem::VertexBuffer>,
+        handle: buffer::BufferHandle<buffer::VertexBuffer>,
     },
     CreateIndexBuffer {
-        handle: mem::BufferHandle<mem::IndexBuffer>,
+        handle: buffer::BufferHandle<buffer::IndexBuffer>,
     },
     CreateUniformBuffer {
-        handle: mem::BufferHandle<mem::UniformBuffer>,
+        handle: buffer::BufferHandle<buffer::UniformBuffer>,
     },
     CreateTexture {
         handle: resurs::Handle<texture::Texture>,
@@ -483,7 +483,7 @@ impl Renderer {
     fn execute_command(
         &mut self,
         command: SyncResourceCommand,
-    ) -> Result<FinishedResourceCommand, mem::MemoryError> {
+    ) -> Result<FinishedResourceCommand, MemoryError> {
         let mut raw_cmd_buf = self.util_command_pool.begin_single_submit()?;
         let pending_cmd = self
             .schedule_command(command, &mut raw_cmd_buf)
@@ -561,9 +561,9 @@ impl Renderer {
             command::CommandPool::new(&device, device.graphics_queue_family().clone())?;
         let descriptor_sets = descriptor::DescriptorSets::new(&device)?;
         let resources = resource::Resources {
-            uniform_buffers: mem::UniformBuffers::default(),
-            vertex_buffers: mem::VertexBuffers::default(),
-            index_buffers: mem::IndexBuffers::default(),
+            uniform_buffers: buffer::UniformBuffers::default(),
+            vertex_buffers: buffer::VertexBuffers::default(),
+            index_buffers: buffer::IndexBuffers::default(),
             textures: texture::Textures::default(),
             graphics_pipelines: pipeline::GraphicsPipelines::default(),
             descriptor_sets,
@@ -756,9 +756,9 @@ impl Renderer {
 
 /// These are functions only used by other parts of this lib
 impl Renderer {
-    fn update_uniform<T: Copy>(
+    fn update_uniform<T: Copy + buffer::Uniform>(
         &mut self,
-        h: &BufferHandle<mem::UniformBuffer>,
+        h: &BufferHandle<buffer::UniformBuffer>,
         data: &T,
     ) -> Result<(), RenderError> {
         let ubuf = self
@@ -809,7 +809,7 @@ impl Renderer {
 macro_rules! impl_buffer_manager {
     ($desc:ty, $resource:ty, $handle:ty, $cmd_enum:ident, $storage:ident) => {
         impl resource::ResourceManager<$desc, $resource, $handle> for Renderer {
-            type Error = mem::MemoryError;
+            type Error = MemoryError;
 
             fn get_resource(&self, handle: &$handle) -> Option<&$resource> {
                 self.resources.$storage.get(handle, self.frame_idx as usize)
@@ -831,23 +831,23 @@ macro_rules! impl_buffer_manager {
 }
 
 impl_buffer_manager!(
-    mem::OwningVertexBufferDescriptor,
-    mem::VertexBuffer,
-    BufferHandle<mem::VertexBuffer>,
+    buffer::OwningVertexBufferDescriptor,
+    buffer::VertexBuffer,
+    BufferHandle<buffer::VertexBuffer>,
     CreateVertexBuffer,
     vertex_buffers
 );
 impl_buffer_manager!(
-    mem::OwningIndexBufferDescriptor,
-    mem::IndexBuffer,
-    BufferHandle<mem::IndexBuffer>,
+    buffer::OwningIndexBufferDescriptor,
+    buffer::IndexBuffer,
+    BufferHandle<buffer::IndexBuffer>,
     CreateIndexBuffer,
     index_buffers
 );
 impl_buffer_manager!(
-    mem::OwningUniformBufferDescriptor,
-    mem::UniformBuffer,
-    BufferHandle<mem::UniformBuffer>,
+    buffer::OwningUniformBufferDescriptor,
+    buffer::UniformBuffer,
+    BufferHandle<buffer::UniformBuffer>,
     CreateUniformBuffer,
     uniform_buffers
 );
@@ -906,6 +906,7 @@ impl Renderer {
         &mut self,
         handles: &[Handle<texture::Texture>],
     ) -> Result<(), RenderError> {
+        use backend::vk::image::{generate_mipmaps, transition_image_layout};
         if handles.is_empty() {
             return Ok(());
         }
@@ -926,7 +927,7 @@ impl Renderer {
             let usage = vk::ImageUsageFlags::TRANSFER_SRC
                 | vk::ImageUsageFlags::TRANSFER_DST
                 | vk::ImageUsageFlags::SAMPLED;
-            let dst_image = mem::DeviceImage::empty_2d(
+            let dst_image = DeviceImage::empty_2d(
                 &self.device.allocator(),
                 extent,
                 format,
@@ -936,14 +937,14 @@ impl Renderer {
                 vk::SampleCountFlags::TYPE_1,
             )
             .expect("Failed to create dst image");
-            mem::transition_image_layout(
+            transition_image_layout(
                 &mut cmd_buf,
                 texture.vk_image(),
                 1,
                 vk::ImageLayout::SHADER_READ_ONLY_OPTIMAL,
                 vk::ImageLayout::TRANSFER_SRC_OPTIMAL,
             );
-            mem::transition_image_layout(
+            transition_image_layout(
                 &mut cmd_buf,
                 dst_image.vk_image(),
                 mip_levels,
@@ -957,7 +958,7 @@ impl Renderer {
                 vk::ImageLayout::TRANSFER_DST_OPTIMAL,
                 &extent,
             );
-            mem::generate_mipmaps(&mut cmd_buf, dst_image.vk_image(), &extent, mip_levels);
+            generate_mipmaps(&mut cmd_buf, dst_image.vk_image(), &extent, mip_levels);
             let new =
                 texture::Texture::from_device_image(&self.device, dst_image, format, mip_levels)
                     .expect("Failed to create mipmapped texture");

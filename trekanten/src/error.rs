@@ -2,8 +2,9 @@ use thiserror::Error;
 
 use crate::backend::*;
 use crate::descriptor;
-use crate::mem;
 use crate::pipeline;
+
+use crate::backend::MemoryError;
 
 use crate::resource::ID;
 
@@ -29,9 +30,9 @@ pub enum RenderError {
     Sync(#[from] sync::SyncError),
     Swapchain(swapchain::SwapchainError),
     RenderTarget(#[from] framebuffer::FramebufferError),
-    UniformBuffer(mem::MemoryError),
-    VertexBuffer(mem::MemoryError),
-    IndexBuffer(mem::MemoryError),
+    UniformBuffer(MemoryError),
+    VertexBuffer(MemoryError),
+    IndexBuffer(MemoryError),
     // TODO: Should this be an error?
     NeedsResize(ResizeReason),
     // TODO: Resource typename here as well

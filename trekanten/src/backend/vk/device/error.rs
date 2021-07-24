@@ -3,7 +3,7 @@ use ash::vk;
 use thiserror::Error;
 
 use super::device_selection::DeviceSuitability;
-use crate::surface::SurfaceError;
+use crate::backend::surface::SurfaceError;
 
 #[derive(Error, Debug)]
 pub enum DeviceCreationError {

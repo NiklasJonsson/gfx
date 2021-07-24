@@ -4,7 +4,7 @@ use thiserror::Error;
 
 use crate::ecs::prelude::*;
 
-use trekanten::mem::{BufferMutability, OwningUniformBufferDescriptor, UniformBuffer};
+use trekanten::buffer::{BufferMutability, OwningUniformBufferDescriptor, UniformBuffer};
 use trekanten::pipeline::{
     GraphicsPipeline, GraphicsPipelineDescriptor, PipelineError, ShaderDescriptor,
 };

@@ -1,5 +1,5 @@
 use trekanten::texture::Texture;
-use trekanten::{mem::UniformBuffer, texture::TextureDescriptor};
+use trekanten::{buffer::UniformBuffer, pipeline::PolygonMode, texture::TextureDescriptor};
 use trekanten::{BufferHandle, Handle};
 
 use crate::math::Rgba;
@@ -14,6 +14,7 @@ use trekanten::resource::Async;
 #[component(inspect)]
 pub struct Unlit {
     pub color: Rgba,
+    pub polygon_mode: PolygonMode,
 }
 
 #[derive(Debug, Clone, Inspect)]
@@ -32,7 +33,6 @@ pub struct PhysicallyBased {
     pub normal_map: Option<TextureUse2>,
     pub base_color_texture: Option<TextureUse2>,
     pub metallic_roughness_texture: Option<TextureUse2>,
-    // TODO: Should this really be here?
     pub has_vertex_colors: bool,
 }
 

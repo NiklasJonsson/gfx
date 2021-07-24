@@ -1,9 +1,9 @@
 use polymap::polymap;
-use trekanten::descriptor::DescriptorSet;
-use trekanten::mem::{
+use trekanten::buffer::{
     BufferMutability, IndexBuffer, OwningIndexBufferDescriptor, OwningVertexBufferDescriptor,
     VertexBuffer,
 };
+use trekanten::descriptor::DescriptorSet;
 use trekanten::pipeline::{
     BlendState, DepthTest, GraphicsPipeline, GraphicsPipelineDescriptor, ShaderDescriptor,
     ShaderStage, TriangleCulling,

@@ -1,7 +1,7 @@
 pub use resurs::*;
 
+use crate::buffer;
 use crate::descriptor;
-use crate::mem;
 use crate::pipeline;
 use crate::render_pass;
 use crate::render_target;
@@ -9,16 +9,16 @@ use crate::texture;
 
 pub enum ResourceCommand {
     CreateVertexBuffer {
-        descriptor: mem::OwningVertexBufferDescriptor,
-        handle: mem::BufferHandle<mem::VertexBuffer>,
+        descriptor: buffer::OwningVertexBufferDescriptor,
+        handle: buffer::BufferHandle<buffer::VertexBuffer>,
     },
     CreateIndexBuffer {
-        descriptor: mem::OwningIndexBufferDescriptor,
-        handle: mem::BufferHandle<mem::IndexBuffer>,
+        descriptor: buffer::OwningIndexBufferDescriptor,
+        handle: buffer::BufferHandle<buffer::IndexBuffer>,
     },
     CreateUniformBuffer {
-        descriptor: mem::OwningUniformBufferDescriptor,
-        handle: mem::BufferHandle<mem::UniformBuffer>,
+        descriptor: buffer::OwningUniformBufferDescriptor,
+        handle: buffer::BufferHandle<buffer::UniformBuffer>,
     },
     CreateTexture {
         descriptor: texture::TextureDescriptor,
@@ -36,17 +36,17 @@ pub struct ResourceCommandBatch {
 
 #[derive(Default)]
 pub struct AsyncResources {
-    pub uniform_buffers: mem::AsyncUniformBuffers,
-    pub vertex_buffers: mem::AsyncVertexBuffers,
-    pub index_buffers: mem::AsyncIndexBuffers,
+    pub uniform_buffers: buffer::AsyncUniformBuffers,
+    pub vertex_buffers: buffer::AsyncVertexBuffers,
+    pub index_buffers: buffer::AsyncIndexBuffers,
     pub textures: texture::AsyncTextures,
     pub graphics_pipelines: pipeline::AsyncGraphicsPipelines,
 }
 
 pub struct Resources {
-    pub uniform_buffers: mem::UniformBuffers,
-    pub vertex_buffers: mem::VertexBuffers,
-    pub index_buffers: mem::IndexBuffers,
+    pub uniform_buffers: buffer::UniformBuffers,
+    pub vertex_buffers: buffer::VertexBuffers,
+    pub index_buffers: buffer::IndexBuffers,
     pub textures: texture::Textures,
     pub graphics_pipelines: pipeline::GraphicsPipelines,
     pub descriptor_sets: descriptor::DescriptorSets,

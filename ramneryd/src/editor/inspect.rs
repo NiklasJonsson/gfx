@@ -353,7 +353,7 @@ impl Inspect for usize {
     }
 }
 
-impl<BT> Inspect for trekanten::mem::OwningBufferDescriptor<BT> {
+impl<BT> Inspect for trekanten::buffer::OwningBufferDescriptor<BT> {
     fn inspect<'a>(&self, ui: &Ui<'a>, _name: &str) {
         ui.inner().text("TODO")
     }

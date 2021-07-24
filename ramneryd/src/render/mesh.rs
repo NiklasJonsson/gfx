@@ -1,9 +1,26 @@
 use crate::ecs::prelude::*;
 use crate::render::Pending;
+use trekanten::buffer::{
+    IndexBuffer, OwningIndexBufferDescriptor, OwningVertexBufferDescriptor, VertexBuffer,
+};
 use trekanten::loader::{Loader, ResourceLoader};
-use trekanten::mem::{IndexBuffer, VertexBuffer};
 use trekanten::resource::Async;
+use trekanten::util::ByteBuffer;
 use trekanten::BufferHandle;
+
+pub enum GpuResource<PendingT, AvailT> {
+    Null,
+    Pending(PendingT),
+    Available(AvailT),
+}
+type GpuBuffer<BT> = GpuResource<BufferHandle<Async<BT>>, BufferHandle<BT>>;
+
+pub struct Mesh {
+    pub cpu_vertex_buffer: ByteBuffer,
+    pub cpu_index_buffer: ByteBuffer,
+    pub gpu_vertex_buffer: GpuBuffer<VertexBuffer>,
+    pub gpu_index_buffer: GpuBuffer<IndexBuffer>,
+}
 
 #[derive(Component)]
 #[component(inspect)]
@@ -16,8 +33,8 @@ pub struct GpuMesh {
 #[derive(Component, Clone)]
 #[component(inspect)]
 pub struct CpuMesh {
-    pub vertex_buffer: trekanten::mem::OwningVertexBufferDescriptor,
-    pub index_buffer: trekanten::mem::OwningIndexBufferDescriptor,
+    pub vertex_buffer: OwningVertexBufferDescriptor,
+    pub index_buffer: OwningIndexBufferDescriptor,
     pub polygon_mode: trekanten::pipeline::PolygonMode,
 }
 

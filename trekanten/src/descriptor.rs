@@ -4,15 +4,15 @@ use ash::version::DeviceV1_0;
 
 use thiserror::Error;
 
-use crate::device::Device;
-use crate::device::HasVkDevice;
-use crate::device::VkDeviceHandle;
-use crate::mem::BufferHandle;
-use crate::mem::UniformBuffer;
+use crate::backend;
+
+use crate::buffer::BufferHandle;
+use crate::buffer::UniformBuffer;
 use crate::pipeline::ShaderStage;
 use crate::resource::{BufferedStorage, Handle};
 use crate::texture::Texture;
 use crate::Renderer;
+use backend::device::{Device, HasVkDevice, VkDeviceHandle};
 
 use crate::common::MAX_FRAMES_IN_FLIGHT;
 
@@ -176,7 +176,7 @@ impl<'a> DescriptorSetBuilder<'a> {
             let (buf0, buf1) = ubufs.get_all(&buf_h).expect("Failed to get buffer");
 
             assert!(
-                buf1.is_some() || buf_h.mutability() == crate::mem::BufferMutability::Immutable
+                buf1.is_some() || buf_h.mutability() == crate::buffer::BufferMutability::Immutable
             );
             let buf1 = buf1.unwrap_or(buf0);
             (

@@ -1,13 +1,13 @@
-use crate::mem::{BufferHandle, IndexBuffer, VertexBuffer};
+use crate::buffer::{BufferHandle, IndexBuffer, VertexBuffer};
 use crate::resource::Handle;
 use crate::util;
 
 use crate::backend;
-use crate::backend::command::{CommandBuffer, CommandError};
 use crate::descriptor::DescriptorSet;
 use crate::pipeline::{GraphicsPipeline, ShaderStage};
 use crate::resource::Resources;
 use ash::vk as vk_raw;
+use backend::command::{CommandBuffer, CommandError};
 
 pub struct RenderPassEncoder<'a> {
     resources: &'a Resources,
@@ -174,7 +174,7 @@ impl RenderPass {
         format: util::Format,
         msaa_sample_count: u8,
     ) -> Result<Self, crate::error::RenderError> {
-        let msaa_sample_count = backend::vk::n_to_sample_count(msaa_sample_count);
+        let msaa_sample_count = backend::n_to_sample_count(msaa_sample_count);
         let msaa_color_attach = vk_raw::AttachmentDescription::builder()
             .format(vk_raw::Format::from(format))
             .samples(msaa_sample_count)

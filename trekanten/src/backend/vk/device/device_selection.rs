@@ -6,9 +6,12 @@ use std::ffi::CString;
 
 use std::convert::{TryFrom, TryInto};
 
-use crate::instance::Instance;
-use crate::queue::QueueFamily;
-use crate::surface::Surface;
+use crate::backend;
+
+use backend::instance::Instance;
+use backend::queue::QueueFamily;
+use backend::surface::Surface;
+
 use crate::util;
 
 use super::error::DeviceCreationError;

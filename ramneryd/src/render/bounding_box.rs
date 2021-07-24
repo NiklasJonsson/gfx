@@ -61,6 +61,7 @@ impl<'a> System<'a> for CreateRenderedBoundingBoxes {
 
             let material = super::material::Unlit {
                 color: Rgba::new(1.0, 0.0, 0.0, 1.0),
+                polygon_mode: trekanten::pipeline::PolygonMode::Line,
             };
 
             let mut tfm = Transform::identity();

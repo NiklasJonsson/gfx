@@ -1,4 +1,4 @@
-use trekanten::mem::Uniform;
+use trekanten::buffer::Uniform;
 
 pub trait UniformBlock {
     const SET: u32;

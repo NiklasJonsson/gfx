@@ -28,23 +28,25 @@ pub fn as_bytes<T: Copy>(v: &T) -> &[u8] {
     unsafe { std::slice::from_raw_parts(ptr, size) }
 }
 
-fn drop_as_vec<T>(ptr: *const u8, len: usize, cap: usize) {
+// SAFETY: Only call this on the components that come from a call to std::Vec::into_raw_parts
+// Note that len and cap should is expected to be in *bytes*, this function will make the conversion
+// to len/cap in number of *T*.
+unsafe fn drop_as_vec<T>(ptr: *const u8, len: usize, cap: usize) {
     assert!(len % std::mem::size_of::<T>() == 0);
     assert!(cap % std::mem::size_of::<T>() == 0);
-    std::mem::drop(unsafe {
-        Vec::from_raw_parts(
-            ptr as *mut T,
-            len / std::mem::size_of::<T>(),
-            cap / std::mem::size_of::<T>(),
-        )
-    })
+    std::mem::drop(Vec::from_raw_parts(
+        ptr as *mut T,
+        len / std::mem::size_of::<T>(),
+        cap / std::mem::size_of::<T>(),
+    ));
 }
 
+/// A buffer containing bytes. Essentially a type-erased Vec<T>.
 pub struct ByteBuffer {
     ptr: *const u8,
     len: usize,
     cap: usize,
-    drop: fn(*const u8, usize, usize),
+    drop: unsafe fn(*const u8, usize, usize),
 }
 
 impl std::ops::Deref for ByteBuffer {
@@ -63,9 +65,11 @@ impl std::fmt::Debug for ByteBuffer {
 }
 
 impl ByteBuffer {
-    // Requiring copy enforces that there is no custom drop that is needed
-    // Very unsafe
+    /// Very unsafe
+    /// The vector should really only contain pods or the like, require Copy to kind of enforce this.
+    /// Note: after this, the contents of the vector might be passed accross ffi boundaries, e.g. to the gpu.
     pub unsafe fn from_vec<T: Copy + 'static>(mut v: Vec<T>) -> Self {
+        // TODO: use the into_raw_parts here when it is not nightly
         let (ptr, len, cap) = (v.as_mut_ptr(), v.len(), v.capacity());
         let drop = drop_as_vec::<T>;
         std::mem::forget(v);
@@ -88,6 +92,8 @@ unsafe impl Sync for ByteBuffer {}
 
 impl Drop for ByteBuffer {
     fn drop(&mut self) {
-        (self.drop)(self.ptr, self.len, self.cap);
+        unsafe {
+            (self.drop)(self.ptr, self.len, self.cap);
+        }
     }
 }

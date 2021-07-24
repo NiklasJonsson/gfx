@@ -1,9 +1,8 @@
 use glfw::{Action, Key};
 use nalgebra_glm as glm;
 
+use trekanten::buffer;
 use trekanten::descriptor::DescriptorSet;
-use trekanten::mem;
-use trekanten::mesh;
 use trekanten::pipeline;
 use trekanten::pipeline::ShaderDescriptor;
 use trekanten::pipeline::ShaderStage;
@@ -117,7 +116,7 @@ struct UniformBufferObject {
     view: glm::Mat4,
     proj: glm::Mat4,
 }
-impl mem::Uniform for UniformBufferObject {}
+impl buffer::Uniform for UniformBufferObject {}
 
 fn get_fname(dir: &str, target: &str) -> std::path::PathBuf {
     let url = reqwest::Url::parse(target).expect("Bad url");
@@ -245,14 +244,16 @@ fn main() -> Result<(), trekanten::RenderError> {
     let mut window = GlfwWindow::new();
     let mut renderer = trekanten::Renderer::new(&window, window.extents())?;
 
-    let vertex_buffer_descriptor =
-        mem::OwningVertexBufferDescriptor::from_vec(vertices, mem::BufferMutability::Immutable);
+    let vertex_buffer_descriptor = buffer::OwningVertexBufferDescriptor::from_vec(
+        vertices,
+        buffer::BufferMutability::Immutable,
+    );
     let vertex_buffer = renderer
         .create_resource_blocking(vertex_buffer_descriptor)
         .expect("Failed to create vertex buffer");
 
     let index_buffer_descriptor =
-        mem::OwningIndexBufferDescriptor::from_vec(indices, mem::BufferMutability::Immutable);
+        buffer::OwningIndexBufferDescriptor::from_vec(indices, buffer::BufferMutability::Immutable);
     let index_buffer = renderer
         .create_resource_blocking(index_buffer_descriptor)
         .expect("Failed to create index buffer");
@@ -277,7 +278,7 @@ fn main() -> Result<(), trekanten::RenderError> {
     }];
 
     let uniform_buffer_desc =
-        mem::OwningUniformBufferDescriptor::from_vec(data, mem::BufferMutability::Mutable);
+        buffer::OwningUniformBufferDescriptor::from_vec(data, buffer::BufferMutability::Mutable);
 
     let uniform_buffer_handle = renderer
         .create_resource_blocking(uniform_buffer_desc)

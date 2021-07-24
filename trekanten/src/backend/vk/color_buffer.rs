@@ -2,10 +2,12 @@ use ash::vk;
 
 use thiserror::Error;
 
-use super::device::Device;
-use super::image::{ImageView, ImageViewError};
-use crate::mem::{DeviceImage, MemoryError};
+use crate::backend;
+
 use crate::util;
+use backend::device::Device;
+use backend::image::{DeviceImage, ImageView, ImageViewError};
+use backend::MemoryError;
 
 #[derive(Debug, Error)]
 pub enum ColorBufferError {

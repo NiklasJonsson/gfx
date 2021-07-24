@@ -125,6 +125,7 @@ impl<'a> System<'a> for RenderLightVolumes {
 
             let material = super::material::Unlit {
                 color: Rgba::from_opaque(*color),
+                polygon_mode: trekanten::pipeline::PolygonMode::Line,
             };
 
             let child = entities

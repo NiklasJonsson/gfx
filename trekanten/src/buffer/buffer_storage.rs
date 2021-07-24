@@ -204,7 +204,7 @@ impl<T> AsyncDeviceBufferStorage<T> {
 pub type DrainIterator<'a, T> =
     DrainFilter<'a, fn(&mut Async<T>) -> bool, fn(&mut [Async<T>; 2]) -> bool, Async<T>>;
 
-use super::buffer::*;
+use super::{IndexBuffer, UniformBuffer, VertexBuffer};
 pub type UniformBuffers = DeviceBufferStorage<UniformBuffer>;
 pub type AsyncUniformBuffers = AsyncDeviceBufferStorage<UniformBuffer>;
 pub type VertexBuffers = DeviceBufferStorage<VertexBuffer>;

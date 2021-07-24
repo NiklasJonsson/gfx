@@ -2,8 +2,8 @@ use crate::ecs;
 use crate::ecs::prelude::*;
 use std::path::{Path, PathBuf};
 
-use trekanten::mem::BufferMutability;
-use trekanten::mem::{OwningIndexBufferDescriptor, OwningVertexBufferDescriptor};
+use trekanten::buffer::BufferMutability;
+use trekanten::buffer::{OwningIndexBufferDescriptor, OwningVertexBufferDescriptor};
 use trekanten::pipeline::PolygonMode;
 use trekanten::texture::{MipMaps, TextureDescriptor};
 use trekanten::util;
