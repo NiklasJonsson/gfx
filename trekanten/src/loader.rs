@@ -1,9 +1,9 @@
 use crate::backend;
 
 use crate::buffer::{
-    BufferDescriptor, BufferHandle, DrainIterator as BufferDrainIterator, IndexBuffer,
+    BufferDescriptor, BufferHandle, DrainIterator as BufferDrainIterator, DeviceIndexBuffer,
     OwningIndexBufferDescriptor, OwningUniformBufferDescriptor, OwningVertexBufferDescriptor,
-    UniformBuffer, VertexBuffer,
+    DeviceUniformBuffer, DeviceVertexBuffer,
 };
 use crate::resource::{Async, AsyncResources, Handle, Resources};
 use crate::texture::{DrainIterator as TextureDrainIterator, Texture, TextureDescriptor};
@@ -14,7 +14,7 @@ use crate::{
     },
     BufferMutability,
 };
-use backend::buffer::DeviceBuffer;
+use backend::buffer::Buffer;
 use backend::device::Device;
 
 // TODO: Don't use vk directly here
@@ -43,15 +43,15 @@ impl std::fmt::Display for LoaderError {
 pub enum AsyncResourceCommand {
     CreateVertexBuffer {
         descriptor: OwningVertexBufferDescriptor,
-        handle: BufferHandle<Async<VertexBuffer>>,
+        handle: BufferHandle<Async<DeviceVertexBuffer>>,
     },
     CreateIndexBuffer {
         descriptor: OwningIndexBufferDescriptor,
-        handle: BufferHandle<Async<IndexBuffer>>,
+        handle: BufferHandle<Async<DeviceIndexBuffer>>,
     },
     CreateUniformBuffer {
         descriptor: OwningUniformBufferDescriptor,
-        handle: BufferHandle<Async<UniformBuffer>>,
+        handle: BufferHandle<Async<DeviceUniformBuffer>>,
     },
     CreateTexture {
         descriptor: TextureDescriptor,
@@ -62,45 +62,45 @@ pub enum AsyncResourceCommand {
 enum PendingResourceCommand {
     CreateVertexBuffer {
         descriptor: OwningVertexBufferDescriptor,
-        handle: BufferHandle<Async<VertexBuffer>>,
-        buffer0: VertexBuffer,
-        buffer1: Option<VertexBuffer>, // For double buffering
-        transients: [Option<DeviceBuffer>; 2],
+        handle: BufferHandle<Async<DeviceVertexBuffer>>,
+        buffer0: DeviceVertexBuffer,
+        buffer1: Option<DeviceVertexBuffer>, // For double buffering
+        transients: [Option<Buffer>; 2],
     },
     CreateIndexBuffer {
         descriptor: OwningIndexBufferDescriptor,
-        handle: BufferHandle<Async<IndexBuffer>>,
-        buffer0: IndexBuffer,
-        buffer1: Option<IndexBuffer>, // For double buffering
-        transients: [Option<DeviceBuffer>; 2],
+        handle: BufferHandle<Async<DeviceIndexBuffer>>,
+        buffer0: DeviceIndexBuffer,
+        buffer1: Option<DeviceIndexBuffer>, // For double buffering
+        transients: [Option<Buffer>; 2],
     },
     CreateUniformBuffer {
         descriptor: OwningUniformBufferDescriptor,
-        handle: BufferHandle<Async<UniformBuffer>>,
-        buffer0: UniformBuffer,
-        buffer1: Option<UniformBuffer>, // For double buffering
-        transients: [Option<DeviceBuffer>; 2],
+        handle: BufferHandle<Async<DeviceUniformBuffer>>,
+        buffer0: DeviceUniformBuffer,
+        buffer1: Option<DeviceUniformBuffer>, // For double buffering
+        transients: [Option<Buffer>; 2],
     },
     CreateTexture {
         descriptor: TextureDescriptor,
         handle: Handle<Async<Texture>>,
         image: Texture,
-        transients: DeviceBuffer,
+        transients: Buffer,
     },
 }
 
 pub enum HandleMapping {
     UniformBuffer {
-        old: BufferHandle<Async<UniformBuffer>>,
-        new: BufferHandle<UniformBuffer>,
+        old: BufferHandle<Async<DeviceUniformBuffer>>,
+        new: BufferHandle<DeviceUniformBuffer>,
     },
     VertexBuffer {
-        old: BufferHandle<Async<VertexBuffer>>,
-        new: BufferHandle<VertexBuffer>,
+        old: BufferHandle<Async<DeviceVertexBuffer>>,
+        new: BufferHandle<DeviceVertexBuffer>,
     },
     IndexBuffer {
-        old: BufferHandle<Async<IndexBuffer>>,
-        new: BufferHandle<IndexBuffer>,
+        old: BufferHandle<Async<DeviceIndexBuffer>>,
+        new: BufferHandle<DeviceIndexBuffer>,
     },
     Texture {
         old: Handle<Async<Texture>>,
@@ -271,9 +271,9 @@ pub struct TransferGuard<'mutex, 'renderer> {
 }
 
 enum IntermediateIteratorItem {
-    Vertex(<BufferDrainIterator<'static, VertexBuffer> as Iterator>::Item),
-    Index(<BufferDrainIterator<'static, IndexBuffer> as Iterator>::Item),
-    Uniform(<BufferDrainIterator<'static, UniformBuffer> as Iterator>::Item),
+    Vertex(<BufferDrainIterator<'static, DeviceVertexBuffer> as Iterator>::Item),
+    Index(<BufferDrainIterator<'static, DeviceIndexBuffer> as Iterator>::Item),
+    Uniform(<BufferDrainIterator<'static, DeviceUniformBuffer> as Iterator>::Item),
     Texture(<TextureDrainIterator<'static> as Iterator>::Item),
 }
 
@@ -446,19 +446,19 @@ macro_rules! impl_loader {
 
 impl_loader!(
     OwningIndexBufferDescriptor,
-    BufferHandle<Async<IndexBuffer>>,
+    BufferHandle<Async<DeviceIndexBuffer>>,
     index_buffers,
     CreateIndexBuffer
 );
 impl_loader!(
     OwningVertexBufferDescriptor,
-    BufferHandle<Async<VertexBuffer>>,
+    BufferHandle<Async<DeviceVertexBuffer>>,
     vertex_buffers,
     CreateVertexBuffer
 );
 impl_loader!(
     OwningUniformBufferDescriptor,
-    BufferHandle<Async<UniformBuffer>>,
+    BufferHandle<Async<DeviceUniformBuffer>>,
     uniform_buffers,
     CreateUniformBuffer
 );

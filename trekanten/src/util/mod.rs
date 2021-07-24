@@ -28,6 +28,13 @@ pub fn as_bytes<T: Copy>(v: &T) -> &[u8] {
     unsafe { std::slice::from_raw_parts(ptr, size) }
 }
 
+/// SAFETY: Only call this if A & B are transparent (repr(transparent))
+pub unsafe fn cast_transparent_slice<A, B>(a: &[A]) -> &[B] {
+    let ptr = a.as_ptr() as *const B;
+    let len = a.len();
+    std::slice::from_raw_parts(ptr, len)
+}
+
 // SAFETY: Only call this on the components that come from a call to std::Vec::into_raw_parts
 // Note that len and cap should is expected to be in *bytes*, this function will make the conversion
 // to len/cap in number of *T*.
@@ -41,7 +48,7 @@ unsafe fn drop_as_vec<T>(ptr: *const u8, len: usize, cap: usize) {
     ));
 }
 
-/// A buffer containing bytes. Essentially a type-erased Vec<T>.
+/// A buffer containing bytes. Essentially a type-erased Box<[T]>.
 pub struct ByteBuffer {
     ptr: *const u8,
     len: usize,

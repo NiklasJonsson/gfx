@@ -5,7 +5,7 @@ use crate::backend::vk::{
 };
 use vk_mem::{Allocation, AllocationCreateInfo, MemoryUsage};
 
-pub struct DeviceBuffer {
+pub struct Buffer {
     allocator: AllocatorHandle,
     vk_buffer: vk::Buffer,
     allocation: Allocation,
@@ -13,10 +13,10 @@ pub struct DeviceBuffer {
     is_mapped: bool,
 }
 
-impl std::fmt::Debug for DeviceBuffer {
+impl std::fmt::Debug for Buffer {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         let allocation_info = self.allocator.get_allocation_info(&self.allocation);
-        f.debug_struct("DeviceBuffer")
+        f.debug_struct("Buffer")
             .field("vk_buffer", &self.vk_buffer)
             .field("allocation", &self.allocation)
             .field("size", &self.size)
@@ -25,7 +25,7 @@ impl std::fmt::Debug for DeviceBuffer {
     }
 }
 
-impl DeviceBuffer {
+impl Buffer {
     pub fn empty(
         allocator: &AllocatorHandle,
         size: usize,
@@ -85,7 +85,7 @@ impl DeviceBuffer {
         let size = stride as usize * n_elems;
         log::trace!("Total buffer size: {}", size);
 
-        let mut buffer = DeviceBuffer::empty(allocator, size, buffer_usage, mem_usage)?;
+        let mut buffer = Buffer::empty(allocator, size, buffer_usage, mem_usage)?;
         let dst = buffer.map()?;
         let src = data.as_ptr() as *const u8;
         if elem_size == elem_align {
@@ -172,7 +172,7 @@ impl DeviceBuffer {
     }
 }
 
-impl DeviceBuffer {
+impl Buffer {
     pub fn map(&mut self) -> Result<*mut u8, MemoryError> {
         self.is_mapped = true;
         self.allocator
@@ -214,7 +214,7 @@ impl DeviceBuffer {
     }
 }
 
-impl std::ops::Drop for DeviceBuffer {
+impl std::ops::Drop for Buffer {
     fn drop(&mut self) {
         if self.is_mapped {
             self.unmap();

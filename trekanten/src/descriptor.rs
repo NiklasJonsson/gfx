@@ -7,7 +7,7 @@ use thiserror::Error;
 use crate::backend;
 
 use crate::buffer::BufferHandle;
-use crate::buffer::UniformBuffer;
+use crate::buffer::DeviceUniformBuffer;
 use crate::pipeline::ShaderStage;
 use crate::resource::{BufferedStorage, Handle};
 use crate::texture::Texture;
@@ -166,7 +166,7 @@ impl<'a> DescriptorSetBuilder<'a> {
 
     pub fn add_buffer(
         mut self,
-        buf_h: &BufferHandle<UniformBuffer>,
+        buf_h: &BufferHandle<DeviceUniformBuffer>,
         binding: u32,
         stage: ShaderStage,
     ) -> Self {

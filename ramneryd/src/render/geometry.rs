@@ -1,8 +1,6 @@
 use crate::ecs::prelude::*;
 use crate::math::Vec3;
-use trekanten::buffer::{
-    BufferMutability, OwningIndexBufferDescriptor, OwningVertexBufferDescriptor,
-};
+use trekanten::buffer::{BufferMutability, HostIndexBuffer, HostVertexBuffer};
 use trekanten::util::Format;
 use trekanten::vertex::{VertexDefinition, VertexFormat};
 
@@ -23,7 +21,7 @@ impl VertexDefinition for Vertex {
     }
 }
 
-pub type Mesh = (OwningVertexBufferDescriptor, OwningIndexBufferDescriptor);
+pub type Mesh = (HostVertexBuffer, HostIndexBuffer);
 
 /// Right-handed
 /// origin-centered box. x,y,z are the length of the sides.
@@ -135,14 +133,14 @@ pub fn box_mesh(x: f32, y: f32, z: f32) -> Mesh {
         },
     ];
 
-    let indices = vec![
+    let indices: Vec<u16> = vec![
         0, 1, 2, 2, 3, 0, 4, 5, 6, 6, 7, 4, // Bottom/top
         8, 9, 10, 10, 11, 8, 12, 13, 14, 14, 15, 12, // Front/back
         16, 17, 18, 18, 19, 16, 20, 21, 22, 22, 23, 20, // Left/right
     ];
 
-    let vertices = OwningVertexBufferDescriptor::from_vec(vertices, BufferMutability::Immutable);
-    let indices = OwningIndexBufferDescriptor::from_vec(indices, BufferMutability::Immutable);
+    let vertices = HostVertexBuffer::from_vec(vertices);
+    let indices = HostIndexBuffer::from_vec(indices);
 
     (vertices, indices)
 }
@@ -189,8 +187,8 @@ pub fn sphere_mesh(radius: f32) -> Mesh {
         }
     }
 
-    let vertices = OwningVertexBufferDescriptor::from_vec(vertices, BufferMutability::Immutable);
-    let indices = OwningIndexBufferDescriptor::from_vec(indices, BufferMutability::Immutable);
+    let vertices = HostVertexBuffer::from_vec(vertices);
+    let indices = HostIndexBuffer::from_vec(indices);
 
     (vertices, indices)
 }
@@ -271,8 +269,8 @@ pub fn cone_mesh(radius: f32, height: f32) -> Mesh {
         }
     }
 
-    let vertices = OwningVertexBufferDescriptor::from_vec(vertices, BufferMutability::Immutable);
-    let indices = OwningIndexBufferDescriptor::from_vec(indices, BufferMutability::Immutable);
+    let vertices = HostVertexBuffer::from_vec(vertices);
+    let indices = HostIndexBuffer::from_vec(indices);
     (vertices, indices)
 }
 

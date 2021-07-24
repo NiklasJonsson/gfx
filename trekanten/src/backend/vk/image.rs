@@ -7,7 +7,7 @@ use crate::backend;
 
 use backend::command::{CommandBuffer, CommandBufferType};
 use backend::device::{HasVkDevice, VkDeviceHandle};
-use backend::{buffer::DeviceBuffer, AllocatorHandle, MemoryError};
+use backend::{buffer::Buffer, AllocatorHandle, MemoryError};
 use vk_mem::{Allocation, AllocationCreateInfo, AllocationInfo, MemoryUsage};
 
 use crate::util;
@@ -272,7 +272,7 @@ pub fn generate_mipmaps(
     );
 }
 
-pub struct DeviceImage {
+pub struct Image {
     allocator: AllocatorHandle,
     vk_image: vk::Image,
     allocation: Allocation,
@@ -281,7 +281,7 @@ pub struct DeviceImage {
     format: util::Format,
 }
 
-impl DeviceImage {
+impl Image {
     pub fn empty_2d(
         allocator: &AllocatorHandle,
         extent: util::Extent2D,
@@ -337,12 +337,10 @@ impl DeviceImage {
         extent: util::Extent2D,
         format: util::Format,
         data: &[u8],
-    ) -> Result<(Self, DeviceBuffer), MemoryError> {
+    ) -> Result<(Self, Buffer), MemoryError> {
         // stride & alignment does not matter as long as they are the same.
-        let staging = DeviceBuffer::staging_with_data(
-            allocator, data, 1, /*elem_size*/
-            1, /*stride*/
-        )?;
+        let staging =
+            Buffer::staging_with_data(allocator, data, 1 /*elem_size*/, 1 /*stride*/)?;
         // Both src & dst as we use one mip level to create the next
         let usage = vk::ImageUsageFlags::TRANSFER_DST
             | vk::ImageUsageFlags::SAMPLED
@@ -385,12 +383,10 @@ impl DeviceImage {
         format: util::Format,
         mip_levels: u32,
         data: &[u8],
-    ) -> Result<(Self, DeviceBuffer), MemoryError> {
+    ) -> Result<(Self, Buffer), MemoryError> {
         // stride & alignment does not matter as long as they are the same.
-        let staging = DeviceBuffer::staging_with_data(
-            allocator, data, 1, /*elem_size*/
-            1, /*stride*/
-        )?;
+        let staging =
+            Buffer::staging_with_data(allocator, data, 1 /*elem_size*/, 1 /*stride*/)?;
         // Both src & dst as we use one mip level to create the next
         let usage = vk::ImageUsageFlags::TRANSFER_SRC
             | vk::ImageUsageFlags::TRANSFER_DST
@@ -421,7 +417,7 @@ impl DeviceImage {
     }
 }
 
-impl DeviceImage {
+impl Image {
     pub fn vk_image(&self) -> &vk::Image {
         &self.vk_image
     }
@@ -435,7 +431,7 @@ impl DeviceImage {
     }
 }
 
-impl std::ops::Drop for DeviceImage {
+impl std::ops::Drop for Image {
     fn drop(&mut self) {
         self.allocator
             .destroy_image(self.vk_image, &self.allocation);

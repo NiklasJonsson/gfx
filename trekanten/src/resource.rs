@@ -10,15 +10,15 @@ use crate::texture;
 pub enum ResourceCommand {
     CreateVertexBuffer {
         descriptor: buffer::OwningVertexBufferDescriptor,
-        handle: buffer::BufferHandle<buffer::VertexBuffer>,
+        handle: buffer::BufferHandle<buffer::DeviceVertexBuffer>,
     },
     CreateIndexBuffer {
         descriptor: buffer::OwningIndexBufferDescriptor,
-        handle: buffer::BufferHandle<buffer::IndexBuffer>,
+        handle: buffer::BufferHandle<buffer::DeviceIndexBuffer>,
     },
     CreateUniformBuffer {
         descriptor: buffer::OwningUniformBufferDescriptor,
-        handle: buffer::BufferHandle<buffer::UniformBuffer>,
+        handle: buffer::BufferHandle<buffer::DeviceUniformBuffer>,
     },
     CreateTexture {
         descriptor: texture::TextureDescriptor,

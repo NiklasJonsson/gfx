@@ -3,7 +3,7 @@ use crate::ecs::prelude::*;
 use std::path::{Path, PathBuf};
 
 use trekanten::buffer::BufferMutability;
-use trekanten::buffer::{OwningIndexBufferDescriptor, OwningVertexBufferDescriptor};
+use trekanten::buffer::{HostIndexBuffer, HostVertexBuffer};
 use trekanten::pipeline::PolygonMode;
 use trekanten::texture::{MipMaps, TextureDescriptor};
 use trekanten::util;
@@ -71,7 +71,7 @@ fn check_supported<'a>(primitive: &gltf::Primitive<'a>) {
 fn interleave_vertex_buffer<'a>(
     ctx: &RecGltfCtx,
     primitive: &gltf::Primitive<'a>,
-) -> (OwningVertexBufferDescriptor, bool) {
+) -> (HostVertexBuffer, bool) {
     check_supported(primitive);
     let reader = primitive.reader(|buffer| Some(&ctx.buffers[buffer.index()]));
     let positions = reader.read_positions().expect("Found no positions");
@@ -140,25 +140,25 @@ fn interleave_vertex_buffer<'a>(
     }
 
     (
-        OwningVertexBufferDescriptor::from_raw(data, format, BufferMutability::Immutable),
+        unsafe { HostVertexBuffer::from_raw(data, format) },
         has_vertex_colors,
     )
 }
 
-fn to_index_buffer(indices: gltf::mesh::util::ReadIndices<'_>) -> OwningIndexBufferDescriptor {
+fn to_index_buffer(indices: gltf::mesh::util::ReadIndices<'_>) -> HostIndexBuffer {
     use gltf::mesh::util::ReadIndices;
     match indices {
         ReadIndices::U8(iter) => {
             let v: Vec<u16> = iter.map(|byte| byte as u16).collect();
-            OwningIndexBufferDescriptor::from_vec(v, BufferMutability::Immutable)
+            HostIndexBuffer::from_vec(v)
         }
         ReadIndices::U16(iter) => {
             let v: Vec<u16> = iter.collect();
-            OwningIndexBufferDescriptor::from_vec(v, BufferMutability::Immutable)
+            HostIndexBuffer::from_vec(v)
         }
         ReadIndices::U32(iter) => {
             let v: Vec<u32> = iter.collect();
-            OwningIndexBufferDescriptor::from_vec(v, BufferMutability::Immutable)
+            HostIndexBuffer::from_vec(v)
         }
     }
 }

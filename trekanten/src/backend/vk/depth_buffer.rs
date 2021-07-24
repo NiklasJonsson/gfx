@@ -5,7 +5,7 @@ use thiserror::Error;
 use crate::backend;
 use crate::util;
 use backend::device::Device;
-use backend::image::{DeviceImage, ImageView, ImageViewError};
+use backend::image::{Image, ImageView, ImageViewError};
 use backend::MemoryError;
 
 #[derive(Debug, Error)]
@@ -17,7 +17,7 @@ pub enum DepthBufferError {
 }
 
 pub struct DepthBuffer {
-    _image: DeviceImage,
+    _image: Image,
     image_view: ImageView,
     _format: util::Format,
 }
@@ -32,7 +32,7 @@ impl DepthBuffer {
         let usage = vk::ImageUsageFlags::DEPTH_STENCIL_ATTACHMENT;
         let props = vk_mem::MemoryUsage::GpuOnly;
         let mip_levels = 1; // No mip maps
-        let _image = DeviceImage::empty_2d(
+        let _image = Image::empty_2d(
             &device.allocator(),
             *extents,
             format,

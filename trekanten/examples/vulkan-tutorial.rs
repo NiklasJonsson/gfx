@@ -268,7 +268,7 @@ fn main() -> Result<(), trekanten::RenderError> {
         .expect("Failed to build graphics pipeline descriptor");
 
     let gfx_pipeline_handle = renderer
-        .create_resource_blocking(pipeline_descriptor)
+        .create_gfx_pipeline(pipeline_descriptor)
         .expect("Failed to create graphics pipeline");
 
     let data = vec![UniformBufferObject {

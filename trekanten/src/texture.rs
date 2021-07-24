@@ -9,9 +9,9 @@ use crate::backend;
 
 use crate::resource::{Handle, Storage};
 use crate::util;
-use backend::buffer::DeviceBuffer;
+use backend::buffer::Buffer;
 use backend::command::CommandBuffer;
-use backend::image::{DeviceImage, ImageView, ImageViewError};
+use backend::image::{Image, ImageView, ImageViewError};
 use backend::{AllocatorHandle, HasVkDevice, MemoryError, VkDeviceHandle};
 use util::Extent2D;
 
@@ -153,7 +153,7 @@ impl TextureDescriptor {
         allocator: &AllocatorHandle,
         device: &D,
         command_buffer: &mut CommandBuffer,
-    ) -> Result<(Texture, DeviceBuffer), TextureError> {
+    ) -> Result<(Texture, Buffer), TextureError> {
         match self {
             TextureDescriptor::File {
                 path,
@@ -339,7 +339,7 @@ pub fn mip_levels_for(e: Extent2D) -> u32 {
 pub struct Texture {
     sampler: Sampler,
     image_view: ImageView,
-    image: DeviceImage,
+    image: Image,
 }
 
 impl Texture {
@@ -365,7 +365,7 @@ impl Texture {
                 vk::ImageAspectFlags::COLOR
             };
 
-            let image = DeviceImage::empty_2d(
+            let image = Image::empty_2d(
                 allocator,
                 *extent,
                 *format,
@@ -389,7 +389,7 @@ impl Texture {
 
     pub(crate) fn from_device_image<D: HasVkDevice>(
         device: &D,
-        image: DeviceImage,
+        image: Image,
         format: util::Format,
         mip_levels: u32,
     ) -> Result<Self, TextureError> {
@@ -413,11 +413,11 @@ impl Texture {
         format: util::Format,
         mipmaps: MipMaps,
         data: &'a [u8],
-    ) -> Result<(Self, DeviceBuffer), TextureError> {
+    ) -> Result<(Self, Buffer), TextureError> {
         let ((image, staging), mip_levels) = if let MipMaps::Generate = mipmaps {
             let mip_levels = mip_levels_for(extent);
             (
-                DeviceImage::device_local_mipmapped(
+                Image::device_local_mipmapped(
                     &allocator,
                     command_buffer,
                     extent,
@@ -429,7 +429,7 @@ impl Texture {
             )
         } else {
             (
-                DeviceImage::device_local(&allocator, command_buffer, extent, format, data)?,
+                Image::device_local(&allocator, command_buffer, extent, format, data)?,
                 1,
             )
         };

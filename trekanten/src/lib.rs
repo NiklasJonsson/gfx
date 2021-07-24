@@ -31,7 +31,7 @@ use backend::device::HasVkDevice as _;
 use backend::{color_buffer, command, depth_buffer, device, instance, surface, swapchain, sync};
 use common::MAX_FRAMES_IN_FLIGHT;
 
-use crate::backend::vk::{buffer::DeviceBuffer, image::DeviceImage, MemoryError};
+use crate::backend::vk::{buffer::Buffer, image::Image, MemoryError};
 use crate::buffer::BufferDescriptor as _;
 
 // Notes:
@@ -90,7 +90,7 @@ impl<'a> Frame<'a> {
     // TODO: Could we use vkCmdUpdateBuffer instead? Note that it can't be inside a render pass
     pub fn update_uniform_blocking<T: Copy + buffer::Uniform>(
         &mut self,
-        h: &BufferHandle<buffer::UniformBuffer>,
+        h: &BufferHandle<buffer::DeviceUniformBuffer>,
         data: &T,
     ) -> Result<(), RenderError> {
         self.renderer.update_uniform(h, data)
@@ -222,13 +222,13 @@ macro_rules! impl_mut_buffer_manager_frame {
 
 impl_mut_buffer_manager_frame!(
     buffer::OwningVertexBufferDescriptor,
-    buffer::VertexBuffer,
+    buffer::DeviceVertexBuffer,
     vertex_buffers
 );
 
 impl_mut_buffer_manager_frame!(
     buffer::OwningIndexBufferDescriptor,
-    buffer::IndexBuffer,
+    buffer::DeviceIndexBuffer,
     index_buffers
 );
 
@@ -253,16 +253,16 @@ macro_rules! impl_buffer_manager_frame {
 
 impl_buffer_manager_frame!(
     buffer::OwningVertexBufferDescriptor,
-    buffer::VertexBuffer,
-    BufferHandle<buffer::VertexBuffer>,
+    buffer::DeviceVertexBuffer,
+    BufferHandle<buffer::DeviceVertexBuffer>,
     CreateVertexBuffer,
     vertex_buffers
 );
 
 impl_buffer_manager_frame!(
     buffer::OwningIndexBufferDescriptor,
-    buffer::IndexBuffer,
-    BufferHandle<buffer::IndexBuffer>,
+    buffer::DeviceIndexBuffer,
+    BufferHandle<buffer::DeviceIndexBuffer>,
     CreateIndexBuffer,
     index_buffers
 );
@@ -284,20 +284,20 @@ pub enum SyncResourceCommand {
 
 pub enum PendingSyncResourceCommand {
     CreateVertexBuffer {
-        handle: buffer::BufferHandle<buffer::VertexBuffer>,
-        transients: [Option<DeviceBuffer>; 2],
+        handle: buffer::BufferHandle<buffer::DeviceVertexBuffer>,
+        transients: [Option<Buffer>; 2],
     },
     CreateIndexBuffer {
-        handle: buffer::BufferHandle<buffer::IndexBuffer>,
-        transients: [Option<DeviceBuffer>; 2],
+        handle: buffer::BufferHandle<buffer::DeviceIndexBuffer>,
+        transients: [Option<Buffer>; 2],
     },
     CreateUniformBuffer {
-        handle: buffer::BufferHandle<buffer::UniformBuffer>,
-        transients: [Option<DeviceBuffer>; 2],
+        handle: buffer::BufferHandle<buffer::DeviceUniformBuffer>,
+        transients: [Option<Buffer>; 2],
     },
     CreateTexture {
         handle: resurs::Handle<texture::Texture>,
-        transients: DeviceBuffer,
+        transients: Buffer,
     },
 }
 
@@ -320,13 +320,13 @@ impl PendingSyncResourceCommand {
 
 pub enum FinishedResourceCommand {
     CreateVertexBuffer {
-        handle: buffer::BufferHandle<buffer::VertexBuffer>,
+        handle: buffer::BufferHandle<buffer::DeviceVertexBuffer>,
     },
     CreateIndexBuffer {
-        handle: buffer::BufferHandle<buffer::IndexBuffer>,
+        handle: buffer::BufferHandle<buffer::DeviceIndexBuffer>,
     },
     CreateUniformBuffer {
-        handle: buffer::BufferHandle<buffer::UniformBuffer>,
+        handle: buffer::BufferHandle<buffer::DeviceUniformBuffer>,
     },
     CreateTexture {
         handle: resurs::Handle<texture::Texture>,
@@ -758,7 +758,7 @@ impl Renderer {
 impl Renderer {
     fn update_uniform<T: Copy + buffer::Uniform>(
         &mut self,
-        h: &BufferHandle<buffer::UniformBuffer>,
+        h: &BufferHandle<buffer::DeviceUniformBuffer>,
         data: &T,
     ) -> Result<(), RenderError> {
         let ubuf = self
@@ -832,22 +832,22 @@ macro_rules! impl_buffer_manager {
 
 impl_buffer_manager!(
     buffer::OwningVertexBufferDescriptor,
-    buffer::VertexBuffer,
-    BufferHandle<buffer::VertexBuffer>,
+    buffer::DeviceVertexBuffer,
+    BufferHandle<buffer::DeviceVertexBuffer>,
     CreateVertexBuffer,
     vertex_buffers
 );
 impl_buffer_manager!(
     buffer::OwningIndexBufferDescriptor,
-    buffer::IndexBuffer,
-    BufferHandle<buffer::IndexBuffer>,
+    buffer::DeviceIndexBuffer,
+    BufferHandle<buffer::DeviceIndexBuffer>,
     CreateIndexBuffer,
     index_buffers
 );
 impl_buffer_manager!(
     buffer::OwningUniformBufferDescriptor,
-    buffer::UniformBuffer,
-    BufferHandle<buffer::UniformBuffer>,
+    buffer::DeviceUniformBuffer,
+    BufferHandle<buffer::DeviceUniformBuffer>,
     CreateUniformBuffer,
     uniform_buffers
 );
@@ -927,7 +927,7 @@ impl Renderer {
             let usage = vk::ImageUsageFlags::TRANSFER_SRC
                 | vk::ImageUsageFlags::TRANSFER_DST
                 | vk::ImageUsageFlags::SAMPLED;
-            let dst_image = DeviceImage::empty_2d(
+            let dst_image = Image::empty_2d(
                 &self.device.allocator(),
                 extent,
                 format,

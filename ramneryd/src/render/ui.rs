@@ -1,7 +1,7 @@
 use polymap::polymap;
 use trekanten::buffer::{
-    BufferMutability, IndexBuffer, OwningIndexBufferDescriptor, OwningVertexBufferDescriptor,
-    VertexBuffer,
+    BufferMutability, DeviceIndexBuffer, HostIndexBuffer, OwningIndexBufferDescriptor,
+    OwningVertexBufferDescriptor, DeviceVertexBuffer, HostVertexBuffer,
 };
 use trekanten::descriptor::DescriptorSet;
 use trekanten::pipeline::{
@@ -10,7 +10,7 @@ use trekanten::pipeline::{
 };
 use trekanten::resource::{MutResourceManager, ResourceManager};
 use trekanten::texture::{MipMaps, Texture, TextureDescriptor};
-use trekanten::util::{Extent2D, Format, Offset2D, Rect2D, Viewport};
+use trekanten::util::{cast_transparent_slice, Extent2D, Format, Offset2D, Rect2D, Viewport};
 use trekanten::vertex::{VertexDefinition, VertexFormat};
 use trekanten::Frame;
 use trekanten::RenderPassEncoder;
@@ -30,11 +30,9 @@ use imgui::im_str;
 
 use std::path::Path;
 
-struct ImGuiVertex {
-    _pos: [f32; 2],
-    _uv: [f32; 2],
-    _col: [u8; 4],
-}
+#[derive(Clone, Copy, Debug)]
+#[repr(transparent)]
+struct ImGuiVertex(imgui::DrawVert);
 
 impl VertexDefinition for ImGuiVertex {
     fn format() -> VertexFormat {
@@ -48,8 +46,8 @@ impl VertexDefinition for ImGuiVertex {
 
 #[derive(Clone, Copy, Debug)]
 struct PerFrameData {
-    vertex_buffer: BufferHandle<VertexBuffer>,
-    index_buffer: BufferHandle<IndexBuffer>,
+    vertex_buffer: BufferHandle<DeviceVertexBuffer>,
+    index_buffer: BufferHandle<DeviceIndexBuffer>,
     fb_width: f32,
     fb_height: f32,
 }
@@ -491,8 +489,8 @@ impl UIContext {
             return None;
         }
 
-        // TODO: This is extra copies + allocation, avoid this by exposing nicer creation tools from VertexBufferDescriptor
-        let mut vertices = Vec::with_capacity(draw_data.total_vtx_count as usize);
+        // TODO(perf): Reuse these allocation between frames
+        let mut vertices: Vec<ImGuiVertex> = Vec::with_capacity(draw_data.total_vtx_count as usize);
         let mut indices = Vec::with_capacity(draw_data.total_idx_count as usize);
 
         let mut commands = Vec::new();
@@ -506,7 +504,10 @@ impl UIContext {
         let mut global_vertices_idx = 0;
         let mut global_indices_idx = 0;
         for draw_list in draw_data.draw_lists() {
-            vertices.extend_from_slice(trekanten::util::as_byte_slice(draw_list.vtx_buffer()));
+            let imgui_vtx_slice = draw_list.vtx_buffer();
+            // SAFETY: The two types are transparent
+            let our_vtx_slice = unsafe { cast_transparent_slice(imgui_vtx_slice) };
+            vertices.extend_from_slice(our_vtx_slice);
             indices.extend_from_slice(draw_list.idx_buffer());
             for cmd in draw_list.commands() {
                 use imgui::DrawCmd;
@@ -582,12 +583,14 @@ impl UIContext {
             std::mem::size_of::<ImGuiVertex>(),
             "Mismatch in imgui vertex type"
         );
-        let vbuf_desc = OwningVertexBufferDescriptor::from_raw(
-            vertices,
-            ImGuiVertex::format(),
-            BufferMutability::Mutable,
-        );
-        let ibuf_desc = OwningIndexBufferDescriptor::from_vec(indices, BufferMutability::Mutable);
+        let vbuf = HostVertexBuffer::from_vec(vertices);
+
+        // TODO: This could be a borrow when reusing the allocation
+        let vbuf_desc =
+            OwningVertexBufferDescriptor::from_host_buffer(&vbuf, BufferMutability::Mutable);
+        let ibuf = HostIndexBuffer::from_vec(indices);
+        let ibuf_desc =
+            OwningIndexBufferDescriptor::from_host_buffer(&ibuf, BufferMutability::Mutable);
 
         let (vertex_buffer, index_buffer) = if let Some(per_frame_data) = self.per_frame_data {
             frame

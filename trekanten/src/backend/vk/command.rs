@@ -8,7 +8,7 @@ use super::framebuffer::Framebuffer;
 use super::queue::QueueFamily;
 use super::render_pass::RenderPass;
 
-use crate::buffer::{IndexBuffer, VertexBuffer};
+use crate::buffer::{DeviceIndexBuffer, DeviceVertexBuffer};
 use crate::descriptor::DescriptorSet;
 use crate::pipeline::GraphicsPipeline;
 use crate::pipeline::Pipeline;
@@ -262,7 +262,7 @@ impl CommandBuffer {
         self
     }
 
-    pub fn bind_vertex_buffer(&mut self, buffer: &VertexBuffer, offset: u64) -> &mut Self {
+    pub fn bind_vertex_buffer(&mut self, buffer: &DeviceVertexBuffer, offset: u64) -> &mut Self {
         assert!(self.queue_flags.contains(vk::QueueFlags::GRAPHICS));
 
         unsafe {
@@ -295,7 +295,7 @@ impl CommandBuffer {
         self
     }
 
-    pub fn bind_index_buffer(&mut self, buffer: &IndexBuffer, offset: u64) -> &mut Self {
+    pub fn bind_index_buffer(&mut self, buffer: &DeviceIndexBuffer, offset: u64) -> &mut Self {
         assert!(self.queue_flags.contains(vk::QueueFlags::GRAPHICS));
 
         unsafe {

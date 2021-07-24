@@ -1,18 +1,35 @@
 mod buffer_storage;
-
-pub use buffer_storage::*;
-
-use ash::vk;
+mod descriptor;
 
 use crate::backend;
 use crate::resource::Handle;
-use crate::vertex::{VertexDefinition, VertexFormat};
+use crate::vertex::VertexFormat;
 use backend::command::CommandBuffer;
-use backend::{buffer::DeviceBuffer, util::stride, AllocatorHandle, MemoryError};
+use backend::{buffer::Buffer, util::stride, AllocatorHandle, MemoryError};
 
-use crate::util::{as_byte_slice, as_bytes, ByteBuffer};
+use crate::util::{as_bytes, ByteBuffer};
+use crate::vertex::VertexDefinition;
+
+use ash::vk;
 
 use std::sync::Arc;
+
+pub use descriptor::BufferDescriptor;
+
+// TODO: Remove
+pub use descriptor::{
+    OwningBufferDescriptor, OwningIndexBufferDescriptor, OwningUniformBufferDescriptor,
+    OwningVertexBufferDescriptor,
+};
+
+pub use buffer_storage::DrainIterator;
+use buffer_storage::{AsyncDeviceBufferStorage, DeviceBufferStorage};
+pub type UniformBuffers = DeviceBufferStorage<DeviceUniformBuffer>;
+pub type AsyncUniformBuffers = AsyncDeviceBufferStorage<DeviceUniformBuffer>;
+pub type VertexBuffers = DeviceBufferStorage<DeviceVertexBuffer>;
+pub type AsyncVertexBuffers = AsyncDeviceBufferStorage<DeviceVertexBuffer>;
+pub type IndexBuffers = DeviceBufferStorage<DeviceIndexBuffer>;
+pub type AsyncIndexBuffers = AsyncDeviceBufferStorage<DeviceIndexBuffer>;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum BufferMutability {
@@ -20,48 +37,6 @@ pub enum BufferMutability {
     Mutable,
 }
 
-pub struct BufferResult<B> {
-    pub buffer: B,
-    pub transient: Option<DeviceBuffer>,
-}
-
-pub trait BufferDescriptor {
-    type Buffer;
-    fn mutability(&self) -> BufferMutability;
-    fn n_elems(&self) -> u32;
-    fn elem_size(&self) -> u16;
-    fn elem_align(&self, _: &AllocatorHandle) -> u16;
-    fn data(&self) -> &[u8];
-    fn vk_usage_flags(&self) -> vk::BufferUsageFlags;
-
-    fn enqueue_single(
-        &self,
-        allocator: &AllocatorHandle,
-        command_buffer: &mut CommandBuffer,
-    ) -> Result<BufferResult<Self::Buffer>, MemoryError>;
-
-    fn enqueue(
-        &self,
-        allocator: &AllocatorHandle,
-        command_buffer: &mut CommandBuffer,
-    ) -> Result<
-        (
-            BufferResult<Self::Buffer>,
-            Option<BufferResult<Self::Buffer>>,
-        ),
-        MemoryError,
-    > {
-        let buf0 = self.enqueue_single(allocator, command_buffer)?;
-
-        let buf1 = if let BufferMutability::Mutable = self.mutability() {
-            Some(self.enqueue_single(allocator, command_buffer)?)
-        } else {
-            None
-        };
-
-        Ok((buf0, buf1))
-    }
-}
 #[derive(Debug)]
 pub struct BufferHandle<T> {
     h: Handle<T>,
@@ -148,111 +123,10 @@ impl<T> BufferHandle<T> {
     }
 }
 
-// Below is backend agnostic (almost...)
 pub trait BufferType {
     const USAGE: vk::BufferUsageFlags;
     fn elem_align(&self, _allocator: &AllocatorHandle) -> Option<u16> {
         None
-    }
-}
-
-#[derive(Clone, Debug)]
-pub struct OwningBufferDescriptor<BT> {
-    data: Arc<ByteBuffer>,
-    mutability: BufferMutability,
-    elem_size: u16,
-    n_elems: u32,
-    buffer_type: BT,
-}
-
-impl<BT: BufferType + Clone> BufferDescriptor for OwningBufferDescriptor<BT> {
-    type Buffer = TypedBuffer<BT>;
-    fn mutability(&self) -> BufferMutability {
-        self.mutability
-    }
-
-    fn vk_usage_flags(&self) -> vk::BufferUsageFlags {
-        BT::USAGE
-    }
-
-    fn elem_size(&self) -> u16 {
-        self.elem_size
-    }
-
-    fn elem_align(&self, allocator: &AllocatorHandle) -> u16 {
-        self.buffer_type
-            .elem_align(allocator)
-            .unwrap_or(self.elem_size())
-    }
-
-    fn n_elems(&self) -> u32 {
-        self.n_elems
-    }
-
-    fn data(&self) -> &[u8] {
-        &self.data
-    }
-
-    fn enqueue_single(
-        &self,
-        allocator: &AllocatorHandle,
-        command_buffer: &mut CommandBuffer,
-    ) -> Result<BufferResult<Self::Buffer>, MemoryError> {
-        let (buffer, transient) =
-            Self::Buffer::create(allocator, command_buffer, self, self.buffer_type.clone())?;
-
-        Ok(BufferResult { buffer, transient })
-    }
-}
-
-pub struct BorrowingBufferDescriptor<'a, BT> {
-    data: &'a [u8],
-    mutability: BufferMutability,
-    elem_size: u16,
-    #[allow(dead_code)]
-    n_elems: u32,
-    buffer_type: BT,
-}
-
-impl<'a, BT: BufferType + Clone> BufferDescriptor for BorrowingBufferDescriptor<'a, BT> {
-    type Buffer = TypedBuffer<BT>;
-
-    fn mutability(&self) -> BufferMutability {
-        self.mutability
-    }
-
-    fn elem_size(&self) -> u16 {
-        self.elem_size
-    }
-
-    fn n_elems(&self) -> u32 {
-        assert_eq!(self.data.len() % self.elem_size() as usize, 0);
-        (self.data.len() / self.elem_size() as usize) as u32
-    }
-
-    fn elem_align(&self, allocator: &AllocatorHandle) -> u16 {
-        self.buffer_type
-            .elem_align(allocator)
-            .unwrap_or(self.elem_size())
-    }
-
-    fn vk_usage_flags(&self) -> vk::BufferUsageFlags {
-        BT::USAGE
-    }
-
-    fn data(&self) -> &[u8] {
-        self.data
-    }
-
-    fn enqueue_single(
-        &self,
-        allocator: &AllocatorHandle,
-        command_buffer: &mut CommandBuffer,
-    ) -> Result<BufferResult<Self::Buffer>, MemoryError> {
-        let (buffer, transient) =
-            Self::Buffer::create(allocator, command_buffer, self, self.buffer_type.clone())?;
-
-        Ok(BufferResult { buffer, transient })
     }
 }
 
@@ -271,25 +145,9 @@ impl BufferType for UniformBufferType {
     }
 }
 
+// TODO: This should have a corresponding derive that exposes align/size/padding checks
+/// Marker trait for a type that is a uniform
 pub trait Uniform {}
-
-pub type OwningUniformBufferDescriptor = OwningBufferDescriptor<UniformBufferType>;
-impl OwningUniformBufferDescriptor {
-    pub fn from_vec<T: Copy + Uniform + 'static>(
-        data: Vec<T>,
-        mutability: BufferMutability,
-    ) -> Self {
-        let n_elems = data.len() as u32;
-        let data = unsafe { Arc::new(ByteBuffer::from_vec(data)) };
-        Self {
-            data,
-            n_elems,
-            elem_size: std::mem::size_of::<T>() as u16,
-            mutability,
-            buffer_type: UniformBufferType,
-        }
-    }
-}
 
 #[derive(Debug, Clone)]
 pub struct VertexBufferType {
@@ -297,69 +155,6 @@ pub struct VertexBufferType {
 }
 impl BufferType for VertexBufferType {
     const USAGE: vk::BufferUsageFlags = vk::BufferUsageFlags::VERTEX_BUFFER;
-}
-
-pub type OwningVertexBufferDescriptor = OwningBufferDescriptor<VertexBufferType>;
-impl OwningVertexBufferDescriptor {
-    pub fn from_vec<V: VertexDefinition + Copy + 'static>(
-        data: Vec<V>,
-        mutability: BufferMutability,
-    ) -> Self {
-        let n_elems = data.len() as u32;
-        let data = unsafe { Arc::new(ByteBuffer::from_vec(data)) };
-        Self {
-            data,
-            n_elems,
-            elem_size: std::mem::size_of::<V>() as u16,
-            mutability,
-            buffer_type: VertexBufferType {
-                format: V::format(),
-            },
-        }
-    }
-
-    // TODO: unsafe
-    pub fn from_raw(data: Vec<u8>, format: VertexFormat, mutability: BufferMutability) -> Self {
-        assert_eq!(data.len() as u32 % format.size(), 0);
-        let n_elems = data.len() as u32 / format.size();
-        let data = unsafe { Arc::new(ByteBuffer::from_vec(data)) };
-        Self {
-            data,
-            n_elems,
-            elem_size: format.size() as u16,
-            mutability,
-            buffer_type: VertexBufferType { format },
-        }
-    }
-}
-
-pub type BorrowingVertexBufferDescriptor<'a> = BorrowingBufferDescriptor<'a, VertexBufferType>;
-impl<'a> BorrowingVertexBufferDescriptor<'a> {
-    pub fn from_slice<V: VertexDefinition + Copy>(
-        slice: &'a [V],
-        mutability: BufferMutability,
-    ) -> Self {
-        let data = as_byte_slice(slice);
-        let format = V::format();
-        Self {
-            data,
-            mutability,
-            n_elems: slice.len() as u32,
-            elem_size: format.size() as u16,
-            buffer_type: VertexBufferType { format },
-        }
-    }
-
-    pub fn from_raw(data: &'a [u8], format: VertexFormat, mutability: BufferMutability) -> Self {
-        assert_eq!(data.len() % format.size() as usize, 0);
-        Self {
-            data,
-            mutability,
-            n_elems: data.len() as u32 / format.size(),
-            elem_size: format.size() as u16,
-            buffer_type: VertexBufferType { format },
-        }
-    }
 }
 
 #[derive(Debug, Copy, Clone, PartialEq, Eq, Hash)]
@@ -395,87 +190,22 @@ impl BufferType for IndexBufferType {
     const USAGE: vk::BufferUsageFlags = vk::BufferUsageFlags::INDEX_BUFFER;
 }
 
-pub type OwningIndexBufferDescriptor = OwningBufferDescriptor<IndexBufferType>;
-impl OwningIndexBufferDescriptor {
-    // TODO: Custom trait here?
-    pub fn from_vec<T: num_traits::PrimInt + 'static>(
-        data: Vec<T>,
-        mutability: BufferMutability,
-    ) -> Self {
-        let index_size = match std::mem::size_of::<T>() {
-            4 => IndexSize::Size32,
-            2 => IndexSize::Size16,
-            _ => unreachable!("Invalid index type, needs to be either 16 or 32 bits"),
-        };
-        let n_elems = data.len() as u32;
-        let data = unsafe { Arc::new(ByteBuffer::from_vec(data)) };
-        Self {
-            data,
-            n_elems,
-            elem_size: std::mem::size_of::<T>() as u16,
-            mutability,
-            buffer_type: IndexBufferType { index_size },
-        }
-    }
-}
-
-pub type BorrowingIndexBufferDescriptor<'a> = BorrowingBufferDescriptor<'a, IndexBufferType>;
-impl<'a> BorrowingIndexBufferDescriptor<'a> {
-    pub fn from_slice<T: num_traits::PrimInt>(
-        slice: &'a [T],
-        mutability: BufferMutability,
-    ) -> Self {
-        let n_elems = slice.len() as u32;
-        let data = as_byte_slice(slice);
-        let index_size = match std::mem::size_of::<T>() {
-            4 => IndexSize::Size32,
-            2 => IndexSize::Size16,
-            _ => unreachable!("Invalid index type, needs to be either 16 or 32 bits"),
-        };
-        let elem_size = std::mem::size_of::<T>() as u16;
-
-        Self {
-            data,
-            mutability,
-            n_elems,
-            elem_size,
-            buffer_type: IndexBufferType { index_size },
-        }
-    }
-
-    pub fn from_raw<T>(
-        data: &'a [u8],
-        index_size: IndexSize,
-        mutability: BufferMutability,
-    ) -> Self {
-        let elem_size = index_size.size() as usize;
-        assert_eq!(data.len() % elem_size, 0);
-        Self {
-            data,
-            mutability,
-            n_elems: data.len() as u32 / elem_size as u32,
-            elem_size: elem_size as u16,
-            buffer_type: IndexBufferType { index_size },
-        }
-    }
-}
-
 #[derive(Debug)]
-pub struct TypedBuffer<BT> {
-    buffer: DeviceBuffer,
+pub struct DeviceBuffer<BT> {
+    buffer: Buffer,
     elem_size: u16,
-    stride: u16,
     n_elems: u32,
     buffer_type: BT,
+    stride: u16,
 }
 
-impl<BT> TypedBuffer<BT> {
+impl<BT> DeviceBuffer<BT> {
     pub fn create(
         allocator: &AllocatorHandle,
         command_buffer: &mut CommandBuffer,
         descriptor: &impl BufferDescriptor,
         buffer_type: BT,
-    ) -> Result<(Self, Option<DeviceBuffer>), MemoryError> {
+    ) -> Result<(Self, Option<Buffer>), MemoryError> {
         log::trace!("Creating buffer");
         let elem_size = descriptor.elem_size();
         let elem_align = descriptor.elem_align(allocator);
@@ -485,7 +215,7 @@ impl<BT> TypedBuffer<BT> {
 
         let (buffer, staging) = match descriptor.mutability() {
             BufferMutability::Immutable => {
-                let (buffer, staging) = DeviceBuffer::device_local(
+                let (buffer, staging) = Buffer::device_local(
                     allocator,
                     command_buffer,
                     vk_buffer_usage_flags,
@@ -496,7 +226,7 @@ impl<BT> TypedBuffer<BT> {
                 (buffer, Some(staging))
             }
             BufferMutability::Mutable => (
-                DeviceBuffer::persistent_mapped(
+                Buffer::persistent_mapped(
                     allocator,
                     vk_buffer_usage_flags,
                     data,
@@ -535,7 +265,7 @@ impl<BT> TypedBuffer<BT> {
         let stride = stride(elem_size, elem_align);
         let size = stride as usize * n_elems as usize;
         if size > self.buffer.size() {
-            self.buffer = DeviceBuffer::persistent_mapped(
+            self.buffer = Buffer::persistent_mapped(
                 allocator,
                 vk_buffer_usage_flags,
                 data,
@@ -550,7 +280,7 @@ impl<BT> TypedBuffer<BT> {
         Ok(())
     }
 
-    pub fn buffer_mut(&mut self) -> &mut DeviceBuffer {
+    pub fn buffer_mut(&mut self) -> &mut Buffer {
         &mut self.buffer
     }
 
@@ -575,22 +305,22 @@ impl<BT> TypedBuffer<BT> {
     }
 }
 
-pub type VertexBuffer = TypedBuffer<VertexBufferType>;
-impl VertexBuffer {
+pub type DeviceVertexBuffer = DeviceBuffer<VertexBufferType>;
+impl DeviceVertexBuffer {
     pub fn format(&self) -> &VertexFormat {
         &self.buffer_type().format
     }
 }
 
-pub type IndexBuffer = TypedBuffer<IndexBufferType>;
-impl IndexBuffer {
+pub type DeviceIndexBuffer = DeviceBuffer<IndexBufferType>;
+impl DeviceIndexBuffer {
     pub fn vk_index_type(&self) -> vk::IndexType {
         vk::IndexType::from(self.buffer_type().index_size)
     }
 }
 
-pub type UniformBuffer = TypedBuffer<UniformBufferType>;
-impl UniformBuffer {
+pub type DeviceUniformBuffer = DeviceBuffer<UniformBufferType>;
+impl DeviceUniformBuffer {
     pub fn update_with<T: Uniform + Copy>(
         &mut self,
         data: &T,
@@ -607,7 +337,89 @@ impl UniformBuffer {
     }
 }
 
-struct HostBuffer<BT> {
-    buffer: Arc<ByteBuffer>,
+#[derive(Debug, Clone)]
+pub struct HostBuffer<BT> {
+    data: Arc<ByteBuffer>,
+    elem_size: u16,
+    n_elems: u32,
     buffer_type: BT,
+}
+
+pub type HostVertexBuffer = HostBuffer<VertexBufferType>;
+pub type HostIndexBuffer = HostBuffer<IndexBufferType>;
+pub type HostUniformBuffer = HostBuffer<UniformBufferType>;
+
+impl HostUniformBuffer {
+    pub fn from_vec<T: Copy + Uniform + 'static>(data: Vec<T>) -> Self {
+        let n_elems = data.len() as u32;
+        let data = unsafe { Arc::new(ByteBuffer::from_vec(data)) };
+        Self {
+            data,
+            n_elems,
+            elem_size: std::mem::size_of::<T>() as u16,
+            buffer_type: UniformBufferType,
+        }
+    }
+}
+
+impl HostVertexBuffer {
+    pub fn from_vec<V: VertexDefinition + Copy + 'static>(data: Vec<V>) -> Self {
+        let n_elems = data.len() as u32;
+        let data = unsafe { Arc::new(ByteBuffer::from_vec(data)) };
+        Self {
+            data,
+            n_elems,
+            elem_size: std::mem::size_of::<V>() as u16,
+            buffer_type: VertexBufferType {
+                format: V::format(),
+            },
+        }
+    }
+
+    pub unsafe fn from_raw(data: Vec<u8>, format: VertexFormat) -> Self {
+        assert_eq!(data.len() as u32 % format.size(), 0);
+        let n_elems = data.len() as u32 / format.size();
+        let data = Arc::new(ByteBuffer::from_vec(data));
+        Self {
+            data,
+            n_elems,
+            elem_size: format.size() as u16,
+            buffer_type: VertexBufferType { format },
+        }
+    }
+}
+
+pub trait IndexInt {
+    fn size() -> IndexSize;
+}
+
+impl IndexInt for u16 {
+    fn size() -> IndexSize {
+        IndexSize::Size16
+    }
+}
+
+impl IndexInt for u32 {
+    fn size() -> IndexSize {
+        IndexSize::Size32
+    }
+}
+
+impl HostIndexBuffer {
+    pub fn from_vec<T: IndexInt + Copy + 'static>(data: Vec<T>) -> Self {
+        // TODO: static assert here
+        let index_size = match std::mem::size_of::<T>() {
+            4 => IndexSize::Size32,
+            2 => IndexSize::Size16,
+            _ => unreachable!("Invalid index type, needs to be either 16 or 32 bits"),
+        };
+        let n_elems = data.len() as u32;
+        let data = unsafe { Arc::new(ByteBuffer::from_vec(data)) };
+        Self {
+            data,
+            n_elems,
+            elem_size: std::mem::size_of::<T>() as u16,
+            buffer_type: IndexBufferType { index_size },
+        }
+    }
 }

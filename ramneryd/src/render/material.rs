@@ -1,5 +1,5 @@
 use trekanten::texture::Texture;
-use trekanten::{buffer::UniformBuffer, pipeline::PolygonMode, texture::TextureDescriptor};
+use trekanten::{buffer::DeviceUniformBuffer, pipeline::PolygonMode, texture::TextureDescriptor};
 use trekanten::{BufferHandle, Handle};
 
 use crate::math::Rgba;
@@ -46,10 +46,10 @@ pub struct TextureUse<T> {
 #[component(inspect)]
 pub enum GpuMaterial {
     Unlit {
-        color_uniform: BufferHandle<UniformBuffer>,
+        color_uniform: BufferHandle<DeviceUniformBuffer>,
     },
     PBR {
-        material_uniforms: BufferHandle<UniformBuffer>,
+        material_uniforms: BufferHandle<DeviceUniformBuffer>,
         normal_map: Option<TextureUse<Texture>>,
         base_color_texture: Option<TextureUse<Texture>>,
         metallic_roughness_texture: Option<TextureUse<Texture>>,
@@ -61,10 +61,11 @@ pub enum GpuMaterial {
 #[component(inspect)]
 pub enum PendingMaterial {
     Unlit {
-        color_uniform: Pending<BufferHandle<Async<UniformBuffer>>, BufferHandle<UniformBuffer>>,
+        color_uniform: Pending<BufferHandle<Async<DeviceUniformBuffer>>, BufferHandle<DeviceUniformBuffer>>,
     },
     PBR {
-        material_uniforms: Pending<BufferHandle<Async<UniformBuffer>>, BufferHandle<UniformBuffer>>,
+        material_uniforms:
+            Pending<BufferHandle<Async<DeviceUniformBuffer>>, BufferHandle<DeviceUniformBuffer>>,
         normal_map: Option<Pending<TextureUse<Async<Texture>>, TextureUse<Texture>>>,
         base_color_texture: Option<Pending<TextureUse<Async<Texture>>, TextureUse<Texture>>>,
         metallic_roughness_texture:

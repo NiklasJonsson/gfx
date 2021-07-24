@@ -6,7 +6,7 @@ use crate::backend;
 
 use crate::util;
 use backend::device::Device;
-use backend::image::{DeviceImage, ImageView, ImageViewError};
+use backend::image::{Image, ImageView, ImageViewError};
 use backend::MemoryError;
 
 #[derive(Debug, Error)]
@@ -18,7 +18,7 @@ pub enum ColorBufferError {
 }
 
 pub struct ColorBuffer {
-    _image: DeviceImage,
+    _image: Image,
     image_view: ImageView,
     _format: util::Format,
 }
@@ -34,7 +34,7 @@ impl ColorBuffer {
             vk::ImageUsageFlags::TRANSIENT_ATTACHMENT | vk::ImageUsageFlags::COLOR_ATTACHMENT;
         let props = vk_mem::MemoryUsage::GpuOnly;
         let mip_levels = 1; // No mip maps
-        let _image = DeviceImage::empty_2d(
+        let _image = Image::empty_2d(
             &device.allocator(),
             *extents,
             format,

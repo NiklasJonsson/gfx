@@ -4,7 +4,7 @@ use thiserror::Error;
 
 use crate::ecs::prelude::*;
 
-use trekanten::buffer::{BufferMutability, OwningUniformBufferDescriptor, UniformBuffer};
+use trekanten::buffer::{BufferMutability, OwningUniformBufferDescriptor, DeviceUniformBuffer};
 use trekanten::pipeline::{
     GraphicsPipeline, GraphicsPipelineDescriptor, PipelineError, ShaderDescriptor,
 };
@@ -53,7 +53,7 @@ pub fn camera_pos(world: &World) -> Vec3 {
 
 struct SpotlightShadow {
     render_target: Handle<trekanten::RenderTarget>,
-    view_data_buffer: BufferHandle<UniformBuffer>,
+    view_data_buffer: BufferHandle<DeviceUniformBuffer>,
     view_data_desc_set: Handle<DescriptorSet>,
     texture: Handle<trekanten::Texture>,
 }
@@ -74,13 +74,13 @@ struct UnlitFrameUniformResources {
 struct PhysicallyBasedUniformResources {
     dummy_pipeline: Handle<GraphicsPipeline>,
     shader_resource_group: Handle<DescriptorSet>,
-    light_buffer: BufferHandle<UniformBuffer>,
-    shadow_matrices_buffer: BufferHandle<UniformBuffer>,
+    light_buffer: BufferHandle<DeviceUniformBuffer>,
+    shadow_matrices_buffer: BufferHandle<DeviceUniformBuffer>,
 }
 
 pub struct FrameData {
     main_render_pass: Handle<trekanten::RenderPass>,
-    main_camera_view_data: BufferHandle<UniformBuffer>,
+    main_camera_view_data: BufferHandle<DeviceUniformBuffer>,
     unlit_resources: UnlitFrameUniformResources,
     pbr_resources: PhysicallyBasedUniformResources,
     shadow: ShadowData,

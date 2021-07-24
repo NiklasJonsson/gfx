@@ -353,24 +353,18 @@ impl Inspect for usize {
     }
 }
 
-impl<BT> Inspect for trekanten::buffer::OwningBufferDescriptor<BT> {
-    fn inspect<'a>(&self, ui: &Ui<'a>, _name: &str) {
-        ui.inner().text("TODO")
-    }
+macro_rules! impl_generic_todo_inspect {
+    ($ty:ident) => {
+        impl<T> Inspect for $ty<T> {
+            fn inspect<'a>(&self, ui: &Ui<'a>, _name: &str) {
+                ui.inner().text("TODO");
+            }
 
-    fn inspect_mut<'a>(&mut self, ui: &Ui<'a>, _name: &str) {
-        ui.inner().text("TODO")
-    }
-}
-
-impl<T> Inspect for resurs::Async<T> {
-    fn inspect<'a>(&self, ui: &Ui<'a>, _name: &str) {
-        ui.inner().text("TODO")
-    }
-
-    fn inspect_mut<'a>(&mut self, ui: &Ui<'a>, _name: &str) {
-        ui.inner().text("TODO")
-    }
+            fn inspect_mut<'a>(&mut self, ui: &Ui<'a>, _name: &str) {
+                ui.inner().text("TODO");
+            }
+        }
+    };
 }
 
 macro_rules! impl_todo_inspect {
@@ -389,3 +383,8 @@ macro_rules! impl_todo_inspect {
 
 impl_todo_inspect!(trekanten::texture::TextureDescriptor);
 impl_todo_inspect!(trekanten::texture::Texture);
+use trekanten::buffer::{HostBuffer, OwningBufferDescriptor};
+use trekanten::resource::Async;
+impl_generic_todo_inspect!(HostBuffer);
+impl_generic_todo_inspect!(OwningBufferDescriptor);
+impl_generic_todo_inspect!(Async);

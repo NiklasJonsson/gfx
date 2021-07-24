@@ -1,48 +1,53 @@
 use crate::ecs::prelude::*;
 use crate::render::Pending;
-use trekanten::buffer::{
-    IndexBuffer, OwningIndexBufferDescriptor, OwningVertexBufferDescriptor, VertexBuffer,
-};
+
+use ramneryd_derive::Inspect;
+use trekanten::buffer::{DeviceIndexBuffer, HostIndexBuffer, DeviceVertexBuffer, HostVertexBuffer};
 use trekanten::loader::{Loader, ResourceLoader};
 use trekanten::resource::Async;
-use trekanten::util::ByteBuffer;
-use trekanten::BufferHandle;
+use trekanten::{BufferHandle, BufferMutability};
 
-pub enum GpuResource<PendingT, AvailT> {
+/// Utility for working with asynchronously uploaded gpu resources
+#[derive(Inspect)]
+pub enum GpuResource<InFlightT, AvailT> {
     Null,
-    Pending(PendingT),
+    InFlight(InFlightT),
     Available(AvailT),
 }
 type GpuBuffer<BT> = GpuResource<BufferHandle<Async<BT>>, BufferHandle<BT>>;
 
+#[derive(Component)]
+#[component(inspect)]
 pub struct Mesh {
-    pub cpu_vertex_buffer: ByteBuffer,
-    pub cpu_index_buffer: ByteBuffer,
-    pub gpu_vertex_buffer: GpuBuffer<VertexBuffer>,
-    pub gpu_index_buffer: GpuBuffer<IndexBuffer>,
+    pub cpu_vertex_buffer: HostVertexBuffer,
+    pub cpu_index_buffer: HostIndexBuffer,
+    pub gpu_vertex_buffer: GpuBuffer<DeviceVertexBuffer>,
+    pub gpu_index_buffer: GpuBuffer<DeviceIndexBuffer>,
 }
 
 #[derive(Component)]
 #[component(inspect)]
 pub struct GpuMesh {
-    pub vertex_buffer: BufferHandle<VertexBuffer>,
-    pub index_buffer: BufferHandle<IndexBuffer>,
+    pub vertex_buffer: BufferHandle<DeviceVertexBuffer>,
+    pub index_buffer: BufferHandle<DeviceIndexBuffer>,
     pub polygon_mode: trekanten::pipeline::PolygonMode,
 }
 
 #[derive(Component, Clone)]
 #[component(inspect)]
 pub struct CpuMesh {
-    pub vertex_buffer: OwningVertexBufferDescriptor,
-    pub index_buffer: OwningIndexBufferDescriptor,
+    pub vertex_buffer: HostVertexBuffer,
+    pub index_buffer: HostIndexBuffer,
     pub polygon_mode: trekanten::pipeline::PolygonMode,
 }
 
 #[derive(Component)]
 #[component(inspect)]
 pub struct PendingMesh {
-    pub vertex_buffer: Pending<BufferHandle<Async<VertexBuffer>>, BufferHandle<VertexBuffer>>,
-    pub index_buffer: Pending<BufferHandle<Async<IndexBuffer>>, BufferHandle<IndexBuffer>>,
+    pub vertex_buffer:
+        Pending<BufferHandle<Async<DeviceVertexBuffer>>, BufferHandle<DeviceVertexBuffer>>,
+    pub index_buffer:
+        Pending<BufferHandle<Async<DeviceIndexBuffer>>, BufferHandle<DeviceIndexBuffer>>,
     pub polygon_mode: trekanten::pipeline::PolygonMode,
 }
 
@@ -59,16 +64,23 @@ impl PendingMesh {
     }
 
     pub fn load(loader: &Loader, mesh: &CpuMesh) -> Self {
+        use trekanten::buffer::{OwningIndexBufferDescriptor, OwningVertexBufferDescriptor};
+        let vbuf_desc = OwningVertexBufferDescriptor::from_host_buffer(
+            &mesh.vertex_buffer,
+            BufferMutability::Immutable,
+        );
+        let ibuf_desc = OwningIndexBufferDescriptor::from_host_buffer(
+            &mesh.index_buffer,
+            BufferMutability::Immutable,
+        );
         Self {
             vertex_buffer: Pending::Pending(
                 loader
-                    .load(mesh.vertex_buffer.clone())
+                    .load(vbuf_desc)
                     .expect("Failed to load vertex buffer"),
             ),
             index_buffer: Pending::Pending(
-                loader
-                    .load(mesh.index_buffer.clone())
-                    .expect("Failed to load index buffer"),
+                loader.load(ibuf_desc).expect("Failed to load index buffer"),
             ),
             polygon_mode: mesh.polygon_mode,
         }
