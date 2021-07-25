@@ -497,7 +497,8 @@ impl CommandBuffer {
         stage: ShaderStage,
         v: &V,
     ) -> &mut Self {
-        let bytes = util::as_bytes(v);
+        // TODO: Use bytemuck::Pod here?
+        let bytes = unsafe { util::as_bytes(v) };
         assert!(bytes.len() <= 128);
         unsafe {
             self.vk_device.cmd_push_constants(

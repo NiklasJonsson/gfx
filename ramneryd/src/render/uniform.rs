@@ -1,3 +1,5 @@
+use std::convert::TryInto;
+
 use trekanten::buffer::Uniform;
 
 pub trait UniformBlock {
@@ -20,7 +22,13 @@ impl UniformBlock for PBRMaterialData {
     const BINDING: u32 = 0;
 }
 
-impl Uniform for PBRMaterialData {}
+impl Uniform for PBRMaterialData {
+    fn size() -> u16 {
+        std::mem::size_of::<Self>()
+            .try_into()
+            .expect("uniform is too big")
+    }
+}
 
 #[derive(Copy, Clone, Debug)]
 #[repr(C, packed)]
@@ -32,7 +40,13 @@ impl UniformBlock for UnlitUniformData {
     const SET: u32 = 1;
     const BINDING: u32 = 0;
 }
-impl Uniform for UnlitUniformData {}
+impl Uniform for UnlitUniformData {
+    fn size() -> u16 {
+        std::mem::size_of::<Self>()
+            .try_into()
+            .expect("uniform is too big")
+    }
+}
 
 #[derive(Copy, Clone, Debug)]
 #[repr(C, packed)]
@@ -68,7 +82,13 @@ impl UniformBlock for ShadowMatrices {
     const SET: u32 = 0;
     const BINDING: u32 = 3;
 }
-impl Uniform for ShadowMatrices {}
+impl Uniform for ShadowMatrices {
+    fn size() -> u16 {
+        std::mem::size_of::<Self>()
+            .try_into()
+            .expect("uniform is too big")
+    }
+}
 
 #[derive(Copy, Clone, Debug, Default)]
 #[repr(C, packed)]
@@ -82,7 +102,13 @@ impl UniformBlock for LightingData {
     const SET: u32 = 0;
     const BINDING: u32 = 1;
 }
-impl Uniform for LightingData {}
+impl Uniform for LightingData {
+    fn size() -> u16 {
+        std::mem::size_of::<Self>()
+            .try_into()
+            .expect("uniform is too big")
+    }
+}
 
 #[derive(Copy, Clone, Debug)]
 #[repr(C, packed)]
@@ -102,4 +128,10 @@ impl UniformBlock for ViewData {
     const SET: u32 = 0;
     const BINDING: u32 = 0;
 }
-impl Uniform for ViewData {}
+impl Uniform for ViewData {
+    fn size() -> u16 {
+        std::mem::size_of::<Self>()
+            .try_into()
+            .expect("uniform is too big")
+    }
+}

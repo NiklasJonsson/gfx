@@ -487,10 +487,6 @@ impl<T> TextureStorage<T> {
     pub fn add(&mut self, t: T) -> Handle<T> {
         self.storage.add(t)
     }
-
-    pub fn cached(&self, _descriptor: &TextureDescriptor) -> Option<Handle<T>> {
-        None
-    }
 }
 impl TextureStorage<Async<Texture>> {
     pub fn allocate(&mut self, _desc: &TextureDescriptor) -> Handle<Async<Texture>> {

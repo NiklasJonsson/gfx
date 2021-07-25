@@ -16,16 +16,16 @@ pub fn clamp<T: Ord>(v: T, min: T, max: T) -> T {
     std::cmp::max(min, std::cmp::min(v, max))
 }
 
-pub fn as_byte_slice<T: Copy>(slice: &[T]) -> &[u8] {
+pub unsafe fn as_byte_slice<T: Copy>(slice: &[T]) -> &[u8] {
     let ptr = slice.as_ptr() as *const u8;
     let size = std::mem::size_of::<T>() * slice.len();
-    unsafe { std::slice::from_raw_parts(ptr, size) }
+    std::slice::from_raw_parts(ptr, size)
 }
 
-pub fn as_bytes<T: Copy>(v: &T) -> &[u8] {
+pub unsafe fn as_bytes<T: Copy>(v: &T) -> &[u8] {
     let ptr = (v as *const T) as *const u8;
     let size = std::mem::size_of::<T>();
-    unsafe { std::slice::from_raw_parts(ptr, size) }
+    std::slice::from_raw_parts(ptr, size)
 }
 
 /// SAFETY: Only call this if A & B are transparent (repr(transparent))

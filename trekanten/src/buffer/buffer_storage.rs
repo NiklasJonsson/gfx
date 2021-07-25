@@ -121,10 +121,6 @@ where
 }
 
 use crate::resource::Async;
-use parking_lot::{RwLockReadGuard, RwLockWriteGuard};
-
-pub type BufferStorageReadGuard<'a, T> = RwLockReadGuard<'a, DeviceBufferStorage<T>>;
-pub type BufferStorageWriteGuard<'a, T> = RwLockWriteGuard<'a, DeviceBufferStorage<T>>;
 
 pub struct AsyncDeviceBufferStorage<T> {
     inner: DeviceBufferStorage<Async<T>>,
@@ -151,10 +147,7 @@ impl<T> AsyncDeviceBufferStorage<T> {
         self.inner.get_buffered_mut(h, idx)
     }
 
-    pub fn allocate<BD>(&mut self, desc: &BD) -> BufferHandle<Async<T>>
-    where
-        BD: BufferDescriptor<Buffer = T>,
-    {
+    pub fn allocate<BT>(&mut self, desc: &BufferDescriptor<BT>) -> BufferHandle<Async<T>> {
         let buffer1 = if let BufferMutability::Immutable = desc.mutability() {
             None
         } else {
@@ -162,13 +155,6 @@ impl<T> AsyncDeviceBufferStorage<T> {
         };
         let inner_handle = self.inner.add(Async::<T>::Pending, buffer1);
         unsafe { BufferHandle::from_buffer(inner_handle, 0, desc.n_elems(), desc.mutability()) }
-    }
-
-    pub fn cached<BD>(&self, _desc: &BD) -> Option<BufferHandle<Async<T>>>
-    where
-        BD: BufferDescriptor<Buffer = T>,
-    {
-        None
     }
 
     pub fn get(&self, h: &BufferHandle<Async<T>>, idx: usize) -> Option<&Async<T>> {

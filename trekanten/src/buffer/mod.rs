@@ -12,14 +12,11 @@ use crate::vertex::VertexDefinition;
 
 use ash::vk;
 
+use std::convert::TryInto;
 use std::sync::Arc;
 
-pub use descriptor::BufferDescriptor;
-
-// TODO: Remove
 pub use descriptor::{
-    OwningBufferDescriptor, OwningIndexBufferDescriptor, OwningUniformBufferDescriptor,
-    OwningVertexBufferDescriptor,
+    BufferDescriptor, IndexBufferDescriptor, UniformBufferDescriptor, VertexBufferDescriptor,
 };
 
 pub use buffer_storage::DrainIterator;
@@ -128,10 +125,13 @@ pub trait BufferType {
     fn elem_align(&self, _allocator: &AllocatorHandle) -> Option<u16> {
         None
     }
+    fn elem_size(&self) -> u16;
 }
 
 #[derive(Debug, Clone)]
-pub struct UniformBufferType;
+pub struct UniformBufferType {
+    size: u16,
+}
 impl BufferType for UniformBufferType {
     const USAGE: vk::BufferUsageFlags = vk::BufferUsageFlags::UNIFORM_BUFFER;
     fn elem_align(&self, allocator: &AllocatorHandle) -> Option<u16> {
@@ -143,11 +143,23 @@ impl BufferType for UniformBufferType {
                 .min_uniform_buffer_offset_alignment as u16,
         )
     }
+    fn elem_size(&self) -> u16 {
+        self.size
+    }
+}
+
+impl UniformBufferType {
+    fn from_trait<U: Uniform>() -> Self {
+        Self { size: U::size() }
+    }
 }
 
 // TODO: This should have a corresponding derive that exposes align/size/padding checks
-/// Marker trait for a type that is a uniform
-pub trait Uniform {}
+/// Trait for a type that is a uniform
+pub trait Uniform {
+    // The size of a uniform in bytes. Note that there cannot be padding in a struct
+    fn size() -> u16;
+}
 
 #[derive(Debug, Clone)]
 pub struct VertexBufferType {
@@ -155,6 +167,24 @@ pub struct VertexBufferType {
 }
 impl BufferType for VertexBufferType {
     const USAGE: vk::BufferUsageFlags = vk::BufferUsageFlags::VERTEX_BUFFER;
+    fn elem_size(&self) -> u16 {
+        self.format
+            .size()
+            .try_into()
+            .expect("Vertex format is too big")
+    }
+}
+
+impl VertexBufferType {
+    fn from_trait<V: VertexDefinition>() -> Self {
+        Self {
+            format: V::format(),
+        }
+    }
+
+    pub fn new(format: VertexFormat) -> Self {
+        Self { format }
+    }
 }
 
 #[derive(Debug, Copy, Clone, PartialEq, Eq, Hash)]
@@ -183,27 +213,51 @@ impl IndexSize {
 
 #[derive(Debug, Clone)]
 pub struct IndexBufferType {
-    index_size: IndexSize,
+    size: IndexSize,
 }
 
 impl BufferType for IndexBufferType {
     const USAGE: vk::BufferUsageFlags = vk::BufferUsageFlags::INDEX_BUFFER;
+    fn elem_size(&self) -> u16 {
+        self.size.size() as u16
+    }
+}
+
+impl IndexBufferType {
+    fn from_trait<I: IndexInt>() -> Self {
+        Self { size: I::size() }
+    }
+}
+
+pub trait IndexInt {
+    fn size() -> IndexSize;
+}
+
+impl IndexInt for u16 {
+    fn size() -> IndexSize {
+        IndexSize::Size16
+    }
+}
+
+impl IndexInt for u32 {
+    fn size() -> IndexSize {
+        IndexSize::Size32
+    }
 }
 
 #[derive(Debug)]
 pub struct DeviceBuffer<BT> {
     buffer: Buffer,
-    elem_size: u16,
     n_elems: u32,
     buffer_type: BT,
     stride: u16,
 }
 
-impl<BT> DeviceBuffer<BT> {
+impl<BT: BufferType + Clone> DeviceBuffer<BT> {
     pub fn create(
         allocator: &AllocatorHandle,
         command_buffer: &mut CommandBuffer,
-        descriptor: &impl BufferDescriptor,
+        descriptor: &BufferDescriptor<BT>,
         buffer_type: BT,
     ) -> Result<(Self, Option<Buffer>), MemoryError> {
         log::trace!("Creating buffer");
@@ -242,7 +296,6 @@ impl<BT> DeviceBuffer<BT> {
         Ok((
             Self {
                 buffer,
-                elem_size,
                 stride,
                 n_elems,
                 buffer_type,
@@ -254,7 +307,7 @@ impl<BT> DeviceBuffer<BT> {
     pub fn recreate(
         &mut self,
         allocator: &AllocatorHandle,
-        descriptor: &impl BufferDescriptor,
+        descriptor: &BufferDescriptor<BT>,
     ) -> Result<(), MemoryError> {
         assert!(descriptor.mutability() == BufferMutability::Mutable);
         let elem_size = descriptor.elem_size();
@@ -275,7 +328,6 @@ impl<BT> DeviceBuffer<BT> {
         } else {
             self.buffer.update_data_at(descriptor.data(), 0)?;
         }
-        self.elem_size = elem_size;
         self.stride = stride;
         Ok(())
     }
@@ -289,7 +341,7 @@ impl<BT> DeviceBuffer<BT> {
     }
 
     pub fn elem_size(&self) -> u16 {
-        self.elem_size
+        self.buffer_type.elem_size()
     }
 
     pub fn n_elems(&self) -> u32 {
@@ -315,7 +367,7 @@ impl DeviceVertexBuffer {
 pub type DeviceIndexBuffer = DeviceBuffer<IndexBufferType>;
 impl DeviceIndexBuffer {
     pub fn vk_index_type(&self) -> vk::IndexType {
-        vk::IndexType::from(self.buffer_type().index_size)
+        vk::IndexType::from(self.buffer_type().size)
     }
 }
 
@@ -326,7 +378,8 @@ impl DeviceUniformBuffer {
         data: &T,
         idx: u64,
     ) -> Result<(), MemoryError> {
-        let raw_data = as_bytes(data);
+        // SAFETY: The Uniform trait garantues that we can pass this as bytes to the gpu (or will atleast...)
+        let raw_data = unsafe { as_bytes(data) };
         let offset = (idx * self.stride() as u64) as usize;
         self.buffer_mut().update_data_at(raw_data, offset)
     }
@@ -340,7 +393,6 @@ impl DeviceUniformBuffer {
 #[derive(Debug, Clone)]
 pub struct HostBuffer<BT> {
     data: Arc<ByteBuffer>,
-    elem_size: u16,
     n_elems: u32,
     buffer_type: BT,
 }
@@ -349,77 +401,39 @@ pub type HostVertexBuffer = HostBuffer<VertexBufferType>;
 pub type HostIndexBuffer = HostBuffer<IndexBufferType>;
 pub type HostUniformBuffer = HostBuffer<UniformBufferType>;
 
-impl HostUniformBuffer {
-    pub fn from_vec<T: Copy + Uniform + 'static>(data: Vec<T>) -> Self {
-        let n_elems = data.len() as u32;
-        let data = unsafe { Arc::new(ByteBuffer::from_vec(data)) };
-        Self {
-            data,
-            n_elems,
-            elem_size: std::mem::size_of::<T>() as u16,
-            buffer_type: UniformBufferType,
+macro_rules! impl_host_buffer_from {
+    ($name:ty, $trait:ident, $buffer_type:ident) => {
+        impl $name {
+            pub fn from_vec<T: Copy + $trait + 'static>(data: Vec<T>) -> Self {
+                let n_elems = data.len() as u32;
+                let data = Arc::new(unsafe { ByteBuffer::from_vec(data) });
+                let buffer_type = $buffer_type::from_trait::<T>();
+                Self {
+                    data,
+                    n_elems,
+                    buffer_type,
+                }
+            }
+
+            pub fn from_single<T: Copy + $trait + 'static>(t: T) -> Self {
+                // TODO(perf): Can we avoid the allocation here?
+                Self::from_vec(vec![t])
+            }
+
+            pub unsafe fn from_raw(data: Vec<u8>, buffer_type: $buffer_type) -> Self {
+                assert_eq!(data.len() % buffer_type.elem_size() as usize, 0);
+                let n_elems = data.len() as u32 / buffer_type.elem_size() as u32;
+                let data = Arc::new(ByteBuffer::from_vec(data));
+                Self {
+                    data,
+                    n_elems,
+                    buffer_type,
+                }
+            }
         }
-    }
+    };
 }
 
-impl HostVertexBuffer {
-    pub fn from_vec<V: VertexDefinition + Copy + 'static>(data: Vec<V>) -> Self {
-        let n_elems = data.len() as u32;
-        let data = unsafe { Arc::new(ByteBuffer::from_vec(data)) };
-        Self {
-            data,
-            n_elems,
-            elem_size: std::mem::size_of::<V>() as u16,
-            buffer_type: VertexBufferType {
-                format: V::format(),
-            },
-        }
-    }
-
-    pub unsafe fn from_raw(data: Vec<u8>, format: VertexFormat) -> Self {
-        assert_eq!(data.len() as u32 % format.size(), 0);
-        let n_elems = data.len() as u32 / format.size();
-        let data = Arc::new(ByteBuffer::from_vec(data));
-        Self {
-            data,
-            n_elems,
-            elem_size: format.size() as u16,
-            buffer_type: VertexBufferType { format },
-        }
-    }
-}
-
-pub trait IndexInt {
-    fn size() -> IndexSize;
-}
-
-impl IndexInt for u16 {
-    fn size() -> IndexSize {
-        IndexSize::Size16
-    }
-}
-
-impl IndexInt for u32 {
-    fn size() -> IndexSize {
-        IndexSize::Size32
-    }
-}
-
-impl HostIndexBuffer {
-    pub fn from_vec<T: IndexInt + Copy + 'static>(data: Vec<T>) -> Self {
-        // TODO: static assert here
-        let index_size = match std::mem::size_of::<T>() {
-            4 => IndexSize::Size32,
-            2 => IndexSize::Size16,
-            _ => unreachable!("Invalid index type, needs to be either 16 or 32 bits"),
-        };
-        let n_elems = data.len() as u32;
-        let data = unsafe { Arc::new(ByteBuffer::from_vec(data)) };
-        Self {
-            data,
-            n_elems,
-            elem_size: std::mem::size_of::<T>() as u16,
-            buffer_type: IndexBufferType { index_size },
-        }
-    }
-}
+impl_host_buffer_from!(HostUniformBuffer, Uniform, UniformBufferType);
+impl_host_buffer_from!(HostVertexBuffer, VertexDefinition, VertexBufferType);
+impl_host_buffer_from!(HostIndexBuffer, IndexInt, IndexBufferType);

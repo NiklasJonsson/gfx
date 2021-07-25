@@ -383,8 +383,7 @@ macro_rules! impl_todo_inspect {
 
 impl_todo_inspect!(trekanten::texture::TextureDescriptor);
 impl_todo_inspect!(trekanten::texture::Texture);
-use trekanten::buffer::{HostBuffer, OwningBufferDescriptor};
+use trekanten::buffer::HostBuffer;
 use trekanten::resource::Async;
 impl_generic_todo_inspect!(HostBuffer);
-impl_generic_todo_inspect!(OwningBufferDescriptor);
 impl_generic_todo_inspect!(Async);

@@ -252,14 +252,14 @@ fn main() -> Result<(), trekanten::RenderError> {
     std::thread::spawn(move || {
         let (vertices, indices) = load_viking_house();
 
-        let vertex_buffer_descriptor = buffer::OwningVertexBufferDescriptor::from_vec(
+        let vertex_buffer_descriptor = buffer::OwningVertexBufferDescriptor2::from_vec(
             vertices,
             buffer::BufferMutability::Immutable,
         );
 
         let vertex_buffer = loader_clone.load(vertex_buffer_descriptor);
 
-        let index_buffer_descriptor = buffer::OwningIndexBufferDescriptor::from_vec(
+        let index_buffer_descriptor = buffer::OwningIndexBufferDescriptor2::from_vec(
             indices,
             buffer::BufferMutability::Immutable,
         );
@@ -308,7 +308,7 @@ fn main() -> Result<(), trekanten::RenderError> {
     }];
 
     let uniform_buffer_desc =
-        buffer::OwningUniformBufferDescriptor::from_vec(data, buffer::BufferMutability::Mutable);
+        buffer::OwningUniformBufferDescriptor2::from_vec(data, buffer::BufferMutability::Mutable);
 
     let uniform_buffer_handle = renderer
         .create_resource_blocking(uniform_buffer_desc)

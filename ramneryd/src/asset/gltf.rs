@@ -2,8 +2,7 @@ use crate::ecs;
 use crate::ecs::prelude::*;
 use std::path::{Path, PathBuf};
 
-use trekanten::buffer::BufferMutability;
-use trekanten::buffer::{HostIndexBuffer, HostVertexBuffer};
+use trekanten::buffer::{HostIndexBuffer, HostVertexBuffer, VertexBufferType};
 use trekanten::pipeline::PolygonMode;
 use trekanten::texture::{MipMaps, TextureDescriptor};
 use trekanten::util;
@@ -108,39 +107,47 @@ fn interleave_vertex_buffer<'a>(
     match (colors, tex_coords, tangents) {
         (None, Some(tex_coords), Some(tangents)) => {
             for ((uv, tan), (pos, nor)) in tex_coords.into_f32().zip(tangents).zip(it) {
-                data.extend_from_slice(util::as_bytes(&pos));
-                data.extend_from_slice(util::as_bytes(&nor));
-                data.extend_from_slice(util::as_bytes(&uv));
-                data.extend_from_slice(util::as_bytes(&tan));
+                unsafe {
+                    data.extend_from_slice(util::as_bytes(&pos));
+                    data.extend_from_slice(util::as_bytes(&nor));
+                    data.extend_from_slice(util::as_bytes(&uv));
+                    data.extend_from_slice(util::as_bytes(&tan));
+                }
             }
         }
         (Some(colors), Some(tex_coords), None) => {
             for ((uv, col), (pos, nor)) in tex_coords.into_f32().zip(colors.into_rgba_f32()).zip(it)
             {
-                data.extend_from_slice(util::as_bytes(&pos));
-                data.extend_from_slice(util::as_bytes(&nor));
-                data.extend_from_slice(util::as_bytes(&uv));
-                data.extend_from_slice(util::as_bytes(&col));
+                unsafe {
+                    data.extend_from_slice(util::as_bytes(&pos));
+                    data.extend_from_slice(util::as_bytes(&nor));
+                    data.extend_from_slice(util::as_bytes(&uv));
+                    data.extend_from_slice(util::as_bytes(&col));
+                }
             }
         }
         (None, Some(tex_coords), None) => {
             for (uv, (pos, nor)) in tex_coords.into_f32().zip(it) {
-                data.extend_from_slice(util::as_bytes(&pos));
-                data.extend_from_slice(util::as_bytes(&nor));
-                data.extend_from_slice(util::as_bytes(&uv));
+                unsafe {
+                    data.extend_from_slice(util::as_bytes(&pos));
+                    data.extend_from_slice(util::as_bytes(&nor));
+                    data.extend_from_slice(util::as_bytes(&uv));
+                }
             }
         }
         (None, None, None) => {
             for (pos, nor) in it {
-                data.extend_from_slice(util::as_bytes(&pos));
-                data.extend_from_slice(util::as_bytes(&nor));
+                unsafe {
+                    data.extend_from_slice(util::as_bytes(&pos));
+                    data.extend_from_slice(util::as_bytes(&nor));
+                }
             }
         }
         _ => unimplemented!("Unsupported vertex format"),
     }
 
     (
-        unsafe { HostVertexBuffer::from_raw(data, format) },
+        unsafe { HostVertexBuffer::from_raw(data, VertexBufferType::new(format)) },
         has_vertex_colors,
     )
 }

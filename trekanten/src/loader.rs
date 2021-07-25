@@ -1,9 +1,9 @@
 use crate::backend;
 
 use crate::buffer::{
-    BufferDescriptor, BufferHandle, DrainIterator as BufferDrainIterator, DeviceIndexBuffer,
-    OwningIndexBufferDescriptor, OwningUniformBufferDescriptor, OwningVertexBufferDescriptor,
-    DeviceUniformBuffer, DeviceVertexBuffer,
+    BufferHandle, DeviceIndexBuffer, DeviceUniformBuffer, DeviceVertexBuffer,
+    DrainIterator as BufferDrainIterator, IndexBufferDescriptor, UniformBufferDescriptor,
+    VertexBufferDescriptor,
 };
 use crate::resource::{Async, AsyncResources, Handle, Resources};
 use crate::texture::{DrainIterator as TextureDrainIterator, Texture, TextureDescriptor};
@@ -42,15 +42,15 @@ impl std::fmt::Display for LoaderError {
 
 pub enum AsyncResourceCommand {
     CreateVertexBuffer {
-        descriptor: OwningVertexBufferDescriptor,
+        descriptor: VertexBufferDescriptor<'static>,
         handle: BufferHandle<Async<DeviceVertexBuffer>>,
     },
     CreateIndexBuffer {
-        descriptor: OwningIndexBufferDescriptor,
+        descriptor: IndexBufferDescriptor<'static>,
         handle: BufferHandle<Async<DeviceIndexBuffer>>,
     },
     CreateUniformBuffer {
-        descriptor: OwningUniformBufferDescriptor,
+        descriptor: UniformBufferDescriptor<'static>,
         handle: BufferHandle<Async<DeviceUniformBuffer>>,
     },
     CreateTexture {
@@ -61,21 +61,21 @@ pub enum AsyncResourceCommand {
 
 enum PendingResourceCommand {
     CreateVertexBuffer {
-        descriptor: OwningVertexBufferDescriptor,
+        descriptor: VertexBufferDescriptor<'static>,
         handle: BufferHandle<Async<DeviceVertexBuffer>>,
         buffer0: DeviceVertexBuffer,
         buffer1: Option<DeviceVertexBuffer>, // For double buffering
         transients: [Option<Buffer>; 2],
     },
     CreateIndexBuffer {
-        descriptor: OwningIndexBufferDescriptor,
+        descriptor: IndexBufferDescriptor<'static>,
         handle: BufferHandle<Async<DeviceIndexBuffer>>,
         buffer0: DeviceIndexBuffer,
         buffer1: Option<DeviceIndexBuffer>, // For double buffering
         transients: [Option<Buffer>; 2],
     },
     CreateUniformBuffer {
-        descriptor: OwningUniformBufferDescriptor,
+        descriptor: UniformBufferDescriptor<'static>,
         handle: BufferHandle<Async<DeviceUniformBuffer>>,
         buffer0: DeviceUniformBuffer,
         buffer1: Option<DeviceUniformBuffer>, // For double buffering
@@ -414,9 +414,6 @@ macro_rules! impl_loader {
                 $validate_fn(&descriptor)?;
 
                 let mut guard = self.locked.lock().map_err(|_| LoaderError::Mutex)?;
-                if let Some(handle) = guard.resources.$storage.cached(&descriptor) {
-                    return Ok(handle);
-                }
 
                 let handle = guard.resources.$storage.allocate(&descriptor);
                 let cmd = AsyncResourceCommand::$cmd_enum { descriptor, handle };
@@ -445,19 +442,19 @@ macro_rules! impl_loader {
 }
 
 impl_loader!(
-    OwningIndexBufferDescriptor,
+    IndexBufferDescriptor<'static>,
     BufferHandle<Async<DeviceIndexBuffer>>,
     index_buffers,
     CreateIndexBuffer
 );
 impl_loader!(
-    OwningVertexBufferDescriptor,
+    VertexBufferDescriptor<'static>,
     BufferHandle<Async<DeviceVertexBuffer>>,
     vertex_buffers,
     CreateVertexBuffer
 );
 impl_loader!(
-    OwningUniformBufferDescriptor,
+    UniformBufferDescriptor<'static>,
     BufferHandle<Async<DeviceUniformBuffer>>,
     uniform_buffers,
     CreateUniformBuffer

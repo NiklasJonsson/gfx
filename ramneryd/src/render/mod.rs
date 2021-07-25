@@ -4,7 +4,7 @@ use thiserror::Error;
 
 use crate::ecs::prelude::*;
 
-use trekanten::buffer::{BufferMutability, OwningUniformBufferDescriptor, DeviceUniformBuffer};
+use trekanten::buffer::{BufferMutability, DeviceUniformBuffer, UniformBufferDescriptor};
 use trekanten::pipeline::{
     GraphicsPipeline, GraphicsPipelineDescriptor, PipelineError, ShaderDescriptor,
 };
@@ -678,7 +678,7 @@ fn build_shadow_data(
         };
         NUM_SPOTLIGHT_SHADOW_MAPS
     ];
-    let view_data = OwningUniformBufferDescriptor::from_vec(view_data, BufferMutability::Mutable);
+    let view_data = UniformBufferDescriptor::from_vec(view_data, BufferMutability::Mutable);
     let view_data_buffer_handles = renderer
         .create_resource_blocking(view_data)
         .expect("FAIL")
@@ -744,16 +744,11 @@ pub fn setup_resources(world: &mut World, mut renderer: &mut Renderer) {
             .presentation_render_pass(8)
             .expect("main render pass creation failed");
 
-        const N_VIEW_DATA: usize = 1;
-        let view_data = vec![
-            uniform::ViewData {
-                view_proj: [0.0; 16],
-                view_pos: [0.0; 4],
-            };
-            N_VIEW_DATA
-        ];
-        let view_data =
-            OwningUniformBufferDescriptor::from_vec(view_data, BufferMutability::Mutable);
+        let view_data = uniform::ViewData {
+            view_proj: [0.0; 16],
+            view_pos: [0.0; 4],
+        };
+        let view_data = UniformBufferDescriptor::from_single(view_data, BufferMutability::Mutable);
         let main_camera_view_data = renderer.create_resource_blocking(view_data).expect("FAIL");
         let shadow_data = build_shadow_data(&shader_compiler, renderer);
 
@@ -783,21 +778,21 @@ pub fn setup_resources(world: &mut World, mut renderer: &mut Renderer) {
                 .expect("FAIL");
 
             // TODO: Single elem uniform buffer here. Add to the same buffer?
-            let light_data = vec![uniform::LightingData {
+            let light_data = uniform::LightingData {
                 punctual_lights: [uniform::PackedLight::default(); uniform::MAX_NUM_LIGHTS],
                 num_lights: 0,
                 ambient: [0.0; 4],
-            }];
+            };
             let light_data =
-                OwningUniformBufferDescriptor::from_vec(light_data, BufferMutability::Mutable);
+                UniformBufferDescriptor::from_single(light_data, BufferMutability::Mutable);
             let light_buffer = renderer.create_resource_blocking(light_data).expect("FAIL");
 
-            let shadow_matrices = vec![uniform::ShadowMatrices {
+            let shadow_matrices = uniform::ShadowMatrices {
                 matrices: [uniform::Mat4::default(); uniform::MAX_NUM_LIGHTS],
                 num_matrices: 0,
-            }];
+            };
             let shadow_matrices =
-                OwningUniformBufferDescriptor::from_vec(shadow_matrices, BufferMutability::Mutable);
+                UniformBufferDescriptor::from_single(shadow_matrices, BufferMutability::Mutable);
             let shadow_matrices_buffer = renderer
                 .create_resource_blocking(shadow_matrices)
                 .expect("Failed to create shadow matrix uniform buffer");
@@ -1054,7 +1049,7 @@ impl<'a> System<'a> for GpuUpload {
 
             if !ubuf.is_empty() {
                 let async_handle = loader
-                    .load(OwningUniformBufferDescriptor::from_vec(
+                    .load(UniformBufferDescriptor::from_vec(
                         ubuf,
                         BufferMutability::Immutable,
                     ))
@@ -1115,7 +1110,7 @@ impl<'a> System<'a> for GpuUpload {
 
             if !ubuf_pbr.is_empty() {
                 let async_handle = loader
-                    .load(OwningUniformBufferDescriptor::from_vec(
+                    .load(UniformBufferDescriptor::from_vec(
                         ubuf_pbr,
                         BufferMutability::Immutable,
                     ))

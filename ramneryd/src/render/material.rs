@@ -61,7 +61,8 @@ pub enum GpuMaterial {
 #[component(inspect)]
 pub enum PendingMaterial {
     Unlit {
-        color_uniform: Pending<BufferHandle<Async<DeviceUniformBuffer>>, BufferHandle<DeviceUniformBuffer>>,
+        color_uniform:
+            Pending<BufferHandle<Async<DeviceUniformBuffer>>, BufferHandle<DeviceUniformBuffer>>,
     },
     PBR {
         material_uniforms:

@@ -32,7 +32,6 @@ use backend::{color_buffer, command, depth_buffer, device, instance, surface, sw
 use common::MAX_FRAMES_IN_FLIGHT;
 
 use crate::backend::vk::{buffer::Buffer, image::Image, MemoryError};
-use crate::buffer::BufferDescriptor as _;
 
 // Notes:
 // We can have N number of swapchain images, it depends on the backing presentation implementation.
@@ -180,7 +179,7 @@ impl<'a> Frame<'a> {
 
 macro_rules! impl_mut_buffer_manager_frame {
     ($desc:ty, $resource:ty, $storage:ident) => {
-        impl<'a> resource::MutResourceManager<$desc, $resource, BufferHandle<$resource>>
+        impl<'a, 'b> resource::MutResourceManager<$desc, $resource, BufferHandle<$resource>>
             for Frame<'a>
         {
             type Error = MemoryError;
@@ -220,14 +219,15 @@ macro_rules! impl_mut_buffer_manager_frame {
     };
 }
 
+// TODO: How to avoid having to give <'b> here?
 impl_mut_buffer_manager_frame!(
-    buffer::OwningVertexBufferDescriptor,
+    buffer::VertexBufferDescriptor<'b>,
     buffer::DeviceVertexBuffer,
     vertex_buffers
 );
 
 impl_mut_buffer_manager_frame!(
-    buffer::OwningIndexBufferDescriptor,
+    buffer::IndexBufferDescriptor<'b>,
     buffer::DeviceIndexBuffer,
     index_buffers
 );
@@ -252,7 +252,7 @@ macro_rules! impl_buffer_manager_frame {
 }
 
 impl_buffer_manager_frame!(
-    buffer::OwningVertexBufferDescriptor,
+    buffer::VertexBufferDescriptor<'static>,
     buffer::DeviceVertexBuffer,
     BufferHandle<buffer::DeviceVertexBuffer>,
     CreateVertexBuffer,
@@ -260,7 +260,7 @@ impl_buffer_manager_frame!(
 );
 
 impl_buffer_manager_frame!(
-    buffer::OwningIndexBufferDescriptor,
+    buffer::IndexBufferDescriptor<'static>,
     buffer::DeviceIndexBuffer,
     BufferHandle<buffer::DeviceIndexBuffer>,
     CreateIndexBuffer,
@@ -269,13 +269,13 @@ impl_buffer_manager_frame!(
 
 pub enum SyncResourceCommand {
     CreateVertexBuffer {
-        descriptor: buffer::OwningVertexBufferDescriptor,
+        descriptor: buffer::VertexBufferDescriptor<'static>,
     },
     CreateIndexBuffer {
-        descriptor: buffer::OwningIndexBufferDescriptor,
+        descriptor: buffer::IndexBufferDescriptor<'static>,
     },
     CreateUniformBuffer {
-        descriptor: buffer::OwningUniformBufferDescriptor,
+        descriptor: buffer::UniformBufferDescriptor<'static>,
     },
     CreateTexture {
         descriptor: texture::TextureDescriptor,
@@ -831,21 +831,21 @@ macro_rules! impl_buffer_manager {
 }
 
 impl_buffer_manager!(
-    buffer::OwningVertexBufferDescriptor,
+    buffer::VertexBufferDescriptor<'static>,
     buffer::DeviceVertexBuffer,
     BufferHandle<buffer::DeviceVertexBuffer>,
     CreateVertexBuffer,
     vertex_buffers
 );
 impl_buffer_manager!(
-    buffer::OwningIndexBufferDescriptor,
+    buffer::IndexBufferDescriptor<'static>,
     buffer::DeviceIndexBuffer,
     BufferHandle<buffer::DeviceIndexBuffer>,
     CreateIndexBuffer,
     index_buffers
 );
 impl_buffer_manager!(
-    buffer::OwningUniformBufferDescriptor,
+    buffer::UniformBufferDescriptor<'static>,
     buffer::DeviceUniformBuffer,
     BufferHandle<buffer::DeviceUniformBuffer>,
     CreateUniformBuffer,

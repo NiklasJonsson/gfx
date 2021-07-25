@@ -2,7 +2,7 @@ use crate::ecs::prelude::*;
 use crate::render::Pending;
 
 use ramneryd_derive::Inspect;
-use trekanten::buffer::{DeviceIndexBuffer, HostIndexBuffer, DeviceVertexBuffer, HostVertexBuffer};
+use trekanten::buffer::{DeviceIndexBuffer, DeviceVertexBuffer, HostIndexBuffer, HostVertexBuffer};
 use trekanten::loader::{Loader, ResourceLoader};
 use trekanten::resource::Async;
 use trekanten::{BufferHandle, BufferMutability};
@@ -64,12 +64,12 @@ impl PendingMesh {
     }
 
     pub fn load(loader: &Loader, mesh: &CpuMesh) -> Self {
-        use trekanten::buffer::{OwningIndexBufferDescriptor, OwningVertexBufferDescriptor};
-        let vbuf_desc = OwningVertexBufferDescriptor::from_host_buffer(
+        use trekanten::buffer::{IndexBufferDescriptor, VertexBufferDescriptor};
+        let vbuf_desc = VertexBufferDescriptor::from_host_buffer(
             &mesh.vertex_buffer,
             BufferMutability::Immutable,
         );
-        let ibuf_desc = OwningIndexBufferDescriptor::from_host_buffer(
+        let ibuf_desc = IndexBufferDescriptor::from_host_buffer(
             &mesh.index_buffer,
             BufferMutability::Immutable,
         );

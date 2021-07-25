@@ -244,7 +244,7 @@ fn main() -> Result<(), trekanten::RenderError> {
     let mut window = GlfwWindow::new();
     let mut renderer = trekanten::Renderer::new(&window, window.extents())?;
 
-    let vertex_buffer_descriptor = buffer::OwningVertexBufferDescriptor::from_vec(
+    let vertex_buffer_descriptor = buffer::OwningVertexBufferDescriptor2::from_vec(
         vertices,
         buffer::BufferMutability::Immutable,
     );
@@ -252,8 +252,10 @@ fn main() -> Result<(), trekanten::RenderError> {
         .create_resource_blocking(vertex_buffer_descriptor)
         .expect("Failed to create vertex buffer");
 
-    let index_buffer_descriptor =
-        buffer::OwningIndexBufferDescriptor::from_vec(indices, buffer::BufferMutability::Immutable);
+    let index_buffer_descriptor = buffer::OwningIndexBufferDescriptor2::from_vec(
+        indices,
+        buffer::BufferMutability::Immutable,
+    );
     let index_buffer = renderer
         .create_resource_blocking(index_buffer_descriptor)
         .expect("Failed to create index buffer");
@@ -278,7 +280,7 @@ fn main() -> Result<(), trekanten::RenderError> {
     }];
 
     let uniform_buffer_desc =
-        buffer::OwningUniformBufferDescriptor::from_vec(data, buffer::BufferMutability::Mutable);
+        buffer::OwningUniformBufferDescriptor2::from_vec(data, buffer::BufferMutability::Mutable);
 
     let uniform_buffer_handle = renderer
         .create_resource_blocking(uniform_buffer_desc)

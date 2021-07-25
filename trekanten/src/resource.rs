@@ -7,33 +7,6 @@ use crate::render_pass;
 use crate::render_target;
 use crate::texture;
 
-pub enum ResourceCommand {
-    CreateVertexBuffer {
-        descriptor: buffer::OwningVertexBufferDescriptor,
-        handle: buffer::BufferHandle<buffer::DeviceVertexBuffer>,
-    },
-    CreateIndexBuffer {
-        descriptor: buffer::OwningIndexBufferDescriptor,
-        handle: buffer::BufferHandle<buffer::DeviceIndexBuffer>,
-    },
-    CreateUniformBuffer {
-        descriptor: buffer::OwningUniformBufferDescriptor,
-        handle: buffer::BufferHandle<buffer::DeviceUniformBuffer>,
-    },
-    CreateTexture {
-        descriptor: texture::TextureDescriptor,
-        handle: Handle<texture::Texture>,
-    },
-    CreatePipeline {
-        descriptor: pipeline::GraphicsPipelineDescriptor,
-        handle: Handle<pipeline::GraphicsPipeline>,
-    },
-}
-
-pub struct ResourceCommandBatch {
-    _commands: arrayvec::ArrayVec<[ResourceCommand; 64]>,
-}
-
 #[derive(Default)]
 pub struct AsyncResources {
     pub uniform_buffers: buffer::AsyncUniformBuffers,

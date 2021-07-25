@@ -1,7 +1,7 @@
 use polymap::polymap;
 use trekanten::buffer::{
-    BufferMutability, DeviceIndexBuffer, HostIndexBuffer, OwningIndexBufferDescriptor,
-    OwningVertexBufferDescriptor, DeviceVertexBuffer, HostVertexBuffer,
+    BufferMutability, DeviceIndexBuffer, DeviceVertexBuffer, HostIndexBuffer, HostVertexBuffer,
+    IndexBufferDescriptor, VertexBufferDescriptor,
 };
 use trekanten::descriptor::DescriptorSet;
 use trekanten::pipeline::{
@@ -586,11 +586,9 @@ impl UIContext {
         let vbuf = HostVertexBuffer::from_vec(vertices);
 
         // TODO: This could be a borrow when reusing the allocation
-        let vbuf_desc =
-            OwningVertexBufferDescriptor::from_host_buffer(&vbuf, BufferMutability::Mutable);
+        let vbuf_desc = VertexBufferDescriptor::from_host_buffer(&vbuf, BufferMutability::Mutable);
         let ibuf = HostIndexBuffer::from_vec(indices);
-        let ibuf_desc =
-            OwningIndexBufferDescriptor::from_host_buffer(&ibuf, BufferMutability::Mutable);
+        let ibuf_desc = IndexBufferDescriptor::from_host_buffer(&ibuf, BufferMutability::Mutable);
 
         let (vertex_buffer, index_buffer) = if let Some(per_frame_data) = self.per_frame_data {
             frame
