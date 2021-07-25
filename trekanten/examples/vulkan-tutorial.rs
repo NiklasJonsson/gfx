@@ -1,21 +1,27 @@
 use glfw::{Action, Key};
 use nalgebra_glm as glm;
+use resurs::Handle;
 
+use buffer::{
+    BufferHandle, BufferMutability, DeviceIndexBuffer, DeviceUniformBuffer, DeviceVertexBuffer,
+};
 use trekanten::buffer;
 use trekanten::descriptor::DescriptorSet;
-use trekanten::pipeline;
-use trekanten::pipeline::ShaderDescriptor;
-use trekanten::pipeline::ShaderStage;
+use trekanten::pipeline::{
+    GraphicsPipeline, GraphicsPipelineDescriptor, ShaderDescriptor, ShaderStage,
+};
 use trekanten::texture;
 use trekanten::util;
 use trekanten::vertex::{VertexDefinition, VertexFormat};
+use trekanten::{RenderPass, Renderer, Texture};
+
 use trekanten::ResourceManager as _;
 
 use std::time::Duration;
 
 const WINDOW_HEIGHT: u32 = 300;
 const WINDOW_WIDTH: u32 = 300;
-const WINDOW_TITLE: &str = "Trekanten";
+const WINDOW_TITLE: &str = "Trekanten Vulkan Tutoria";
 
 type GlfwWindowEvents = std::sync::mpsc::Receiver<(f64, glfw::WindowEvent)>;
 
@@ -116,7 +122,11 @@ struct UniformBufferObject {
     view: glm::Mat4,
     proj: glm::Mat4,
 }
-impl buffer::Uniform for UniformBufferObject {}
+impl buffer::Uniform for UniformBufferObject {
+    fn size() -> u16 {
+        std::mem::size_of::<Self>() as u16
+    }
+}
 
 fn get_fname(dir: &str, target: &str) -> std::path::PathBuf {
     let url = reqwest::Url::parse(target).expect("Bad url");
@@ -236,43 +246,42 @@ fn get_next_mvp(start: &std::time::Instant, aspect_ratio: f32) -> UniformBufferO
     ubo
 }
 
-fn main() -> Result<(), trekanten::RenderError> {
-    env_logger::init();
+fn create_texture(renderer: &mut Renderer) -> Handle<Texture> {
+    let _ = load_url("textures", TEX_URL);
+    let tex_path = get_fname("textures", TEX_URL);
+    let texture_handle = renderer
+        .create_texture(texture::TextureDescriptor::file(
+            tex_path.into(),
+            util::Format::RGBA_SRGB,
+            texture::MipMaps::Generate,
+        ))
+        .expect("Failed to create texture");
+    texture_handle
+}
 
+type Mesh = (
+    BufferHandle<DeviceVertexBuffer>,
+    BufferHandle<DeviceIndexBuffer>,
+);
+
+fn create_mesh(renderer: &mut Renderer) -> Mesh {
     let (vertices, indices) = load_viking_house();
 
-    let mut window = GlfwWindow::new();
-    let mut renderer = trekanten::Renderer::new(&window, window.extents())?;
-
-    let vertex_buffer_descriptor = buffer::OwningVertexBufferDescriptor2::from_vec(
-        vertices,
-        buffer::BufferMutability::Immutable,
-    );
+    let vertex_buffer_descriptor =
+        buffer::VertexBufferDescriptor::from_slice(&vertices, BufferMutability::Immutable);
     let vertex_buffer = renderer
         .create_resource_blocking(vertex_buffer_descriptor)
         .expect("Failed to create vertex buffer");
 
-    let index_buffer_descriptor = buffer::OwningIndexBufferDescriptor2::from_vec(
-        indices,
-        buffer::BufferMutability::Immutable,
-    );
+    let index_buffer_descriptor =
+        buffer::IndexBufferDescriptor::from_slice(&indices, BufferMutability::Immutable);
     let index_buffer = renderer
         .create_resource_blocking(index_buffer_descriptor)
         .expect("Failed to create index buffer");
+    (vertex_buffer, index_buffer)
+}
 
-    let vert = ShaderDescriptor::FromRawSpirv(RAW_VERT_SPV.to_vec());
-    let frag = ShaderDescriptor::FromRawSpirv(RAW_FRAG_SPV.to_vec());
-    let pipeline_descriptor = pipeline::GraphicsPipelineDescriptor::builder()
-        .vert(vert)
-        .frag(frag)
-        .vertex_format(Vertex::format())
-        .build()
-        .expect("Failed to build graphics pipeline descriptor");
-
-    let gfx_pipeline_handle = renderer
-        .create_gfx_pipeline(pipeline_descriptor)
-        .expect("Failed to create graphics pipeline");
-
+fn create_mvp_ubuf(renderer: &mut Renderer) -> BufferHandle<DeviceUniformBuffer> {
     let data = vec![UniformBufferObject {
         model: glm::Mat4::default(),
         view: glm::Mat4::default(),
@@ -280,25 +289,49 @@ fn main() -> Result<(), trekanten::RenderError> {
     }];
 
     let uniform_buffer_desc =
-        buffer::OwningUniformBufferDescriptor2::from_vec(data, buffer::BufferMutability::Mutable);
+        buffer::UniformBufferDescriptor::from_slice(&data, BufferMutability::Mutable);
 
-    let uniform_buffer_handle = renderer
+    renderer
         .create_resource_blocking(uniform_buffer_desc)
-        .expect("Failed to create uniform buffer");
+        .expect("Failed to create uniform buffer")
+}
 
-    let _ = load_url("textures", TEX_URL);
-    let tex_path = get_fname("textures", TEX_URL);
-    let texture_handle = renderer
-        .create_resource_blocking(texture::TextureDescriptor::file(
-            tex_path.into(),
-            util::Format::RGBA_SRGB,
-            texture::MipMaps::Generate,
-        ))
-        .expect("Failed to create texture");
+fn create_pipeline(
+    renderer: &mut Renderer,
+    render_pass: &Handle<RenderPass>,
+) -> Handle<GraphicsPipeline> {
+    let vert = ShaderDescriptor::FromRawSpirv(RAW_VERT_SPV.to_vec());
+    let frag = ShaderDescriptor::FromRawSpirv(RAW_FRAG_SPV.to_vec());
+    let pipeline_descriptor = GraphicsPipelineDescriptor::builder()
+        .vert(vert)
+        .frag(frag)
+        .vertex_format(Vertex::format())
+        .build()
+        .expect("Failed to build graphics pipeline descriptor");
 
+    let gfx_pipeline_handle = renderer
+        .create_gfx_pipeline(pipeline_descriptor, &render_pass)
+        .expect("Failed to create graphics pipeline");
+    gfx_pipeline_handle
+}
+
+fn main() -> Result<(), trekanten::RenderError> {
+    env_logger::init();
+
+    let mut window = GlfwWindow::new();
+    let mut renderer = trekanten::Renderer::new(&window, window.extents())?;
+
+    let render_pass = renderer
+        .presentation_render_pass(4)
+        .expect("Failed to create render pass");
+
+    let (vertex_buffer, index_buffer) = create_mesh(&mut renderer);
+    let gfx_pipeline_handle = create_pipeline(&mut renderer, &render_pass);
+    let uniform_buffer_handle = create_mvp_ubuf(&mut renderer);
+    let texture_handle = create_texture(&mut renderer);
     let desc_set_handle = DescriptorSet::builder(&mut renderer)
         .add_buffer(&uniform_buffer_handle, 0, ShaderStage::VERTEX)
-        .add_texture(&texture_handle, 1, ShaderStage::FRAGMENT)
+        .add_texture(&texture_handle, 1, ShaderStage::FRAGMENT, false)
         .build();
 
     let start = std::time::Instant::now();
@@ -329,9 +362,12 @@ fn main() -> Result<(), trekanten::RenderError> {
         frame
             .update_uniform_blocking(&uniform_buffer_handle, &next_mvp)
             .expect("Failed to update uniform buffer!");
+        let cmd_buf = frame
+            .new_command_buffer()
+            .expect("Failed to build render command buffer");
 
         let mut builder = frame
-            .begin_render_pass()
+            .begin_presentation_pass(cmd_buf, &render_pass)
             .expect("Failed to begin render pass");
 
         builder
@@ -339,10 +375,9 @@ fn main() -> Result<(), trekanten::RenderError> {
             .bind_shader_resource_group(0, &desc_set_handle, &gfx_pipeline_handle)
             .draw_mesh(&vertex_buffer, &index_buffer);
 
-        let cmd_buf = builder
-            .build()
-            .expect("Failed to build render command buffer");
-        frame.add_raw_command_buffer(cmd_buf);
+        let cmd_buf = builder.end().expect("Failed to end render command buffer");
+
+        frame.add_command_buffer(cmd_buf);
 
         let frame = frame.finish();
         renderer.submit(frame).or_else(|e| {

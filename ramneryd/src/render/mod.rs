@@ -892,7 +892,7 @@ impl GpuUpload {
     #[profiling::function]
     fn resolve_pending(world: &mut World, renderer: &mut Renderer) {
         use trekanten::loader::HandleMapping;
-        let mut loader = world.write_resource::<trekanten::Loader>();
+        let loader = world.write_resource::<trekanten::Loader>();
         let mut pending_materials = world.write_storage::<PendingMaterial>();
         let mut pending_meshes = world.write_storage::<PendingMesh>();
         let mut materials = world.write_storage::<GpuMaterial>();

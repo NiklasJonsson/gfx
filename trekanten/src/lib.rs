@@ -234,7 +234,7 @@ impl_mut_buffer_manager_frame!(
 
 macro_rules! impl_buffer_manager_frame {
     ($desc:ty, $resource:ty, $handle:ty, $cmd_enum:ident, $storage:ident) => {
-        impl<'a> resource::ResourceManager<$desc, $resource, $handle> for Frame<'a> {
+        impl<'a, 'b> resource::ResourceManager<$desc, $resource, $handle> for Frame<'a> {
             type Error = MemoryError;
 
             fn get_resource(&self, handle: &$handle) -> Option<&$resource> {
@@ -252,7 +252,7 @@ macro_rules! impl_buffer_manager_frame {
 }
 
 impl_buffer_manager_frame!(
-    buffer::VertexBufferDescriptor<'static>,
+    buffer::VertexBufferDescriptor<'b>,
     buffer::DeviceVertexBuffer,
     BufferHandle<buffer::DeviceVertexBuffer>,
     CreateVertexBuffer,
@@ -260,22 +260,22 @@ impl_buffer_manager_frame!(
 );
 
 impl_buffer_manager_frame!(
-    buffer::IndexBufferDescriptor<'static>,
+    buffer::IndexBufferDescriptor<'b>,
     buffer::DeviceIndexBuffer,
     BufferHandle<buffer::DeviceIndexBuffer>,
     CreateIndexBuffer,
     index_buffers
 );
 
-pub enum SyncResourceCommand {
+pub enum SyncResourceCommand<'a> {
     CreateVertexBuffer {
-        descriptor: buffer::VertexBufferDescriptor<'static>,
+        descriptor: buffer::VertexBufferDescriptor<'a>,
     },
     CreateIndexBuffer {
-        descriptor: buffer::IndexBufferDescriptor<'static>,
+        descriptor: buffer::IndexBufferDescriptor<'a>,
     },
     CreateUniformBuffer {
-        descriptor: buffer::UniformBufferDescriptor<'static>,
+        descriptor: buffer::UniformBufferDescriptor<'a>,
     },
     CreateTexture {
         descriptor: texture::TextureDescriptor,
@@ -808,7 +808,7 @@ impl Renderer {
 
 macro_rules! impl_buffer_manager {
     ($desc:ty, $resource:ty, $handle:ty, $cmd_enum:ident, $storage:ident) => {
-        impl resource::ResourceManager<$desc, $resource, $handle> for Renderer {
+        impl<'a> resource::ResourceManager<$desc, $resource, $handle> for Renderer {
             type Error = MemoryError;
 
             fn get_resource(&self, handle: &$handle) -> Option<&$resource> {
@@ -831,21 +831,21 @@ macro_rules! impl_buffer_manager {
 }
 
 impl_buffer_manager!(
-    buffer::VertexBufferDescriptor<'static>,
+    buffer::VertexBufferDescriptor<'a>,
     buffer::DeviceVertexBuffer,
     BufferHandle<buffer::DeviceVertexBuffer>,
     CreateVertexBuffer,
     vertex_buffers
 );
 impl_buffer_manager!(
-    buffer::IndexBufferDescriptor<'static>,
+    buffer::IndexBufferDescriptor<'a>,
     buffer::DeviceIndexBuffer,
     BufferHandle<buffer::DeviceIndexBuffer>,
     CreateIndexBuffer,
     index_buffers
 );
 impl_buffer_manager!(
-    buffer::UniformBufferDescriptor<'static>,
+    buffer::UniformBufferDescriptor<'a>,
     buffer::DeviceUniformBuffer,
     BufferHandle<buffer::DeviceUniformBuffer>,
     CreateUniformBuffer,

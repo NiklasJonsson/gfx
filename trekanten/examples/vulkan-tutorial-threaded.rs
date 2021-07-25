@@ -1,24 +1,30 @@
 use glfw::{Action, Key};
 use nalgebra_glm as glm;
-use resurs::Handle;
+use resurs::{Async, Handle};
 
+use buffer::{
+    BufferHandle, BufferMutability, DeviceIndexBuffer, DeviceUniformBuffer, DeviceVertexBuffer,
+};
 use trekanten::buffer;
 use trekanten::descriptor::DescriptorSet;
-use trekanten::pipeline;
-use trekanten::pipeline::ShaderDescriptor;
-use trekanten::pipeline::ShaderStage;
+use trekanten::pipeline::{
+    GraphicsPipeline, GraphicsPipelineDescriptor, ShaderDescriptor, ShaderStage,
+};
 use trekanten::texture;
 use trekanten::util;
 use trekanten::vertex::{VertexDefinition, VertexFormat};
+use trekanten::{Loader, RenderPass, Renderer, Texture};
 
 use trekanten::loader::ResourceLoader as _;
 use trekanten::ResourceManager as _;
 
+use std::sync::mpsc;
+use std::sync::Arc;
 use std::time::Duration;
 
 const WINDOW_HEIGHT: u32 = 300;
 const WINDOW_WIDTH: u32 = 300;
-const WINDOW_TITLE: &str = "Vulkan Tutorial";
+const WINDOW_TITLE: &str = "Trekanten Vulkan Tutoria";
 
 type GlfwWindowEvents = std::sync::mpsc::Receiver<(f64, glfw::WindowEvent)>;
 
@@ -120,7 +126,11 @@ struct UniformBufferObject {
     proj: glm::Mat4,
 }
 
-impl buffer::Uniform for UniformBufferObject {}
+impl buffer::Uniform for UniformBufferObject {
+    fn size() -> u16 {
+        std::mem::size_of::<Self>() as u16
+    }
+}
 
 fn get_fname(dir: &str, target: &str) -> std::path::PathBuf {
     let url = reqwest::Url::parse(target).expect("Bad url");
@@ -240,67 +250,48 @@ fn get_next_mvp(start: &std::time::Instant, aspect_ratio: f32) -> UniformBufferO
     ubo
 }
 
-fn main() -> Result<(), trekanten::RenderError> {
-    env_logger::init();
+fn create_texture(
+    loader: Arc<Loader>,
+    texture_sender: mpsc::Sender<Handle<Async<trekanten::Texture>>>,
+) {
+    let _ = load_url("textures", TEX_URL);
+    let tex_path = get_fname("textures", TEX_URL);
+    let descriptor = texture::TextureDescriptor::file(
+        tex_path.into(),
+        util::Format::RGBA_SRGB,
+        texture::MipMaps::None,
+    );
+    let texture = loader.load(descriptor).expect("Failed to load texture");
+    texture_sender.send(texture).expect("Failed to send");
+}
 
-    let mut window = GlfwWindow::new();
-    let mut renderer = trekanten::Renderer::new(&window, window.extents())?;
-    let loader = renderer.loader();
+type PendingMesh = (
+    BufferHandle<Async<DeviceVertexBuffer>>,
+    BufferHandle<Async<DeviceIndexBuffer>>,
+);
 
-    let (mesh_sender, mesh_receiver) = std::sync::mpsc::channel();
-    let loader_clone = loader.clone();
-    std::thread::spawn(move || {
-        let (vertices, indices) = load_viking_house();
+fn create_mesh(loader: Arc<Loader>, mesh_sender: mpsc::Sender<PendingMesh>) {
+    let (vertices, indices) = load_viking_house();
 
-        let vertex_buffer_descriptor = buffer::OwningVertexBufferDescriptor2::from_vec(
-            vertices,
-            buffer::BufferMutability::Immutable,
-        );
+    let vertex_buffer_descriptor =
+        buffer::VertexBufferDescriptor::from_vec(vertices, BufferMutability::Immutable);
 
-        let vertex_buffer = loader_clone.load(vertex_buffer_descriptor);
+    let vertex_buffer = loader
+        .load(vertex_buffer_descriptor)
+        .expect("Failed to load vertex buffer");
 
-        let index_buffer_descriptor = buffer::OwningIndexBufferDescriptor2::from_vec(
-            indices,
-            buffer::BufferMutability::Immutable,
-        );
-        let index_buffer = loader_clone.load(index_buffer_descriptor);
+    let index_buffer_descriptor =
+        buffer::IndexBufferDescriptor::from_vec(indices, BufferMutability::Immutable);
+    let index_buffer = loader
+        .load(index_buffer_descriptor)
+        .expect("Failed to load index buffer");
 
-        mesh_sender
-            .send((vertex_buffer, index_buffer))
-            .expect("Failed to send");
-    });
+    mesh_sender
+        .send((vertex_buffer, index_buffer))
+        .expect("Failed to send");
+}
 
-    let (texture_sender, texture_receiver) = std::sync::mpsc::channel();
-    let loader_clone = loader.clone();
-    std::thread::spawn(move || {
-        let _ = load_url("textures", TEX_URL);
-        let tex_path = get_fname("textures", TEX_URL);
-        let descriptor = texture::TextureDescriptor::file(
-            tex_path.into(),
-            util::Format::RGBA_SRGB,
-            texture::MipMaps::Generate,
-        );
-        let texture = loader_clone.load(descriptor);
-        texture_sender.send(texture).expect("Failed to send");
-    });
-
-    let mut mesh: Option<mesh::Mesh> = None;
-    let mut desc_set_handle: Option<Handle<DescriptorSet>> = None;
-    let mut texture_handle: Option<Handle<texture::Texture>> = None;
-
-    let vert = ShaderDescriptor::FromRawSpirv(RAW_VERT_SPV.to_vec());
-    let frag = ShaderDescriptor::FromRawSpirv(RAW_FRAG_SPV.to_vec());
-    let pipeline_descriptor = pipeline::GraphicsPipelineDescriptor::builder()
-        .vert(vert)
-        .frag(frag)
-        .vertex_format(Vertex::format())
-        .build()
-        .expect("Failed to build graphics pipeline descriptor");
-
-    let gfx_pipeline_handle = renderer
-        .create_resource_blocking(pipeline_descriptor)
-        .expect("Failed to create graphics pipeline");
-
+fn create_mvp_ubuf(renderer: &mut Renderer) -> BufferHandle<DeviceUniformBuffer> {
     let data = vec![UniformBufferObject {
         model: glm::Mat4::default(),
         view: glm::Mat4::default(),
@@ -308,11 +299,66 @@ fn main() -> Result<(), trekanten::RenderError> {
     }];
 
     let uniform_buffer_desc =
-        buffer::OwningUniformBufferDescriptor2::from_vec(data, buffer::BufferMutability::Mutable);
+        buffer::UniformBufferDescriptor::from_slice(&data, buffer::BufferMutability::Mutable);
 
-    let uniform_buffer_handle = renderer
+    renderer
         .create_resource_blocking(uniform_buffer_desc)
-        .expect("Failed to create uniform buffer");
+        .expect("Failed to create uniform buffer")
+}
+
+fn create_pipeline(
+    renderer: &mut Renderer,
+    render_pass: &Handle<RenderPass>,
+) -> Handle<GraphicsPipeline> {
+    let vert = ShaderDescriptor::FromRawSpirv(RAW_VERT_SPV.to_vec());
+    let frag = ShaderDescriptor::FromRawSpirv(RAW_FRAG_SPV.to_vec());
+    let pipeline_descriptor = GraphicsPipelineDescriptor::builder()
+        .vert(vert)
+        .frag(frag)
+        .vertex_format(Vertex::format())
+        .build()
+        .expect("Failed to build graphics pipeline descriptor");
+
+    let gfx_pipeline_handle = renderer
+        .create_gfx_pipeline(pipeline_descriptor, &render_pass)
+        .expect("Failed to create graphics pipeline");
+    gfx_pipeline_handle
+}
+
+fn main() -> Result<(), trekanten::RenderError> {
+    env_logger::init();
+
+    let mut window = GlfwWindow::new();
+    let mut renderer = trekanten::Renderer::new(&window, window.extents())?;
+    let loader = Arc::new(renderer.loader().expect("Loader should be available"));
+    let render_pass = renderer
+        .presentation_render_pass(4)
+        .expect("Failed to create render pass");
+
+    let (mesh_sender, mesh_receiver) = std::sync::mpsc::channel();
+    let loader_clone = loader.clone();
+    std::thread::spawn(move || create_mesh(loader_clone, mesh_sender));
+
+    let (texture_sender, texture_receiver) = std::sync::mpsc::channel();
+    let loader_clone = loader.clone();
+    std::thread::spawn(move || create_texture(loader_clone, texture_sender));
+
+    let gfx_pipeline_handle = create_pipeline(&mut renderer, &render_pass);
+    let ubuf = create_mvp_ubuf(&mut renderer);
+
+    // The call to load happens async so in the main-loop, we query the channel each frame if we are done.
+    // After that, we still might need to wait for the gpu resource upload. When that is done, we will get
+    // the final handle back with the transfer() call, ready to to be used when rendering.
+    let mut pending_mesh: Option<PendingMesh> = None;
+    let mut pending_tex: Option<Handle<Async<Texture>>> = None;
+
+    // The final handles used for rendering
+    let mut vbuf: Option<BufferHandle<DeviceVertexBuffer>> = None;
+    let mut ibuf: Option<BufferHandle<DeviceIndexBuffer>> = None;
+    let mut tex: Option<Handle<Texture>> = None;
+
+    // Can only created once the texture is done.
+    let mut desc_set: Option<Handle<DescriptorSet>> = None;
 
     let start = std::time::Instant::now();
     let mut last = start;
@@ -327,22 +373,57 @@ fn main() -> Result<(), trekanten::RenderError> {
             handle_window_event(&mut window.window, event);
         }
 
-        mesh = mesh.or(mesh_receiver.try_recv().ok());
-        texture_handle = texture_handle.or(texture_receiver.try_recv().ok());
+        // Query the manually spawned threads
+        pending_mesh = pending_mesh.or(mesh_receiver.try_recv().ok());
+        pending_tex = pending_tex.or(texture_receiver.try_recv().ok());
 
-        if let Some(texture_handle) = texture_handle {
-            let is_pending = renderer
-                .get_resource(&texture_handle)
-                .expect("This should have been inserted...")
-                .is_pending();
-            if !is_pending && desc_set_handle.is_none() {
-                desc_set_handle = Some(
-                    DescriptorSet::builder(&mut renderer)
-                        .add_buffer(&uniform_buffer_handle, 0, ShaderStage::VERTEX)
-                        .add_texture(&texture_handle, 1, ShaderStage::FRAGMENT)
-                        .build(),
-                );
+        // It is fairly unlikely but it could happen that the gpu upload happens before the spawned threads have returned their data.
+        // If that happens we wouldn't have the pending handles to compare with when transfering. In our case, it doesn't matter since
+        // we only have one handle of each type, but in the general case, we need to have the async handles to map the incoming ones to.
+        // We still want to wait for them though, because we need to have exclusive ownership
+        if let (Some(pending_mesh), Some(pending_tex)) = (pending_mesh, pending_tex) {
+            let mut guard = loader.transfer(&mut renderer);
+            for mapping in guard.iter() {
+                use trekanten::loader::HandleMapping;
+
+                match mapping {
+                    HandleMapping::IndexBuffer { old, new } => {
+                        assert_eq!(old.handle(), pending_mesh.1.handle());
+                        assert!(ibuf.is_none(), "Double return?");
+                        ibuf = Some(new);
+                    }
+                    HandleMapping::VertexBuffer { old, new } => {
+                        assert_eq!(old.handle(), pending_mesh.0.handle());
+                        assert!(vbuf.is_none(), "Double return?");
+                        vbuf = Some(new);
+                    }
+                    HandleMapping::Texture { old, new } => {
+                        assert_eq!(old, pending_tex);
+                        assert!(tex.is_none());
+                        tex = Some(new);
+                    }
+                    _ => unreachable!("Haven't tried to load any other types"),
+                }
             }
+        }
+
+        // Create the descriptor set if we've received the texture
+        if let (Some(tex), None) = (tex, desc_set) {
+            // We can't generate mipmaps as part of the loading via loader so we do it here.
+            renderer
+                .generate_mipmaps(&[tex])
+                .expect("Failed to generate mipmaps");
+            desc_set = Some(
+                DescriptorSet::builder(&mut renderer)
+                    .add_buffer(&ubuf, 0, ShaderStage::VERTEX)
+                    .add_texture(&tex, 1, ShaderStage::FRAGMENT, false)
+                    .build(),
+            );
+        }
+
+        if vbuf.is_none() && ibuf.is_none() && desc_set.is_none() {
+            // Nothing to render
+            continue;
         }
 
         let aspect_ratio = renderer.aspect_ratio();
@@ -358,25 +439,26 @@ fn main() -> Result<(), trekanten::RenderError> {
 
         let next_mvp = get_next_mvp(&start, aspect_ratio);
         frame
-            .update_uniform_blocking(&uniform_buffer_handle, &next_mvp)
+            .update_uniform_blocking(&ubuf, &next_mvp)
             .expect("Failed to update uniform buffer!");
 
-        // Check if loading is done and gpu load has been submitted
-        if let (Some(mesh), Some(desc_set)) = (&mesh, &desc_set_handle) {
+        // All loading needs to be done before drawing
+        if let (Some(vbuf), Some(ibuf), Some(desc_set)) = (&vbuf, &ibuf, desc_set) {
+            let cmd_buf = frame
+                .new_command_buffer()
+                .expect("Failed to create render command buffer");
             // Pass the handles to the render pass and the renderer will ignore them if they haven't loaded yet
             let mut builder = frame
-                .begin_render_pass()
+                .begin_presentation_pass(cmd_buf, &render_pass)
                 .expect("Failed to begin render pass");
 
             builder
                 .bind_graphics_pipeline(&gfx_pipeline_handle)
                 .bind_shader_resource_group(0, &desc_set, &gfx_pipeline_handle)
-                .draw_mesh(mesh);
+                .draw_mesh(vbuf, ibuf);
 
-            let cmd_buf = builder
-                .build()
-                .expect("Failed to build render command buffer");
-            frame.add_raw_command_buffer(cmd_buf);
+            let cmd_buf = builder.end().expect("Failed to end render command buffer");
+            frame.add_command_buffer(cmd_buf);
         }
 
         let frame = frame.finish();

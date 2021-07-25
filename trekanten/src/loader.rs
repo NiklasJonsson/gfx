@@ -265,6 +265,8 @@ impl AsyncResources {
     }
 }
 
+// TODO: Into iter?
+
 pub struct TransferGuard<'mutex, 'renderer> {
     guard: MutexGuard<'mutex, NonSync>,
     resources: &'renderer mut Resources,
@@ -305,7 +307,7 @@ impl Loader {
         }
     }
 
-    pub fn poll(&mut self) {
+    pub fn poll(&self) {
         // Query finished
         // TODO: Use drain_filter here when not nightly
         let mut guard = self.locked.lock().expect("Failed to unlock");
@@ -375,7 +377,7 @@ impl Loader {
     }
 
     pub fn transfer<'mutex, 'loader: 'mutex, 'renderer>(
-        &'loader mut self,
+        &'loader self,
         renderer: &'renderer mut Renderer,
     ) -> TransferGuard<'mutex, 'renderer> {
         self.poll();
