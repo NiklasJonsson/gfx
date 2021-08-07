@@ -49,8 +49,8 @@ pub type VertexBufferDescriptor<'a> = BufferDescriptor<'a, VertexBufferType>;
 pub type IndexBufferDescriptor<'a> = BufferDescriptor<'a, IndexBufferType>;
 
 macro_rules! impl_descriptor_from {
-    ($name_static:ty, $name_any_lifetime:ty, $trait:ident, $buffer_type:ident) => {
-        impl $name_static {
+    ($name:ident, $trait:ident, $buffer_type:ident) => {
+        impl $name<'static> {
             pub fn from_vec<T: Copy + $trait + 'static>(
                 data: Vec<T>,
                 mutability: BufferMutability,
@@ -70,7 +70,6 @@ macro_rules! impl_descriptor_from {
                 t: T,
                 mutability: BufferMutability,
             ) -> Self {
-                // TODO(perf): Can we avoid the allocation here?
                 Self::from_vec(vec![t], mutability)
             }
 
@@ -91,7 +90,7 @@ macro_rules! impl_descriptor_from {
             }
         }
 
-        impl<'a> $name_any_lifetime {
+        impl<'a> $name<'a> {
             pub fn from_slice<T: Copy + $trait + 'static>(
                 data: &'a [T],
                 mutability: BufferMutability,
@@ -110,24 +109,9 @@ macro_rules! impl_descriptor_from {
     };
 }
 
-impl_descriptor_from!(
-    UniformBufferDescriptor<'static>,
-    UniformBufferDescriptor<'a>,
-    Uniform,
-    UniformBufferType
-);
-impl_descriptor_from!(
-    VertexBufferDescriptor<'static>,
-    VertexBufferDescriptor<'a>,
-    VertexDefinition,
-    VertexBufferType
-);
-impl_descriptor_from!(
-    IndexBufferDescriptor<'static>,
-    IndexBufferDescriptor<'a>,
-    IndexInt,
-    IndexBufferType
-);
+impl_descriptor_from!(UniformBufferDescriptor, Uniform, UniformBufferType);
+impl_descriptor_from!(VertexBufferDescriptor, VertexDefinition, VertexBufferType);
+impl_descriptor_from!(IndexBufferDescriptor, IndexInt, IndexBufferType);
 
 impl<'a, BT> BufferDescriptor<'a, BT> {
     pub fn mutability(&self) -> BufferMutability {
@@ -147,7 +131,7 @@ impl<'a, BT> BufferDescriptor<'a, BT> {
     }
 }
 
-impl<'a, BT: BufferType + Clone> BufferDescriptor<'a, BT> {
+impl<'a, BT: BufferType> BufferDescriptor<'a, BT> {
     pub fn vk_usage_flags(&self) -> raw_vk::BufferUsageFlags {
         BT::USAGE
     }
@@ -161,7 +145,9 @@ impl<'a, BT: BufferType + Clone> BufferDescriptor<'a, BT> {
             .elem_align(allocator)
             .unwrap_or(self.elem_size())
     }
+}
 
+impl<'a, BT: BufferType + Clone> BufferDescriptor<'a, BT> {
     pub fn enqueue_single(
         &self,
         allocator: &AllocatorHandle,

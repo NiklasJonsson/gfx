@@ -6,7 +6,7 @@ use crate::math::{
 use trekanten::CommandBuffer;
 
 use crate::graph::{sys::add_edge, sys::breadth_first, Children, Parent};
-use crate::render::mesh::CpuMesh;
+use crate::render::mesh::Mesh;
 use crate::render::uniform::{LightingData, PackedLight, ShadowMatrices, ViewData, MAX_NUM_LIGHTS};
 
 #[derive(Default, Component)]
@@ -63,7 +63,7 @@ impl<'a> System<'a> for RenderLightVolumes {
         Entities<'a>,
         ReadStorage<'a, RenderLightVolume>,
         WriteStorage<'a, LightVolumeRenderer>,
-        WriteStorage<'a, CpuMesh>,
+        WriteStorage<'a, Mesh>,
         WriteStorage<'a, super::material::Unlit>,
     );
 
@@ -89,18 +89,19 @@ impl<'a> System<'a> for RenderLightVolumes {
                 continue;
             }
 
-            let (vertex_buffer, index_buffer, color, tfm) = match light {
-                Light::Point { range, color } => {
-                    let mesh = super::geometry::sphere_mesh(*range);
-                    (mesh.0, mesh.1, color, Transform::identity())
-                }
+            let (mesh, color, tfm) = match light {
+                Light::Point { range, color } => (
+                    super::geometry::sphere_mesh(*range),
+                    color,
+                    Transform::identity(),
+                ),
                 Light::Spot {
                     color,
                     angle,
                     range,
                 } => {
                     let radius = angle.tan() * range;
-                    let (v, i) = super::geometry::cone_mesh(radius, *range);
+                    let mesh = super::geometry::cone_mesh(radius, *range);
                     // Cone mesh has base at origin, apex at (0, range, 0). We want to have apex at origin (translation) and then
                     // rotated to Light::DEFAULT_FACING
                     let translation = Transform::pos(0.0, -*range, 0.0);
@@ -112,15 +113,9 @@ impl<'a> System<'a> for RenderLightVolumes {
                         ..Default::default()
                     };
                     let tfm = rotation * translation;
-                    (v, i, color, tfm)
+                    (mesh, color, tfm)
                 }
                 _ => continue,
-            };
-
-            let mesh = CpuMesh {
-                vertex_buffer,
-                index_buffer,
-                polygon_mode: trekanten::pipeline::PolygonMode::Line,
             };
 
             let material = super::material::Unlit {

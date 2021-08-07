@@ -3,7 +3,7 @@ use crate::ecs::prelude::*;
 use crate::graph::sys as graph;
 use crate::math::{BoundingBox, Rgba, Transform, Vec3};
 
-use super::mesh::CpuMesh;
+use super::mesh::Mesh;
 
 #[derive(Default, Component)]
 #[component(storage = "NullStorage")]
@@ -24,7 +24,7 @@ impl<'a> System<'a> for CreateRenderedBoundingBoxes {
         WriteStorage<'a, Transform>,
         WriteStorage<'a, Name>,
         WriteStorage<'a, BoundingBoxRenderer>,
-        WriteStorage<'a, CpuMesh>,
+        WriteStorage<'a, Mesh>,
         WriteStorage<'a, super::material::Unlit>,
     );
 
@@ -52,12 +52,7 @@ impl<'a> System<'a> for CreateRenderedBoundingBoxes {
                 continue;
             }
             let dims = bbox.max - bbox.min;
-            let (vertex_buffer, index_buffer) = super::geometry::box_mesh(dims.x, dims.y, dims.z);
-            let mesh = CpuMesh {
-                vertex_buffer,
-                index_buffer,
-                polygon_mode: trekanten::pipeline::PolygonMode::Line,
-            };
+            let mesh = super::geometry::box_mesh(dims.x, dims.y, dims.z);
 
             let material = super::material::Unlit {
                 color: Rgba::new(1.0, 0.0, 0.0, 1.0),

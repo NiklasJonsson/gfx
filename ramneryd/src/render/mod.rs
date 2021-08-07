@@ -33,14 +33,22 @@ pub mod uniform;
 pub use geometry::Shape;
 pub use light::Light;
 
-use mesh::GpuMesh;
-use mesh::PendingMesh;
+use mesh::Mesh;
 
 use crate::camera::*;
 use crate::ecs;
 use crate::math::{Mat4, ModelMatrix, Transform, Vec3};
 use material::{GpuMaterial, PendingMaterial};
 use ramneryd_derive::Inspect;
+
+/// Utility for working with asynchronously uploaded gpu resources
+#[derive(Inspect)]
+pub enum GpuResource<InFlightT, AvailT> {
+    None,
+    InFlight(InFlightT),
+    Available(AvailT),
+}
+type GpuBuffer<BT> = GpuResource<BufferHandle<Async<BT>>, BufferHandle<BT>>;
 
 pub fn camera_pos(world: &World) -> Vec3 {
     let camera_entity = ecs::get_singleton_entity::<Camera>(world);
@@ -189,7 +197,7 @@ fn create_material_descriptor_set(
 
             desc_set_builder.build()
         }
-        material::GpuMaterial::Unlit { color_uniform } => DescriptorSet::builder(renderer)
+        material::GpuMaterial::Unlit { color_uniform, .. } => DescriptorSet::builder(renderer)
             .add_buffer(
                 &color_uniform,
                 0,
@@ -235,15 +243,10 @@ fn unlit_pipeline_desc(
 fn get_pipeline_for(
     renderer: &mut Renderer,
     world: &World,
-    mesh: &GpuMesh,
+    mesh: &Mesh,
     mat: &material::GpuMaterial,
 ) -> Result<Handle<GraphicsPipeline>, MaterialError> {
-    // TODO: Infer from spirv?
-    let vertex_format = renderer
-        .get_resource(&mesh.vertex_buffer)
-        .expect("Invalid handle")
-        .format()
-        .clone();
+    let vertex_format = mesh.cpu_vertex_buffer.format().clone();
 
     let frame_data = world.read_resource::<FrameData>();
     let shader_compiler = world.read_resource::<pipeline::ShaderCompiler>();
@@ -273,13 +276,13 @@ fn get_pipeline_for(
                 .vert(ShaderDescriptor::FromRawSpirv(vert.data()))
                 .frag(ShaderDescriptor::FromRawSpirv(frag.data()))
                 .vertex_format(vertex_format)
-                .polygon_mode(mesh.polygon_mode)
+                .polygon_mode(trekanten::pipeline::PolygonMode::Fill)
                 .build()?;
 
             renderer.create_gfx_pipeline(desc, &frame_data.main_render_pass)?
         }
-        material::GpuMaterial::Unlit { .. } => {
-            let desc = unlit_pipeline_desc(&shader_compiler, vertex_format, mesh.polygon_mode)?;
+        material::GpuMaterial::Unlit { polygon_mode, .. } => {
+            let desc = unlit_pipeline_desc(&shader_compiler, vertex_format, *polygon_mode)?;
             renderer.create_gfx_pipeline(desc, &frame_data.main_render_pass)?
         }
     };
@@ -308,17 +311,12 @@ fn shadow_pipeline_desc(
 fn get_shadow_pipeline_for(
     renderer: &mut Renderer,
     world: &World,
-    mesh: &GpuMesh,
+    mesh: &Mesh,
 ) -> Result<Handle<GraphicsPipeline>, MaterialError> {
     let shader_compiler = world.read_resource::<pipeline::ShaderCompiler>();
     let frame_data = world.read_resource::<FrameData>();
 
-    let vertex_format_size = renderer
-        .get_resource(&mesh.vertex_buffer)
-        .expect("Invalid handle")
-        .format()
-        .size();
-
+    let vertex_format_size = mesh.cpu_vertex_buffer.format().size();
     let shadow_vertex_format = trekanten::vertex::VertexFormat::builder()
         .add_attribute(trekanten::util::Format::FLOAT3) // pos
         .skip(vertex_format_size - trekanten::util::Format::FLOAT3.size())
@@ -330,7 +328,7 @@ fn get_shadow_pipeline_for(
 fn create_renderable(
     renderer: &mut Renderer,
     world: &World,
-    mesh: &GpuMesh,
+    mesh: &Mesh,
     material: &GpuMaterial,
 ) -> RenderableMaterial {
     log::trace!("Creating renderable: {:?}", material);
@@ -355,7 +353,7 @@ fn create_renderable(
 fn create_renderables(renderer: &mut Renderer, world: &mut World) {
     use specs::storage::StorageEntry;
 
-    let meshes = world.read_storage::<GpuMesh>();
+    let meshes = world.read_storage::<Mesh>();
     let materials = world.read_storage::<GpuMaterial>();
     let mut should_reload = world.write_storage::<ReloadMaterial>();
     let mut renderables = world.write_storage::<RenderableMaterial>();
@@ -396,7 +394,7 @@ enum DrawMode {
 #[profiling::function]
 fn draw_entities<'a>(world: &World, cmd_buf: &mut RenderPassEncoder<'a>, mode: DrawMode) {
     let model_matrices = world.read_storage::<ModelMatrix>();
-    let meshes = world.read_storage::<GpuMesh>();
+    let meshes = world.read_storage::<Mesh>();
     let renderables = world.read_storage::<RenderableMaterial>();
     use trekanten::pipeline::ShaderStage;
 
@@ -411,6 +409,15 @@ fn draw_entities<'a>(world: &World, cmd_buf: &mut RenderPassEncoder<'a>, mode: D
     };
 
     for (mesh, renderable, mtx) in (&meshes, &renderables, &model_matrices).join() {
+        let (vertex_buffer, index_buffer) = match (&mesh.gpu_vertex_buffer, &mesh.gpu_index_buffer)
+        {
+            (GpuResource::Available(vbuf), GpuResource::Available(ibuf)) => (vbuf, ibuf),
+            _ => continue,
+        };
+        if !mesh.is_available_gpu() {
+            continue;
+        }
+
         let tfm = uniform::Model {
             model: mtx.0.into_col_array(),
             model_it: mtx.0.inverted().transposed().into_col_array(),
@@ -426,7 +433,7 @@ fn draw_entities<'a>(world: &World, cmd_buf: &mut RenderPassEncoder<'a>, mode: D
                 bind_pipeline(cmd_buf, shadow_pipeline);
                 cmd_buf
                     .bind_push_constant(shadow_pipeline, ShaderStage::VERTEX, &tfm)
-                    .draw_mesh(&mesh.vertex_buffer, &mesh.index_buffer);
+                    .draw_mesh(vertex_buffer, index_buffer);
             }
             (
                 RenderableMaterial::PBR {
@@ -447,7 +454,7 @@ fn draw_entities<'a>(world: &World, cmd_buf: &mut RenderPassEncoder<'a>, mode: D
                 cmd_buf
                     .bind_shader_resource_group(1, material_descriptor_set, gfx_pipeline)
                     .bind_push_constant(gfx_pipeline, ShaderStage::VERTEX, &tfm)
-                    .draw_mesh(&mesh.vertex_buffer, &mesh.index_buffer);
+                    .draw_mesh(vertex_buffer, index_buffer);
             }
             _ => (),
         }
@@ -894,9 +901,8 @@ impl GpuUpload {
         use trekanten::loader::HandleMapping;
         let loader = world.write_resource::<trekanten::Loader>();
         let mut pending_materials = world.write_storage::<PendingMaterial>();
-        let mut pending_meshes = world.write_storage::<PendingMesh>();
         let mut materials = world.write_storage::<GpuMaterial>();
-        let mut meshes = world.write_storage::<GpuMesh>();
+        let mut meshes = world.write_storage::<Mesh>();
         let mut transfer_guard = loader.transfer(renderer);
         let mut generate_mipmaps = Vec::new();
         for mapping in transfer_guard.iter() {
@@ -906,7 +912,7 @@ impl GpuUpload {
                     for (ent, _) in (&world.entities(), &pending_materials.mask().clone()).join() {
                         if let Some(pending) = pending_materials.get_mut(ent) {
                             let handle = match pending {
-                                PendingMaterial::Unlit { color_uniform } => color_uniform,
+                                PendingMaterial::Unlit { color_uniform, .. } => color_uniform,
                                 PendingMaterial::PBR {
                                     material_uniforms, ..
                                 } => material_uniforms,
@@ -921,33 +927,27 @@ impl GpuUpload {
                                 .remove(ent)
                                 .expect("This is alive")
                                 .finish();
+
                             materials.insert(ent, material).expect("This is alive");
                         }
                     }
                 }
                 HandleMapping::VertexBuffer { old, new } => {
-                    for (ent, _) in (&world.entities(), &pending_meshes.mask().clone()).join() {
-                        if let Some(pending) = pending_meshes.get_mut(ent) {
-                            map_pending_buffer_handle(&mut pending.vertex_buffer, old, new);
-
-                            // TODO: is_done + remove().finish() here
-                            if let Some(mesh) = pending.try_finish() {
-                                meshes.insert(ent, mesh).expect("I'm alive!");
-                                pending_meshes.remove(ent).expect("I'm alive!");
-                            }
+                    for mesh in (&mut meshes).join() {
+                        if !mesh.is_pending_gpu() {
+                            continue;
                         }
+
+                        mesh.try_consume_vertex_buffer(old, new);
                     }
                 }
                 HandleMapping::IndexBuffer { old, new } => {
-                    for (ent, _) in (&world.entities(), &pending_meshes.mask().clone()).join() {
-                        if let Some(pending) = pending_meshes.get_mut(ent) {
-                            map_pending_buffer_handle(&mut pending.index_buffer, old, new);
-
-                            if let Some(mesh) = pending.try_finish() {
-                                meshes.insert(ent, mesh).expect("I'm alive!");
-                                pending_meshes.remove(ent).expect("I'm alive!");
-                            }
+                    for mesh in (&mut meshes).join() {
+                        if !mesh.is_pending_gpu() {
+                            continue;
                         }
+
+                        mesh.try_consume_index_buffer(old, new);
                     }
                 }
                 HandleMapping::Texture { old, new } => {
@@ -1015,9 +1015,7 @@ impl<'a> System<'a> for GpuUpload {
         WriteStorage<'a, material::PhysicallyBased>,
         WriteStorage<'a, PendingMaterial>,
         WriteStorage<'a, GpuMaterial>,
-        WriteStorage<'a, mesh::CpuMesh>,
-        WriteStorage<'a, PendingMesh>,
-        WriteStorage<'a, mesh::GpuMesh>,
+        WriteStorage<'a, mesh::Mesh>,
         Entities<'a>,
     );
 
@@ -1030,9 +1028,7 @@ impl<'a> System<'a> for GpuUpload {
             physically_based_materials,
             mut pending_mats,
             gpu_materials,
-            cpu_meshes,
-            mut pending_meshes,
-            gpu_meshes,
+            mut meshes,
             entities,
         ) = data;
 
@@ -1054,7 +1050,7 @@ impl<'a> System<'a> for GpuUpload {
                         BufferMutability::Immutable,
                     ))
                     .expect("Failed to load uniform buffer");
-                for (i, (ent, _unlit, _)) in (&entities, &unlit_materials, !&gpu_materials)
+                for (i, (ent, unlit, _)) in (&entities, &unlit_materials, !&gpu_materials)
                     .join()
                     .enumerate()
                 {
@@ -1065,6 +1061,7 @@ impl<'a> System<'a> for GpuUpload {
                                 i as u32,
                                 1,
                             )),
+                            polygon_mode: unlit.polygon_mode,
                         });
                     }
                 }
@@ -1137,10 +1134,12 @@ impl<'a> System<'a> for GpuUpload {
             }
         }
 
-        for (ent, mesh, _) in (&entities, &cpu_meshes, !&gpu_meshes).join() {
-            if let StorageEntry::Vacant(entry) = pending_meshes.entry(ent).unwrap() {
-                entry.insert(PendingMesh::load(&loader, &mesh));
+        for mesh in (&mut meshes).join() {
+            if mesh.is_available_gpu() || mesh.is_pending_gpu() {
+                continue;
             }
+
+            mesh.load_gpu(&loader);
         }
     }
 }

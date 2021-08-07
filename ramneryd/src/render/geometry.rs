@@ -4,7 +4,7 @@ use trekanten::buffer::{HostIndexBuffer, HostVertexBuffer};
 use trekanten::util::Format;
 use trekanten::vertex::{VertexDefinition, VertexFormat};
 
-use super::mesh::CpuMesh;
+use super::mesh::Mesh;
 
 #[derive(Copy, Clone)]
 struct Vertex {
@@ -20,8 +20,6 @@ impl VertexDefinition for Vertex {
             .build()
     }
 }
-
-pub type Mesh = (HostVertexBuffer, HostIndexBuffer);
 
 /// Right-handed
 /// origin-centered box. x,y,z are the length of the sides.
@@ -142,7 +140,7 @@ pub fn box_mesh(x: f32, y: f32, z: f32) -> Mesh {
     let vertices = HostVertexBuffer::from_vec(vertices);
     let indices = HostIndexBuffer::from_vec(indices);
 
-    (vertices, indices)
+    Mesh::new(vertices, indices)
 }
 
 /// Right-handed coordinates
@@ -190,7 +188,7 @@ pub fn sphere_mesh(radius: f32) -> Mesh {
     let vertices = HostVertexBuffer::from_vec(vertices);
     let indices = HostIndexBuffer::from_vec(indices);
 
-    (vertices, indices)
+    Mesh::new(vertices, indices)
 }
 
 // Cone with circle at origin in z/x, height in +y
@@ -271,7 +269,7 @@ pub fn cone_mesh(radius: f32, height: f32) -> Mesh {
 
     let vertices = HostVertexBuffer::from_vec(vertices);
     let indices = HostIndexBuffer::from_vec(indices);
-    (vertices, indices)
+    Mesh::new(vertices, indices)
 }
 
 #[derive(Debug, Component, Clone, Copy)]
@@ -289,18 +287,14 @@ impl ShapeMeshCreation {
 }
 
 impl<'a> System<'a> for ShapeMeshCreation {
-    type SystemData = (
-        Entities<'a>,
-        ReadStorage<'a, Shape>,
-        WriteStorage<'a, CpuMesh>,
-    );
+    type SystemData = (Entities<'a>, ReadStorage<'a, Shape>, WriteStorage<'a, Mesh>);
     fn run(&mut self, (entities, shapes, mut meshes): Self::SystemData) {
         for (ent, shape) in (&entities, &shapes).join() {
             if meshes.contains(ent) {
                 continue;
             }
 
-            let (vertex_buffer, index_buffer) = match *shape {
+            let mesh = match *shape {
                 Shape::Box {
                     width,
                     height,
@@ -308,12 +302,6 @@ impl<'a> System<'a> for ShapeMeshCreation {
                 } => box_mesh(width, height, depth),
                 Shape::Sphere { radius } => sphere_mesh(radius),
                 Shape::Cone { radius, height } => cone_mesh(radius, height),
-            };
-
-            let mesh = CpuMesh {
-                vertex_buffer,
-                index_buffer,
-                polygon_mode: trekanten::pipeline::PolygonMode::Fill,
             };
 
             meshes.insert(ent, mesh).expect("This was already checked");

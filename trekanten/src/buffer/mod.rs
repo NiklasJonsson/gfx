@@ -416,7 +416,6 @@ macro_rules! impl_host_buffer_from {
             }
 
             pub fn from_single<T: Copy + $trait + 'static>(t: T) -> Self {
-                // TODO(perf): Can we avoid the allocation here?
                 Self::from_vec(vec![t])
             }
 
@@ -437,3 +436,9 @@ macro_rules! impl_host_buffer_from {
 impl_host_buffer_from!(HostUniformBuffer, Uniform, UniformBufferType);
 impl_host_buffer_from!(HostVertexBuffer, VertexDefinition, VertexBufferType);
 impl_host_buffer_from!(HostIndexBuffer, IndexInt, IndexBufferType);
+
+impl HostVertexBuffer {
+    pub fn format(&self) -> &VertexFormat {
+        &self.buffer_type.format
+    }
+}

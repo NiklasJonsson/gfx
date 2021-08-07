@@ -47,6 +47,7 @@ pub struct TextureUse<T> {
 pub enum GpuMaterial {
     Unlit {
         color_uniform: BufferHandle<DeviceUniformBuffer>,
+        polygon_mode: PolygonMode,
     },
     PBR {
         material_uniforms: BufferHandle<DeviceUniformBuffer>,
@@ -63,6 +64,7 @@ pub enum PendingMaterial {
     Unlit {
         color_uniform:
             Pending<BufferHandle<Async<DeviceUniformBuffer>>, BufferHandle<DeviceUniformBuffer>>,
+        polygon_mode: PolygonMode,
     },
     PBR {
         material_uniforms:
@@ -80,6 +82,7 @@ impl PendingMaterial {
         match self {
             PendingMaterial::Unlit {
                 color_uniform: Pending::Available(_),
+                ..
             } => true,
             PendingMaterial::PBR {
                 material_uniforms: Pending::Available(_),
@@ -110,7 +113,11 @@ impl PendingMaterial {
         match self {
             PendingMaterial::Unlit {
                 color_uniform: Pending::Available(color_uniform),
-            } => GpuMaterial::Unlit { color_uniform },
+                polygon_mode,
+            } => GpuMaterial::Unlit {
+                color_uniform,
+                polygon_mode,
+            },
             PendingMaterial::PBR {
                 material_uniforms: Pending::Available(material_uniforms),
                 normal_map,

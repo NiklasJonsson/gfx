@@ -3,7 +3,6 @@ use crate::ecs::prelude::*;
 use std::path::{Path, PathBuf};
 
 use trekanten::buffer::{HostIndexBuffer, HostVertexBuffer, VertexBufferType};
-use trekanten::pipeline::PolygonMode;
 use trekanten::texture::{MipMaps, TextureDescriptor};
 use trekanten::util;
 use trekanten::vertex::VertexFormat;
@@ -14,8 +13,7 @@ use crate::graph::sys as graph;
 use crate::math::*;
 use crate::render;
 use crate::render::material::{PhysicallyBased, TextureUse2};
-use crate::render::mesh::CpuMesh;
-use crate::render::uniform::PBRMaterialData;
+use crate::render::mesh::Mesh;
 
 fn load_texture(
     ctx: &RecGltfCtx,
@@ -178,11 +176,7 @@ fn load_primitive<'a>(ctx: &mut RecGltfCtx, primitive: &gltf::Primitive<'a>) -> 
     let index_buffer = to_index_buffer(triangle_index_data);
     let (vertex_buffer, has_vertex_colors) = interleave_vertex_buffer(ctx, primitive);
 
-    let mesh = CpuMesh {
-        vertex_buffer,
-        index_buffer,
-        polygon_mode: PolygonMode::Fill,
-    };
+    let mesh = Mesh::new(vertex_buffer, index_buffer);
 
     let mat = primitive.material();
     let pbr_mr = mat.pbr_metallic_roughness();
@@ -399,7 +393,7 @@ pub struct LoadGltfAsset {
 #[derive(Component)]
 #[component(inspect)]
 pub struct PendingGltfModel {
-    mesh: CpuMesh,
+    mesh: Mesh,
     material: PhysicallyBased,
 }
 
@@ -417,7 +411,7 @@ struct LoaderData<'a> {
     parent_storage: WriteStorage<'a, graph::Parent>,
     children_storage: WriteStorage<'a, graph::Children>,
     names: WriteStorage<'a, Name>,
-    meshes: WriteStorage<'a, render::mesh::CpuMesh>,
+    meshes: WriteStorage<'a, render::mesh::Mesh>,
     pb_materials: WriteStorage<'a, render::material::PhysicallyBased>,
     bboxes: WriteStorage<'a, BoundingBox>,
     cameras: WriteStorage<'a, Camera>,
@@ -429,7 +423,7 @@ struct CtxData<'a, 'b> {
     parent_storage: &'b mut WriteStorage<'a, graph::Parent>,
     children_storage: &'b mut WriteStorage<'a, graph::Children>,
     names: &'b mut WriteStorage<'a, Name>,
-    meshes: &'b mut WriteStorage<'a, CpuMesh>,
+    meshes: &'b mut WriteStorage<'a, Mesh>,
     pb_materials: &'b mut WriteStorage<'a, render::material::PhysicallyBased>,
     #[allow(dead_code)]
     cameras: &'b mut WriteStorage<'a, Camera>,
@@ -440,7 +434,6 @@ struct RecGltfCtx<'a, 'b> {
     pub data: CtxData<'a, 'b>,
     pub buffers: Vec<gltf::buffer::Data>,
     pub path: PathBuf,
-    pub material_buffer: Vec<PBRMaterialData>,
 }
 
 impl<'a> System<'a> for GltfLoader {
@@ -488,7 +481,6 @@ impl<'a> System<'a> for GltfLoader {
                 buffers,
                 path: asset.path.clone(),
                 data: ctx_data,
-                material_buffer: Vec::new(),
             };
 
             // A scene may have several root nodes
