@@ -59,6 +59,7 @@ pub enum AsyncResourceCommand {
     },
 }
 
+#[allow(clippy::enum_variant_names)]
 enum PendingResourceCommand {
     CreateVertexBuffer {
         descriptor: VertexBufferDescriptor<'static>,
@@ -223,12 +224,12 @@ impl AsyncResources {
         let vbufs = self
             .vertex_buffers
             .drain_available()
-            .map(|x| IntermediateIteratorItem::Vertex(x));
+            .map(IntermediateIteratorItem::Vertex);
 
         let ubufs = self
             .uniform_buffers
             .drain_available()
-            .map(|x| IntermediateIteratorItem::Uniform(x));
+            .map(IntermediateIteratorItem::Uniform);
 
         let ibufs = self
             .index_buffers
@@ -422,7 +423,7 @@ macro_rules! impl_loader {
 
                 let mut cmd_buffer = guard.command_pool.begin_single_submit()?;
 
-                // TODO: Allocation. Switch to small vec
+                // TODO(perf): Allocation. Switch to small vec
                 let mut commands = Vec::new();
                 if let Some(cmd) = self.process_command(cmd, Some(&mut cmd_buffer)) {
                     commands.push(cmd);

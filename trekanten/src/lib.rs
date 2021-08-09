@@ -28,7 +28,7 @@ pub use texture::Texture;
 
 use ash::version::DeviceV1_0;
 use backend::device::HasVkDevice as _;
-use backend::{color_buffer, command, depth_buffer, device, instance, surface, swapchain, sync};
+use backend::{command, device, framebuffer, instance, surface, swapchain, sync};
 use common::MAX_FRAMES_IN_FLIGHT;
 
 use crate::backend::vk::{buffer::Buffer, image::Image, MemoryError};
@@ -336,8 +336,8 @@ pub enum FinishedResourceCommand {
 struct PresentationRenderTarget {
     render_pass: Handle<RenderPass>,
     swapchain_render_targets: Vec<Handle<render_target::RenderTarget>>,
-    _depth_buffer: depth_buffer::DepthBuffer,
-    _color_buffer: color_buffer::ColorBuffer,
+    _depth_buffer: backend::image::ImageAttachment,
+    _color_buffer: backend::image::ImageAttachment,
 }
 
 pub struct Renderer {
@@ -386,8 +386,7 @@ fn create_swapchain_and_co(
     requested_extent: &util::Extent2D,
     old: Option<&swapchain::Swapchain>,
 ) -> Result<SwapchainAndCo, RenderError> {
-    let swapchain =
-        swapchain::Swapchain::new(&instance, &device, &surface, &requested_extent, old)?;
+    let swapchain = swapchain::Swapchain::new(instance, device, surface, requested_extent, old)?;
 
     let image_to_frame_idx: Vec<Option<u32>> = (0..swapchain.num_images()).map(|_| None).collect();
     Ok(SwapchainAndCo {
@@ -506,32 +505,83 @@ impl Renderer {
             .get(&render_pass_h)
             .expect("No presentation pass handle");
         let msaa_sample_count = render_pass.0.msaa_sample_count();
-        let _depth_buffer = depth_buffer::DepthBuffer::new(
-            &self.device,
-            &self.swapchain.info().extent,
-            msaa_sample_count,
-        )?;
-        let _color_buffer = color_buffer::ColorBuffer::new(
-            &self.device,
-            format,
-            &self.swapchain.info().extent,
-            msaa_sample_count,
-        )?;
-        let swapchain_render_targets = self
-            .swapchain
-            .create_framebuffers_for(&render_pass.0, &_depth_buffer, &_color_buffer)?
-            .into_iter()
-            .map(|fb| {
-                self.resources
-                    .render_targets
-                    .add(RenderTarget { inner: fb })
-            })
-            .collect();
+        let extent = self.swapchain_extent();
+        let mip_levels = 1; // No mip maps
+        let props = vk_mem::MemoryUsage::GpuOnly;
+
+        let depth_buffer = {
+            let format = self.device.depth_buffer_format().into();
+            let usage = vk::ImageUsageFlags::DEPTH_STENCIL_ATTACHMENT;
+            let image = Image::empty_2d(
+                &self.device.allocator(),
+                extent,
+                format,
+                usage,
+                props,
+                mip_levels,
+                msaa_sample_count,
+            )
+            .map_err(RenderError::RenderTargetImage)?;
+            let image_view = backend::image::ImageView::new(
+                &self.device,
+                image.vk_image(),
+                format,
+                vk::ImageAspectFlags::DEPTH,
+                mip_levels,
+            )
+            .map_err(RenderError::RenderTargetImageView)?;
+            backend::image::ImageAttachment { image, image_view }
+        };
+        let color_buffer = {
+            let usage =
+                vk::ImageUsageFlags::TRANSIENT_ATTACHMENT | vk::ImageUsageFlags::COLOR_ATTACHMENT;
+            let mip_levels = 1; // No mip maps
+            let image = Image::empty_2d(
+                &self.device.allocator(),
+                extent,
+                format,
+                usage,
+                props,
+                mip_levels,
+                msaa_sample_count,
+            )
+            .map_err(RenderError::RenderTargetImage)?;
+
+            let image_view = crate::backend::image::ImageView::new(
+                &self.device,
+                image.vk_image(),
+                format,
+                vk::ImageAspectFlags::COLOR,
+                mip_levels,
+            )
+            .map_err(RenderError::RenderTargetImageView)?;
+            backend::image::ImageAttachment { image, image_view }
+        };
+
+        let mut swapchain_render_targets = Vec::with_capacity(self.swapchain.num_images());
+        for image_view in self.swapchain.image_views() {
+            let views = [
+                &color_buffer.image_view,
+                &depth_buffer.image_view,
+                image_view,
+            ];
+            let fb = framebuffer::Framebuffer::new(
+                &self.device,
+                &views,
+                &render_pass.0,
+                &self.swapchain_extent(),
+            )?;
+            let handle = self
+                .resources
+                .render_targets
+                .add(RenderTarget { inner: fb });
+            swapchain_render_targets.push(handle);
+        }
 
         Ok(PresentationRenderTarget {
             render_pass: render_pass_h,
-            _color_buffer,
-            _depth_buffer,
+            _color_buffer: color_buffer,
+            _depth_buffer: depth_buffer,
             swapchain_render_targets,
         })
     }
@@ -740,7 +790,7 @@ impl Renderer {
             RenderPass::presentation_render_pass(&self.device, format, msaa_sample_count)?;
         let render_pass = self.resources.render_passes.add(render_pass);
         self.presentation_render_target =
-            Some(self.create_presentation_render_target(format, render_pass.clone())?);
+            Some(self.create_presentation_render_target(format, render_pass)?);
 
         Ok(render_pass)
     }
@@ -788,7 +838,7 @@ impl Renderer {
 impl Renderer {
     fn update_descriptor_sets(&self, writes: &[vk::WriteDescriptorSet]) {
         unsafe {
-            self.device.vk_device().update_descriptor_sets(&writes, &[]);
+            self.device.vk_device().update_descriptor_sets(writes, &[]);
         }
     }
 
@@ -920,7 +970,7 @@ impl Renderer {
                 .resources
                 .textures
                 .get_mut(handle)
-                .ok_or(RenderError::InvalidHandle(handle.id()))?;
+                .ok_or_else(|| RenderError::InvalidHandle(handle.id()))?;
             let extent = texture.extent();
             let format = texture.format();
             let mip_levels = texture::mip_levels_for(extent);
@@ -981,14 +1031,14 @@ impl Renderer {
             .resources
             .render_passes
             .get(render_pass)
-            .ok_or(RenderError::InvalidHandle(render_pass.id()))?;
+            .ok_or_else(|| RenderError::InvalidHandle(render_pass.id()))?;
         let attachments: Result<Vec<&Texture>, RenderError> = attachments
             .iter()
             .map(|h| {
                 self.resources
                     .textures
                     .get(h)
-                    .ok_or(RenderError::InvalidHandle(h.id()))
+                    .ok_or_else(|| RenderError::InvalidHandle(h.id()))
             })
             .collect();
         let attachments = attachments?;

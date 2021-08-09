@@ -26,7 +26,7 @@ pub trait HasVkDevice {
 
 impl HasVkDevice for VkDeviceHandle {
     fn vk_device(&self) -> VkDeviceHandle {
-        VkDeviceHandle::clone(&self)
+        VkDeviceHandle::clone(self)
     }
 }
 
@@ -212,11 +212,11 @@ impl Device {
     }
 
     pub fn graphics_queue_family(&self) -> &QueueFamily {
-        &self.queue_info.graphics.family()
+        self.queue_info.graphics.family()
     }
 
     pub fn present_queue_family(&self) -> &QueueFamily {
-        &self.queue_info.present.family()
+        self.queue_info.present.family()
     }
 
     pub fn graphics_queue(&self) -> &Queue {

@@ -3,15 +3,11 @@ use ash::vk;
 
 use thiserror::Error;
 
-use super::color_buffer::ColorBuffer;
-use super::depth_buffer::DepthBuffer;
-use super::device::{Device, HasVkDevice, VkDeviceHandle};
+use super::device::{Device, HasVkDevice};
 
-use super::framebuffer::{Framebuffer, FramebufferError};
 use super::image::{ImageView, ImageViewError};
 use super::instance::Instance;
 use super::queue::Queue;
-use super::render_pass::RenderPass;
 use super::surface::{Surface, SurfaceError};
 use super::sync::Semaphore;
 
@@ -23,8 +19,6 @@ pub enum SwapchainError {
     VulkanObjectCreation(vk::Result, &'static str),
     #[error("Image view creation failed: {0}")]
     ImageView(#[from] ImageViewError),
-    #[error("Framebuffer creation failed: {0}")]
-    Framebuffer(#[from] FramebufferError),
     #[error("Failed to acquire next image {0}")]
     AcquireNextImage(vk::Result),
     #[error("Failed to enqueue present command {0}")]
@@ -52,7 +46,6 @@ pub struct Swapchain {
     images: Vec<vk::Image>,
     image_views: Vec<ImageView>,
     info: SwapchainInfo,
-    vk_device: VkDeviceHandle,
 }
 
 impl std::ops::Drop for Swapchain {
@@ -211,7 +204,6 @@ impl Swapchain {
             images,
             image_views,
             info: light_info,
-            vk_device: device.vk_device(),
         })
     }
 
@@ -219,21 +211,8 @@ impl Swapchain {
         &self.info
     }
 
-    // TODO: Does this really belong here?
-    pub fn create_framebuffers_for(
-        &self,
-        render_pass: &RenderPass,
-        depth_buffer: &DepthBuffer,
-        color_buffer: &ColorBuffer,
-    ) -> Result<Vec<Framebuffer>, SwapchainError> {
-        self.image_views
-            .iter()
-            .map(|iv| {
-                let views = [color_buffer.image_view(), depth_buffer.image_view(), iv];
-                Framebuffer::new(&self.vk_device, &views, render_pass, &self.info.extent)
-            })
-            .collect::<Result<Vec<_>, FramebufferError>>()
-            .map_err(SwapchainError::Framebuffer)
+    pub fn image_views(&self) -> impl Iterator<Item = &ImageView> {
+        self.image_views.iter()
     }
 
     pub fn acquire_next_image(&self, sem: Option<&Semaphore>) -> Result<u32, SwapchainError> {

@@ -57,11 +57,11 @@ impl DescriptorPool {
         let pool_sizes = [
             vk::DescriptorPoolSize {
                 ty: vk::DescriptorType::UNIFORM_BUFFER,
-                descriptor_count: max_allocatable_sets * 2 as u32,
+                descriptor_count: max_allocatable_sets * 2,
             },
             vk::DescriptorPoolSize {
                 ty: vk::DescriptorType::COMBINED_IMAGE_SAMPLER,
-                descriptor_count: max_allocatable_sets * 2 as u32,
+                descriptor_count: max_allocatable_sets * 2,
             },
         ];
 
@@ -173,7 +173,7 @@ impl<'a> DescriptorSetBuilder<'a> {
         let (buf0, buf1, stride0, stride1) = {
             let ubufs = &self.renderer.resources.uniform_buffers;
 
-            let (buf0, buf1) = ubufs.get_all(&buf_h).expect("Failed to get buffer");
+            let (buf0, buf1) = ubufs.get_all(buf_h).expect("Failed to get buffer");
 
             assert!(
                 buf1.is_some() || buf_h.mutability() == crate::buffer::BufferMutability::Immutable
@@ -379,7 +379,7 @@ impl DescriptorSets {
         bindings: &[vk::DescriptorSetLayoutBinding],
     ) -> Result<(Handle<DescriptorSet>, &[DescriptorSet; 2]), DescriptorError> {
         // TODO: We should not create a descriptor set layout everytime we allocate. Hash bindings instead?
-        let info = vk::DescriptorSetLayoutCreateInfo::builder().bindings(&bindings);
+        let info = vk::DescriptorSetLayoutCreateInfo::builder().bindings(bindings);
         let dset_layout = unsafe {
             self.vk_device
                 .create_descriptor_set_layout(&info, None)

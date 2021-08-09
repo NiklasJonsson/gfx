@@ -73,6 +73,9 @@ macro_rules! impl_descriptor_from {
                 Self::from_vec(vec![t], mutability)
             }
 
+            /// # Safety
+            /// The contents of the vector must match the description of it in buffer_type. Furthermore, the contents must fulfill vulkan requirements, e.g. alignment,
+            /// for the supplied buffer type.
             pub unsafe fn from_raw(
                 data: Vec<u8>,
                 buffer_type: $buffer_type,
@@ -125,8 +128,8 @@ impl<'a, BT> BufferDescriptor<'a, BT> {
     pub fn data(&self) -> &[u8] {
         match &self.data {
             DescriptorData::Borrowed(slice) => slice,
-            DescriptorData::Owned(buf) => &buf,
-            DescriptorData::Shared(buf) => &&buf,
+            DescriptorData::Owned(buf) => buf,
+            DescriptorData::Shared(buf) => buf,
         }
     }
 }
@@ -143,7 +146,7 @@ impl<'a, BT: BufferType> BufferDescriptor<'a, BT> {
     pub fn elem_align(&self, allocator: &AllocatorHandle) -> u16 {
         self.buffer_type
             .elem_align(allocator)
-            .unwrap_or(self.elem_size())
+            .unwrap_or_else(|| self.elem_size())
     }
 }
 
@@ -159,6 +162,7 @@ impl<'a, BT: BufferType + Clone> BufferDescriptor<'a, BT> {
         Ok(BufferResult { buffer, transient })
     }
 
+    #[allow(clippy::type_complexity)]
     pub fn enqueue(
         &self,
         allocator: &AllocatorHandle,

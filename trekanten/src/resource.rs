@@ -13,7 +13,6 @@ pub struct AsyncResources {
     pub vertex_buffers: buffer::AsyncVertexBuffers,
     pub index_buffers: buffer::AsyncIndexBuffers,
     pub textures: texture::AsyncTextures,
-    pub graphics_pipelines: pipeline::AsyncGraphicsPipelines,
 }
 
 pub struct Resources {

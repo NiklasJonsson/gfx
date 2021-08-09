@@ -16,19 +16,24 @@ pub fn clamp<T: Ord>(v: T, min: T, max: T) -> T {
     std::cmp::max(min, std::cmp::min(v, max))
 }
 
+/// # Safety
+/// # Only call this is the type can be represented with all possible byte values
 pub unsafe fn as_byte_slice<T: Copy>(slice: &[T]) -> &[u8] {
     let ptr = slice.as_ptr() as *const u8;
     let size = std::mem::size_of::<T>() * slice.len();
     std::slice::from_raw_parts(ptr, size)
 }
 
+/// # Safety
+/// # Only call this is the type can be represented with all possible byte values
 pub unsafe fn as_bytes<T: Copy>(v: &T) -> &[u8] {
     let ptr = (v as *const T) as *const u8;
     let size = std::mem::size_of::<T>();
     std::slice::from_raw_parts(ptr, size)
 }
 
-/// SAFETY: Only call this if A & B are transparent (repr(transparent))
+/// # Safety
+///  Only call this if A & B are transparent (repr(transparent))
 pub unsafe fn cast_transparent_slice<A, B>(a: &[A]) -> &[B] {
     let ptr = a.as_ptr() as *const B;
     let len = a.len();
@@ -72,6 +77,7 @@ impl std::fmt::Debug for ByteBuffer {
 }
 
 impl ByteBuffer {
+    /// # Safety
     /// Very unsafe
     /// The vector should really only contain pods or the like, require Copy to kind of enforce this.
     /// Note: after this, the contents of the vector might be passed accross ffi boundaries, e.g. to the gpu.
@@ -91,6 +97,10 @@ impl ByteBuffer {
 
     pub fn len(&self) -> usize {
         self.len
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.len == 0
     }
 }
 

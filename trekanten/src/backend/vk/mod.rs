@@ -1,6 +1,3 @@
-pub mod color_buffer;
-pub mod depth_buffer;
-
 pub mod buffer;
 pub mod command;
 pub mod device;

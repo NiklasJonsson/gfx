@@ -362,7 +362,7 @@ impl Image {
             vk::ImageLayout::UNDEFINED,
             vk::ImageLayout::TRANSFER_DST_OPTIMAL,
         );
-        cmd_buf.copy_buffer_to_image(&staging.vk_buffer(), dst_image.vk_image(), &extent);
+        cmd_buf.copy_buffer_to_image(staging.vk_buffer(), dst_image.vk_image(), &extent);
 
         transition_image_layout(
             cmd_buf,
@@ -409,7 +409,7 @@ impl Image {
             vk::ImageLayout::UNDEFINED,
             vk::ImageLayout::TRANSFER_DST_OPTIMAL,
         );
-        cmd_buf.copy_buffer_to_image(&staging.vk_buffer(), dst_image.vk_image(), &extent);
+        cmd_buf.copy_buffer_to_image(staging.vk_buffer(), dst_image.vk_image(), &extent);
 
         generate_mipmaps(cmd_buf, dst_image.vk_image(), &extent, mip_levels);
 
@@ -436,4 +436,11 @@ impl std::ops::Drop for Image {
         self.allocator
             .destroy_image(self.vk_image, &self.allocation);
     }
+}
+
+/// Utility for holding an image and an image view into it. Only for use inside of the trekanten crate
+#[allow(dead_code)]
+pub(crate) struct ImageAttachment {
+    pub image: Image,
+    pub image_view: ImageView,
 }

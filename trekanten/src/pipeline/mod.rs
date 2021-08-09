@@ -14,7 +14,7 @@ use std::borrow::Cow;
 use crate::backend::render_pass::RenderPass;
 use crate::device::HasVkDevice;
 use crate::device::VkDeviceHandle;
-use crate::resource::{CachedStorage, Handle};
+use crate::resource::CachedStorage;
 use crate::vertex::VertexFormat;
 
 mod error;
@@ -22,7 +22,6 @@ mod spirv;
 
 pub use error::PipelineError;
 use spirv::{parse_spirv, ReflectionData};
-use std::sync::Arc;
 
 bitflags::bitflags! {
     pub struct ShaderStage: u8 {
@@ -315,14 +314,14 @@ impl GraphicsPipeline {
             })
             .transpose()?;
         let vertex_input_state = vk::PipelineVertexInputStateCreateInfo::builder()
-            .vertex_binding_descriptions(&desc.vertex_format.vk_binding_description())
-            .vertex_attribute_descriptions(&desc.vertex_format.vk_attribute_description());
+            .vertex_binding_descriptions(desc.vertex_format.vk_binding_description())
+            .vertex_attribute_descriptions(desc.vertex_format.vk_attribute_description());
 
         let vk_device = device.vk_device();
         // TODO(perf): allocation here
-        let mut stages = vec![vert_create_info.clone()];
+        let mut stages = vec![vert_create_info];
         if let Some(PipelineCreationInfo { create_info, .. }) = &frag {
-            stages.push(create_info.clone());
+            stages.push(*create_info);
         }
 
         let input_assembly_info = vk::PipelineInputAssemblyStateCreateInfo::builder()
@@ -519,58 +518,3 @@ impl GraphicsPipelineDescriptor {
 }
 
 pub type GraphicsPipelines = CachedStorage<GraphicsPipelineDescriptor, GraphicsPipeline>;
-
-use crate::resource::Async;
-use parking_lot::{MappedRwLockReadGuard, RwLock, RwLockReadGuard};
-
-type Inner = CachedStorage<GraphicsPipelineDescriptor, Async<GraphicsPipeline>>;
-pub type PipelineStorageReadGuard<'a> = RwLockReadGuard<'a, Inner>;
-
-#[derive(Default)]
-pub struct AsyncGraphicsPipelines {
-    inner: Arc<RwLock<Inner>>,
-}
-
-impl AsyncGraphicsPipelines {
-    pub fn allocate(&self, descriptor: &GraphicsPipelineDescriptor) -> Handle<GraphicsPipeline> {
-        let mut guard = self.inner.write();
-        guard
-            .add(descriptor.clone(), Async::<GraphicsPipeline>::Pending)
-            .unwrap_async()
-    }
-
-    pub fn cached(
-        &self,
-        descriptor: &GraphicsPipelineDescriptor,
-    ) -> Option<Handle<GraphicsPipeline>> {
-        self.inner
-            .read()
-            .cached(descriptor)
-            .map(|h| h.unwrap_async())
-    }
-
-    pub fn read(&self) -> PipelineStorageReadGuard<'_> {
-        self.inner.read()
-    }
-
-    pub fn get(
-        &self,
-        h: &Handle<GraphicsPipeline>,
-    ) -> Option<MappedRwLockReadGuard<'_, Async<GraphicsPipeline>>> {
-        let guard = self.inner.read();
-
-        if !guard.has(&h.wrap_async()) {
-            return None;
-        }
-
-        Some(RwLockReadGuard::map(guard, |inner| {
-            inner.get(&h.wrap_async()).unwrap()
-        }))
-    }
-
-    pub fn insert(&self, h: &Handle<GraphicsPipeline>, pipeline: GraphicsPipeline) {
-        if let Some(x) = self.inner.write().get_mut(&h.wrap_async()) {
-            *x = Async::<GraphicsPipeline>::Available(pipeline);
-        }
-    }
-}

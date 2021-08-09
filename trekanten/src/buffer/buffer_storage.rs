@@ -116,7 +116,7 @@ where
             return Some((handle.as_unbuffered(), item0, Some(item1)));
         }
 
-        return None;
+        None
     }
 }
 
@@ -168,7 +168,7 @@ impl<T> AsyncDeviceBufferStorage<T> {
     }
 
     pub fn insert(&mut self, h: &BufferHandle<Async<T>>, buf0: T, buf1: Option<T>) {
-        if let Some((slot0, slot1)) = self.inner.get_all_mut(&h) {
+        if let Some((slot0, slot1)) = self.inner.get_all_mut(h) {
             *slot0 = Async::Available(buf0);
             match (buf1, slot1) {
                 (Some(buf1), Some(slot1)) => *slot1 = Async::Available(buf1),

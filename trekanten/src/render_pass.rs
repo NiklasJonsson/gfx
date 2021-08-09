@@ -32,7 +32,7 @@ impl<'a> RenderPassEncoder<'a> {
         let pipeline = self
             .resources
             .graphics_pipelines
-            .get(&pipeline)
+            .get(pipeline)
             .expect("Failed to find pipeline");
 
         self.command_buffer.bind_descriptor_set(idx, dset, pipeline);
@@ -44,7 +44,7 @@ impl<'a> RenderPassEncoder<'a> {
         let pipeline = self
             .resources
             .graphics_pipelines
-            .get(&pipeline)
+            .get(pipeline)
             .expect("Failed to get pipeline");
 
         self.command_buffer.bind_graphics_pipeline(pipeline);
@@ -56,10 +56,10 @@ impl<'a> RenderPassEncoder<'a> {
         let ib = self
             .resources
             .index_buffers
-            .get(&handle, self.frame_idx as usize)
+            .get(handle, self.frame_idx as usize)
             .expect("Failed to get index buffer");
 
-        self.command_buffer.bind_index_buffer(&ib, 0);
+        self.command_buffer.bind_index_buffer(ib, 0);
 
         self
     }
@@ -68,10 +68,10 @@ impl<'a> RenderPassEncoder<'a> {
         let vb = self
             .resources
             .vertex_buffers
-            .get(&handle, self.frame_idx as usize)
+            .get(handle, self.frame_idx as usize)
             .expect("Failed to get index buffer");
 
-        self.command_buffer.bind_vertex_buffer(&vb, 0);
+        self.command_buffer.bind_vertex_buffer(vb, 0);
 
         self
     }
@@ -88,13 +88,13 @@ impl<'a> RenderPassEncoder<'a> {
         let vb = self
             .resources
             .vertex_buffers
-            .get(&vertex_buffer, self.frame_idx as usize)
+            .get(vertex_buffer, self.frame_idx as usize)
             .expect("Failed to get index buffer");
 
         let ib = self
             .resources
             .index_buffers
-            .get(&index_buffer, self.frame_idx as usize)
+            .get(index_buffer, self.frame_idx as usize)
             .expect("Failed to get index buffer");
 
         self.command_buffer
@@ -138,7 +138,7 @@ impl<'a> RenderPassEncoder<'a> {
         let pipeline = self
             .resources
             .graphics_pipelines
-            .get(&pipeline)
+            .get(pipeline)
             .expect("Failed to get pipeline");
 
         self.command_buffer.bind_push_constant(pipeline, stage, v);

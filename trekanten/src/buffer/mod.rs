@@ -52,10 +52,10 @@ impl<T> Copy for BufferHandle<T> {}
 
 impl<T> PartialEq for BufferHandle<T> {
     fn eq(&self, o: &Self) -> bool {
-        return self.h == o.h
+        self.h == o.h
             && self.mutability == o.mutability
             && self.idx == o.idx
-            && self.n_elems == o.n_elems;
+            && self.n_elems == o.n_elems
     }
 }
 impl<T> Eq for BufferHandle<T> {}
@@ -75,14 +75,16 @@ impl<T> BufferHandle<T> {
         Self { idx, n_elems, ..h }
     }
 
+    /// # Safety
+    /// The handle must refer to a valid buffer resource. idx + n_elems must be less than or equal to the number of elements the buffer that the handle refers to was created with.
     pub unsafe fn from_buffer(
-        h: Handle<T>,
+        handle: Handle<T>,
         idx: u32,
         n_elems: u32,
         mutability: BufferMutability,
     ) -> Self {
         Self {
-            h,
+            h: handle,
             mutability,
             idx,
             n_elems,
@@ -337,7 +339,7 @@ impl<BT: BufferType + Clone> DeviceBuffer<BT> {
     }
 
     pub fn vk_buffer(&self) -> &vk::Buffer {
-        &self.buffer.vk_buffer()
+        self.buffer.vk_buffer()
     }
 
     pub fn elem_size(&self) -> u16 {
@@ -419,6 +421,9 @@ macro_rules! impl_host_buffer_from {
                 Self::from_vec(vec![t])
             }
 
+            /// # Safety
+            /// The contents of the vector must match the description of it in buffer_type. Furthermore, the contents must fulfill vulkan requirements, e.g. alignment,
+            /// for the supplied buffer type.
             pub unsafe fn from_raw(data: Vec<u8>, buffer_type: $buffer_type) -> Self {
                 assert_eq!(data.len() % buffer_type.elem_size() as usize, 0);
                 let n_elems = data.len() as u32 / buffer_type.elem_size() as u32;

@@ -34,7 +34,7 @@ fn main() {
         std::fs::create_dir_all(&dest_path).expect("Failed to create dirs for shaders");
     }
     let shader_sources = Path::new("src/render/shaders/");
-    for path in find_ext(&shader_sources, "glsl").into_iter() {
+    for path in find_ext(shader_sources, "glsl").into_iter() {
         let dest = dest_path.join(
             path.strip_prefix(&shader_sources)
                 .expect("Failed to relative dir"),

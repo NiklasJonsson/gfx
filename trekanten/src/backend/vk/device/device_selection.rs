@@ -418,14 +418,14 @@ pub fn device_selection(
         queue_families.present.family.index,
         queue_families.transfer.family.index,
     ];
-    fam_indices.sort();
+    fam_indices.sort_unstable();
     let mut queue_infos: Vec<vk::DeviceQueueCreateInfo> = Vec::with_capacity(3);
     let prio_1 = [1.0];
     let prio_2 = [1.0, 1.0];
     let prio_3 = [1.0, 1.0, 1.0];
     let prios: [&[f32]; 3] = [&prio_1, &prio_2, &prio_3];
     for &fi in &fam_indices {
-        if queue_infos.len() == 0 || fi != queue_infos.last().unwrap().queue_family_index {
+        if queue_infos.is_empty() || fi != queue_infos.last().unwrap().queue_family_index {
             queue_infos.push(vk::DeviceQueueCreateInfo {
                 queue_family_index: fi,
                 p_queue_priorities: prio_1.as_ptr(),

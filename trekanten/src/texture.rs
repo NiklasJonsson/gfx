@@ -141,11 +141,7 @@ impl TextureDescriptor {
     }
 
     pub(crate) fn needs_command_buffer(&self) -> bool {
-        if let TextureDescriptor::Empty { .. } = self {
-            false
-        } else {
-            true
-        }
+        std::matches!(self, TextureDescriptor::Empty { .. })
     }
 
     pub fn enqueue<D: HasVkDevice>(
@@ -188,7 +184,7 @@ impl TextureDescriptor {
                 *extent,
                 *format,
                 *mipmaps,
-                &data,
+                data,
             ),
             _ => unreachable!("This should not be created with a command buffer"),
         }
@@ -376,7 +372,7 @@ impl Texture {
             )?;
             let image_view =
                 ImageView::new(device, image.vk_image(), *format, aspect_mask, mip_levels)?;
-            let sampler = Sampler::new(device, &sampler_descriptor)?;
+            let sampler = Sampler::new(device, sampler_descriptor)?;
             Ok(Self {
                 image,
                 image_view,
@@ -418,7 +414,7 @@ impl Texture {
             let mip_levels = mip_levels_for(extent);
             (
                 Image::device_local_mipmapped(
-                    &allocator,
+                    allocator,
                     command_buffer,
                     extent,
                     format,
@@ -429,7 +425,7 @@ impl Texture {
             )
         } else {
             (
-                Image::device_local(&allocator, command_buffer, extent, format, data)?,
+                Image::device_local(allocator, command_buffer, extent, format, data)?,
                 1,
             )
         };
@@ -443,11 +439,11 @@ impl Texture {
     }
 
     pub fn vk_image(&self) -> &vk::Image {
-        &self.image.vk_image()
+        self.image.vk_image()
     }
 
     pub fn vk_sampler(&self) -> &vk::Sampler {
-        &self.sampler.vk_sampler()
+        self.sampler.vk_sampler()
     }
 
     pub fn extent(&self) -> Extent2D {
