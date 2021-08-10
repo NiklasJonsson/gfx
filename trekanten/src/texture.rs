@@ -141,7 +141,7 @@ impl TextureDescriptor {
     }
 
     pub(crate) fn needs_command_buffer(&self) -> bool {
-        std::matches!(self, TextureDescriptor::Empty { .. })
+        !std::matches!(self, TextureDescriptor::Empty { .. })
     }
 
     pub fn enqueue<D: HasVkDevice>(
