@@ -80,7 +80,7 @@ impl EventManager {
         self.action = cur.update_with(action);
     }
 
-    pub fn collect_event<'a>(&mut self, event: winit::event::Event<'a, ()>) -> EventLoopControl {
+    pub fn collect_event(&mut self, event: winit::event::Event<'_, ()>) -> EventLoopControl {
         log::trace!("Received event: {:?}", event);
         use winit::event::Event as WinEvent;
         let mut resolve = false;
@@ -184,10 +184,7 @@ impl EventManager {
                             y: y.into(),
                         },
                         MouseScrollDelta::PixelDelta(LogicalPosition { x, y }) => {
-                            ExternalInput::ScrollDelta {
-                                x: (-x).into(),
-                                y: y.into(),
-                            }
+                            ExternalInput::ScrollDelta { x: (-x), y }
                         }
                     };
 

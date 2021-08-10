@@ -50,7 +50,7 @@ fn load_texture(
     }
 }
 
-fn check_supported<'a>(primitive: &gltf::Primitive<'a>) {
+fn check_supported(primitive: &gltf::Primitive<'_>) {
     use gltf::mesh::Semantic;
     for (semantic, _accessor) in primitive.attributes() {
         match semantic {

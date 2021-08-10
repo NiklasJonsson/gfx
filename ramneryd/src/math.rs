@@ -125,9 +125,9 @@ impl From<Transform> for ModelMatrix {
     }
 }
 
-impl Into<Mat4> for ModelMatrix {
-    fn into(self) -> Mat4 {
-        self.0
+impl From<ModelMatrix> for Mat4 {
+    fn from(m: ModelMatrix) -> Self {
+        m.0
     }
 }
 
@@ -368,10 +368,10 @@ mod tests {
         };
         let rhs = Transform {
             rotation: Quat {
-                x: -0.7071068,
+                x: -std::f32::consts::FRAC_1_SQRT_2,
                 y: 0.0,
                 z: 0.0,
-                w: 0.7071068,
+                w: std::f32::consts::FRAC_1_SQRT_2,
             }
             .normalized(),
             ..Default::default()

@@ -388,7 +388,7 @@ mod tests {
 
         let f = |x| x < 30;
         remove_with_cond(&mut m, &r, f);
-        check_with_cond(&mut m, &r, f);
+        check_with_cond(&m, &r, f);
     }
 
     #[test]
@@ -398,7 +398,7 @@ mod tests {
 
         let f = |x| x > 60;
         remove_with_cond(&mut m, &r, f);
-        check_with_cond(&mut m, &r, f);
+        check_with_cond(&m, &r, f);
     }
 
     #[test]
@@ -408,7 +408,7 @@ mod tests {
 
         let f = |x| x < 60 && x > 30;
         remove_with_cond(&mut m, &r, f);
-        check_with_cond(&mut m, &r, f);
+        check_with_cond(&m, &r, f);
     }
 
     #[test]
@@ -418,7 +418,7 @@ mod tests {
 
         let f = |x| x > 60 || x < 30;
         remove_with_cond(&mut m, &r, f);
-        check_with_cond(&mut m, &r, f);
+        check_with_cond(&m, &r, f);
     }
 
     #[test]
@@ -480,7 +480,7 @@ mod tests {
         let expected = [10, 16, 14, 1000];
         assert_eq!(expected.len(), m.len());
         for d in m.iter() {
-            assert!(expected.iter().find(|x| x == d).is_some());
+            assert!(expected.iter().any(|x| x == *d));
         }
     }
 }

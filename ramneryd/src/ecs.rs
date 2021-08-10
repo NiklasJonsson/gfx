@@ -63,10 +63,10 @@ pub mod serde {
             lights,
             names,
         } = serde_data;
-        let mut ron_deserializer = ron::Deserializer::from_str(&ron)?;
+        let mut ron_deserializer = ron::Deserializer::from_str(ron)?;
         let r = specs::saveload::DeserializeComponents::<crate::ecs::serde::Error, _>::deserialize(
             &mut (transforms, lights, names),
-            &entities,
+            entities,
             markers,
             allocator,
             &mut ron_deserializer,
@@ -206,6 +206,12 @@ impl<'a, 'b> ExecutorBuilder<'a, 'b> {
         Self {
             builder: specs::DispatcherBuilder::new(),
         }
+    }
+}
+
+impl<'a, 'b> Default for ExecutorBuilder<'a, 'b> {
+    fn default() -> Self {
+        Self::new()
     }
 }
 

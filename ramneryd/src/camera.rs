@@ -62,9 +62,9 @@ impl From<StateId> for CameraMovement {
     }
 }
 
-impl Into<StateId> for CameraMovement {
-    fn into(self) -> StateId {
-        StateId(self as u32)
+impl From<CameraMovement> for StateId {
+    fn from(cm: CameraMovement) -> Self {
+        Self(cm as u32)
     }
 }
 
@@ -80,9 +80,9 @@ impl From<RangeId> for CameraRotation {
     }
 }
 
-impl Into<RangeId> for CameraRotation {
-    fn into(self) -> RangeId {
-        RangeId(self as u32)
+impl From<CameraRotation> for RangeId {
+    fn from(cm: CameraRotation) -> Self {
+        Self(cm as u32)
     }
 }
 
@@ -222,9 +222,9 @@ const NAME: &str = "FreeFlyCamera";
 
 // Default input mapping for camera
 fn get_input_context() -> Result<InputContext, InputContextError> {
-    let sens = 0.005 as Sensitivity;
+    let sens: Sensitivity = 0.005;
     use CameraMovement::*;
-    Ok(InputContext::builder(&NAME)
+    Ok(InputContext::builder(NAME)
         .description("Input mapping for untethered, 3D camera")
         .with_state(KeyCode::W, Forward)?
         .with_state(KeyCode::S, Backward)?
@@ -277,7 +277,7 @@ impl<'a> ecs::System<'a> for FreeFlyCameraController {
                         }
 
                         let CameraOrientation { view_direction, up } =
-                            FreeFlyCameraController::get_orientation_from(&rotation_state);
+                            FreeFlyCameraController::get_orientation_from(rotation_state);
                         use CameraMovement::*;
                         let dir = time.delta_sim()
                             * MOVEMENT_SPEED
@@ -301,8 +301,10 @@ impl<'a> ecs::System<'a> for FreeFlyCameraController {
 
     fn setup(&mut self, world: &mut World) {
         Self::SystemData::setup(world);
-        let mut t = Transform::default();
-        t.position = Vec3::new(2.0, 2.0, 2.0);
+        let t = Transform {
+            position: Vec3::new(2.0, 2.0, 2.0),
+            ..Default::default()
+        };
         // TODO: Compute from bounding box
         let rot_state = CameraRotationState {
             yaw: 4.0,

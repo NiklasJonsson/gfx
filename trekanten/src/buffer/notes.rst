@@ -13,8 +13,8 @@ There are a few design features we want to acheive with buffers:
   call, as we won't otherwise know which frame idx to use.
 
 *Handle-based device buffer management*
-  Handles for gpu-api managed resources are passed around with handles to ensure lifetime are
-  proper.
+  References to gpu-api managed resources are passed around with handles to ensure lifetime are
+  proper. E.g. that they are not destroyed before they are used on the gpu.
 
 *Buffers are typed according to their usage*
   Vertex, index and uniform buffers have different types.

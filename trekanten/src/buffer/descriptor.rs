@@ -162,7 +162,6 @@ impl<'a, BT: BufferType + Clone> BufferDescriptor<'a, BT> {
         Ok(BufferResult { buffer, transient })
     }
 
-    #[allow(clippy::type_complexity)]
     pub fn enqueue(
         &self,
         allocator: &AllocatorHandle,

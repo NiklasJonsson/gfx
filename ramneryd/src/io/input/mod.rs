@@ -413,8 +413,7 @@ mod tests {
                     (Input::Range(rid0, _), Input::Range(rid1, _)) => *rid0 == *rid1,
                     (_, _) => false,
                 })
-                .collect::<Vec<&Input>>()
-                .len(),
+                .count(),
             count
         );
     }
@@ -481,7 +480,7 @@ mod tests {
             .map(|ctx| world.create_entity().with(ctx).build())
             .collect();
 
-        executor.execute(&mut world);
+        executor.execute(&world);
         verify_action_count(&world, entities[0], TestAction::Action0, 0);
         verify_action_count(&world, entities[1], TestAction::Action1, 1);
         verify_action_count(&world, entities[2], TestAction::Action2, 0);
@@ -492,7 +491,7 @@ mod tests {
         world.insert(CurrentFrameExternalInputs(external_inputs.clone()));
         world.delete_entity(entities[1]).expect("Fail");
 
-        executor.execute(&mut world);
+        executor.execute(&world);
         verify_action_count(&world, entities[0], TestAction::Action0, 0);
         verify_action_count(&world, entities[2], TestAction::Action2, 0);
         verify_state_count(&world, entities[0], TestState::State0, 0);

@@ -52,7 +52,7 @@ impl<'a> System<'a> for GameStateSwitcher {
     fn setup(&mut self, world: &mut World) {
         Self::SystemData::setup(world);
         world.insert(GameState::default());
-        let escape_catcher = InputContext::builder(&NAME)
+        let escape_catcher = InputContext::builder(NAME)
             .description("Global top-level escape catcher for game state switcher")
             .priority(InputContextPriority::First)
             .with_action(input::KeyCode::Escape, GAME_STATE_SWITCH)

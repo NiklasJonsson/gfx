@@ -350,7 +350,7 @@ impl UIContext {
         let pipeline = {
             let render_pass = &world.read_resource::<super::FrameData>().main_render_pass;
             renderer
-                .create_gfx_pipeline(pipeline_descriptor, &render_pass)
+                .create_gfx_pipeline(pipeline_descriptor, render_pass)
                 .expect("Failed to create graphics pipeline")
         };
 
@@ -456,11 +456,11 @@ impl UIContext {
         self.resize(frame.extent());
         self.forward_input(world);
 
-        let mut ui = UiFrame {
+        let ui = UiFrame {
             imgui: self.imgui.frame(),
             storage: &self.storage,
         };
-        self.modules.iter_mut().for_each(|m| m.draw(world, &mut ui));
+        self.modules.iter_mut().for_each(|m| m.draw(world, &ui));
 
         let draw_data = ui.imgui.render();
         let fb_width = draw_data.display_size[0] * draw_data.framebuffer_scale[0];
@@ -652,7 +652,7 @@ pub struct VertexShaderData {
 }
 
 impl UIDrawCommands {
-    pub fn record_draw_commands<'b>(self, cmd_buf: &mut RenderPassEncoder<'b>) {
+    pub fn record_draw_commands(self, cmd_buf: &mut RenderPassEncoder<'_>) {
         log::trace!("Recording draw commands!");
         let Self {
             per_frame_data:

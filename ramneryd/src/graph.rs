@@ -130,8 +130,8 @@ pub mod sys {
         }
     }
 
-    pub fn depth_first<'a>(
-        children_storage: &ReadStorage<'a, Children>,
+    pub fn depth_first(
+        children_storage: &ReadStorage<'_, Children>,
         root: Entity,
         mut visit_node: impl FnMut(Entity),
     ) {
@@ -343,11 +343,7 @@ mod tests {
         assert_eq!(order, vec![1, 4, 7, 3, 2, 6, 5]);
     }
 
-    fn verify_it(
-        id2ent: &Vec<Entity>,
-        it: impl Iterator<Item = Entity>,
-        order: Vec<usize>,
-    ) -> bool {
+    fn verify_it(id2ent: &[Entity], it: impl Iterator<Item = Entity>, order: Vec<usize>) -> bool {
         let expected = order.into_iter().map(|i| id2ent[i]).collect::<Vec<_>>();
         it.zip(expected.iter())
             .fold(true, |acc, (ent, &exp)| acc || (ent == exp))

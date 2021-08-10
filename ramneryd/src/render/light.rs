@@ -309,8 +309,12 @@ pub fn light_and_shadow_pass(
     // transistion unused images to depth stencil read optimal as this won't be done by the render pass
     // TODO(perf): Don't allocate, store a vector for reuse
     let mut barriers = Vec::with_capacity(super::NUM_SPOTLIGHT_SHADOW_MAPS - num_shadows as usize);
-    for i in num_shadows as usize..super::NUM_SPOTLIGHT_SHADOW_MAPS {
-        let handle = spotlights[i].texture;
+    for spotlight in spotlights
+        .iter()
+        .take(super::NUM_SPOTLIGHT_SHADOW_MAPS)
+        .skip(num_shadows as usize)
+    {
+        let handle = spotlight.texture;
         let vk_image = frame
             .get_texture(&handle)
             .expect("Failed to get shadow texture for mem barrier")

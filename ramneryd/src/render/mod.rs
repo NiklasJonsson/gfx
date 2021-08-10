@@ -163,7 +163,7 @@ fn create_material_descriptor_set(
             let mut desc_set_builder = DescriptorSet::builder(renderer);
 
             desc_set_builder = desc_set_builder.add_buffer(
-                &material_uniforms,
+                material_uniforms,
                 0,
                 trekanten::pipeline::ShaderStage::FRAGMENT,
             );
@@ -198,11 +198,7 @@ fn create_material_descriptor_set(
             desc_set_builder.build()
         }
         material::GpuMaterial::Unlit { color_uniform, .. } => DescriptorSet::builder(renderer)
-            .add_buffer(
-                &color_uniform,
-                0,
-                trekanten::pipeline::ShaderStage::FRAGMENT,
-            )
+            .add_buffer(color_uniform, 0, trekanten::pipeline::ShaderStage::FRAGMENT)
             .build(),
     }
 }
@@ -334,7 +330,7 @@ fn create_renderable(
     log::trace!("Creating renderable: {:?}", material);
     let material_descriptor_set = create_material_descriptor_set(renderer, material);
     let gfx_pipeline =
-        get_pipeline_for(renderer, world, mesh, &material).expect("Failed to get pipeline");
+        get_pipeline_for(renderer, world, mesh, material).expect("Failed to get pipeline");
     match material {
         material::GpuMaterial::PBR { .. } => RenderableMaterial::PBR {
             gfx_pipeline,
@@ -495,7 +491,7 @@ pub fn draw_frame(world: &mut World, ui: &mut ui::UIContext, renderer: &mut Rend
         .expect("Failed to create command buffer");
 
     let mut cmd_buffer =
-        light::light_and_shadow_pass(world, &mut frame, &frame_resources, cmd_buffer);
+        light::light_and_shadow_pass(world, &mut frame, frame_resources, cmd_buffer);
 
     // View data main render pass
     {
@@ -716,7 +712,7 @@ fn build_shadow_data(
         let pos_only_vertex_format = VertexFormat::builder()
             .add_attribute(util::Format::FLOAT3)
             .build();
-        let pipeline_desc = shadow_pipeline_desc(&shader_compiler, pos_only_vertex_format)
+        let pipeline_desc = shadow_pipeline_desc(shader_compiler, pos_only_vertex_format)
             .expect("Failed to create graphics pipeline descriptor for shadows");
         renderer
             .create_gfx_pipeline(pipeline_desc, &shadow_render_pass)
