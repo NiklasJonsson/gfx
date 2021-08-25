@@ -7,6 +7,7 @@ use crate::descriptor::DescriptorSet;
 use crate::pipeline::{GraphicsPipeline, ShaderStage};
 use crate::raw_vk;
 use crate::resource::Resources;
+use crate::traits::PushConstant;
 
 use backend::command::{CommandBuffer, CommandError};
 
@@ -129,7 +130,7 @@ impl<'a> RenderPassEncoder<'a> {
         self
     }
 
-    pub fn bind_push_constant<V: Copy>(
+    pub fn bind_push_constant<V: PushConstant>(
         &mut self,
         pipeline: &Handle<GraphicsPipeline>,
         stage: ShaderStage,

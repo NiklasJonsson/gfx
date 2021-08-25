@@ -1,13 +1,13 @@
 use std::convert::TryInto;
 
-use trekanten::buffer::Uniform;
+use trekanten::{Std140Compat, Uniform};
 
 pub trait UniformBlock {
     const SET: u32;
     const BINDING: u32;
 }
 
-#[derive(Copy, Clone, Debug)]
+#[derive(Copy, Clone, Debug, Std140Compat)]
 #[repr(C, packed)]
 pub struct PBRMaterialData {
     pub base_color_factor: [f32; 4],
@@ -22,15 +22,7 @@ impl UniformBlock for PBRMaterialData {
     const BINDING: u32 = 0;
 }
 
-impl Uniform for PBRMaterialData {
-    fn size() -> u16 {
-        std::mem::size_of::<Self>()
-            .try_into()
-            .expect("uniform is too big")
-    }
-}
-
-#[derive(Copy, Clone, Debug)]
+#[derive(Copy, Clone, Debug, Std140Compat)]
 #[repr(C, packed)]
 pub struct UnlitUniformData {
     pub color: [f32; 4],
@@ -39,13 +31,6 @@ pub struct UnlitUniformData {
 impl UniformBlock for UnlitUniformData {
     const SET: u32 = 1;
     const BINDING: u32 = 0;
-}
-impl Uniform for UnlitUniformData {
-    fn size() -> u16 {
-        std::mem::size_of::<Self>()
-            .try_into()
-            .expect("uniform is too big")
-    }
 }
 
 #[derive(Copy, Clone, Debug)]
@@ -72,7 +57,7 @@ pub type Mat4 = [f32; 16];
 
 pub const MAX_NUM_LIGHTS: usize = 16;
 
-#[derive(Copy, Clone, Debug, Default)]
+#[derive(Copy, Clone, Debug, Default, Std140Compat)]
 #[repr(C, packed)]
 pub struct ShadowMatrices {
     pub matrices: [Mat4; MAX_NUM_LIGHTS],
@@ -81,13 +66,6 @@ pub struct ShadowMatrices {
 impl UniformBlock for ShadowMatrices {
     const SET: u32 = 0;
     const BINDING: u32 = 3;
-}
-impl Uniform for ShadowMatrices {
-    fn size() -> u16 {
-        std::mem::size_of::<Self>()
-            .try_into()
-            .expect("uniform is too big")
-    }
 }
 
 #[derive(Copy, Clone, Debug, Default)]
@@ -102,7 +80,8 @@ impl UniformBlock for LightingData {
     const SET: u32 = 0;
     const BINDING: u32 = 1;
 }
-impl Uniform for LightingData {
+
+unsafe impl Uniform for LightingData {
     fn size() -> u16 {
         std::mem::size_of::<Self>()
             .try_into()
@@ -110,14 +89,14 @@ impl Uniform for LightingData {
     }
 }
 
-#[derive(Copy, Clone, Debug)]
+#[derive(Copy, Clone, Debug, Std140Compat)]
 #[repr(C, packed)]
 pub struct Model {
     pub model: Mat4,
     pub model_it: Mat4,
 }
 
-#[derive(Copy, Clone, Debug, Default)]
+#[derive(Copy, Clone, Debug, Default, Std140Compat)]
 #[repr(C, packed)]
 pub struct ViewData {
     pub view_proj: Mat4,
@@ -127,11 +106,4 @@ pub struct ViewData {
 impl UniformBlock for ViewData {
     const SET: u32 = 0;
     const BINDING: u32 = 0;
-}
-impl Uniform for ViewData {
-    fn size() -> u16 {
-        std::mem::size_of::<Self>()
-            .try_into()
-            .expect("uniform is too big")
-    }
 }

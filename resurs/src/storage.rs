@@ -378,7 +378,7 @@ mod tests {
 
         let f = |x| x % 2 == 0;
         remove_with_cond(&mut m, &r, f);
-        check_with_cond(&mut m, &r, f);
+        check_with_cond(&m, &r, f);
     }
 
     #[test]

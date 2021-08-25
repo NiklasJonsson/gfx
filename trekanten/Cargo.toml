@@ -26,6 +26,7 @@ resurs = { path = "../resurs" }
 parking_lot = "0.11.1"
 arrayvec = "0.5"
 bitflags = "1.2"
+trekanten-derive = { path = "../trekanten-derive" }
 
 profiling = "1.0.3"
 
@@ -43,3 +44,4 @@ reqwest = {version = "0.10.7", features = ["blocking"]}
 tobj = "2.0.2"
 glfw = {version = "0.39.0", features = ["vulkan"]}
 nalgebra-glm = "0.7.0"
+

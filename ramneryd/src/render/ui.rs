@@ -15,7 +15,7 @@ use trekanten::vertex::{VertexDefinition, VertexFormat};
 use trekanten::Frame;
 use trekanten::RenderPassEncoder;
 use trekanten::Renderer;
-use trekanten::{BufferHandle, Handle};
+use trekanten::{BufferHandle, Handle, Std140Compat};
 
 use crate::common::Name;
 use crate::io::input;
@@ -647,7 +647,7 @@ pub struct UIDrawCommands {
     commands: Vec<UIDrawCommand>,
 }
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, Std140Compat)]
 #[repr(C, packed)]
 pub struct VertexShaderData {
     scale_translate: [f32; 4],

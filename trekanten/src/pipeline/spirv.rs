@@ -343,7 +343,7 @@ mod tests {
             binding.descriptor_type,
             vk::DescriptorType::COMBINED_IMAGE_SAMPLER
         );
-        assert_eq!(binding.binding, 1);
+        assert_eq!(binding.binding, 0);
         assert_eq!(binding.descriptor_count, 8);
         assert_eq!(binding.stage_flags, vk::ShaderStageFlags::FRAGMENT);
     }

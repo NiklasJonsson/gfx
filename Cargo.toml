@@ -1,5 +1,5 @@
 [workspace]
-members = ["trekanten", "resurs", "ramneryd-derive", "gltf-viewer", "ramneryd", "editor"]
+members = ["trekanten", "trekanten-derive", "resurs", "ramneryd-derive", "gltf-viewer", "ramneryd", "editor"]
 
 [profile.release]
 debug = true

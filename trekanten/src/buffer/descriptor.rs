@@ -1,9 +1,10 @@
 use super::{
-    BufferMutability, BufferType, DeviceBuffer, HostBuffer, IndexBufferType, IndexInt, Uniform,
+    BufferMutability, BufferType, DeviceBuffer, HostBuffer, IndexBufferType, IndexInt,
     UniformBufferType, VertexBufferType,
 };
 use crate::backend;
 
+use crate::traits::Uniform;
 use crate::util::{as_byte_slice, ByteBuffer};
 use backend::buffer::Buffer;
 use backend::command::CommandBuffer;
@@ -162,6 +163,7 @@ impl<'a, BT: BufferType + Clone> BufferDescriptor<'a, BT> {
         Ok(BufferResult { buffer, transient })
     }
 
+    #[allow(clippy::type_complexity)]
     pub fn enqueue(
         &self,
         allocator: &AllocatorHandle,

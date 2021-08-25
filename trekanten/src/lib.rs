@@ -13,6 +13,7 @@ mod render_pass;
 mod render_target;
 pub mod resource;
 pub mod texture;
+pub mod traits;
 pub mod util;
 pub mod vertex;
 
@@ -25,6 +26,9 @@ pub use render_pass::{RenderPass, RenderPassEncoder};
 pub use render_target::RenderTarget;
 pub use resource::{Async, Handle, MutResourceManager, ResourceManager};
 pub use texture::Texture;
+pub use traits::{PushConstant, Std140, Uniform};
+
+pub use trekanten_derive::Std140Compat;
 
 use ash::version::DeviceV1_0;
 use backend::device::HasVkDevice as _;
@@ -87,7 +91,7 @@ impl<'a> Frame<'a> {
     }
 
     // TODO: Could we use vkCmdUpdateBuffer instead? Note that it can't be inside a render pass
-    pub fn update_uniform_blocking<T: Copy + buffer::Uniform>(
+    pub fn update_uniform_blocking<T: Copy + traits::Uniform>(
         &mut self,
         h: &BufferHandle<buffer::DeviceUniformBuffer>,
         data: &T,
@@ -806,7 +810,7 @@ impl Renderer {
 
 /// These are functions only used by other parts of this lib
 impl Renderer {
-    fn update_uniform<T: Copy + buffer::Uniform>(
+    fn update_uniform<T: Copy + traits::Uniform>(
         &mut self,
         h: &BufferHandle<buffer::DeviceUniformBuffer>,
         data: &T,

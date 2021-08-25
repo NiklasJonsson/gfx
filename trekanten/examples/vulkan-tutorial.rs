@@ -16,6 +16,7 @@ use trekanten::vertex::{VertexDefinition, VertexFormat};
 use trekanten::{RenderPass, Renderer, Texture};
 
 use trekanten::ResourceManager as _;
+use trekanten::Std140Compat;
 
 use std::time::Duration;
 
@@ -115,17 +116,21 @@ impl VertexDefinition for Vertex {
     }
 }
 
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, Default)]
+#[repr(transparent)]
+struct Mat4(glm::Mat4);
+
+#[derive(Clone, Copy, Std140Compat)]
 #[repr(C)]
 struct UniformBufferObject {
-    model: glm::Mat4,
-    view: glm::Mat4,
-    proj: glm::Mat4,
+    model: Mat4,
+    view: Mat4,
+    proj: Mat4,
 }
-impl buffer::Uniform for UniformBufferObject {
-    fn size() -> u16 {
-        std::mem::size_of::<Self>() as u16
-    }
+
+unsafe impl trekanten::Std140 for Mat4 {
+    const SIZE: usize = 64;
+    const ALIGNMENT: usize = 16;
 }
 
 fn get_fname(dir: &str, target: &str) -> std::path::PathBuf {
@@ -167,13 +172,13 @@ fn load_url(dir: &str, target: &str) -> std::io::Cursor<Vec<u8>> {
 const OBJ_URL: &str = "https://vulkan-tutorial.com/resources/viking_room.obj";
 const TEX_URL: &str = "https://vulkan-tutorial.com/resources/viking_room.png";
 
-static RAW_VERT_SPV: &'static [u32] = inline_spirv::include_spirv!(
+static RAW_VERT_SPV: &[u32] = inline_spirv::include_spirv!(
     "examples/shaders/shader.vert.glsl",
     vert,
     glsl,
     entry = "main"
 );
-static RAW_FRAG_SPV: &'static [u32] = inline_spirv::include_spirv!(
+static RAW_FRAG_SPV: &[u32] = inline_spirv::include_spirv!(
     "examples/shaders/shader.frag.glsl",
     frag,
     glsl,
@@ -217,9 +222,8 @@ fn load_viking_house() -> (Vec<Vertex>, Vec<u32>) {
 }
 
 fn handle_window_event(window: &mut glfw::Window, event: glfw::WindowEvent) {
-    match event {
-        glfw::WindowEvent::Key(Key::Escape, _, Action::Press, _) => window.set_should_close(true),
-        _ => {}
+    if let glfw::WindowEvent::Key(Key::Escape, _, Action::Press, _) = event {
+        window.set_should_close(true);
     }
 }
 
@@ -228,20 +232,25 @@ fn get_next_mvp(start: &std::time::Instant, aspect_ratio: f32) -> UniformBufferO
     let time = time.as_secs_f32();
 
     let mut ubo = UniformBufferObject {
-        model: glm::rotate(
+        model: Mat4(glm::rotate(
             &glm::identity(),
             time * std::f32::consts::FRAC_PI_2,
             &glm::vec3(0.0, 0.0, 1.0),
-        ),
-        view: glm::look_at(
+        )),
+        view: Mat4(glm::look_at(
             &glm::vec3(2.0, 2.0, 2.0),
             &glm::vec3(0.0, 0.0, 0.0),
             &glm::vec3(0.0, 0.0, 1.0),
-        ),
-        proj: glm::perspective_zo(aspect_ratio, std::f32::consts::FRAC_PI_4, 0.1, 10.0),
+        )),
+        proj: Mat4(glm::perspective_zo(
+            aspect_ratio,
+            std::f32::consts::FRAC_PI_4,
+            0.1,
+            10.0,
+        )),
     };
 
-    ubo.proj[(1, 1)] *= -1.0;
+    ubo.proj.0[(1, 1)] *= -1.0;
 
     ubo
 }
@@ -249,14 +258,13 @@ fn get_next_mvp(start: &std::time::Instant, aspect_ratio: f32) -> UniformBufferO
 fn create_texture(renderer: &mut Renderer) -> Handle<Texture> {
     let _ = load_url("textures", TEX_URL);
     let tex_path = get_fname("textures", TEX_URL);
-    let texture_handle = renderer
+    renderer
         .create_texture(texture::TextureDescriptor::file(
-            tex_path.into(),
+            tex_path,
             util::Format::RGBA_SRGB,
             texture::MipMaps::Generate,
         ))
-        .expect("Failed to create texture");
-    texture_handle
+        .expect("Failed to create texture")
 }
 
 type Mesh = (
@@ -283,9 +291,9 @@ fn create_mesh(renderer: &mut Renderer) -> Mesh {
 
 fn create_mvp_ubuf(renderer: &mut Renderer) -> BufferHandle<DeviceUniformBuffer> {
     let data = vec![UniformBufferObject {
-        model: glm::Mat4::default(),
-        view: glm::Mat4::default(),
-        proj: glm::Mat4::default(),
+        model: Mat4::default(),
+        view: Mat4::default(),
+        proj: Mat4::default(),
     }];
 
     let uniform_buffer_desc =
@@ -309,10 +317,9 @@ fn create_pipeline(
         .build()
         .expect("Failed to build graphics pipeline descriptor");
 
-    let gfx_pipeline_handle = renderer
-        .create_gfx_pipeline(pipeline_descriptor, &render_pass)
-        .expect("Failed to create graphics pipeline");
-    gfx_pipeline_handle
+    renderer
+        .create_gfx_pipeline(pipeline_descriptor, render_pass)
+        .expect("Failed to create graphics pipeline")
 }
 
 fn main() -> Result<(), trekanten::RenderError> {

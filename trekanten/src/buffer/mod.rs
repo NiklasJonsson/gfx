@@ -7,6 +7,7 @@ use crate::vertex::VertexFormat;
 use backend::command::CommandBuffer;
 use backend::{buffer::Buffer, util::stride, AllocatorHandle, MemoryError};
 
+use crate::traits::Uniform;
 use crate::util::{as_bytes, ByteBuffer};
 use crate::vertex::VertexDefinition;
 
@@ -154,13 +155,6 @@ impl UniformBufferType {
     fn from_trait<U: Uniform>() -> Self {
         Self { size: U::size() }
     }
-}
-
-// TODO: This should have a corresponding derive that exposes align/size/padding checks
-/// Trait for a type that is a uniform
-pub trait Uniform {
-    // The size of a uniform in bytes. Note that there cannot be padding in a struct
-    fn size() -> u16;
 }
 
 #[derive(Debug, Clone)]

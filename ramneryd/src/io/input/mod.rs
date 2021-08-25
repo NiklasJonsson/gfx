@@ -488,7 +488,7 @@ mod tests {
         verify_state_count(&world, entities[1], TestState::State1, 1);
         verify_state_count(&world, entities[2], TestState::State2, 0);
 
-        world.insert(CurrentFrameExternalInputs(external_inputs.clone()));
+        world.insert(CurrentFrameExternalInputs(external_inputs));
         world.delete_entity(entities[1]).expect("Fail");
 
         executor.execute(&world);
