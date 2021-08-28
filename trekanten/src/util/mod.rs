@@ -16,6 +16,24 @@ pub fn clamp<T: Ord>(v: T, min: T, max: T) -> T {
     std::cmp::max(min, std::cmp::min(v, max))
 }
 
+pub const fn max(a: usize, b: usize) -> usize {
+    if a > b {
+        a
+    } else {
+        b
+    }
+}
+
+pub const fn round_to_multiple(n: usize, multiple: usize) -> usize {
+    if n == 0 {
+        multiple
+    } else if n % multiple == 0 {
+        n
+    } else {
+        n + (multiple - (n % multiple))
+    }
+}
+
 /// # Safety
 /// # Only call this is the type can be represented with all possible byte values
 pub unsafe fn as_byte_slice<T: Copy>(slice: &[T]) -> &[u8] {
@@ -112,5 +130,27 @@ impl Drop for ByteBuffer {
         unsafe {
             (self.drop)(self.ptr, self.len, self.cap);
         }
+    }
+}
+
+#[cfg(test)]
+mod test {
+
+    #[test]
+    fn test_round() {
+        use super::round_to_multiple;
+
+        let check = |x, m, e| {
+            assert_eq!(round_to_multiple(x, m), e);
+        };
+
+        check(0, 100, 100);
+        check(15, 100, 100);
+        check(100, 100, 100);
+        check(101, 100, 200);
+        check(4, 7, 7);
+        check(8, 7, 14);
+        check(12, 16, 16);
+        check(12, 4, 12);
     }
 }
