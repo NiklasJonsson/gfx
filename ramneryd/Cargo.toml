@@ -2,7 +2,7 @@
 name = "ramneryd"
 version = "0.1.0"
 authors = ["Niklas Jonsson <niklasandersjonsson@gmail.com>"]
-edition = "2018"
+edition = "2021"
 
 [dependencies]
 ramneryd-derive = { path = "../ramneryd-derive" }
