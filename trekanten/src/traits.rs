@@ -37,9 +37,9 @@ macro_rules! impl_std140_scalar {
         // rule 6
         unsafe impl<const N: usize> Std140 for [[$ty; 16]; N] {
             const SIZE: usize =
-                crate::util::round_to_multiple(<[$ty; 4] as Std140>::SIZE * N, Self::ALIGNMENT);
+                crate::util::round_to_multiple(<[$ty; 16] as Std140>::SIZE * N, Self::ALIGNMENT);
             const ALIGNMENT: usize =
-                crate::util::round_to_multiple(<[$ty; 4] as Std140>::ALIGNMENT, 16);
+                crate::util::round_to_multiple(<[$ty; 16] as Std140>::ALIGNMENT, 16);
         }
     };
 }

@@ -782,8 +782,8 @@ pub fn setup_resources(world: &mut World, mut renderer: &mut Renderer) {
             // TODO: Single elem uniform buffer here. Add to the same buffer?
             let light_data = uniform::LightingData {
                 punctual_lights: [uniform::PackedLight::default(); uniform::MAX_NUM_LIGHTS],
-                num_lights: 0,
                 ambient: [0.0; 4],
+                num_lights: [0; 4],
             };
             let light_data =
                 UniformBufferDescriptor::from_single(light_data, BufferMutability::Mutable);
@@ -791,8 +791,9 @@ pub fn setup_resources(world: &mut World, mut renderer: &mut Renderer) {
 
             let shadow_matrices = uniform::ShadowMatrices {
                 matrices: [uniform::Mat4::default(); uniform::MAX_NUM_LIGHTS],
-                num_matrices: 0,
+                num_matrices: [0; 4],
             };
+            dbg!(std::mem::size_of::<uniform::ShadowMatrices>());
             let shadow_matrices =
                 UniformBufferDescriptor::from_single(shadow_matrices, BufferMutability::Mutable);
             let shadow_matrices_buffer = renderer

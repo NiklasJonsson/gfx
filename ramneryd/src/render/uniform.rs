@@ -33,7 +33,7 @@ impl UniformBlock for UnlitUniformData {
     const BINDING: u32 = 0;
 }
 
-#[derive(Copy, Clone, Debug)]
+#[derive(Copy, Clone, Debug, Std140Compat)]
 #[repr(C, packed)]
 pub struct PackedLight {
     pub pos: [f32; 4],         // position for point/spot light
@@ -61,7 +61,8 @@ pub const MAX_NUM_LIGHTS: usize = 16;
 #[repr(C, packed)]
 pub struct ShadowMatrices {
     pub matrices: [Mat4; MAX_NUM_LIGHTS],
-    pub num_matrices: u32,
+    // v4 is needed for padding at the end. Use only the first value.
+    pub num_matrices: [u32; 4],
 }
 impl UniformBlock for ShadowMatrices {
     const SET: u32 = 0;
@@ -73,20 +74,22 @@ impl UniformBlock for ShadowMatrices {
 pub struct LightingData {
     pub punctual_lights: [PackedLight; MAX_NUM_LIGHTS],
     pub ambient: [f32; 4],
-    pub num_lights: u32,
+    // v4 is needed for padding at the end. Use only the first value.
+    pub num_lights: [u32; 4],
+}
+
+// TODO: Switch this when std140 code supports structs in arrays
+unsafe impl Uniform for LightingData {
+    fn size() -> u16 {
+        return std::mem::size_of::<Self>()
+            .try_into()
+            .expect("struct is too big to be a uniform, must fit in 16 bits");
+    }
 }
 
 impl UniformBlock for LightingData {
     const SET: u32 = 0;
     const BINDING: u32 = 1;
-}
-
-unsafe impl Uniform for LightingData {
-    fn size() -> u16 {
-        std::mem::size_of::<Self>()
-            .try_into()
-            .expect("uniform is too big")
-    }
 }
 
 #[derive(Copy, Clone, Debug, Std140Compat)]

@@ -252,15 +252,15 @@ pub fn light_and_shadow_pass(
             ),
             Light::Ambient { .. } => unreachable!("Should have been handled already"),
         };
-        lighting_data.punctual_lights[lighting_data.num_lights as usize] = packed_light;
-        lighting_data.num_lights += 1;
+        lighting_data.punctual_lights[lighting_data.num_lights[0] as usize] = packed_light;
+        lighting_data.num_lights[0] += 1;
 
         if let Some(shadow_view_data) = shadow_view_data {
-            let shadow_idx = shadow_matrices.num_matrices;
-            shadow_matrices.num_matrices += 1;
+            let shadow_idx = shadow_matrices.num_matrices[0];
+            shadow_matrices.num_matrices[0] += 1;
 
-            assert!(lighting_data.num_lights > 0);
-            lighting_data.punctual_lights[(lighting_data.num_lights - 1) as usize].shadow_idx =
+            assert!(lighting_data.num_lights[0] > 0);
+            lighting_data.punctual_lights[(lighting_data.num_lights[0] - 1) as usize].shadow_idx =
                 [shadow_idx; 4];
 
             let shadow_idx = shadow_idx as usize;
@@ -295,7 +295,7 @@ pub fn light_and_shadow_pass(
         }
     }
 
-    let num_shadows = shadow_matrices.num_matrices;
+    let num_shadows = shadow_matrices.num_matrices[0];
 
     frame
         .update_uniform_blocking(

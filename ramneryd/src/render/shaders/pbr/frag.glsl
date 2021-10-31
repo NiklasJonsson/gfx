@@ -21,11 +21,11 @@ struct PackedLight {
 layout(set = 0, binding = 1) uniform LightingData {
     PackedLight lights[MAX_NUM_LIGHTS];
     vec4 ambient; // vec3 color + float strength
-    uint num_lights; // The number of lights in the array
+    uvec4 num_lights; // The number of lights in the array
 } lighting_data;
 
 uint num_lights() {
-    return min(lighting_data.num_lights, MAX_NUM_LIGHTS);
+    return min(lighting_data.num_lights.x, MAX_NUM_LIGHTS);
 }
 
 struct Light {

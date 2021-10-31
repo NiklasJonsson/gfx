@@ -10,11 +10,11 @@ layout(set = 0, binding = 0) uniform ViewData {
 
 layout(set = 0, binding = 3) uniform ShadowMatrices {
     mat4 matrices[MAX_NUM_LIGHTS];
-    uint num_matrices;
+    uvec4 num_matrices;
 } shadow_matrices;
 
 uint num_shadow_matrices() {
-    return min(MAX_NUM_LIGHTS, shadow_matrices.num_matrices);
+    return min(MAX_NUM_LIGHTS, shadow_matrices.num_matrices.x);
 }
 
 layout(push_constant) uniform Model {
