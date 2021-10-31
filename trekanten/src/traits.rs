@@ -47,6 +47,14 @@ macro_rules! impl_std140_scalar {
 impl_std140_scalar!(f32);
 impl_std140_scalar!(u32);
 
+/* TODO: Support generic args and generic sizes when we can add bounds on N (>= 3)
+// Otherwise we will get conflicting impl for e.g vec2
+unsafe impl<T: Std140, const N: usize> Std140 for [T; N] {
+    const SIZE: usize = crate::util::round_to_multiple(T::SIZE * N, Self::ALIGNMENT);
+    const ALIGNMENT: usize = crate::util::round_to_multiple(T::ALIGNMENT, 16);
+}
+*/
+
 pub unsafe trait Uniform: Copy {
     // The size of a uniform in bytes. Note that there cannot be padding in a struct
     fn size() -> u16;

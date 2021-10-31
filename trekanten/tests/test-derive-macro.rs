@@ -136,6 +136,7 @@ mod tests {
     fn test_light() {
         const LEN: usize = 16;
 
+        // TODO: structs in arrays (as members of structs)
         pub struct PackedLight {
             pub pos: [f32; 4],         // position for point/spot light
             pub dir_cutoff: [f32; 4], // direction for spot/directional light. .w is the cos(cutoff_angle) of the spotlight

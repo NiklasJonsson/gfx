@@ -81,9 +81,9 @@ pub struct LightingData {
 // TODO: Switch this when std140 code supports structs in arrays
 unsafe impl Uniform for LightingData {
     fn size() -> u16 {
-        return std::mem::size_of::<Self>()
+        std::mem::size_of::<Self>()
             .try_into()
-            .expect("struct is too big to be a uniform, must fit in 16 bits");
+            .expect("struct is too big to be a uniform, must fit in 16 bits")
     }
 }
 
