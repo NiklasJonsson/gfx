@@ -4,7 +4,7 @@ use crate::generics::True;
 pub struct Gt3<const N: usize> {}
 macro_rules! impl_gt3 {
     ($n:expr) => {
-        impl True for Gt3<$n> {} 
+        impl True for Gt3<$n> {}
     };
     ($x:expr, $($y:expr),+) => {
         impl_gt3!($x);
@@ -45,12 +45,12 @@ impl_std140_scalar!(u32);
 
 // rule 2, 4, 5, 6
 unsafe impl<T: Std140, const N: usize> Std140 for [T; N]
-    where Gt3<N>: True,
+where
+    Gt3<N>: True,
 {
     const SIZE: usize = crate::util::round_to_multiple(T::SIZE * N, Self::ALIGNMENT);
     const ALIGNMENT: usize = crate::util::round_to_multiple(T::ALIGNMENT, 16);
 }
-
 
 pub unsafe trait Uniform: Copy {
     // The size of a uniform in bytes. Note that there cannot be padding in a struct

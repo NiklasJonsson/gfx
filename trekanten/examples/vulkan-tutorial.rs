@@ -1,4 +1,10 @@
-use glfw::{Action, Key};
+use winit::{
+    dpi::{LogicalSize, PhysicalSize},
+    event::{Event, WindowEvent},
+    event_loop::{ControlFlow, EventLoop},
+    window::WindowBuilder,
+};
+
 use nalgebra_glm as glm;
 use resurs::Handle;
 
@@ -18,83 +24,75 @@ use trekanten::{RenderPass, Renderer, Texture};
 use trekanten::ResourceManager as _;
 use trekanten::Std140Compat;
 
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 const WINDOW_HEIGHT: u32 = 300;
 const WINDOW_WIDTH: u32 = 300;
 const WINDOW_TITLE: &str = "Trekanten Vulkan Tutoria";
 
-type GlfwWindowEvents = std::sync::mpsc::Receiver<(f64, glfw::WindowEvent)>;
-
-struct GlfwWindow {
-    pub glfw: glfw::Glfw,
-    pub window: glfw::Window,
-    pub events: GlfwWindowEvents,
-    frame_times: [std::time::Duration; 10],
+struct State {
+    pub window: winit::window::Window,
+    frame_times: [Duration; 10],
     frame_time_idx: usize,
+    start: Instant,
+    frame_start: Instant,
 }
 
-impl GlfwWindow {
-    pub fn new() -> Self {
-        let mut glfw = glfw::init(glfw::FAIL_ON_ERRORS).expect("Failed to init glfw");
-        assert!(glfw.vulkan_supported(), "No vulkan!");
+impl State {
+    pub fn new() -> (Self, EventLoop<()>) {
+        let ev = EventLoop::new();
+        let window = WindowBuilder::new()
+            .with_inner_size(LogicalSize::new(WINDOW_WIDTH, WINDOW_HEIGHT))
+            .with_title(WINDOW_TITLE)
+            .build(&ev)
+            .expect("Failed to build window");
 
-        glfw.window_hint(glfw::WindowHint::ClientApi(glfw::ClientApiHint::NoApi));
+        (
+            Self {
+                window,
 
-        let (mut window, events) = glfw
-            .create_window(
-                WINDOW_WIDTH,
-                WINDOW_HEIGHT,
-                WINDOW_TITLE,
-                glfw::WindowMode::Windowed,
-            )
-            .expect("Failed to create GLFW window.");
-
-        window.set_key_polling(true);
-
-        Self {
-            glfw,
-            window,
-            events,
-            frame_times: [std::time::Duration::default(); 10],
-            frame_time_idx: 0,
-        }
+                frame_times: [std::time::Duration::default(); 10],
+                frame_time_idx: 0,
+                start: Instant::now(),
+                frame_start: Instant::now(),
+            },
+            ev,
+        )
     }
 
-    pub fn set_frame_ms(&mut self, time: Duration) {
+    pub fn start_frame(&mut self) {
+        self.frame_start = std::time::Instant::now();
+    }
+
+    pub fn end_frame(&mut self) {
+        let time = std::time::Instant::now() - self.frame_start;
         self.frame_times[self.frame_time_idx] = time;
 
-        if self.frame_time_idx == self.frame_times.len() - 1 {
-            let avg = self
-                .frame_times
-                .iter()
-                .fold(Duration::from_secs(0), |acc, &t| acc + t)
-                / self.frame_times.len() as u32;
-            let s = format!(
-                "{} (FPS: {:.2}, {:.2} ms)",
-                WINDOW_TITLE,
-                1.0 / avg.as_secs_f32(),
-                1000.0 * avg.as_secs_f32()
-            );
-            self.window.set_title(&s);
-            self.frame_time_idx = 0;
-        } else {
+        if self.frame_time_idx < self.frame_times.len() - 1 {
             self.frame_time_idx += 1;
+            return;
         }
+
+        debug_assert!(self.frame_time_idx == (self.frame_times.len() - 1));
+
+        let avg = self
+            .frame_times
+            .iter()
+            .fold(Duration::from_secs(0), |acc, &t| acc + t)
+            / self.frame_times.len() as u32;
+        let s = format!(
+            "{} (FPS: {:.2}, {:.2} ms)",
+            WINDOW_TITLE,
+            1.0 / avg.as_secs_f32(),
+            1000.0 * avg.as_secs_f32()
+        );
+        self.window.set_title(&s);
+        self.frame_time_idx = 0;
     }
 
     fn extents(&self) -> util::Extent2D {
-        let (w, h) = self.window.get_framebuffer_size();
-        util::Extent2D {
-            width: w as u32,
-            height: h as u32,
-        }
-    }
-}
-
-unsafe impl raw_window_handle::HasRawWindowHandle for GlfwWindow {
-    fn raw_window_handle(&self) -> raw_window_handle::RawWindowHandle {
-        self.window.raw_window_handle()
+        let PhysicalSize { width, height } = self.window.inner_size();
+        util::Extent2D { width, height }
     }
 }
 
@@ -218,13 +216,10 @@ fn load_viking_house() -> (Vec<Vertex>, Vec<u32>) {
         vertices.push(vertex);
     }
 
-    (vertices, indices)
-}
+    assert!(!vertices.is_empty());
+    assert!(!indices.is_empty());
 
-fn handle_window_event(window: &mut glfw::Window, event: glfw::WindowEvent) {
-    if let glfw::WindowEvent::Key(Key::Escape, _, Action::Press, _) = event {
-        window.set_should_close(true);
-    }
+    (vertices, indices)
 }
 
 fn get_next_mvp(start: &std::time::Instant, aspect_ratio: f32) -> UniformBufferObject {
@@ -322,11 +317,12 @@ fn create_pipeline(
         .expect("Failed to create graphics pipeline")
 }
 
-fn main() -> Result<(), trekanten::RenderError> {
+fn main() {
     env_logger::init();
 
-    let mut window = GlfwWindow::new();
-    let mut renderer = trekanten::Renderer::new(&window, window.extents())?;
+    let (mut state, event_loop) = State::new();
+    let mut renderer = trekanten::Renderer::new(&state.window, state.extents())
+        .expect("Failed to create renderer");
 
     let render_pass = renderer
         .presentation_render_pass(4)
@@ -341,61 +337,63 @@ fn main() -> Result<(), trekanten::RenderError> {
         .add_texture(&texture_handle, 1, ShaderStage::FRAGMENT, false)
         .build();
 
-    let start = std::time::Instant::now();
-    let mut last = start;
-    while !window.window.should_close() {
-        let now = std::time::Instant::now();
-        let diff = now - last;
-        window.set_frame_ms(diff);
-        last = now;
+    event_loop.run(move |event, _, control_flow| {
+        *control_flow = ControlFlow::Poll;
 
-        window.glfw.poll_events();
-        for (_, event) in glfw::flush_messages(&window.events) {
-            handle_window_event(&mut window.window, event);
+        match event {
+            Event::WindowEvent {
+                event: WindowEvent::CloseRequested,
+                ..
+            } => *control_flow = ControlFlow::Exit,
+            Event::MainEventsCleared => {
+                state.start_frame();
+                let aspect_ratio = renderer.aspect_ratio();
+                let mut frame = match renderer.next_frame() {
+                    Err(trekanten::RenderError::NeedsResize(reason)) => {
+                        log::info!("Resize reason: {:?}", reason);
+                        renderer.resize(state.extents()).expect("Failed to resize");
+                        renderer.next_frame()
+                    }
+                    x => x,
+                }
+                .expect("Failed to start frame");
+
+                let next_mvp = get_next_mvp(&state.start, aspect_ratio);
+                frame
+                    .update_uniform_blocking(&uniform_buffer_handle, &next_mvp)
+                    .expect("Failed to update uniform buffer!");
+                let cmd_buf = frame
+                    .new_command_buffer()
+                    .expect("Failed to build render command buffer");
+
+                let mut builder = frame
+                    .begin_presentation_pass(cmd_buf, &render_pass)
+                    .expect("Failed to begin render pass");
+
+                builder
+                    .bind_graphics_pipeline(&gfx_pipeline_handle)
+                    .bind_shader_resource_group(0, &desc_set_handle, &gfx_pipeline_handle)
+                    .draw_mesh(&vertex_buffer, &index_buffer);
+
+                let cmd_buf = builder.end().expect("Failed to end render command buffer");
+
+                frame.add_command_buffer(cmd_buf);
+
+                let frame = frame.finish();
+                renderer
+                    .submit(frame)
+                    .or_else(|e| {
+                        if let trekanten::RenderError::NeedsResize(reason) = e {
+                            log::info!("Resize reason: {:?}", reason);
+                            renderer.resize(state.extents())
+                        } else {
+                            Err(e)
+                        }
+                    })
+                    .expect("Failed to submit frame");
+                state.end_frame();
+            }
+            _ => (),
         }
-
-        let aspect_ratio = renderer.aspect_ratio();
-
-        let mut frame = match renderer.next_frame() {
-            Err(trekanten::RenderError::NeedsResize(reason)) => {
-                log::info!("Resize reason: {:?}", reason);
-                renderer.resize(window.extents())?;
-                renderer.next_frame()
-            }
-            x => x,
-        }?;
-
-        let next_mvp = get_next_mvp(&start, aspect_ratio);
-        frame
-            .update_uniform_blocking(&uniform_buffer_handle, &next_mvp)
-            .expect("Failed to update uniform buffer!");
-        let cmd_buf = frame
-            .new_command_buffer()
-            .expect("Failed to build render command buffer");
-
-        let mut builder = frame
-            .begin_presentation_pass(cmd_buf, &render_pass)
-            .expect("Failed to begin render pass");
-
-        builder
-            .bind_graphics_pipeline(&gfx_pipeline_handle)
-            .bind_shader_resource_group(0, &desc_set_handle, &gfx_pipeline_handle)
-            .draw_mesh(&vertex_buffer, &index_buffer);
-
-        let cmd_buf = builder.end().expect("Failed to end render command buffer");
-
-        frame.add_command_buffer(cmd_buf);
-
-        let frame = frame.finish();
-        renderer.submit(frame).or_else(|e| {
-            if let trekanten::RenderError::NeedsResize(reason) = e {
-                log::info!("Resize reason: {:?}", reason);
-                renderer.resize(window.extents())
-            } else {
-                Err(e)
-            }
-        })?;
-    }
-
-    Ok(())
+    });
 }

@@ -36,6 +36,8 @@ impl Buffer {
         log::trace!("\tsize: {}", size);
         log::trace!("\tusage: {:?}", buffer_usage_flags);
         log::trace!("\tmemory usage: {:?}", mem_usage);
+        assert!(size > 0);
+
         let buffer_info = vk::BufferCreateInfo {
             size: size as u64,
             usage: buffer_usage_flags,

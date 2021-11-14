@@ -1,4 +1,10 @@
-use glfw::{Action, Key};
+use winit::{
+    dpi::{LogicalSize, PhysicalSize},
+    event::{Event, WindowEvent},
+    event_loop::{ControlFlow, EventLoop},
+    window::WindowBuilder,
+};
+
 use nalgebra_glm as glm;
 use resurs::{Async, Handle};
 
@@ -13,6 +19,7 @@ use trekanten::pipeline::{
 use trekanten::texture;
 use trekanten::util;
 use trekanten::vertex::{VertexDefinition, VertexFormat};
+
 use trekanten::Std140Compat;
 use trekanten::{Loader, RenderPass, Renderer, Texture};
 
@@ -21,83 +28,74 @@ use trekanten::ResourceManager as _;
 
 use std::sync::mpsc;
 use std::sync::Arc;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 const WINDOW_HEIGHT: u32 = 300;
 const WINDOW_WIDTH: u32 = 300;
 const WINDOW_TITLE: &str = "Trekanten Vulkan Tutoria";
 
-type GlfwWindowEvents = std::sync::mpsc::Receiver<(f64, glfw::WindowEvent)>;
-
-struct GlfwWindow {
-    pub glfw: glfw::Glfw,
-    pub window: glfw::Window,
-    pub events: GlfwWindowEvents,
-    frame_times: [std::time::Duration; 10],
+struct State {
+    pub window: winit::window::Window,
+    frame_times: [Duration; 10],
     frame_time_idx: usize,
+    start: Instant,
+    frame_start: Instant,
 }
 
-impl GlfwWindow {
-    pub fn new() -> Self {
-        let mut glfw = glfw::init(glfw::FAIL_ON_ERRORS).expect("Failed to init glfw");
-        assert!(glfw.vulkan_supported(), "No vulkan!");
+impl State {
+    pub fn new() -> (Self, EventLoop<()>) {
+        let ev = EventLoop::new();
+        let window = WindowBuilder::new()
+            .with_inner_size(LogicalSize::new(WINDOW_WIDTH, WINDOW_HEIGHT))
+            .with_title(WINDOW_TITLE)
+            .build(&ev)
+            .expect("Failed to build window");
 
-        glfw.window_hint(glfw::WindowHint::ClientApi(glfw::ClientApiHint::NoApi));
+        (
+            Self {
+                window,
 
-        let (mut window, events) = glfw
-            .create_window(
-                WINDOW_WIDTH,
-                WINDOW_HEIGHT,
-                WINDOW_TITLE,
-                glfw::WindowMode::Windowed,
-            )
-            .expect("Failed to create GLFW window.");
-
-        window.set_key_polling(true);
-
-        Self {
-            glfw,
-            window,
-            events,
-            frame_times: [std::time::Duration::default(); 10],
-            frame_time_idx: 0,
-        }
+                frame_times: [std::time::Duration::default(); 10],
+                frame_time_idx: 0,
+                start: Instant::now(),
+                frame_start: Instant::now(),
+            },
+            ev,
+        )
     }
 
-    pub fn set_frame_ms(&mut self, time: Duration) {
+    pub fn start_frame(&mut self) {
+        self.frame_start = std::time::Instant::now();
+    }
+
+    pub fn end_frame(&mut self) {
+        let time = std::time::Instant::now() - self.frame_start;
         self.frame_times[self.frame_time_idx] = time;
 
-        if self.frame_time_idx == self.frame_times.len() - 1 {
-            let avg = self
-                .frame_times
-                .iter()
-                .fold(Duration::from_secs(0), |acc, &t| acc + t)
-                / self.frame_times.len() as u32;
-            let s = format!(
-                "{} (FPS: {:.2}, {:.2} ms)",
-                WINDOW_TITLE,
-                1.0 / avg.as_secs_f32(),
-                1000.0 * avg.as_secs_f32()
-            );
-            self.window.set_title(&s);
-            self.frame_time_idx = 0;
-        } else {
+        if self.frame_time_idx < self.frame_times.len() - 1 {
             self.frame_time_idx += 1;
+            return;
         }
+        debug_assert!(self.frame_time_idx == (self.frame_times.len() - 1));
+
+        let avg = self
+            .frame_times
+            .iter()
+            .fold(Duration::from_secs(0), |acc, &t| acc + t)
+            / self.frame_times.len() as u32;
+        let s = format!(
+            "{} (FPS: {:.2}, {:.2} ms)",
+            WINDOW_TITLE,
+            1.0 / avg.as_secs_f32(),
+            1000.0 * avg.as_secs_f32()
+        );
+        self.window.set_title(&s);
+        self.frame_time_idx = 0;
     }
 
     fn extents(&self) -> util::Extent2D {
-        let (w, h) = self.window.get_framebuffer_size();
-        util::Extent2D {
-            width: w as u32,
-            height: h as u32,
-        }
-    }
-}
-
-unsafe impl raw_window_handle::HasRawWindowHandle for GlfwWindow {
-    fn raw_window_handle(&self) -> raw_window_handle::RawWindowHandle {
-        self.window.raw_window_handle()
+        let PhysicalSize { width, height } = self.window.inner_size();
+        util::Extent2D { width, height }
     }
 }
 
@@ -224,12 +222,6 @@ fn load_viking_house() -> (Vec<Vertex>, Vec<u32>) {
     (vertices, indices)
 }
 
-fn handle_window_event(window: &mut glfw::Window, event: glfw::WindowEvent) {
-    if let glfw::WindowEvent::Key(Key::Escape, _, Action::Press, _) = event {
-        window.set_should_close(true);
-    }
-}
-
 fn get_next_mvp(start: &std::time::Instant, aspect_ratio: f32) -> UniformBufferObject {
     let time = std::time::Instant::now() - *start;
     let time = time.as_secs_f32();
@@ -329,11 +321,12 @@ fn create_pipeline(
         .expect("Failed to create graphics pipeline")
 }
 
-fn main() -> Result<(), trekanten::RenderError> {
+fn main() {
     env_logger::init();
 
-    let mut window = GlfwWindow::new();
-    let mut renderer = trekanten::Renderer::new(&window, window.extents())?;
+    let (mut state, event_loop) = State::new();
+    let mut renderer = trekanten::Renderer::new(&state.window, state.extents())
+        .expect("Failed to create renderer");
     let loader = Arc::new(renderer.loader().expect("Loader should be available"));
     let render_pass = renderer
         .presentation_render_pass(4)
@@ -364,117 +357,121 @@ fn main() -> Result<(), trekanten::RenderError> {
     // Can only created once the texture is done.
     let mut desc_set: Option<Handle<DescriptorSet>> = None;
 
-    let start = std::time::Instant::now();
-    let mut last = start;
-    while !window.window.should_close() {
-        let now = std::time::Instant::now();
-        let diff = now - last;
-        window.set_frame_ms(diff);
-        last = now;
+    event_loop.run(move |event, _, control_flow| {
+        *control_flow = ControlFlow::Poll;
 
-        window.glfw.poll_events();
-        for (_, event) in glfw::flush_messages(&window.events) {
-            handle_window_event(&mut window.window, event);
-        }
+        match event {
+            Event::WindowEvent {
+                event: WindowEvent::CloseRequested,
+                ..
+            } => *control_flow = ControlFlow::Exit,
+            Event::MainEventsCleared => {
+                state.start_frame();
+                // Query the manually spawned threads
+                pending_mesh = pending_mesh.or_else(|| mesh_receiver.try_recv().ok());
+                pending_tex = pending_tex.or_else(|| texture_receiver.try_recv().ok());
 
-        // Query the manually spawned threads
-        pending_mesh = pending_mesh.or_else(|| mesh_receiver.try_recv().ok());
-        pending_tex = pending_tex.or_else(|| texture_receiver.try_recv().ok());
+                // It is fairly unlikely but it could happen that the gpu upload happens before the spawned threads have returned their data.
+                // If that happens we wouldn't have the pending handles to compare with when transfering. In our case, it doesn't matter since
+                // we only have one handle of each type, but in the general case, we need to have the async handles to map the incoming ones to.
+                // We still want to wait for them though, because we need to have exclusive ownership
+                if let (Some(pending_mesh), Some(pending_tex)) = (pending_mesh, pending_tex) {
+                    let mut guard = loader.transfer(&mut renderer);
+                    for mapping in guard.iter() {
+                        use trekanten::loader::HandleMapping;
 
-        // It is fairly unlikely but it could happen that the gpu upload happens before the spawned threads have returned their data.
-        // If that happens we wouldn't have the pending handles to compare with when transfering. In our case, it doesn't matter since
-        // we only have one handle of each type, but in the general case, we need to have the async handles to map the incoming ones to.
-        // We still want to wait for them though, because we need to have exclusive ownership
-        if let (Some(pending_mesh), Some(pending_tex)) = (pending_mesh, pending_tex) {
-            let mut guard = loader.transfer(&mut renderer);
-            for mapping in guard.iter() {
-                use trekanten::loader::HandleMapping;
-
-                match mapping {
-                    HandleMapping::IndexBuffer { old, new } => {
-                        assert_eq!(old.handle(), pending_mesh.1.handle());
-                        assert!(ibuf.is_none(), "Double return?");
-                        ibuf = Some(new);
+                        match mapping {
+                            HandleMapping::IndexBuffer { old, new } => {
+                                assert_eq!(old.handle(), pending_mesh.1.handle());
+                                assert!(ibuf.is_none(), "Double return?");
+                                ibuf = Some(new);
+                            }
+                            HandleMapping::VertexBuffer { old, new } => {
+                                assert_eq!(old.handle(), pending_mesh.0.handle());
+                                assert!(vbuf.is_none(), "Double return?");
+                                vbuf = Some(new);
+                            }
+                            HandleMapping::Texture { old, new } => {
+                                assert_eq!(old, pending_tex);
+                                assert!(tex.is_none());
+                                tex = Some(new);
+                            }
+                            _ => unreachable!("Haven't tried to load any other types"),
+                        }
                     }
-                    HandleMapping::VertexBuffer { old, new } => {
-                        assert_eq!(old.handle(), pending_mesh.0.handle());
-                        assert!(vbuf.is_none(), "Double return?");
-                        vbuf = Some(new);
-                    }
-                    HandleMapping::Texture { old, new } => {
-                        assert_eq!(old, pending_tex);
-                        assert!(tex.is_none());
-                        tex = Some(new);
-                    }
-                    _ => unreachable!("Haven't tried to load any other types"),
                 }
+
+                // Create the descriptor set if we've received the texture
+                if let (Some(tex), None) = (tex, desc_set) {
+                    // We can't generate mipmaps as part of the loading via loader so we do it here.
+                    renderer
+                        .generate_mipmaps(&[tex])
+                        .expect("Failed to generate mipmaps");
+                    desc_set = Some(
+                        DescriptorSet::builder(&mut renderer)
+                            .add_buffer(&ubuf, 0, ShaderStage::VERTEX)
+                            .add_texture(&tex, 1, ShaderStage::FRAGMENT, false)
+                            .build(),
+                    );
+                }
+
+                if vbuf.is_none() && ibuf.is_none() && desc_set.is_none() {
+                    // Nothing to render
+                    state.end_frame();
+                    return;
+                }
+
+                let aspect_ratio = renderer.aspect_ratio();
+
+                let mut frame = match renderer.next_frame() {
+                    Err(trekanten::RenderError::NeedsResize(reason)) => {
+                        log::info!("Resize reason: {:?}", reason);
+                        renderer.resize(state.extents()).expect("Failed to resize");
+                        renderer.next_frame()
+                    }
+                    x => x,
+                }
+                .expect("Failed to get next frame");
+
+                let next_mvp = get_next_mvp(&state.start, aspect_ratio);
+                frame
+                    .update_uniform_blocking(&ubuf, &next_mvp)
+                    .expect("Failed to update uniform buffer!");
+
+                // All loading needs to be done before drawing
+                if let (Some(vbuf), Some(ibuf), Some(desc_set)) = (&vbuf, &ibuf, desc_set) {
+                    let cmd_buf = frame
+                        .new_command_buffer()
+                        .expect("Failed to create render command buffer");
+                    // Pass the handles to the render pass and the renderer will ignore them if they haven't loaded yet
+                    let mut builder = frame
+                        .begin_presentation_pass(cmd_buf, &render_pass)
+                        .expect("Failed to begin render pass");
+
+                    builder
+                        .bind_graphics_pipeline(&gfx_pipeline_handle)
+                        .bind_shader_resource_group(0, &desc_set, &gfx_pipeline_handle)
+                        .draw_mesh(vbuf, ibuf);
+
+                    let cmd_buf = builder.end().expect("Failed to end render command buffer");
+                    frame.add_command_buffer(cmd_buf);
+                }
+
+                let frame = frame.finish();
+                renderer
+                    .submit(frame)
+                    .or_else(|e| {
+                        if let trekanten::RenderError::NeedsResize(reason) = e {
+                            log::info!("Resize reason: {:?}", reason);
+                            renderer.resize(state.extents())
+                        } else {
+                            Err(e)
+                        }
+                    })
+                    .expect("Failed to submit frame");
+                state.end_frame();
             }
+            _ => (),
         }
-
-        // Create the descriptor set if we've received the texture
-        if let (Some(tex), None) = (tex, desc_set) {
-            // We can't generate mipmaps as part of the loading via loader so we do it here.
-            renderer
-                .generate_mipmaps(&[tex])
-                .expect("Failed to generate mipmaps");
-            desc_set = Some(
-                DescriptorSet::builder(&mut renderer)
-                    .add_buffer(&ubuf, 0, ShaderStage::VERTEX)
-                    .add_texture(&tex, 1, ShaderStage::FRAGMENT, false)
-                    .build(),
-            );
-        }
-
-        if vbuf.is_none() && ibuf.is_none() && desc_set.is_none() {
-            // Nothing to render
-            continue;
-        }
-
-        let aspect_ratio = renderer.aspect_ratio();
-
-        let mut frame = match renderer.next_frame() {
-            Err(trekanten::RenderError::NeedsResize(reason)) => {
-                log::info!("Resize reason: {:?}", reason);
-                renderer.resize(window.extents())?;
-                renderer.next_frame()
-            }
-            x => x,
-        }?;
-
-        let next_mvp = get_next_mvp(&start, aspect_ratio);
-        frame
-            .update_uniform_blocking(&ubuf, &next_mvp)
-            .expect("Failed to update uniform buffer!");
-
-        // All loading needs to be done before drawing
-        if let (Some(vbuf), Some(ibuf), Some(desc_set)) = (&vbuf, &ibuf, desc_set) {
-            let cmd_buf = frame
-                .new_command_buffer()
-                .expect("Failed to create render command buffer");
-            // Pass the handles to the render pass and the renderer will ignore them if they haven't loaded yet
-            let mut builder = frame
-                .begin_presentation_pass(cmd_buf, &render_pass)
-                .expect("Failed to begin render pass");
-
-            builder
-                .bind_graphics_pipeline(&gfx_pipeline_handle)
-                .bind_shader_resource_group(0, &desc_set, &gfx_pipeline_handle)
-                .draw_mesh(vbuf, ibuf);
-
-            let cmd_buf = builder.end().expect("Failed to end render command buffer");
-            frame.add_command_buffer(cmd_buf);
-        }
-
-        let frame = frame.finish();
-        renderer.submit(frame).or_else(|e| {
-            if let trekanten::RenderError::NeedsResize(reason) = e {
-                log::info!("Resize reason: {:?}", reason);
-                renderer.resize(window.extents())
-            } else {
-                Err(e)
-            }
-        })?;
-    }
-
-    Ok(())
+    });
 }
