@@ -11,6 +11,7 @@ pub mod loader;
 pub mod pipeline;
 mod render_pass;
 mod render_target;
+mod generics;
 pub mod resource;
 pub mod texture;
 pub mod traits;

@@ -1,3 +1,20 @@
+use crate::generics::True;
+
+// TODO: Use the above when constant bounds are on stable
+// Hacky way to get compile time bounds on constant generics
+pub struct Gt3<const N: usize> {}
+macro_rules! impl_gt3 {
+    ($n:expr) => {
+        impl True for Gt3<$n> {} 
+    };
+    ($x:expr, $($y:expr),+) => {
+        impl_gt3!($x);
+        impl_gt3!($($y),+);
+    };
+}
+
+impl_gt3!(4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 32, 64);
+
 /// Std140 according to the opengl spec. Use the trekanten::Std140 to derive
 pub unsafe trait Std140 {
     const SIZE: usize;
@@ -21,39 +38,20 @@ macro_rules! impl_std140_scalar {
         impl_std140!([$ty; 2], 8, 8);
         // rule 3
         impl_std140!([$ty; 3], 12, 16);
-        // rule 2
-        impl_std140!([$ty; 4], 16, 16);
-        // rule 5
-        impl_std140!([$ty; 16], 16 * 4, 16);
-
-        // rule 4
-        unsafe impl<const N: usize> Std140 for [[$ty; 4]; N] {
-            const SIZE: usize =
-                crate::util::round_to_multiple(<[$ty; 4] as Std140>::SIZE * N, Self::ALIGNMENT);
-            const ALIGNMENT: usize =
-                crate::util::round_to_multiple(<[$ty; 4] as Std140>::ALIGNMENT, 16);
-        }
-
-        // rule 6
-        unsafe impl<const N: usize> Std140 for [[$ty; 16]; N] {
-            const SIZE: usize =
-                crate::util::round_to_multiple(<[$ty; 16] as Std140>::SIZE * N, Self::ALIGNMENT);
-            const ALIGNMENT: usize =
-                crate::util::round_to_multiple(<[$ty; 16] as Std140>::ALIGNMENT, 16);
-        }
     };
 }
 
 impl_std140_scalar!(f32);
 impl_std140_scalar!(u32);
 
-/* TODO: Support generic args and generic sizes when we can add bounds on N (>= 3)
-// Otherwise we will get conflicting impl for e.g vec2
-unsafe impl<T: Std140, const N: usize> Std140 for [T; N] {
+// rule 2, 4, 5, 6
+unsafe impl<T: Std140, const N: usize> Std140 for [T; N]
+    where Gt3<N>: True,
+{
     const SIZE: usize = crate::util::round_to_multiple(T::SIZE * N, Self::ALIGNMENT);
     const ALIGNMENT: usize = crate::util::round_to_multiple(T::ALIGNMENT, 16);
 }
-*/
+
 
 pub unsafe trait Uniform: Copy {
     // The size of a uniform in bytes. Note that there cannot be padding in a struct

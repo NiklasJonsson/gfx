@@ -8,7 +8,7 @@ edition = "2021"
 # Graphics
 ash = "0.31.0"
 spirv-reflect = "0.2.3"
-vk-mem = { git = "https://github.com/gwihlidal/vk-mem-rs", version = "0.2.3" }
+vk-mem = { git = "https://github.com/NiklasJonsson/vk-mem-rs", branch = "master" }
 
 # Windowing
 ash-window = "0.4.1"
