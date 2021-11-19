@@ -26,21 +26,22 @@ impl Drop for Instance {
     }
 }
 
+fn has_extension(available: &[ash::vk::ExtensionProperties], req: &CStr) -> bool {
+    for avail in available.iter() {
+        let a = unsafe { CStr::from_ptr(avail.extension_name.as_ptr()) };
+        if a == req {
+            return true;
+        }
+    }
+    return false;
+}
+
 fn check_extensions<T: AsRef<CStr>>(
     required: &[T],
     available: &[ash::vk::ExtensionProperties],
 ) -> Result<(), InstanceError> {
     for req in required.iter() {
-        let mut found = false;
-        for avail in available.iter() {
-            let a = unsafe { CStr::from_ptr(avail.extension_name.as_ptr()) };
-            log::trace!("Available vk instance extension: {:?}", avail);
-            if a == req.as_ref() {
-                found = true;
-            }
-        }
-
-        if !found {
+        if !has_extension(available, req.as_ref()) {
             let string: String = req
                 .as_ref()
                 .to_owned()
@@ -68,7 +69,11 @@ fn choose_instance_extensions<W: raw_window_handle::HasRawWindowHandle>(
     })?;
 
     if super::validation_layers::use_vk_validation() {
-        required.push(ash::extensions::ext::DebugUtils::name());
+        if !has_extension(&available, ash::extensions::ext::DebugUtils::name()) {
+            log::warn!("Tried to enable debug utils extension, for validation layers but it is not supported");
+        } else {
+            required.push(ash::extensions::ext::DebugUtils::name());
+        }
     }
 
     check_extensions(&required, &available)?;

@@ -1,7 +1,6 @@
 use crate::generics::True;
 
-// TODO: Use the above when constant bounds are on stable
-// Hacky way to get compile time bounds on constant generics
+// TODO: Hacky way to get compile time bounds on constant generics
 pub struct Gt3<const N: usize> {}
 macro_rules! impl_gt3 {
     ($n:expr) => {
