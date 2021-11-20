@@ -163,7 +163,7 @@ impl Engine {
 
 #[allow(unused_variables)]
 pub trait Module: Send {
-    fn init(&mut self, world: &mut World) {}
+    fn load(&mut self, world: &mut World) {}
 }
 
 #[derive(Default)]
@@ -244,7 +244,7 @@ fn run(mut spec: EngineSpec) -> ! {
             let ui = render::ui::UIContext::new(&mut renderer, &mut world, ui_modules);
 
             for m in spec.modules.0.iter_mut() {
-                m.init(&mut world);
+                m.load(&mut world);
             }
 
             Engine {

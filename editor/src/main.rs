@@ -20,7 +20,7 @@ struct EditorArgs {
 }
 
 impl Module for EditorArgs {
-    fn init(&mut self, world: &mut World) {
+    fn load(&mut self, world: &mut World) {
         self.gltf_files
             .iter()
             .for_each(|f| ramneryd::asset::gltf::load_asset(world, f));
@@ -36,7 +36,7 @@ struct Spawn {
 }
 
 impl Module for Spawn {
-    fn init(&mut self, world: &mut World) {
+    fn load(&mut self, world: &mut World) {
         let plane_side = 1000.0;
         let plane_height = 1.0;
         if self.spawn_plane {

@@ -13,7 +13,7 @@ struct GltfViewer {
 }
 
 impl Module for GltfViewer {
-    fn init(&mut self, world: &mut World) {
+    fn load(&mut self, world: &mut World) {
         use ramneryd::{
             math::{Quat, Rgb, Transform, Vec3},
             render::Light,
