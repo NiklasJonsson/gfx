@@ -1,6 +1,4 @@
-use std::convert::TryInto;
-
-use trekanten::{Std140Compat, Uniform};
+use trekanten::Std140Compat;
 
 pub trait UniformBlock {
     const SET: u32;
@@ -69,22 +67,13 @@ impl UniformBlock for ShadowMatrices {
     const BINDING: u32 = 3;
 }
 
-#[derive(Copy, Clone, Debug, Default)]
+#[derive(Copy, Clone, Debug, Default, Std140Compat)]
 #[repr(C, packed)]
 pub struct LightingData {
     pub punctual_lights: [PackedLight; MAX_NUM_LIGHTS],
     pub ambient: [f32; 4],
     // v4 is needed for padding at the end. Use only the first value.
     pub num_lights: [u32; 4],
-}
-
-// TODO: Switch this when std140 code supports structs in arrays
-unsafe impl Uniform for LightingData {
-    fn size() -> u16 {
-        std::mem::size_of::<Self>()
-            .try_into()
-            .expect("struct is too big to be a uniform, must fit in 16 bits")
-    }
 }
 
 impl UniformBlock for LightingData {
