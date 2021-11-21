@@ -90,12 +90,11 @@ impl Module for Spawn {
 }
 
 fn main() {
-    ramneryd::EngineSpec::builder()
+    ramneryd::EngineSpec::new()
         .with_module(EditorArgs::from_args())
         .with_module(Spawn {
             spawn_plane: false,
             spawn_cube: false,
         })
-        .build()
         .run();
 }

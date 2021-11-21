@@ -98,8 +98,7 @@ impl Module for GltfViewer {
 }
 
 fn main() {
-    ramneryd::EngineSpec::builder()
+    ramneryd::EngineSpec::new()
         .with_module(GltfViewer::from_args())
-        .build()
         .run();
 }

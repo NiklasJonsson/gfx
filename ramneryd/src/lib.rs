@@ -7,7 +7,6 @@ mod camera;
 pub mod common;
 pub mod ecs;
 mod editor;
-mod game_state;
 mod graph;
 mod io;
 pub mod math;
@@ -16,8 +15,6 @@ mod time;
 mod visit;
 
 use time::Time;
-
-use game_state::GameState;
 
 use ecs::prelude::*;
 use io::event::Event;
@@ -40,8 +37,7 @@ struct Engine {
     event_queue: Arc<io::EventQueue>,
     ui: render::ui::UIContext,
     state: State,
-    control_systems: ecs::Executor<'static, 'static>,
-    engine_systems: ecs::Executor<'static, 'static>,
+    systems: ecs::Executor<'static, 'static>,
     renderer: trekanten::Renderer,
     #[allow(dead_code)]
     spec: EngineSpec,
@@ -66,22 +62,23 @@ impl Engine {
 */
 
 impl Engine {
-    fn init_dispatchers<'a, 'b>() -> (Executor<'a, 'b>, Executor<'a, 'b>) {
-        let control_builder = ExecutorBuilder::new();
+    fn init_dispatcher<'a, 'b>() -> Executor<'a, 'b> {
+        let mut builder = ExecutorBuilder::new();
         // Input needs to go before as most systems depends on it
-        let control = register_module_systems!(control_builder, io::input, game_state).build();
+        builder = register_module_systems!(builder, io::input);
 
-        let engine_builder = ExecutorBuilder::new();
-        let engine = register_module_systems!(engine_builder, asset, camera, render)
+        builder = builder.with_barrier();
+
+        builder = register_module_systems!(builder, asset, camera, render);
+
+        builder
             .with_barrier()
             .with(
                 graph::TransformPropagation,
                 graph::TransformPropagation::ID,
                 &[],
             )
-            .build();
-
-        (control, engine)
+            .build()
     }
 
     fn next_event(&self) -> Option<Event> {
@@ -115,7 +112,6 @@ impl Engine {
             Some(Event::Focus) => self.state = State::Focused,
             Some(Event::Unfocus) => {
                 self.state = State::Unfocused;
-                *self.world.write_resource::<GameState>() = GameState::Paused;
             }
             Some(Event::Input(input)) => {
                 let mut cur_inputs = self
@@ -148,11 +144,7 @@ impl Engine {
                 Action::ContinueFrame => (),
             }
 
-            self.control_systems.execute(&self.world);
-            let state = *self.world.read_resource::<GameState>();
-            if let GameState::Running = state {
-                self.engine_systems.execute(&self.world);
-            }
+            self.systems.execute(&self.world);
             render::draw_frame(&mut self.world, &mut self.ui, &mut self.renderer);
 
             self.post_frame();
@@ -167,33 +159,21 @@ pub trait Module: Send {
 }
 
 #[derive(Default)]
-struct Modules(pub Vec<Box<dyn Module>>);
-
-pub struct EngineSpecBuilder {
-    modules: Modules,
-}
-
-impl EngineSpecBuilder {
-    pub fn with_module(mut self, module: impl Module + 'static) -> Self {
-        self.modules.0.push(Box::new(module));
-
-        self
-    }
-
-    pub fn build(self) -> EngineSpec {
-        EngineSpec {
-            modules: self.modules,
-        }
-    }
-}
+struct Modules(Vec<Box<dyn Module>>);
 
 pub struct EngineSpec {
     modules: Modules,
 }
 
 impl EngineSpec {
-    pub fn builder() -> EngineSpecBuilder {
-        EngineSpecBuilder {
+    pub fn with_module(mut self, module: impl Module + 'static) -> Self {
+        self.modules.0.push(Box::new(module));
+
+        self
+    }
+
+    pub fn new() -> Self {
+        Self {
             modules: Modules::default(),
         }
     }
@@ -229,15 +209,14 @@ fn run(mut spec: EngineSpec) -> ! {
             profiling::register_thread!("ramneryd::engine");
 
             let mut world = World::new();
-            let (mut control_systems, mut engine_systems) = Engine::init_dispatchers();
+            let mut systems = Engine::init_dispatcher();
 
             ecs::meta::register_all_components(&mut world);
 
             world.insert(Time::default());
             ecs::serde::setup_resources(&mut world);
 
-            control_systems.setup(&mut world);
-            engine_systems.setup(&mut world);
+            systems.setup(&mut world);
             io::setup(&mut world, window);
             render::setup_resources(&mut world, &mut renderer);
             let ui_modules = vec![editor::ui_module()];
@@ -252,8 +231,7 @@ fn run(mut spec: EngineSpec) -> ! {
                 ui,
                 event_queue: event_queue_recv,
                 state: State::Focused,
-                control_systems,
-                engine_systems,
+                systems,
                 renderer,
                 spec,
             }
