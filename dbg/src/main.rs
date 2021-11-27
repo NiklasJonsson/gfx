@@ -12,14 +12,14 @@ use std::path::PathBuf;
 
 #[derive(Debug, StructOpt)]
 #[structopt(name = "editor", about = "ramneryd editor")]
-struct EditorArgs {
+struct Args {
     #[structopt(parse(from_os_str), name = "gltf-file", long)]
     gltf_files: Vec<PathBuf>,
     #[structopt(parse(from_os_str), name = "rsf-file", long)]
     rsf_files: Vec<PathBuf>,
 }
 
-impl Module for EditorArgs {
+impl Module for Args {
     fn load(&mut self, world: &mut World) {
         self.gltf_files
             .iter()
@@ -91,7 +91,7 @@ impl Module for Spawn {
 
 fn main() {
     ramneryd::EngineSpec::new()
-        .with_module(EditorArgs::from_args())
+        .with_module(Args::from_args())
         .with_module(Spawn {
             spawn_plane: false,
             spawn_cube: false,
