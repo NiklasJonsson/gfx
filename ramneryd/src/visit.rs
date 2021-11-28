@@ -185,35 +185,4 @@ mod test {
             v.visit(&self.b, m2);
         }
     }
-
-    /*
-    fn main() {
-        let a = A {
-            x: 345345,
-            y: String::from("Hello World!"),
-        };
-        let mut v = PrintVisitor {
-            indent: 0,
-        };
-        let b = B {
-            a,
-            b: 78679,
-        };
-
-        let a = A {
-            x: 4567689,
-            y: String::from("Hello World2!"),
-        };
-        let c = C {
-            a,
-            b,
-        };
-        let m = Meta {
-                type_name: String::from("C"),
-                field_name: None,
-                range: None,
-            };
-        v.visit(&c, m);
-    }
-    */
 }

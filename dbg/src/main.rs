@@ -11,7 +11,7 @@ use structopt::StructOpt;
 use std::path::PathBuf;
 
 #[derive(Debug, StructOpt)]
-#[structopt(name = "editor", about = "ramneryd editor")]
+#[structopt(name = "dbg", about = "ramneryd debug utils")]
 struct Args {
     #[structopt(parse(from_os_str), name = "gltf-file", long)]
     gltf_files: Vec<PathBuf>,
@@ -93,8 +93,8 @@ fn main() {
     ramneryd::EngineSpec::new()
         .with_module(Args::from_args())
         .with_module(Spawn {
-            spawn_plane: false,
-            spawn_cube: false,
+            spawn_plane: true,
+            spawn_cube: true,
         })
         .run();
 }

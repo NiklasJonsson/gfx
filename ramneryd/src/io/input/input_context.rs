@@ -22,6 +22,7 @@ type AxisConvMap = HashMap<DeviceAxis, (RangeId, Sensitivity, InputPassthrough)>
 
 // Order is important! Declaration order determines sorting order since PartialOrd and Ord are
 // auto derived
+#[allow(dead_code)]
 #[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord)]
 pub enum InputContextPriority {
     First,

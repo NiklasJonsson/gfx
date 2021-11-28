@@ -793,7 +793,6 @@ pub fn setup_resources(world: &mut World, mut renderer: &mut Renderer) {
                 matrices: [uniform::Mat4::default(); uniform::MAX_NUM_LIGHTS],
                 num_matrices: [0; 4],
             };
-            dbg!(std::mem::size_of::<uniform::ShadowMatrices>());
             let shadow_matrices =
                 UniformBufferDescriptor::from_single(shadow_matrices, BufferMutability::Mutable);
             let shadow_matrices_buffer = renderer
