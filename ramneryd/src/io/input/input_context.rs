@@ -9,28 +9,29 @@ use std::collections::HashMap;
 // input and if one is not interested in some input, it passes it on to the next.
 
 use super::*;
+use ramneryd_derive::Visitable;
 
-#[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord)]
+#[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Visitable)]
 pub enum InputPassthrough {
     Passthrough,
     Consume,
 }
 
-type ActionMap = HashMap<Button, (ActionId, InputPassthrough)>;
-type StateMap = HashMap<Button, (StateId, InputPassthrough)>;
-type AxisConvMap = HashMap<DeviceAxis, (RangeId, Sensitivity, InputPassthrough)>;
+pub type ActionMap = HashMap<Button, (ActionId, InputPassthrough)>;
+pub type StateMap = HashMap<Button, (StateId, InputPassthrough)>;
+pub type AxisConvMap = HashMap<DeviceAxis, (RangeId, Sensitivity, InputPassthrough)>;
 
 // Order is important! Declaration order determines sorting order since PartialOrd and Ord are
 // auto derived
 #[allow(dead_code)]
-#[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord)]
+#[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Visitable)]
 pub enum InputContextPriority {
     First,
     Ui,
     DontCare,
 }
 
-#[derive(Component, Debug)]
+#[derive(Component, Debug, Visitable)]
 #[component(storage = "HashMapStorage")]
 pub struct InputContext {
     name: String,

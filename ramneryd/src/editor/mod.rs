@@ -63,7 +63,13 @@ fn build_inspector<'a>(world: &mut World, ui: &crate::render::ui::UiFrame<'a>, e
             let mut i = inspector::Inspector::new();
             i.add::<crate::render::Shape>(crate::render::Shape::meta().name);
             i.add::<crate::render::light::Light>(crate::render::light::Light::meta().name);
-            //i.add::<crate::math::Transform>();
+            i.add::<crate::math::Transform>(crate::math::Transform::meta().name);
+            i.add::<crate::camera::Camera>(crate::camera::Camera::meta().name);
+            i.add::<crate::camera::FreeFlyCameraState>(
+                crate::camera::FreeFlyCameraState::meta().name,
+            );
+            i.add::<crate::common::Name>(crate::common::Name::meta().name);
+            //i.add::<crate::io::input::InputContext>(crate::io::input::InputContext::meta().name);
             entry.insert(i)
         }
         polymap::polymap::Entry::Occupied(entry) => entry.into_mut(),
@@ -77,7 +83,7 @@ fn build_inspector<'a>(world: &mut World, ui: &crate::render::ui::UiFrame<'a>, e
                     .build(ui.inner());
             } else if inspector.can_inspect(comp.name) {
                 inspector.inspect(comp.name, &mut visitor, world, ent);
-            } else if CollapsingHeader::new(&imgui::ImString::from(String::from(comp.name)))
+            } else if CollapsingHeader::new(&imgui::ImString::from(format!("struct {}", comp.name)))
                 .build(ui.inner())
             {
                 ui.inner().text(im_str!("unimplemented"));
@@ -110,6 +116,21 @@ impl UIModule for EditorUiModule {
                 InputFloat3::new(frame.inner(), im_str!("Camera pos"), &mut p)
                     .read_only(true)
                     .build();
+
+                let ffcs_storage = world.read_storage::<crate::camera::FreeFlyCameraState>();
+                for (i, state) in ffcs_storage.join().enumerate() {
+                    let ori = state.orientation();
+                    let mut view_dir = ori.view_direction.into_array();
+                    let mut up = ori.up.into_array();
+                    InputFloat3::new(frame.inner(), &im_str!("view dir {}", i), &mut view_dir)
+                        .read_only(true)
+                        .build();
+
+                    InputFloat3::new(frame.inner(), &im_str!("up {}", i), &mut up)
+                        .read_only(true)
+                        .build();
+                }
+
                 frame
                     .inner()
                     .text(im_str!("#components: {}", ecs::meta::ALL_COMPONENTS.len()));

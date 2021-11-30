@@ -161,6 +161,10 @@ pub trait Module: Send {
 #[derive(Default)]
 struct Modules(Vec<Box<dyn Module>>);
 
+fn default_modules() -> Modules {
+    Modules(vec![Box::new(camera::DefaultCamera)])
+}
+
 pub struct EngineSpec {
     modules: Modules,
 }
@@ -174,7 +178,7 @@ impl EngineSpec {
 
     pub fn new() -> Self {
         Self {
-            modules: Modules::default(),
+            modules: default_modules(),
         }
     }
 

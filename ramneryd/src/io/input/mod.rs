@@ -19,9 +19,12 @@ pub use input_context::InputContext;
 pub use input_context::InputContextError;
 pub use input_context::InputContextPriority;
 pub use input_context::InputPassthrough;
+pub use input_context::{ActionMap, StateMap};
 
 pub use winit::event::MouseButton;
 pub use winit::event::VirtualKeyCode as KeyCode;
+
+use ramneryd_derive::Visitable;
 
 #[derive(Default, Debug)]
 pub struct CurrentFrameExternalInputs(pub Vec<ExternalInput>);
@@ -36,11 +39,11 @@ impl CurrentFrameExternalInputs {
     }
 }
 
-#[derive(Debug, Clone, Copy, Hash, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, Hash, PartialEq, Eq, Visitable)]
 pub struct ActionId(pub u32);
-#[derive(Debug, Clone, Copy, Hash, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, Hash, PartialEq, Eq, Visitable)]
 pub struct StateId(pub u32);
-#[derive(Debug, Clone, Copy, Hash, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, Hash, PartialEq, Eq, Visitable)]
 pub struct RangeId(pub u32);
 
 pub type RangeValue = f64;

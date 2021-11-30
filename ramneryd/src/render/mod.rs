@@ -37,7 +37,7 @@ use mesh::Mesh;
 
 use crate::camera::*;
 use crate::ecs;
-use crate::math::{Mat4, ModelMatrix, Transform, Vec3};
+use crate::math::{ModelMatrix, Transform, Vec3};
 use material::{GpuMaterial, PendingMaterial};
 use ramneryd_derive::Visitable;
 
@@ -92,32 +92,6 @@ pub struct FrameData {
     unlit_resources: UnlitFrameUniformResources,
     pbr_resources: PhysicallyBasedUniformResources,
     shadow: ShadowData,
-}
-
-fn get_view_data(world: &World) -> (Mat4, Vec3) {
-    let camera_entity = ecs::get_singleton_entity::<Camera>(world);
-    let transforms = world.read_storage::<Transform>();
-    let rots = world.read_storage::<CameraRotationState>();
-
-    let cam_pos = transforms
-        .get(camera_entity)
-        .expect("Could not get position component for camera")
-        .position;
-
-    let cam_rotation_state = rots
-        .get(camera_entity)
-        .expect("Could not get rotation state for camera");
-
-    // TODO: Camera system should write to ViewMatrixResource at the end of system
-    // and we should read it here.
-    let view = FreeFlyCameraController::get_view_matrix_from(cam_pos, cam_rotation_state);
-    log::trace!("View matrix: {:#?}", view);
-
-    (view, cam_pos)
-}
-
-fn get_proj_matrix(aspect_ratio: f32) -> Mat4 {
-    crate::math::perspective_vk(std::f32::consts::FRAC_PI_4, aspect_ratio, 0.05, 1000000.0)
 }
 
 #[derive(Component, Default)]
@@ -456,13 +430,39 @@ fn draw_entities<'a>(world: &World, cmd_buf: &mut RenderPassEncoder<'a>, mode: D
     }
 }
 
-#[profiling::function]
-pub fn draw_frame(world: &mut World, ui: &mut ui::UIContext, renderer: &mut Renderer) {
-    let cam_entity = ecs::find_singleton_entity::<Camera>(world);
-    if cam_entity.is_none() {
-        log::warn!("Did not find a camera entity, can't render");
+fn draw_aabb(world: &World, camera_ent: Entity, aabb: &crate::math::BoundingBox) {
+    assert!(aabb
+        .min
+        .iter()
+        .zip(aabb.max.iter())
+        .all(|(min_e, max_e)| min_e < max_e));
+
+    let children_storage = world.read_component::<crate::graph::Children>();
+    if children_storage.get(camera_ent).is_some() {
         return;
     }
+
+    let mut cmd_storage = world.write_component::<bounding_box::RenderBoundingBox>();
+    let mut bbox_storage = world.write_component::<crate::math::BoundingBox>();
+    cmd_storage
+        .entry(camera_ent)
+        .expect("Bad camera entity")
+        .or_insert(Default::default());
+    bbox_storage
+        .entry(camera_ent)
+        .expect("Bad camera entity")
+        .or_insert(*aabb);
+}
+
+#[profiling::function]
+pub fn draw_frame(world: &mut World, ui: &mut ui::UIContext, renderer: &mut Renderer) {
+    let cam_entity = match ecs::find_singleton_entity::<Camera>(world) {
+        None => {
+            log::warn!("Did not find a camera entity, can't render");
+            return;
+        }
+        Some(e) => e,
+    };
 
     GpuUpload::resolve_pending(world, renderer);
     create_renderables(renderer, world);
@@ -489,22 +489,48 @@ pub fn draw_frame(world: &mut World, ui: &mut ui::UIContext, renderer: &mut Rend
         .new_command_buffer()
         .expect("Failed to create command buffer");
 
-    let mut cmd_buffer =
-        light::light_and_shadow_pass(world, &mut frame, frame_resources, cmd_buffer);
-
     // View data main render pass
-    {
-        let (view_matrix, view_pos) = get_view_data(world);
-        let view_proj = get_proj_matrix(aspect_ratio) * view_matrix;
+    let camera_aabb = {
+        let mut cameras = world.write_component::<Camera>();
+        let transforms = world.read_component::<Transform>();
+        // TODO: Instead of using the state here, we should just use the inverse of the rotation of the transform,
+        // but it is not updated properly by the camera systems. Only the positions is reliable
+        let states = world.read_component::<FreeFlyCameraState>();
+
+        let camera = cameras.get_mut(cam_entity).unwrap();
+        camera.aspect_ratio = aspect_ratio;
+        let tfm = transforms
+            .get(cam_entity)
+            .expect("Camera needs a transform");
+        let state = states.get(cam_entity).expect("Camera needs state");
+
+        let view_matrix = state.view_matrix_with_pos(tfm.position);
+        let view_proj = camera.proj_matrix() * view_matrix;
         let view_data = uniform::ViewData {
             view_proj: view_proj.into_col_array(),
-            view_pos: [view_pos.x, view_pos.y, view_pos.z, 1.0f32],
+            view_pos: [tfm.position.x, tfm.position.y, tfm.position.z, 1.0f32],
         };
+
+        dbg!(tfm.position);
 
         frame
             .update_uniform_blocking(&frame_resources.main_camera_view_data, &view_data)
             .expect("Failed to update uniform");
-    }
+
+        dbg!(camera.view_volume());
+        dbg!(view_matrix);
+        dbg!(view_matrix.inverted());
+        dbg!(view_matrix.inverted() * camera.view_volume());
+        dbg!(view_matrix * camera.view_volume());
+        view_matrix.inverted() * camera.view_volume()
+    };
+
+    draw_aabb(world, cam_entity, &camera_aabb);
+
+    dbg!(&camera_aabb);
+
+    let mut cmd_buffer =
+        light::light_and_shadow_pass(world, &mut frame, frame_resources, camera_aabb, cmd_buffer);
 
     {
         // main render pass

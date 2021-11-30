@@ -7,7 +7,8 @@ use std::collections::HashMap;
 pub type Ui<'a> = crate::render::ui::UiFrame<'a>;
 
 pub struct Inspector {
-    components: HashMap<&'static str, for<'a> fn(&mut ImguiVisitor<'a>, &mut World, Entity)>,
+    components:
+        HashMap<&'static str, for<'a> fn(&'static str, &mut ImguiVisitor<'a>, &World, Entity)>,
 }
 
 impl Inspector {
@@ -21,15 +22,27 @@ impl Inspector {
 pub trait ImguiVisitableComponent<'a>: Visitable<ImguiVisitor<'a>> + Component + 'static {}
 impl<'a, T: Visitable<ImguiVisitor<'a>> + Component + 'static> ImguiVisitableComponent<'a> for T {}
 
-fn inspect_component<'a, C>(v: &mut ImguiVisitor<'a>, world: &mut World, e: Entity)
-where
+fn inspect_component<'a, C>(
+    type_name: &'static str,
+    v: &mut ImguiVisitor<'a>,
+    world: &World,
+    e: Entity,
+) where
     for<'b> C: ImguiVisitableComponent<'b>,
 {
-    world
-        .write_component::<C>()
+    let mut storage = world.write_component::<C>();
+    let component = storage
         .get_mut(e)
-        .expect("component not available for entity")
-        .visit_fields_mut(v);
+        .expect("component not available for entity");
+
+    v.visit_mut(
+        component,
+        &Meta {
+            range: None,
+            type_name,
+            origin: MetaOrigin::Standalone,
+        },
+    );
 }
 impl Inspector {
     pub fn add<C>(&mut self, name: &'static str)
@@ -43,16 +56,10 @@ impl Inspector {
         self.components.contains_key(k)
     }
 
-    pub fn inspect<'a>(
-        &mut self,
-        k: &'static str,
-        v: &mut ImguiVisitor<'a>,
-        w: &mut World,
-        e: Entity,
-    ) {
+    pub fn inspect<'a>(&mut self, k: &'static str, v: &mut ImguiVisitor<'a>, w: &World, e: Entity) {
         self.components
             .get(k)
-            .expect("Missing component for inspector")(v, w, e);
+            .expect("Missing component for inspector")(k, v, w, e);
     }
 }
 
@@ -160,7 +167,6 @@ impl<'a> ImguiVisitor<'a> {
     }
 }
 
-// TODO: Implement Visitable for this instead?
 impl<'a, T, const N: usize> Visitor<[T; N]> for ImguiVisitor<'a>
 where
     T: Visitable<Self>,
@@ -420,7 +426,117 @@ impl<'a> Visitor<String> for ImguiVisitor<'a> {
     }
 }
 
-/*
+/* TODO
+impl<'a, T1, T2> Visitor<(T1, T2)> for ImguiVisitor<'a>
+where
+    T1: Visitable<Self>,
+    T2: Visitable<Self>,
+{
+    fn visit(&mut self, t: &(T1, T2), m: &Meta<(T1, T2)>) {
+        if let Some(outer_token) = self.visit_array_begin(m) {
+            {
+                let token = self.ui.inner().push_id(&im_str!("0"));
+                self.visit(
+                    &t.0,
+                    &Meta {
+                        type_name: std::any::type_name::<T1>(),
+                        range: None,
+                        origin: MetaOrigin::TupleField { idx: 0 },
+                    },
+                );
+                token.pop(self.ui.inner());
+            }
+
+            {
+                let token = self.ui.inner().push_id(&im_str!("1"));
+                self.visit(
+                    &t.1,
+                    &Meta {
+                        type_name: std::any::type_name::<T2>(),
+                        range: None,
+                        origin: MetaOrigin::TupleField { idx: 1 },
+                    },
+                );
+                token.pop(self.ui.inner());
+            }
+
+
+            self.visit_array_end(outer_token);
+        }
+    }
+
+    fn visit_mut(&mut self, t: &mut (T1, T2), m: &Meta<(T1, T2)>) {
+        if let Some(outer_token) = self.visit_array_begin(m) {
+            {
+                let token = self.ui.inner().push_id(&im_str!("0"));
+                self.visit_mut(
+                    &mut t.0,
+                    &Meta {
+                        type_name: std::any::type_name::<T1>(),
+                        range: None,
+                        origin: MetaOrigin::TupleField { idx: 0 },
+                    },
+                );
+                token.pop(self.ui.inner());
+            }
+
+            {
+                let token = self.ui.inner().push_id(&im_str!("1"));
+                self.visit_mut(
+                    &mut t.1,
+                    &Meta {
+                        type_name: std::any::type_name::<T2>(),
+                        range: None,
+                        origin: MetaOrigin::TupleField { idx: 1 },
+                    },
+                );
+                token.pop(self.ui.inner());
+            }
+
+
+            self.visit_array_end(outer_token);
+        }
+    }
+}
+
+impl<'a, K, V> Visitor<std::collections::HashMap<K, V>> for ImguiVisitor<'a>
+    where
+        K: std::hash::Hash,
+        Self: Visitor<V>,
+{
+    fn visit(&mut self, t: &std::collections::HashMap<K, V>, m: &Meta<std::collections::HashMap<K, V>>) {
+        use std::hash::Hasher as _;
+        for (k, v) in t.iter() {
+            let mut hasher = std::collections::hash_map::DefaultHasher::new();
+            k.hash(&mut hasher);
+            let field_name = format!("{}", hasher.finish());
+            let meta = Meta { type_name: std::any::type_name::<V>(), range: None, origin: MetaOrigin::NamedField { name: "0" }};
+            let token = self.ui.inner().push_id(&field_name);
+            if imgui::CollapsingHeader::new(&ImString::from(field_name)).build(self.ui.inner()) {
+                self.visit(v, &meta);
+            }
+            token.pop(self.ui.inner());
+        }
+    }
+
+    fn visit_mut(&mut self, t: &mut std::collections::HashMap<K, V>, m: &Meta<std::collections::HashMap<K, V>>) {
+        use std::hash::Hasher as _;
+        for (k, v) in t.iter_mut() {
+            let mut hasher = std::collections::hash_map::DefaultHasher::new();
+            k.hash(&mut hasher);
+
+            let field_name = format!("{}", hasher.finish());
+            let meta = Meta { type_name: std::any::type_name::<V>(), range: None, origin: MetaOrigin::NamedField { name: "1" }};
+
+            let token = self.ui.inner().push_id(&field_name);
+            if imgui::CollapsingHeader::new(&ImString::from(field_name)).build(self.ui.inner()) {
+                self.visit(v, &meta);
+            }
+            token.pop(self.ui.inner());
+        }
+    }
+}
+
 fn inspect_mat<'a>(m: &crate::math::Mat4, ui: &Ui<'a>, _name: &str) -> [[f32; 4]; 4] {
     let mut rows = m.into_row_arrays();
     for (i, mut row) in rows.iter_mut().enumerate() {

@@ -134,7 +134,7 @@ impl Drop for ByteBuffer {
 }
 
 #[cfg(test)]
-mod test {
+mod tests {
 
     #[test]
     fn test_round() {

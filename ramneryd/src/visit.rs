@@ -52,8 +52,8 @@ pub trait Visitable<V> {
     fn variant_idx(&self) -> usize;
 }
 
-#[cfg(not(windows))]
-mod test {
+#[cfg(not)]
+mod unused {
     struct PrintVisitor {
         indent: usize,
     }

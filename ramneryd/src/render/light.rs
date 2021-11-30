@@ -1,6 +1,7 @@
 use crate::ecs::prelude::*;
 use crate::math::{
-    orthographic_vk, perspective_vk, FrustrumPlanes, Mat4, Quat, Rgb, Rgba, Transform, Vec3,
+    orthographic_vk, perspective_vk, BoundingBox, FrustrumPlanes, Mat4, Quat, Rgb, Rgba, Transform,
+    Vec3,
 };
 
 use trekanten::CommandBuffer;
@@ -150,6 +151,7 @@ pub fn light_and_shadow_pass(
     world: &World,
     frame: &mut trekanten::Frame,
     frame_resources: &super::FrameData,
+    light_bounds: BoundingBox,
     mut cmd_buffer: CommandBuffer,
 ) -> CommandBuffer {
     use trekanten::raw_vk;
@@ -218,15 +220,17 @@ pub fn light_and_shadow_pass(
                 )
             }
             Light::Directional { color } => {
-                let proj: Mat4 = orthographic_vk(FrustrumPlanes {
-                    left: -10.0,
-                    right: 10.0,
-                    bottom: -10.0,
-                    top: 10.0,
-                    near: 1.0,
-                    far: 10.0,
-                });
                 let view = Mat4::from(*tfm).inverted();
+                let aabb_light_space = view * light_bounds;
+                let (min, max) = (aabb_light_space.min, aabb_light_space.max);
+                let proj: Mat4 = orthographic_vk(FrustrumPlanes {
+                    left: min.x,
+                    right: max.x,
+                    bottom: min.y,
+                    top: max.y,
+                    near: min.z,
+                    far: max.z,
+                });
 
                 (
                     PackedLight {

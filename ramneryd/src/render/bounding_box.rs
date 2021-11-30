@@ -52,6 +52,7 @@ impl<'a> System<'a> for CreateRenderedBoundingBoxes {
                 continue;
             }
             let dims = bbox.max - bbox.min;
+            assert!(dims.iter().all(|&e| e > f32::EPSILON));
             let mesh = super::geometry::box_mesh(dims.x, dims.y, dims.z);
 
             let material = super::material::Unlit {
