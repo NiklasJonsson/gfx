@@ -267,7 +267,7 @@ fn load_node_rec(ctx: &mut RecGltfCtx, src: &gltf::Node) -> ecs::Entity {
         for (i, primitive) in mesh.primitives().enumerate() {
             let PendingGltfModel { mesh, material } = load_primitive(ctx, &primitive);
 
-            let bbox = BoundingBox {
+            let bbox = Aabb {
                 min: Vec3::from(primitive.bounding_box().min),
                 max: Vec3::from(primitive.bounding_box().max),
             };
@@ -413,7 +413,7 @@ struct LoaderData<'a> {
     names: WriteStorage<'a, Name>,
     meshes: WriteStorage<'a, render::mesh::Mesh>,
     pb_materials: WriteStorage<'a, render::material::PhysicallyBased>,
-    bboxes: WriteStorage<'a, BoundingBox>,
+    bboxes: WriteStorage<'a, Aabb>,
     cameras: WriteStorage<'a, Camera>,
 }
 
@@ -427,7 +427,7 @@ struct CtxData<'a, 'b> {
     pb_materials: &'b mut WriteStorage<'a, render::material::PhysicallyBased>,
     #[allow(dead_code)]
     cameras: &'b mut WriteStorage<'a, Camera>,
-    bboxes: &'b mut WriteStorage<'a, BoundingBox>,
+    bboxes: &'b mut WriteStorage<'a, Aabb>,
 }
 
 struct RecGltfCtx<'a, 'b> {

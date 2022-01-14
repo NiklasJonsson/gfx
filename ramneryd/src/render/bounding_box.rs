@@ -1,7 +1,7 @@
 use crate::common::Name;
 use crate::ecs::prelude::*;
 use crate::graph::sys as graph;
-use crate::math::{BoundingBox, Rgba, Transform, Vec3};
+use crate::math::{Aabb, Rgba, Transform, Vec3};
 
 use super::mesh::Mesh;
 
@@ -17,7 +17,7 @@ pub struct CreateRenderedBoundingBoxes;
 impl<'a> System<'a> for CreateRenderedBoundingBoxes {
     type SystemData = (
         Entities<'a>,
-        ReadStorage<'a, BoundingBox>,
+        ReadStorage<'a, Aabb>,
         WriteStorage<'a, RenderBoundingBox>,
         WriteStorage<'a, graph::Children>,
         WriteStorage<'a, graph::Parent>,

@@ -6,7 +6,7 @@ use crate::io::input::{
     DeviceAxis, Input, InputContext, InputContextError, KeyCode, MappedInput, MouseButton, RangeId,
     Sensitivity, StateId,
 };
-use crate::math::{BoundingBox, Mat4, Transform, Vec3};
+use crate::math::{Aabb, Mat4, Transform, Vec3};
 use crate::time::Time;
 use ecs::prelude::*;
 
@@ -38,8 +38,13 @@ impl Camera {
         crate::math::perspective_vk(self.fov_y_radians, self.aspect_ratio, self.near, self.far)
     }
 
+    pub fn frustum(&self) {
+        todo!()
+
+    }
+
     /// Compute a bounding box, in camera space, covering the view-frustrum of this camera
-    pub fn view_aabb(&self) -> BoundingBox {
+    pub fn view_volume(&self) -> Aabb {
         let half_height = (self.fov_y_radians / 2.0).tan() * self.far;
 
         // Cameras view frustum lies in the negative z-axis, why...?
@@ -61,7 +66,7 @@ impl Camera {
             .zip(max.iter())
             .all(|(min_e, max_e)| min_e < max_e));
 
-        BoundingBox { min, max }
+        Aabb { min, max }
     }
 }
 

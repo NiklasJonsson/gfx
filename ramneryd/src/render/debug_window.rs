@@ -295,7 +295,7 @@ impl<'a> System<'a> for ApplySettings {
         Entities<'a>,
         ReadStorage<'a, render::material::GpuMaterial>,
         WriteStorage<'a, render::ReloadMaterial>,
-        ReadStorage<'a, crate::math::BoundingBox>,
+        ReadStorage<'a, crate::math::Aabb>,
         WriteStorage<'a, render::bounding_box::RenderBoundingBox>,
         ReadStorage<'a, Light>,
         WriteStorage<'a, render::light::RenderLightVolume>,

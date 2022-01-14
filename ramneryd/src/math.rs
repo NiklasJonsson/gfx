@@ -137,22 +137,22 @@ impl std::fmt::Display for ModelMatrix {
 }
 
 #[derive(Debug, Clone, Copy, Component, Visitable)]
-pub struct BoundingBox {
+pub struct Aabb {
     pub min: Vec3,
     pub max: Vec3,
 }
 
-impl BoundingBox {
+impl Aabb {
     pub fn combine(&mut self, other: Self) {
         self.min = Vec3::partial_min(self.min, other.min);
         self.max = Vec3::partial_max(self.max, other.max);
     }
 }
 
-impl std::ops::Mul<BoundingBox> for Mat4 {
-    type Output = BoundingBox;
-    fn mul(self, rhs: BoundingBox) -> Self::Output {
-        BoundingBox {
+impl std::ops::Mul<Aabb> for Mat4 {
+    type Output = Aabb;
+    fn mul(self, rhs: Aabb) -> Self::Output {
+        Aabb {
             min: (self * Vec4::from_point(rhs.min)).xyz(),
             max: (self * Vec4::from_point(rhs.max)).xyz(),
         }

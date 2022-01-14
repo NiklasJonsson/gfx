@@ -430,7 +430,7 @@ fn draw_entities<'a>(world: &World, cmd_buf: &mut RenderPassEncoder<'a>, mode: D
     }
 }
 
-fn draw_aabb(world: &World, camera_ent: Entity, aabb: &crate::math::BoundingBox) {
+fn draw_aabb(world: &World, camera_ent: Entity, aabb: &crate::math::Aabb) {
     assert!(aabb
         .min
         .iter()
@@ -443,7 +443,7 @@ fn draw_aabb(world: &World, camera_ent: Entity, aabb: &crate::math::BoundingBox)
     }
 
     let mut cmd_storage = world.write_component::<bounding_box::RenderBoundingBox>();
-    let mut bbox_storage = world.write_component::<crate::math::BoundingBox>();
+    let mut bbox_storage = world.write_component::<crate::math::Aabb>();
     cmd_storage
         .entry(camera_ent)
         .expect("Bad camera entity")

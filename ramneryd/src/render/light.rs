@@ -1,6 +1,6 @@
 use crate::ecs::prelude::*;
 use crate::math::{
-    orthographic_vk, perspective_vk, BoundingBox, FrustrumPlanes, Mat4, Quat, Rgb, Rgba, Transform,
+    orthographic_vk, perspective_vk, Aabb, FrustrumPlanes, Mat4, Quat, Rgb, Rgba, Transform,
     Vec3,
 };
 
@@ -151,7 +151,7 @@ pub fn light_and_shadow_pass(
     world: &World,
     frame: &mut trekanten::Frame,
     frame_resources: &super::FrameData,
-    light_bounds: BoundingBox,
+    light_bounds: Aabb,
     mut cmd_buffer: CommandBuffer,
 ) -> CommandBuffer {
     use trekanten::raw_vk;
