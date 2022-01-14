@@ -136,18 +136,31 @@ mod tests {
     fn test_light() {
         const LEN: usize = 16;
 
-        // TODO: structs in arrays (as members of structs)
+        #[derive(Clone, Copy, Std140Compat)]
         pub struct PackedLight {
-            pub pos: [f32; 4],         // position for point/spot light
-            pub dir_cutoff: [f32; 4], // direction for spot/directional light. .w is the cos(cutoff_angle) of the spotlight
-            pub color_range: [f32; 4], // color for all light types. .w is the range of point/spot lights
+            pub pos: [f32; 4],
+            pub dir_cutoff: [f32; 4],
+            pub color_range: [f32; 4],
             pub shadow_idx: [u32; 4],
         }
 
+        assert_eq!(PackedLight::SIZE, 64);
+        assert_eq!(PackedLight::ALIGNMENT, 16);
+        assert!(PackedLight::SIZE == std::mem::size_of::<PackedLight>());
+
+        #[derive(Clone, Copy, Std140Compat)]
         pub struct LightingData {
             pub punctual_lights: [PackedLight; LEN],
             pub ambient: [f32; 4],
             pub num_lights: u32,
         }
+
+        assert_eq!(LightingData::offset_of_field_punctual_lights(), 0);
+        assert_eq!(LightingData::offset_of_field_ambient(), 64 * LEN);
+        assert_eq!(LightingData::offset_of_field_num_lights(), 64 * LEN + 16);
+
+        assert_eq!(LightingData::SIZE, 64 * LEN + 16 + 16);
+        assert_eq!(LightingData::ALIGNMENT, 16);
+        assert!(LightingData::SIZE >= std::mem::size_of::<LightingData>());
     }
 }
