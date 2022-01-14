@@ -6,7 +6,7 @@ use crate::io::input::{
     DeviceAxis, Input, InputContext, InputContextError, KeyCode, MappedInput, MouseButton, RangeId,
     Sensitivity, StateId,
 };
-use crate::math::{Aabb, Mat4, Transform, Vec3};
+use crate::math::{Extent, Mat4, Obb, Transform, Vec3};
 use crate::time::Time;
 use ecs::prelude::*;
 
@@ -28,7 +28,7 @@ impl Default for Camera {
             fov_y_radians: std::f32::consts::FRAC_PI_4,
             aspect_ratio: 1.0,
             near: 0.05,
-            far: 10000.0,
+            far: 100.0,
         }
     }
 }
@@ -38,35 +38,25 @@ impl Camera {
         crate::math::perspective_vk(self.fov_y_radians, self.aspect_ratio, self.near, self.far)
     }
 
-    pub fn frustum(&self) {
-        todo!()
-
-    }
-
     /// Compute a bounding box, in camera space, covering the view-frustrum of this camera
-    pub fn view_volume(&self) -> Aabb {
+    pub fn view_obb(&self) -> Obb {
+        debug_assert!(self.fov_y_radians > 0.0);
+        debug_assert!(self.far > self.near);
+
         let half_height = (self.fov_y_radians / 2.0).tan() * self.far;
+        let half_width = self.aspect_ratio * half_height;
+        let half_depth = (self.far - self.near) / 2.0;
 
-        // Cameras view frustum lies in the negative z-axis, why...?
+        let center = Vec3::new(0.0, 0.0, -half_depth - self.near);
 
-        let max = Vec3 {
-            x: self.aspect_ratio * half_height,
-            y: half_height,
-            z: -self.near,
-        };
-
-        let min = Vec3 {
-            x: -self.aspect_ratio * half_height,
-            y: -half_height,
-            z: -self.far,
-        };
-
-        assert!(min
-            .iter()
-            .zip(max.iter())
-            .all(|(min_e, max_e)| min_e < max_e));
-
-        Aabb { min, max }
+        Obb::axis_aligned(
+            center,
+            Extent {
+                w: half_width * 2.0,
+                h: half_height * 2.0,
+                d: half_depth * 2.0,
+            },
+        )
     }
 }
 
@@ -356,16 +346,81 @@ impl crate::Module for DefaultCamera {
 mod test {
     use super::*;
 
+    fn check_obb_points<P: Into<Vec3> + Copy>(obb: &Obb, points: &[P], should_contain: bool) {
+        for &p in points {
+            assert_eq!(obb.contains(p.into()), should_contain);
+        }
+    }
+
     #[test]
-    fn camera_view_aabb() {
-        let cam = FreeFlyCameraState {
+    fn camera_view_obb() {
+        let cam = Camera {
+            near: 0.1,
+            far: 100.0,
+            ..Default::default()
+        };
+
+        let obb = cam.view_obb();
+
+        let inside_positions = [
+            [-1.2, -0.7, -1.4], // view direction
+            [-1.2, -0.7, -0.5],
+            [-1.2, -0.7, -0.11],
+        ];
+        check_obb_points(&obb, &inside_positions, true);
+
+        let outside_positions = [
+            [-1.2, -0.7, -0.05],
+            [-1.2, -0.7, 1.0],
+            [-1.2, -0.7, 10.0],
+            [-1.2, -0.7, -101.0],
+            [0.0, 0.0, 0.0],
+        ];
+        check_obb_points(&obb, &outside_positions, false);
+    }
+
+    #[test]
+    fn camera_view_obb_worldspace() {
+        let free_fly_state = FreeFlyCameraState {
             yaw: 4.0,
             pitch: -0.4,
             speed: DEFAULT_MOVEMENT_SPEED,
         };
 
-        let CameraOrientation { view_direction, .. } = cam.orientation();
+        let cam = Camera {
+            near: 0.1,
+            far: 100.0,
+            ..Default::default()
+        };
 
-        let pos = view_direction * 2.0;
+        let obb = cam.view_obb();
+        let view = free_fly_state.view_matrix_with_pos(Vec3::new(2.0, 2.0, 2.0));
+        let obb = view * obb;
+
+        let mulp = |m: Mat4, p: [f32; 3]| -> Vec3 { (m * Vec3::from(p).with_w(1.0)).xyz() };
+
+        let inside_positions: Vec<Vec3> = [
+            [-1.2, -0.7, -1.4], // view direction
+            [-1.2, -0.7, -0.5],
+            [-1.2, -0.7, -0.11],
+        ]
+        .into_iter()
+        .map(|p| mulp(view, p))
+        .collect();
+
+        check_obb_points(&obb, &inside_positions, true);
+
+        let outside_positions: Vec<Vec3> = [
+            [-1.2, -0.7, -0.05],
+            [-1.2, -0.7, 1.0],
+            [-1.2, -0.7, 10.0],
+            [-1.2, -0.7, -101.0],
+            [0.0, 0.0, 0.0],
+        ]
+        .into_iter()
+        .map(|p| mulp(view, p))
+        .collect();
+
+        check_obb_points(&obb, &outside_positions, false);
     }
 }

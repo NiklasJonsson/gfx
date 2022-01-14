@@ -3,11 +3,13 @@ use serde::{Deserialize, Serialize};
 
 pub type Vec3 = vek::Vec3<f32>;
 pub type Vec4 = vek::Vec4<f32>;
+pub type Mat3 = vek::Mat3<f32>;
 pub type Mat4 = vek::Mat4<f32>;
 pub type Quat = vek::Quaternion<f32>;
 pub type Rgb = vek::Rgb<f32>;
 pub type Rgba = vek::Rgba<f32>;
 pub type FrustrumPlanes = vek::FrustumPlanes<f32>;
+pub type Extent = vek::Extent3<f32>;
 
 use ramneryd_derive::Visitable;
 
@@ -136,6 +138,19 @@ impl std::fmt::Display for ModelMatrix {
     }
 }
 
+#[derive(Debug, Clone, Copy)]
+pub struct Plane {
+    pub point: Vec3,
+    pub normal: Vec3,
+}
+
+impl Plane {
+    /// Return which half-space the point belongs to (positive if true, negative otherwise). Does not handle points on the plane.
+    pub fn halfspace(&self, point: Vec3) -> bool {
+        self.normal.dot(point - self.point) > 0.0
+    }
+}
+
 #[derive(Debug, Clone, Copy, Component, Visitable)]
 pub struct Aabb {
     pub min: Vec3,
@@ -149,13 +164,191 @@ impl Aabb {
     }
 }
 
-impl std::ops::Mul<Aabb> for Mat4 {
-    type Output = Aabb;
-    fn mul(self, rhs: Aabb) -> Self::Output {
-        Aabb {
-            min: (self * Vec4::from_point(rhs.min)).xyz(),
-            max: (self * Vec4::from_point(rhs.max)).xyz(),
+impl From<&[Vec3]> for Aabb {
+    fn from(points: &[Vec3]) -> Self {
+        let mut min = Vec3::new(f32::MAX, f32::MAX, f32::MAX);
+        let mut max = Vec3::new(f32::MIN, f32::MIN, f32::MIN);
+
+        for p in points {
+            if p.x < min.x {
+                min.x = p.x;
+            }
+
+            if p.y < min.y {
+                min.y = p.y;
+            }
+
+            if p.z < min.z {
+                min.z = p.z;
+            }
+
+            if p.x > max.x {
+                max.x = p.x;
+            }
+
+            if p.y > max.y {
+                max.y = p.y;
+            }
+
+            if p.z > max.z {
+                max.z = p.z;
+            }
         }
+
+        Self { min, max }
+    }
+}
+
+impl From<Obb> for Aabb {
+    fn from(bb: Obb) -> Self {
+        Self::from(bb.corners().as_slice())
+    }
+}
+
+/// Oriented bounding box
+///
+/// An oriented bounding box is a box that has an arbitrary orientation (in contrast to [`Aabb`]).
+/// It consists of a center point and three orthogonal bounding vectors. Each vector starts at the
+/// center and ends at one of the faces.
+#[derive(Debug, Clone, Copy, Component, Visitable)]
+pub struct Obb {
+    u_norm: Vec3,
+    u_len: f32,
+    v_norm: Vec3,
+    v_len: f32,
+    w_norm: Vec3,
+    w_len: f32,
+    center: Vec3,
+}
+
+/// Normalize the input vector. Returns the length and the normalized vector.
+pub fn normalized(v: Vec3) -> (f32, Vec3) {
+    let m = v.magnitude();
+    (m, v / m)
+}
+
+impl Obb {
+    /// Create an oriented bounding box (OBB) from a center position and three vectors,
+    /// each from the center point to one of the faces. The vectors need to be orthogonal
+    /// (otherwise, this is not a box).
+    pub fn new(center: Vec3, u: Vec3, v: Vec3, w: Vec3) -> Self {
+        let (u_len, u_norm) = normalized(u);
+        let (v_len, v_norm) = normalized(v);
+        let (w_len, w_norm) = normalized(w);
+
+        Self {
+            u_norm,
+            u_len,
+            v_norm,
+            v_len,
+            w_norm,
+            w_len,
+            center,
+        }
+    }
+
+    /// Create an (axis-aligned) oriented bounding box (OBB) from a center position and three extents.
+    ///
+    /// This is similar to an [`Aabb`] but is useful when the bounding box needs to be rotated or
+    /// transformed into another coordinate space. An Aabb would not bw valid after a rotation.
+    /// If no rotations are needed, prefer using [`Aabb`].
+    pub fn axis_aligned(center: Vec3, dims: Extent) -> Self {
+        Self::new(
+            center,
+            Vec3::new(dims.w / 2.0, 0.0, 0.0),
+            Vec3::new(0.0, dims.h / 2.0, 0.0),
+            Vec3::new(0.0, 0.0, dims.d / 2.0),
+        )
+    }
+
+    /// Returns the center point of the box.
+    pub fn center(&self) -> Vec3 {
+        self.center
+    }
+
+    /// Returns the three vectors that make up the bounds of the box. Each vector starts at the
+    /// center and ends at a face. As such, inverting a vector and adding it to the center gives
+    /// the opposite face.
+    pub fn uvw(&self) -> [Vec3; 3] {
+        [
+            self.u_norm * self.u_len,
+            self.v_norm * self.v_len,
+            self.w_norm * self.w_len,
+        ]
+    }
+
+    /// Returns the eight corners of the box, in no particular order.
+    pub fn corners(&self) -> [Vec3; 8] {
+        let [u, v, w] = self.uvw();
+        [
+            self.center + u + v + w,
+            self.center + u + v - w,
+            self.center + u - v + w,
+            self.center + u - v - w,
+            self.center - u + v + w,
+            self.center - u + v - w,
+            self.center - u - v + w,
+            self.center - u - v - w,
+        ]
+    }
+
+    /// Return whether the point is inside the box.
+    ///
+    /// If the point is incident with any of the faces of the box (lies in the plane of that face),
+    /// the return value is unspecified.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// # use ramneryd::math::{Obb, Vec3};
+    /// let obb = Obb::new(
+    ///     Vec3::new(0.0, 0.0, 0.0),
+    ///     Vec3::new(2.0, 0.0, 0.0),
+    ///     Vec3::new(0.0, 2.0, 0.0),
+    ///     Vec3::new(0.0, 0.0, 2.0),
+    /// );
+    /// let p0 = Vec3::new(1.0, 1.0, 1.0);
+    /// assert!(obb.contains(p0));
+    /// ```
+    pub fn contains(&self, point: Vec3) -> bool {
+        // A point is outside the box if it is in the positive halfspace of any of the faces.
+
+        let plane = |vec_norm: Vec3, vec_len: f32| -> Plane {
+            Plane {
+                point: self.center + vec_norm * vec_len,
+                normal: vec_norm,
+            }
+        };
+
+        let planes = [
+            plane(self.u_norm, self.u_len),
+            plane(-self.u_norm, self.u_len),
+            plane(self.v_norm, self.v_len),
+            plane(-self.v_norm, self.v_len),
+            plane(self.w_norm, self.w_len),
+            plane(-self.w_norm, self.w_len),
+        ];
+
+        for plane in planes {
+            if plane.halfspace(point) {
+                return false;
+            }
+        }
+
+        true
+    }
+}
+
+impl std::ops::Mul<Obb> for Mat4 {
+    type Output = Obb;
+    fn mul(self, o: Obb) -> Self::Output {
+        let center = self * o.center().with_w(1.0);
+        let mut vecs = o.uvw();
+        for v in &mut vecs {
+            *v = Mat3::from(self) * *v;
+        }
+
+        Obb::new(center.xyz(), vecs[0], vecs[1], vecs[2])
     }
 }
 
@@ -171,8 +364,7 @@ where
 
 pub fn perspective_vk(fov_y_radians: f32, aspect_ratio: f32, near: f32, far: f32) -> Mat4 {
     let mut m = Mat4::perspective_rh_zo(fov_y_radians, aspect_ratio, near, far);
-    // vulkan has the y-axis
-    // inverted (right-handed upside-down).
+    // vulkan has the y-axis inverted (right-handed upside-down).
     m[(1, 1)] *= -1.0;
 
     m
@@ -407,5 +599,53 @@ mod tests {
         let result = lhs * rhs;
 
         verify_composed(&lhs, &rhs, &result);
+    }
+
+    #[test]
+    fn plane_halfspace() {
+        use super::Plane;
+        let plane = Plane {
+            point: Vec3::new(0.5, -2.0, -1000.0),
+            normal: Vec3::new(1.0, 0.0, 0.0),
+        };
+
+        let positive = [
+            Vec3::new(2.0, 0.0, 0.0),
+            Vec3::new(10.0, -2.0, 0.0),
+            Vec3::new(1337.0, 2.0, -10.0),
+            Vec3::new(1337.0, -1232.0, -10.0),
+        ];
+        for p in positive {
+            assert!(plane.halfspace(p));
+        }
+    }
+
+    #[test]
+    fn obb_contains() {
+        use super::{Extent, Obb};
+        let obb = Obb::axis_aligned(Vec3::new(1.0, 2.0, 3.0), Extent::new(6.0, 4.0, 2.0));
+
+        let inside = [
+            [1.0, 2.0, 3.0],
+            [2.0, 2.9, 3.0],
+            [3.9, 2.9, 3.0],
+            [-1.9, 2.9, 3.0],
+            [-1.0, 0.1, 2.1],
+        ];
+
+        for p in inside {
+            assert!(obb.contains(Vec3::from(p)));
+        }
+
+        let outside = [
+            [5.0, 5.0, 5.1],
+            [-2.1, 2.9, 3.0],
+            [1.0, 4.1, 3.0],
+            [1.0, 2.0, 4.1],
+        ];
+
+        for p in outside {
+            assert!(!obb.contains(Vec3::from(p)));
+        }
     }
 }
