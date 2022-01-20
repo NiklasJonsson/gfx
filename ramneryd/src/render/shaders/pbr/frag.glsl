@@ -117,8 +117,9 @@ float sample_shadow_map(uint idx, float n_dot_l) {
     float depth = texture(spotlight_shadow_maps[idx], coords.xy).r;
     // This would have been clipped during shadow pass => not in shadow
     // texture clamp_to_edge sampling mode handles xy clipping
-    if (coords.z > 1.0 || coords.z < -1.0)
+    if (coords.z > 1.0 || coords.z < -1.0) {
         return 1.0;
+    }
 
     float max_bias = 0.05;
     float min_bias = 0.005;
@@ -169,6 +170,30 @@ float normal_distribution_function(float cos_angle, float alpha_roughness) {
     float bottom = M_PI * pow(1.0 + pow(cos_angle, 2.0) * (a2 - 1.0), 2.0);
 
     return top / bottom;
+}
+
+#define DEBUG_SHADOW_MAP
+
+vec3 debug_color(uint shadow_idx) {
+
+#ifdef DEBUG_SHADOW_MAP
+    vec3 coords = vs_out.shadow_coords[shadow_idx].xyz / vs_out.shadow_coords[shadow_idx].w;
+
+    if (coords.z > 1.0 || coords.z < -1.0) {
+        return vec3(0.0);
+    }
+
+    float eps = 0.01;
+    float map_size = 1024.0;
+    vec2 real = map_size * coords.xy;
+    bool x_close = abs(real.x - round(real.x)) < eps;
+    bool y_close = abs(real.y - round(real.y)) < eps;
+    if (x_close || y_close) {
+        return vec3(0.5, 0.0, 0.0);
+    }
+#endif
+
+    return vec3(0.0, 0.0, 0.0);
 }
 
 void main() {
@@ -263,11 +288,15 @@ void main() {
         float h_dot_l = clamp(dot(bisect_light_view, light_dir), 0.0, 1.0);
 
         float shadow_factor = 1.0;
-        if (light.shadow_idx != 0xFFFFFFFF)
+        if (light.shadow_idx != 0xFFFFFFFF) {
             shadow_factor = sample_shadow_map(light.shadow_idx, n_dot_l);
+        }
 
-        if (shadow_factor == 0.0)
+        color += debug_color(light.shadow_idx);
+
+        if (shadow_factor == 0.0) {
             continue;
+        }
 
         // Up until now, specific to gltf. From here on, wild west brdf
         // Define output as diffuse term + specular term
