@@ -196,6 +196,8 @@ pub fn light_and_shadow_pass(
         }
 
         let direction = tfm.rotation * Light::DEFAULT_FACING;
+        let light_pos = tfm.position.with_w(1.0);
+        let to_lightspace = Mat4::from(*tfm).inverted();
         let (packed_light, shadow_view_data) = match light {
             Light::Spot {
                 angle,
@@ -203,7 +205,6 @@ pub fn light_and_shadow_pass(
                 color,
             } => {
                 let proj = perspective_vk(angle * 2.0, 1.0, 1.0, *range);
-                let view = Mat4::from(*tfm).inverted();
                 let pos = tfm.position.with_w(1.0).into_array();
 
                 (
@@ -213,16 +214,16 @@ pub fn light_and_shadow_pass(
                         color_range: [color.r, color.g, color.b, *range],
                         ..Default::default()
                     },
-                    Some(ViewData {
-                        view_pos: pos,
-                        view_proj: (proj * view).into_col_array(),
-                    }),
+                    Some(proj),
                 )
             }
             Light::Directional { color } => {
-                let to_lightspace = Mat4::from(*tfm).inverted();
-                let aabb_light_space = Aabb::from(to_lightspace * light_bounds_ws);
-                let (min, max) = (aabb_light_space.min, aabb_light_space.max);
+                let (min, max) = {
+                    let obb_lightspace = to_lightspace * light_bounds_ws;
+                    let aabb_lightspace = Aabb::from(obb_lightspace);
+                    (aabb_lightspace.min, aabb_lightspace.max)
+                };
+
                 let proj: Mat4 = orthographic_vk(FrustrumPlanes {
                     left: min.x,
                     right: max.x,
@@ -239,10 +240,7 @@ pub fn light_and_shadow_pass(
                         color_range: [color.r, color.g, color.b, 0.0],
                         ..Default::default()
                     },
-                    Some(ViewData {
-                        view_pos: tfm.position.with_w(1.0).into_array(),
-                        view_proj: (proj * to_lightspace).into_col_array(),
-                    }),
+                    Some(proj),
                 )
             }
             Light::Point { color, range } => (
@@ -259,7 +257,7 @@ pub fn light_and_shadow_pass(
         lighting_data.punctual_lights[lighting_data.num_lights[0] as usize] = packed_light;
         lighting_data.num_lights[0] += 1;
 
-        if let Some(shadow_view_data) = shadow_view_data {
+        if let Some(shadow_proj) = shadow_view_data {
             let shadow_idx = shadow_matrices.num_matrices[0];
             shadow_matrices.num_matrices[0] += 1;
 
@@ -268,6 +266,11 @@ pub fn light_and_shadow_pass(
                 [shadow_idx; 4];
 
             let shadow_idx = shadow_idx as usize;
+
+            let shadow_view_data = ViewData {
+                view_pos: light_pos.into_array(),
+                view_proj: (shadow_proj * to_lightspace).into_col_array(),
+            };
 
             shadow_matrices.matrices[shadow_idx] = shadow_view_data.view_proj;
             frame
