@@ -227,7 +227,7 @@ impl Obb {
     /// (otherwise, this is not a box).
     pub fn new(center: Vec3, u: Vec3, v: Vec3, w: Vec3) -> Self {
         let (u_norm, u_len) = u.normalized_and_get_magnitude();
-        let (v_norm, v_len) = u.normalized_and_get_magnitude();
+        let (v_norm, v_len) = v.normalized_and_get_magnitude();
         let (w_norm, w_len) = w.normalized_and_get_magnitude();
 
         Self {
