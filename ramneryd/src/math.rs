@@ -221,20 +221,14 @@ pub struct Obb {
     center: Vec3,
 }
 
-/// Normalize the input vector. Returns the length and the normalized vector.
-pub fn normalized(v: Vec3) -> (f32, Vec3) {
-    let m = v.magnitude();
-    (m, v / m)
-}
-
 impl Obb {
     /// Create an oriented bounding box (OBB) from a center position and three vectors,
     /// each from the center point to one of the faces. The vectors need to be orthogonal
     /// (otherwise, this is not a box).
     pub fn new(center: Vec3, u: Vec3, v: Vec3, w: Vec3) -> Self {
-        let (u_len, u_norm) = normalized(u);
-        let (v_len, v_norm) = normalized(v);
-        let (w_len, w_norm) = normalized(w);
+        let (u_norm, u_len) = u.normalized_and_get_magnitude();
+        let (v_norm, v_len) = u.normalized_and_get_magnitude();
+        let (w_norm, w_len) = w.normalized_and_get_magnitude();
 
         Self {
             u_norm,

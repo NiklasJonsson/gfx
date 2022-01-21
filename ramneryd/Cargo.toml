@@ -18,7 +18,7 @@ imgui = "0.6.1"
 shaderc = "0.6.2"
 
 # Math/Physics
-vek = { version = "0.15.1", features = ["serde"] }
+vek = { version = "0.15.5", features = ["serde"] }
 num-derive = "0.2.5"
 num-traits = "0.2.8"
 
