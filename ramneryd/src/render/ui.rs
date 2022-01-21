@@ -26,8 +26,6 @@ use crate::time::Time;
 use specs::world::WorldExt;
 use specs::World;
 
-use imgui::im_str;
-
 use std::path::Path;
 
 #[derive(Clone, Copy, Debug)]
@@ -149,11 +147,11 @@ impl UIContext {
     fn init_imgui_ctx() -> imgui::Context {
         let mut ctx = imgui::Context::create();
 
-        ctx.set_renderer_name(Some(im_str!(
+        ctx.set_renderer_name(Some(format!(
             "ramneryd-trekanten {}",
             env!("CARGO_PKG_VERSION")
         )));
-        ctx.set_platform_name(Some(im_str!(
+        ctx.set_platform_name(Some(format!(
             "ramneryd-winit {}",
             env!("CARGO_PKG_VERSION")
         )));

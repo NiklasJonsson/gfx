@@ -14,8 +14,6 @@ use ramneryd_derive::Visitable;
 
 use num_derive::FromPrimitive;
 
-use imgui::im_str;
-
 #[derive(Debug, Copy, Clone, PartialEq, Eq, FromPrimitive, Visitable)]
 pub enum RenderMode {
     Opaque,
@@ -168,113 +166,106 @@ fn build_lights_tab(
     }
 
     {
-        let modal_id = imgui::im_str!("New light");
-        if frame
-            .inner()
-            .button(imgui::im_str!("Add light"), [0.0, 0.0])
-        {
+        let modal_id = "New light";
+        if frame.inner().button("Add light") {
             frame.inner().open_popup(modal_id);
         }
-        frame.inner().popup_modal(modal_id).build(|| {
-            let mut modal_state = world
-                .write_resource::<RenderSettings>()
-                .state
-                .add_light_modal
-                .take();
-            // TODO(refactor): Auto-generate some of this
-            let items = [
-                imgui::im_str!("Point"),
-                imgui::im_str!("Directional"),
-                imgui::im_str!("Spot"),
-                imgui::im_str!("Ambient"),
-            ];
-            let mut idx = modal_state.as_ref().map(|x| x.idx).unwrap_or(0);
-            let selected = imgui::ComboBox::new(imgui::im_str!("")).build_simple_string(
-                frame.inner(),
-                &mut idx,
-                &items,
-            );
-            if selected || modal_state.is_none() {
-                let tfm = Transform::default();
-                let name = Name::from(items[idx].to_string());
-                let light = match idx {
-                    0 => Light::Point {
-                        color: Rgb {
-                            r: 1.0,
-                            g: 1.0,
-                            b: 1.0,
-                        },
-                        range: 5.0,
-                    },
-                    1 => Light::Directional {
-                        color: Rgb {
-                            r: 1.0,
-                            g: 1.0,
-                            b: 1.0,
-                        },
-                    },
-                    2 => Light::Spot {
-                        color: Rgb {
-                            r: 1.0,
-                            g: 1.0,
-                            b: 1.0,
-                        },
-                        angle: std::f32::consts::FRAC_PI_8,
-                        range: 5.0,
-                    },
-                    3 => Light::Ambient {
-                        color: Rgb {
-                            r: 1.0,
-                            g: 1.0,
-                            b: 1.0,
-                        },
-                        strength: 0.05,
-                    },
-                    x => unreachable!("Invalid value for light selection {}", x),
-                };
-                modal_state = Some(AddLightModalState {
-                    choice: light,
-                    idx,
-                    tfm,
-                    name,
-                });
-            }
-            let mut create = false;
-            if let Some(AddLightModalState {
-                choice, name, tfm, ..
-            }) = &mut modal_state
-            {
-                visitor.visit_mut(choice, &Meta::field("properties"));
-                visitor.visit_mut(tfm, &Meta::field("transform"));
-                visitor.visit_mut(name, &Meta::field("name"));
-
-                if frame.inner().button(imgui::im_str!("Create"), [0.0, 0.0]) {
-                    create = true;
-                    frame.inner().close_current_popup();
-                }
-                frame.inner().same_line(0.0);
-                if frame.inner().button(imgui::im_str!("Cancel"), [0.0, 0.0]) {
-                    create = false;
-                    frame.inner().close_current_popup();
-                }
-            }
-            if create {
-                let AddLightModalState {
-                    choice, name, tfm, ..
-                } = modal_state.expect("create should only be set if this existed");
-                world
-                    .create_entity()
-                    .with(choice)
-                    .with(tfm)
-                    .with(name)
-                    .build();
-            } else {
-                world
+        frame
+            .inner()
+            .popup_modal(modal_id)
+            .build(frame.inner(), || {
+                let mut modal_state = world
                     .write_resource::<RenderSettings>()
                     .state
-                    .add_light_modal = modal_state;
-            }
-        });
+                    .add_light_modal
+                    .take();
+                // TODO(refactor): Auto-generate some of this
+                let items = [("Point"), ("Directional"), ("Spot"), ("Ambient")];
+                let mut idx = modal_state.as_ref().map(|x| x.idx).unwrap_or(0);
+                let selected = frame.inner().combo("Selected", &mut idx, &items, |s| {
+                    std::borrow::Cow::Borrowed(*s)
+                });
+                if selected || modal_state.is_none() {
+                    let tfm = Transform::default();
+                    let name = Name::from(items[idx].to_string());
+                    let light = match idx {
+                        0 => Light::Point {
+                            color: Rgb {
+                                r: 1.0,
+                                g: 1.0,
+                                b: 1.0,
+                            },
+                            range: 5.0,
+                        },
+                        1 => Light::Directional {
+                            color: Rgb {
+                                r: 1.0,
+                                g: 1.0,
+                                b: 1.0,
+                            },
+                        },
+                        2 => Light::Spot {
+                            color: Rgb {
+                                r: 1.0,
+                                g: 1.0,
+                                b: 1.0,
+                            },
+                            angle: std::f32::consts::FRAC_PI_8,
+                            range: 5.0,
+                        },
+                        3 => Light::Ambient {
+                            color: Rgb {
+                                r: 1.0,
+                                g: 1.0,
+                                b: 1.0,
+                            },
+                            strength: 0.05,
+                        },
+                        x => unreachable!("Invalid value for light selection {}", x),
+                    };
+                    modal_state = Some(AddLightModalState {
+                        choice: light,
+                        idx,
+                        tfm,
+                        name,
+                    });
+                }
+                let mut create = false;
+                if let Some(AddLightModalState {
+                    choice, name, tfm, ..
+                }) = &mut modal_state
+                {
+                    visitor.visit_mut(choice, &Meta::field("properties"));
+                    visitor.visit_mut(tfm, &Meta::field("transform"));
+                    visitor.visit_mut(name, &Meta::field("name"));
+
+                    if frame.inner().button("Create") {
+                        create = true;
+                        frame.inner().close_current_popup();
+                    }
+                    frame.inner().same_line();
+                    if frame.inner().button("Cancel") {
+                        create = false;
+                        frame.inner().close_current_popup();
+                    }
+                }
+                if create {
+                    let AddLightModalState {
+                        choice, name, tfm, ..
+                    } = modal_state.expect("create should only be set if this existed");
+                    world
+                        .create_entity()
+                        .with(choice)
+                        .with(tfm)
+                        .with(name)
+                        .build();
+                } else {
+                    world
+                        .write_resource::<RenderSettings>()
+                        .state
+                        .add_light_modal = modal_state;
+                }
+            });
     }
 }
 
@@ -325,22 +316,22 @@ pub(crate) fn build_ui<'a>(
     let size = [300.0, 85.0];
 
     let mut visitor = crate::editor::inspector::ImguiVisitor::new(ui);
-    imgui::Window::new(im_str!("Render debug"))
+    imgui::Window::new("Render debug")
         .position(pos, imgui::Condition::FirstUseEver)
         .size(size, imgui::Condition::FirstUseEver)
         .build(ui.inner(), || {
             let inner = ui.inner();
-            if let Some(token) = imgui::TabBar::new(im_str!("RenderDebugTabBar)")).begin(inner) {
+            if let Some(token) = imgui::TabBar::new("RenderDebugTabBar)").begin(inner) {
                 let items = [
-                    (im_str!("Overview"), build_overview_tab as TabItemFn),
-                    (im_str!("Lights"), build_lights_tab as TabItemFn),
-                    (im_str!("Cameras"), build_cameras_tab as TabItemFn),
+                    ("Overview", build_overview_tab as TabItemFn),
+                    ("Lights", build_lights_tab as TabItemFn),
+                    ("Cameras", build_cameras_tab as TabItemFn),
                 ];
 
                 for (id, func) in items {
                     imgui::TabItem::new(id).build(inner, || func(world, &mut visitor, ui));
                 }
-                token.end(inner);
+                token.end();
             }
         });
 

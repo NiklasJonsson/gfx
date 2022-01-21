@@ -430,30 +430,6 @@ fn draw_entities<'a>(world: &World, cmd_buf: &mut RenderPassEncoder<'a>, mode: D
     }
 }
 
-fn draw_aabb(world: &World, camera_ent: Entity, aabb: &crate::math::Aabb) {
-    assert!(aabb
-        .min
-        .iter()
-        .zip(aabb.max.iter())
-        .all(|(min_e, max_e)| min_e < max_e));
-
-    let children_storage = world.read_component::<crate::graph::Children>();
-    if children_storage.get(camera_ent).is_some() {
-        return;
-    }
-
-    let mut cmd_storage = world.write_component::<bounding_box::RenderBoundingBox>();
-    let mut bbox_storage = world.write_component::<crate::math::Aabb>();
-    cmd_storage
-        .entry(camera_ent)
-        .expect("Bad camera entity")
-        .or_insert(Default::default());
-    bbox_storage
-        .entry(camera_ent)
-        .expect("Bad camera entity")
-        .or_insert(*aabb);
-}
-
 #[profiling::function]
 pub fn draw_frame(world: &mut World, ui: &mut ui::UIContext, renderer: &mut Renderer) {
     let cam_entity = match ecs::find_singleton_entity::<Camera>(world) {
@@ -517,8 +493,6 @@ pub fn draw_frame(world: &mut World, ui: &mut ui::UIContext, renderer: &mut Rend
 
         view_matrix.inverted() * camera.view_obb()
     };
-
-    //draw_aabb(world, cam_entity, &camera_aabb);
 
     let mut cmd_buffer =
         light::light_and_shadow_pass(world, &mut frame, frame_resources, camera_obb, cmd_buffer);

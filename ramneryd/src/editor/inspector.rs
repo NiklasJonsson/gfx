@@ -1,10 +1,33 @@
 use crate::ecs::prelude::*;
 use crate::visit::{Meta, MetaOrigin, Visitable, Visitor};
-use imgui::{im_str, ImString};
 
+use std::borrow::Cow;
 use std::collections::HashMap;
 
+use crate::render::ui::UiFrame;
+
 pub type Ui<'a> = crate::render::ui::UiFrame<'a>;
+
+fn label<T>(m: &Meta<T>) -> Cow<str> {
+    match &m.origin {
+        MetaOrigin::NamedField { name } => Cow::Borrowed(*name),
+        MetaOrigin::TupleField { idx } => Cow::Owned(format!("{}", idx)),
+        MetaOrigin::Standalone => Cow::Owned(String::default()),
+    }
+}
+
+fn push_id<'a, T>(frame: &UiFrame<'a>, m: &Meta<T>) -> imgui::IdStackToken<'a> {
+    match &m.origin {
+        MetaOrigin::NamedField { name } => frame.inner().push_id(*name),
+        MetaOrigin::TupleField { idx } => {
+            let idx: i32 = (*idx)
+                .try_into()
+                .expect("Tuple idx should always fit into i32");
+            frame.inner().push_id(idx)
+        }
+        MetaOrigin::Standalone => frame.inner().push_id(0),
+    }
+}
 
 pub struct Inspector {
     components:
@@ -78,11 +101,11 @@ impl<'a> ImguiVisitor<'a> {
         match &m.origin {
             MetaOrigin::NamedField { name } => {
                 self.ui.inner().text(name);
-                self.ui.inner().same_line(0.0);
+                self.ui.inner().same_line();
             }
             MetaOrigin::TupleField { idx } => {
                 self.ui.inner().text(&format!("{}", idx));
-                self.ui.inner().same_line(0.0);
+                self.ui.inner().same_line();
             }
             MetaOrigin::Standalone => (),
         }
@@ -91,18 +114,18 @@ impl<'a> ImguiVisitor<'a> {
 
 impl<'a> ImguiVisitor<'a> {
     fn visit_visitable_begin<T: Visitable<Self>>(
-        &mut self,
+        &self,
         t: &T,
         m: &Meta<T>,
-    ) -> Option<imgui::IdStackToken> {
+    ) -> Option<imgui::IdStackToken<'a>> {
         self.mk_field(m);
 
-        let token = self.ui.inner().push_id(&label(m));
+        let token = push_id(self.ui, m);
 
         let header_label = if T::IS_ENUM {
-            im_str!("enum {}::{}", m.type_name, t.variant_name())
+            format!("enum {}::{}", m.type_name, t.variant_name())
         } else {
-            im_str!("struct {}", m.type_name)
+            format!("struct {}", m.type_name)
         };
         if m.type_name.is_empty() {
             // We don't want a header for this if there is a type name. Still, add a newline for the comming fields
@@ -116,14 +139,14 @@ impl<'a> ImguiVisitor<'a> {
             self.ui.inner().indent();
             Some(token)
         } else {
-            token.pop(self.ui.inner());
+            token.pop();
             None
         }
     }
 
-    fn visit_visitable_end(&mut self, token: imgui::IdStackToken) {
+    fn visit_visitable_end(&self, token: imgui::IdStackToken) {
         self.ui.inner().unindent();
-        token.pop(self.ui.inner());
+        token.pop();
     }
 }
 
@@ -147,23 +170,23 @@ where
 }
 
 impl<'a> ImguiVisitor<'a> {
-    fn visit_array_begin<T>(&mut self, m: &Meta<T>) -> Option<imgui::IdStackToken> {
+    fn visit_array_begin<T>(&mut self, m: &Meta<T>) -> Option<imgui::IdStackToken<'a>> {
         self.mk_field(m);
-        let header_label = im_str!("{}", m.type_name);
-        let token = self.ui.inner().push_id(&label(m));
+        let header_label = m.type_name;
+        let token = push_id(self.ui, &m);
 
         if imgui::CollapsingHeader::new(&header_label).build(self.ui.inner()) {
             self.ui.inner().indent();
             Some(token)
         } else {
-            token.pop(self.ui.inner());
+            token.pop();
             None
         }
     }
 
-    fn visit_array_end(&mut self, token: imgui::IdStackToken) {
+    fn visit_array_end(&self, token: imgui::IdStackToken<'a>) {
         self.ui.inner().unindent();
-        token.pop(self.ui.inner());
+        token.pop();
     }
 }
 
@@ -174,7 +197,8 @@ where
     fn visit(&mut self, t: &[T; N], m: &Meta<[T; N]>) {
         if let Some(outer_token) = self.visit_array_begin(m) {
             for (i, e) in t.iter().enumerate() {
-                let token = self.ui.inner().push_id(&im_str!("{}", i));
+                let id: i32 = i.try_into().unwrap();
+                let token = self.ui.inner().push_id(id);
                 self.visit(
                     e,
                     &Meta {
@@ -183,7 +207,7 @@ where
                         origin: MetaOrigin::TupleField { idx: i },
                     },
                 );
-                token.pop(self.ui.inner());
+                token.pop();
             }
             self.visit_array_end(outer_token);
         }
@@ -192,7 +216,8 @@ where
     fn visit_mut(&mut self, t: &mut [T; N], m: &Meta<[T; N]>) {
         if let Some(outer_token) = self.visit_array_begin(m) {
             for (i, e) in t.iter_mut().enumerate() {
-                let token = self.ui.inner().push_id(&im_str!("{}", i));
+                let id: i32 = i.try_into().unwrap();
+                let token = self.ui.inner().push_id(id);
                 self.visit_mut(
                     e,
                     &Meta {
@@ -201,18 +226,10 @@ where
                         origin: MetaOrigin::TupleField { idx: i },
                     },
                 );
-                token.pop(self.ui.inner());
+                token.pop();
             }
             self.visit_array_end(outer_token);
         }
-    }
-}
-
-fn label<T>(m: &Meta<T>) -> ImString {
-    match &m.origin {
-        MetaOrigin::NamedField { name } => im_str!("{}", name),
-        MetaOrigin::TupleField { idx } => im_str!("{}", idx),
-        MetaOrigin::Standalone => ImString::default(),
     }
 }
 
@@ -289,7 +306,7 @@ macro_rules! impl_visit_display {
     ($ty:ident) => {
         impl<'a> Visitor<$ty> for ImguiVisitor<'a> {
             fn visit(&mut self, t: &$ty, m: &Meta<$ty>) {
-                self.ui.inner().text(im_str!("{}: {}", &label(m), t));
+                self.ui.inner().text(format!("{}: {}", &label(m), t));
             }
             fn visit_mut(&mut self, t: &mut $ty, m: &Meta<$ty>) {
                 self.visit(t, m);
@@ -339,7 +356,7 @@ impl_visit_todo!(Texture);
 
 impl<'a> Visitor<bool> for ImguiVisitor<'a> {
     fn visit(&mut self, t: &bool, m: &Meta<bool>) {
-        self.ui.inner().text(&im_str!("{}: {}", &label(m), t));
+        self.ui.inner().text(&format!("{}: {}", &label(m), t));
     }
 
     fn visit_mut(&mut self, t: &mut bool, m: &Meta<bool>) {
@@ -350,7 +367,7 @@ impl<'a> Visitor<bool> for ImguiVisitor<'a> {
 use crate::ecs::Entity;
 impl<'a> Visitor<Entity> for ImguiVisitor<'a> {
     fn visit(&mut self, t: &Entity, m: &Meta<Entity>) {
-        self.ui.inner().text(im_str!("{}: {}", &label(m), t.id()));
+        self.ui.inner().text(format!("{}: {}", &label(m), t.id()));
     }
 
     fn visit_mut(&mut self, t: &mut Entity, m: &Meta<Entity>) {
@@ -378,51 +395,50 @@ impl<'a> Visitor<crate::math::Quat> for ImguiVisitor<'a> {
         imgui::InputFloat4::new(self.ui.inner(), &label(m), &mut v).build();
         *t = crate::math::Quat::from(crate::math::Vec4::from(v));
 
-        self.ui.inner().same_line(0.0);
+        self.ui.inner().same_line();
         let storage_id = String::from("Edit quaternion");
-        let imgui_id = imgui::ImString::from(storage_id.clone());
-        if self.ui.inner().button(im_str!("edit"), [0.0, 0.0]) {
-            self.ui.inner().open_popup(&imgui_id);
+        if self.ui.inner().button("edit") {
+            self.ui.inner().open_popup(&storage_id);
             self.ui
                 .storage()
                 .insert(storage_id.clone(), QuatEditState::default());
         }
-        self.ui.inner().popup_modal(&imgui_id).build(|| {
-            let mut storage = self.ui.storage();
-            let state: &mut QuatEditState = storage
-                .get_mut(&storage_id)
-                .expect("Got quat edit modal but no state resource");
-            imgui::InputFloat3::new(self.ui.inner(), im_str!("axis"), &mut state.axis).build();
-            imgui::InputFloat::new(
-                self.ui.inner(),
-                im_str!("angle (radians)"),
-                &mut state.angle_radians,
-            )
-            .build();
+        self.ui
+            .inner()
+            .popup_modal(&storage_id)
+            .build(self.ui.inner(), || {
+                let mut storage = self.ui.storage();
+                let state: &mut QuatEditState = storage
+                    .get_mut(&storage_id)
+                    .expect("Got quat edit modal but no state resource");
+                imgui::InputFloat3::new(self.ui.inner(), "axis", &mut state.axis).build();
+                imgui::InputFloat::new(
+                    self.ui.inner(),
+                    "angle (radians)",
+                    &mut state.angle_radians,
+                )
+                .build();
 
-            if self.ui.inner().button(im_str!("Apply"), [0.0; 2]) {
-                *t = crate::math::Quat::rotation_3d(state.angle_radians, state.axis);
-                self.ui.inner().close_current_popup();
-            }
-            self.ui.inner().same_line(0.0);
-            if self.ui.inner().button(im_str!("Close"), [0.0; 2]) {
-                self.ui.inner().close_current_popup();
-            }
-        });
+                if self.ui.inner().button("Apply") {
+                    *t = crate::math::Quat::rotation_3d(state.angle_radians, state.axis);
+                    self.ui.inner().close_current_popup();
+                }
+                self.ui.inner().same_line();
+                if self.ui.inner().button("Close") {
+                    self.ui.inner().close_current_popup();
+                }
+            });
     }
 }
 
 impl<'a> Visitor<String> for ImguiVisitor<'a> {
     fn visit(&mut self, t: &String, m: &Meta<String>) {
-        self.ui.inner().text(im_str!("{}: {}", label(m), &t));
+        self.ui.inner().text(format!("{}: {}", label(m), &t));
     }
 
     fn visit_mut(&mut self, t: &mut String, m: &Meta<String>) {
-        let mut v = imgui::ImString::from(t.clone());
-        self.ui.inner().text(im_str!("{}: {}", label(m), &t));
-        if imgui::InputText::new(self.ui.inner(), &label(m), &mut v).build() {
-            *t = v.to_string();
-        }
+        self.ui.inner().text(format!("{}: {}", label(m), &t));
+        if imgui::InputText::new(self.ui.inner(), &label(m), t).build() {}
     }
 }
 
@@ -435,7 +451,7 @@ where
     fn visit(&mut self, t: &(T1, T2), m: &Meta<(T1, T2)>) {
         if let Some(outer_token) = self.visit_array_begin(m) {
             {
-                let token = self.ui.inner().push_id(&im_str!("0"));
+                let token = self.ui.inner().push_id(&"0");
                 self.visit(
                     &t.0,
                     &Meta {
@@ -448,7 +464,7 @@ where
             }
 
             {
-                let token = self.ui.inner().push_id(&im_str!("1"));
+                let token = self.ui.inner().push_id(&"1");
                 self.visit(
                     &t.1,
                     &Meta {
@@ -468,7 +484,7 @@ where
     fn visit_mut(&mut self, t: &mut (T1, T2), m: &Meta<(T1, T2)>) {
         if let Some(outer_token) = self.visit_array_begin(m) {
             {
-                let token = self.ui.inner().push_id(&im_str!("0"));
+                let token = self.ui.inner().push_id(&"0");
                 self.visit_mut(
                     &mut t.0,
                     &Meta {
@@ -481,7 +497,7 @@ where
             }
 
             {
-                let token = self.ui.inner().push_id(&im_str!("1"));
+                let token = self.ui.inner().push_id(&"1");
                 self.visit_mut(
                     &mut t.1,
                     &Meta {
@@ -662,7 +678,7 @@ impl Inspect for trekanten::pipeline::PolygonMode {
 
         match self {
             Self::Fill => {
-                let ty = imgui::im_str!("enum {}::{}", std::any::type_name::<Self>(), "Fill");
+                let ty = "enum {}::{}", std::any::type_name::<Self>(), "Fill";
                 let _ = imgui::CollapsingHeader::new(&ty)
                     .default_open(true)
                     .leaf(true)

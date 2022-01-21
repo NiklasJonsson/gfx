@@ -3,7 +3,7 @@ use specs::prelude::*;
 use crate::common::Name;
 use crate::ecs;
 use crate::graph;
-use imgui::{im_str, CollapsingHeader, Condition, InputFloat3, TreeNode};
+use imgui::{CollapsingHeader, Condition, InputFloat3, TreeNode};
 pub type Ui<'a> = crate::render::ui::UiFrame<'a>;
 
 use crate::visit::{Meta, Visitor as _};
@@ -25,9 +25,9 @@ fn build_tree<'a>(
 ) -> Option<specs::Entity> {
     let mut inspected = None;
 
-    let name = im_str!("{}", name(world, ent));
+    let name = name(world, ent);
     TreeNode::new(&name).build(ui.inner(), || {
-        let pressed = ui.inner().small_button(im_str!("inspect"));
+        let pressed = ui.inner().small_button("inspect");
         if pressed {
             inspected = Some(ent);
         }
@@ -45,9 +45,9 @@ fn build_tree<'a>(
 fn build_inspector<'a>(world: &mut World, ui: &crate::render::ui::UiFrame<'a>, ent: specs::Entity) {
     use crate::render::ReloadMaterial;
 
-    ui.inner().text(im_str!("{}", name(world, ent)));
+    ui.inner().text(name(world, ent));
     ui.inner().separator();
-    let pressed = ui.inner().small_button(im_str!("reload material"));
+    let pressed = ui.inner().small_button("reload material");
     if pressed {
         world
             .write_component::<ReloadMaterial>()
@@ -86,7 +86,7 @@ fn build_inspector<'a>(world: &mut World, ui: &crate::render::ui::UiFrame<'a>, e
             } else if CollapsingHeader::new(&imgui::ImString::from(format!("struct {}", comp.name)))
                 .build(ui.inner())
             {
-                ui.inner().text(im_str!("unimplemented"));
+                ui.inner().text("unimplemented");
             }
         }
     }
@@ -106,14 +106,14 @@ impl UIModule for EditorUiModule {
         let dt = world.read_resource::<crate::time::Time>().delta_sim();
         let size = [400.0, 300.0];
         let pos = [0.0, 0.0];
-        imgui::Window::new(im_str!("Overview"))
+        imgui::Window::new("Overview")
             .size(size, imgui::Condition::FirstUseEver)
             .position(pos, imgui::Condition::FirstUseEver)
             .build(frame.inner(), || {
-                frame.inner().text(im_str!("FPS: {:.3}", dt.as_fps()));
+                frame.inner().text(format!("FPS: {:.3}", dt.as_fps()));
                 let mut p = crate::render::camera_pos(world).into_array();
 
-                InputFloat3::new(frame.inner(), im_str!("Camera pos"), &mut p)
+                InputFloat3::new(frame.inner(), "Camera pos", &mut p)
                     .read_only(true)
                     .build();
 
@@ -122,22 +122,20 @@ impl UIModule for EditorUiModule {
                     let ori = state.orientation();
                     let mut view_dir = ori.view_direction.into_array();
                     let mut up = ori.up.into_array();
-                    InputFloat3::new(frame.inner(), &im_str!("view dir {}", i), &mut view_dir)
+                    InputFloat3::new(frame.inner(), format!("view dir {}", i), &mut view_dir)
                         .read_only(true)
                         .build();
 
-                    InputFloat3::new(frame.inner(), &im_str!("up {}", i), &mut up)
+                    InputFloat3::new(frame.inner(), format!("up {}", i), &mut up)
                         .read_only(true)
                         .build();
                 }
 
                 frame
                     .inner()
-                    .text(im_str!("#components: {}", ecs::meta::ALL_COMPONENTS.len()));
-                frame
-                    .inner()
-                    .text(im_str!("Right handed coordinate system"));
-                frame.inner().text(im_str!("Registered systems:"));
+                    .text(format!("#components: {}", ecs::meta::ALL_COMPONENTS.len()));
+                frame.inner().text("Right handed coordinate system");
+                frame.inner().text("Registered systems:");
             });
 
         {
@@ -162,7 +160,7 @@ impl UIModule for EditorUiModule {
             let parent_storage = world.read_storage::<graph::Parent>();
             let entities = world.read_resource::<specs::world::EntitiesRes>();
 
-            imgui::Window::new(im_str!("Scene"))
+            imgui::Window::new("Scene")
                 .position(scene_window_pos, Condition::Always)
                 .size(scene_window_size, Condition::Always)
                 .build(frame.inner(), || {
@@ -179,7 +177,7 @@ impl UIModule for EditorUiModule {
         let inspected_window_size = [scene_window_size[0], 300.0];
         let inspected_window_pos = [scene_window_pos[0], scene_window_size[1]];
         if let Some(ent) = inspected {
-            imgui::Window::new(im_str!("Inspector"))
+            imgui::Window::new("Inspector")
                 .position(inspected_window_pos, Condition::FirstUseEver)
                 .size(inspected_window_size, Condition::FirstUseEver)
                 .build(frame.inner(), || {
@@ -208,23 +206,23 @@ impl UIModule for EditorUiModule {
             polymap::polymap::Entry::Occupied(entry) => entry.into_mut(),
         };
         let mut ins = inspector::ImguiVisitor::new(frame);
-        let test_id = im_str!("Test reflection code");
+        let test_id = "Test reflection code";
         imgui::Window::new(test_id)
             .position(inspected_window_pos, Condition::FirstUseEver)
             .size(inspected_window_size, Condition::FirstUseEver)
             .build(frame.inner(), || {
                 let t = frame.inner().push_id(test_id);
                 ins.visit_mut(test, &Meta::standalone());
-                t.pop(frame.inner());
+                t.pop();
             });
-        let test_id = im_str!("Manual reflection code");
+        let test_id = "Manual reflection code";
         imgui::Window::new(test_id)
             .position(inspected_window_pos, Condition::FirstUseEver)
             .size(inspected_window_size, Condition::FirstUseEver)
             .build(frame.inner(), || {
                 let t = frame.inner().push_id(test_id);
                 build_manual_test(test, frame);
-                t.pop(frame.inner());
+                t.pop();
             });
     }
 }
@@ -263,7 +261,7 @@ struct B {
 
 fn mk_field<'a>(ui: &imgui::Ui<'a>, s: &str) {
     ui.text(s);
-    ui.same_line(0.0);
+    ui.same_line();
 }
 
 fn variant_name(e: &E) -> &str {
@@ -285,13 +283,13 @@ where
 {
     if !name.is_empty() {
         ui.inner().text(name);
-        ui.inner().same_line(0.0);
+        ui.inner().same_line();
     }
 
     let id = if name.is_empty() {
-        im_str!("struct {}", ty)
+        format!("struct {}", ty)
     } else {
-        im_str!("struct {}##{}", ty, name)
+        format!("struct {}##{}", ty, name)
     };
     let token = ui.inner().push_id(&id);
     if imgui::CollapsingHeader::new(&id)
@@ -304,11 +302,11 @@ where
         }
         ui.inner().unindent();
     }
-    token.pop(ui.inner());
+    token.pop();
 }
 
 fn build_manual_test(test: &mut B, frame: &UiFrame) {
-    let header_label = im_str!("B");
+    let header_label = "B";
     let token = frame.inner().push_id(header_label);
 
     let ui = frame.inner();
@@ -319,8 +317,8 @@ fn build_manual_test(test: &mut B, frame: &UiFrame) {
             "A",
             frame,
             Some(|| {
-                ui.input_int(im_str!("x"), &mut test.a.x).build();
-                ui.input_float(im_str!("y"), &mut test.a.y).build();
+                ui.input_int("x", &mut test.a.x).build();
+                ui.input_float("y", &mut test.a.y).build();
             }),
         );
         inspect_struct(
@@ -338,7 +336,7 @@ fn build_manual_test(test: &mut B, frame: &UiFrame) {
             frame,
             Some(|| {
                 mk_field(ui, "e");
-                if imgui::CollapsingHeader::new(&im_str!("E::{}", variant_name(&test.c.e)))
+                if imgui::CollapsingHeader::new(&format!("E::{}", variant_name(&test.c.e)))
                     .build(ui)
                 {
                     ui.indent();
@@ -355,7 +353,7 @@ fn build_manual_test(test: &mut B, frame: &UiFrame) {
                             );
                         }
                         E::InlineStruct { mut s } => {
-                            ui.input_int(im_str!("s"), &mut s).build();
+                            ui.input_int("s", &mut s).build();
                         }
                         E::TupleStruct(s, mut a, mut f, mut b) => {
                             inspect_struct(
@@ -372,13 +370,13 @@ fn build_manual_test(test: &mut B, frame: &UiFrame) {
                                 "A",
                                 frame,
                                 Some(|| {
-                                    ui.input_int(im_str!("x"), &mut a.x).build();
-                                    ui.input_float(im_str!("y"), &mut a.y).build();
+                                    ui.input_int("x", &mut a.x).build();
+                                    ui.input_float("y", &mut a.y).build();
                                 }),
                             );
 
-                            ui.input_float(im_str!(""), &mut f).build();
-                            ui.checkbox(im_str!(""), &mut b);
+                            ui.input_float("", &mut f).build();
+                            ui.checkbox("", &mut b);
                         }
                     }
                     ui.unindent();
@@ -387,7 +385,7 @@ fn build_manual_test(test: &mut B, frame: &UiFrame) {
         );
         ui.unindent();
     }
-    token.pop(frame.inner());
+    token.pop();
 }
 
 pub fn ui_module() -> Box<dyn UIModule> {
