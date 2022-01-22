@@ -14,7 +14,7 @@ use ramneryd_derive::Visitable;
 
 use num_traits::cast::FromPrimitive;
 
-#[derive(Component, Visitable)]
+#[derive(Component, Visitable, Clone, Copy)]
 pub struct Camera {
     pub fov_y_radians: f32,
     pub aspect_ratio: f32,
@@ -69,7 +69,7 @@ pub struct CameraOrientation {
 // Avoid gimbal-lock by clamping pitch
 const MAX_PITCH: f32 = 0.99 * std::f32::consts::FRAC_PI_2;
 const MIN_PITCH: f32 = 0.99 * -std::f32::consts::FRAC_PI_2;
-#[derive(Debug, Component, Visitable)]
+#[derive(Debug, Component, Visitable, Clone, Copy)]
 pub struct FreeFlyCameraState {
     yaw: f32,
     pitch: f32,

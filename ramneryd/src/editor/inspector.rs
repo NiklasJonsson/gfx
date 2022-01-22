@@ -356,7 +356,8 @@ impl_visit_todo!(Texture);
 
 impl<'a> Visitor<bool> for ImguiVisitor<'a> {
     fn visit(&mut self, t: &bool, m: &Meta<bool>) {
-        self.ui.inner().text(&format!("{}: {}", &label(m), t));
+        let mut tmp = *t;
+        self.ui.inner().checkbox(&label(m), &mut tmp);
     }
 
     fn visit_mut(&mut self, t: &mut bool, m: &Meta<bool>) {

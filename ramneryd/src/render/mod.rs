@@ -51,7 +51,7 @@ pub enum GpuResource<InFlightT, AvailT> {
 type GpuBuffer<BT> = GpuResource<BufferHandle<Async<BT>>, BufferHandle<BT>>;
 
 pub fn camera_pos(world: &World) -> Vec3 {
-    let camera_entity = ecs::get_singleton_entity::<Camera>(world);
+    let camera_entity = ecs::get_singleton_entity::<MainRenderCamera>(world);
     let transforms = world.read_storage::<Transform>();
     transforms
         .get(camera_entity)

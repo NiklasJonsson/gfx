@@ -1,3 +1,4 @@
+use crate::camera::FreeFlyCameraState;
 use crate::common::Name;
 use crate::ecs::prelude::*;
 use crate::io::input::{ActionId, InputContext, InputContextError, KeyCode, MappedInput};
@@ -13,6 +14,8 @@ use render::ui::UiFrame;
 use ramneryd_derive::Visitable;
 
 use num_derive::FromPrimitive;
+
+use std::borrow::Cow;
 
 #[derive(Debug, Copy, Clone, PartialEq, Eq, FromPrimitive, Visitable)]
 pub enum RenderMode {
@@ -41,6 +44,7 @@ pub struct RenderSettings {
     pub reload_shaders: bool,
     pub render_light_volumes: bool,
 
+    // TODO: Move to other state holder
     #[visitable(ignore)]
     state: RenderSettingsState,
 }
@@ -167,7 +171,7 @@ fn build_lights_tab(
 
     {
         let modal_id = "New light";
-        if frame.inner().button("Add light") {
+        if frame.inner().button("Add") {
             frame.inner().open_popup(modal_id);
         }
         frame
@@ -274,29 +278,44 @@ fn build_overview_tab(world: &mut World, visitor: &mut ImguiVisitor, _frame: &Ui
     settings.visit_fields_mut(visitor);
 }
 
-#[derive(Debug, Default, Visitable)]
+#[derive(Debug, Visitable)]
 struct CameraInfo {
     pos: Vec3,
     view_dir: Vec3,
     shadow_viewer: bool,
     main_render_camera: bool,
+    entity: Entity,
 }
 
-fn build_cameras_tab(world: &mut World, visitor: &mut ImguiVisitor, _frame: &UiFrame) {
-    {
-        use crate::render::light::ShadowViewer;
-        use crate::render::{Camera, FreeFlyCameraState, MainRenderCamera};
+struct MainCameraData {
+    ent: Entity,
+    idx: usize,
+    tfm: crate::math::Transform,
+    cam: crate::camera::Camera,
+    ff_state: crate::camera::FreeFlyCameraState,
+}
 
-        type SysData<'a> = (
-            ReadStorage<'a, Camera>,
-            ReadStorage<'a, Transform>,
-            ReadStorage<'a, FreeFlyCameraState>,
-            ReadStorage<'a, ShadowViewer>,
-            ReadStorage<'a, MainRenderCamera>,
-        );
-        let (cameras, transforms, states, shadow_viewers, main_render_cameras) =
+fn build_cameras_tab(world: &mut World, visitor: &mut ImguiVisitor, frame: &UiFrame) {
+    use crate::render::light::ShadowViewer;
+    use crate::render::{Camera, MainRenderCamera};
+
+    type SysData<'a> = (
+        Entities<'a>,
+        ReadStorage<'a, Camera>,
+        ReadStorage<'a, Transform>,
+        ReadStorage<'a, FreeFlyCameraState>,
+        ReadStorage<'a, ShadowViewer>,
+        ReadStorage<'a, MainRenderCamera>,
+    );
+
+    // TODO (perf): tmp alloc here
+    let mut camera_entities = Vec::new();
+    let mut main_camera_data = None;
+    {
+        let (entities, cameras, transforms, states, shadow_viewers, main_render_cameras) =
             SysData::fetch(world);
-        for (i, (_cam, tfm, state, shadow_viewer, main_cam)) in (
+        for (i, (ent, cam, tfm, state, shadow_viewer, main_cam)) in (
+            &entities,
             &cameras,
             &transforms,
             &states,
@@ -306,22 +325,95 @@ fn build_cameras_tab(world: &mut World, visitor: &mut ImguiVisitor, _frame: &UiF
             .join()
             .enumerate()
         {
+            camera_entities.push(ent);
+            if main_cam.is_some() && main_camera_data.is_none() {
+                main_camera_data = Some(MainCameraData {
+                    ent,
+                    idx: i,
+                    tfm: *tfm,
+                    cam: *cam,
+                    ff_state: *state,
+                });
+            }
+
             // TODO: Remove knowledge of state here
             let orientation = state.orientation();
-            let c = CameraInfo {
+            let mut c = CameraInfo {
                 pos: tfm.position,
                 view_dir: orientation.view_direction,
                 shadow_viewer: shadow_viewer.is_some(),
                 main_render_camera: main_cam.is_some(),
+                entity: ent,
             };
-            visitor.visit(
-                &c,
+            visitor.visit_mut(
+                &mut c,
                 &Meta {
                     type_name: "Camera",
                     range: None,
                     origin: MetaOrigin::TupleField { idx: i },
                 },
             );
+        }
+    }
+
+    let mut main_camera_data = if let Some(data) = main_camera_data {
+        data
+    } else {
+        log::error!(
+            "Tried to render camera tab for render debug ui but failed to find main camera"
+        );
+        return;
+    };
+
+    {
+        let ui = frame.inner();
+        if ui.button("Add") {
+            let mut tfm = main_camera_data.tfm;
+            tfm.position += Vec3 {
+                x: 0.0,
+                y: 2.0,
+                z: 0.0,
+            };
+            world
+                .create_entity()
+                .with(main_camera_data.cam)
+                .with(tfm)
+                .with(main_camera_data.ff_state)
+                .with(Name::from(format!("{}", camera_entities.len())))
+                .build();
+        }
+
+        if ui.combo(
+            "Main render camera",
+            &mut main_camera_data.idx,
+            &camera_entities,
+            |e| Cow::Owned(format!("{:?}", e)),
+        ) {
+            let old_main = main_camera_data.ent;
+            let new_main = camera_entities[main_camera_data.idx];
+            if old_main != new_main {
+                let mut marker_storage = world.write_storage::<MainRenderCamera>();
+                marker_storage
+                    .remove(old_main)
+                    .expect("Main camera should have this marker");
+
+                let mut input_ctx_storage = world.write_storage::<InputContext>();
+                let input_ctx = input_ctx_storage
+                    .remove(old_main)
+                    .expect("Main camera should have input context");
+
+                let old = marker_storage
+                    .insert(new_main, MainRenderCamera)
+                    .expect("Failed to switch main render camera");
+                assert!(
+                    old.is_none(),
+                    "New main render camera should not have had the tag already"
+                );
+                let old = input_ctx_storage
+                    .insert(new_main, input_ctx)
+                    .expect("Failed to move input context to new main camera");
+                assert!(old.is_none(), "New main camera already has a context!?");
+            }
         }
     }
 }

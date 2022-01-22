@@ -117,25 +117,10 @@ impl UIModule for EditorUiModule {
                     .read_only(true)
                     .build();
 
-                let ffcs_storage = world.read_storage::<crate::camera::FreeFlyCameraState>();
-                for (i, state) in ffcs_storage.join().enumerate() {
-                    let ori = state.orientation();
-                    let mut view_dir = ori.view_direction.into_array();
-                    let mut up = ori.up.into_array();
-                    InputFloat3::new(frame.inner(), format!("view dir {}", i), &mut view_dir)
-                        .read_only(true)
-                        .build();
-
-                    InputFloat3::new(frame.inner(), format!("up {}", i), &mut up)
-                        .read_only(true)
-                        .build();
-                }
-
                 frame
                     .inner()
                     .text(format!("#components: {}", ecs::meta::ALL_COMPONENTS.len()));
                 frame.inner().text("Right handed coordinate system");
-                frame.inner().text("Registered systems:");
             });
 
         {
