@@ -96,6 +96,10 @@ pub struct FrameData {
 
 #[derive(Component, Default)]
 #[component(storage = "NullStorage")]
+pub struct MainRenderCamera;
+
+#[derive(Component, Default)]
+#[component(storage = "NullStorage")]
 pub struct ReloadMaterial;
 
 #[derive(Component, Visitable)]
@@ -432,7 +436,7 @@ fn draw_entities<'a>(world: &World, cmd_buf: &mut RenderPassEncoder<'a>, mode: D
 
 #[profiling::function]
 pub fn draw_frame(world: &mut World, ui: &mut ui::UIContext, renderer: &mut Renderer) {
-    let cam_entity = match ecs::find_singleton_entity::<Camera>(world) {
+    let cam_entity = match ecs::find_singleton_entity::<MainRenderCamera>(world) {
         None => {
             log::warn!("Did not find a camera entity, can't render");
             return;

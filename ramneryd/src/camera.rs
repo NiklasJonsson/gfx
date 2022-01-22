@@ -338,6 +338,7 @@ impl crate::Module for DefaultCamera {
                 speed: DEFAULT_MOVEMENT_SPEED,
             })
             .with(crate::render::light::ShadowViewer)
+            .with(crate::render::MainRenderCamera)
             .with(Name::from(NAME))
             .build();
     }

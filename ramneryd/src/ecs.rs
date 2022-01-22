@@ -108,6 +108,7 @@ where
 
     let mut joined = (&entities, &markers).join();
     let item = joined.next();
+    assert!(joined.next().is_none());
 
     item.map(|(ent, _)| ent)
 }
