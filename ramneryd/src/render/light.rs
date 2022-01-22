@@ -147,13 +147,47 @@ impl<'a> System<'a> for RenderLightVolumes {
     }
 }
 
+#[derive(Default, Component)]
+#[component(storage = "NullStorage")]
+pub struct ShadowViewer;
+
+/// Compute the bounds of the view are that we want to cast shadows on.
+/// The coordinates are in world-space.
+fn compute_shadow_bounds(world: &World) -> Option<Obb> {
+    use crate::camera::{Camera, FreeFlyCameraState};
+
+    type SysData<'a> = (
+        ReadStorage<'a, Camera>,
+        ReadStorage<'a, Transform>,
+        ReadStorage<'a, FreeFlyCameraState>,
+        ReadStorage<'a, ShadowViewer>,
+    );
+
+    let (cameras, transforms, states, markers) = SysData::fetch(world);
+    let mut obb = None;
+    for (cam, tfm, state, _marker) in (&cameras, &transforms, &states, &markers).join() {
+        // TODO: Some sites suggest to use view_proj.inverse() * NDC cube, try this.
+
+        // TODO: Invert tfm instead of using state to compute view_matrix
+        let view_matrix = state.view_matrix_with_pos(tfm.position);
+        if obb.is_none() {
+            obb = Some(view_matrix.inverted() * cam.view_obb());
+        } else {
+            log::error!("Too many shadow viewing cameras, ignoring all but first.");
+        }
+    }
+    obb
+}
+
 pub fn light_and_shadow_pass(
     world: &World,
     frame: &mut trekanten::Frame,
     frame_resources: &super::FrameData,
-    light_bounds_ws: Obb,
     mut cmd_buffer: CommandBuffer,
 ) -> CommandBuffer {
+    let light_bounds_ws =
+        compute_shadow_bounds(world).expect("Failed to compute bounds for shadows");
+
     use trekanten::raw_vk;
     let mut lighting_data = LightingData::default();
     let mut shadow_matrices = ShadowMatrices::default();

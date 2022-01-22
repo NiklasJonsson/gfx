@@ -247,8 +247,8 @@ fn get_input_context() -> Result<InputContext, InputContextError> {
         .with_state(KeyCode::E, Up)?
         .with_state(KeyCode::Q, Down)?
         .with_state(MouseButton::Right, Move)?
-        // Switch y since the delta is computed from top-left corner
         .with_range(DeviceAxis::MouseX, CameraRotation::YawDelta, sens)?
+        // Switch y sign since the delta is computed from top-left corner
         .with_range(DeviceAxis::MouseY, CameraRotation::PitchDelta, -sens)?
         .build())
 }
@@ -337,6 +337,7 @@ impl crate::Module for DefaultCamera {
                 pitch: -0.4,
                 speed: DEFAULT_MOVEMENT_SPEED,
             })
+            .with(crate::render::light::ShadowViewer)
             .with(Name::from(NAME))
             .build();
     }

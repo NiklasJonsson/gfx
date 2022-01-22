@@ -278,21 +278,32 @@ fn build_overview_tab(world: &mut World, visitor: &mut ImguiVisitor, _frame: &Ui
 struct CameraInfo {
     pos: Vec3,
     view_dir: Vec3,
+    shadow_viewer: bool,
 }
 
 fn build_cameras_tab(world: &mut World, visitor: &mut ImguiVisitor, _frame: &UiFrame) {
     {
+        use crate::render::light::ShadowViewer;
         use crate::render::{Camera, FreeFlyCameraState};
-        let cameras = world.write_component::<Camera>();
-        let transforms = world.read_component::<Transform>();
-        // TODO: Invert transform instead
-        let states = world.read_component::<FreeFlyCameraState>();
-        for (i, (_cam, tfm, state)) in (&cameras, &transforms, &states).join().enumerate() {
-            let orientation = state.orientation();
 
+        type SysData<'a> = (
+            ReadStorage<'a, Camera>,
+            ReadStorage<'a, Transform>,
+            ReadStorage<'a, FreeFlyCameraState>,
+            ReadStorage<'a, ShadowViewer>,
+        );
+        let (cameras, transforms, states, markers) = SysData::fetch(world);
+        for (i, (_cam, tfm, state, shadow_viewer)) in
+            (&cameras, &transforms, &states, markers.maybe())
+                .join()
+                .enumerate()
+        {
+            // TODO: Remove knowledge of state here
+            let orientation = state.orientation();
             let c = CameraInfo {
                 pos: tfm.position,
                 view_dir: orientation.view_direction,
+                shadow_viewer: shadow_viewer.is_some(),
             };
             visitor.visit(
                 &c,

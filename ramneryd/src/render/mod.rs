@@ -466,7 +466,7 @@ pub fn draw_frame(world: &mut World, ui: &mut ui::UIContext, renderer: &mut Rend
         .expect("Failed to create command buffer");
 
     // View data main render pass
-    let camera_obb = {
+    {
         let mut cameras = world.write_component::<Camera>();
         let transforms = world.read_component::<Transform>();
         // TODO: Instead of using the state here, we should just use the inverse of the rotation of the transform,
@@ -491,11 +491,11 @@ pub fn draw_frame(world: &mut World, ui: &mut ui::UIContext, renderer: &mut Rend
             .update_uniform_blocking(&frame_resources.main_camera_view_data, &view_data)
             .expect("Failed to update uniform");
 
-        view_matrix.inverted() * camera.view_obb()
+        view_matrix.inverted()
     };
 
     let mut cmd_buffer =
-        light::light_and_shadow_pass(world, &mut frame, frame_resources, camera_obb, cmd_buffer);
+        light::light_and_shadow_pass(world, &mut frame, frame_resources, cmd_buffer);
 
     {
         // main render pass
