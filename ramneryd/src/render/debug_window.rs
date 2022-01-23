@@ -325,7 +325,7 @@ fn build_cameras_tab(world: &mut World, visitor: &mut ImguiVisitor, frame: &UiFr
             .join()
             .enumerate()
         {
-            camera_entities.push(ent);
+            camera_entities.push((ent, i));
             if main_cam.is_some() && main_camera_data.is_none() {
                 main_camera_data = Some(MainCameraData {
                     ent,
@@ -387,10 +387,10 @@ fn build_cameras_tab(world: &mut World, visitor: &mut ImguiVisitor, frame: &UiFr
             "Main render camera",
             &mut main_camera_data.idx,
             &camera_entities,
-            |e| Cow::Owned(format!("{:?}", e)),
+            |e| Cow::Owned(format!("{}", e.1)),
         ) {
             let old_main = main_camera_data.ent;
-            let new_main = camera_entities[main_camera_data.idx];
+            let new_main = camera_entities[main_camera_data.idx].0;
             if old_main != new_main {
                 let mut marker_storage = world.write_storage::<MainRenderCamera>();
                 marker_storage
