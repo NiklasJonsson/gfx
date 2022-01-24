@@ -173,7 +173,7 @@ impl<'a> ImguiVisitor<'a> {
     fn visit_array_begin<T>(&mut self, m: &Meta<T>) -> Option<imgui::IdStackToken<'a>> {
         self.mk_field(m);
         let header_label = m.type_name;
-        let token = push_id(self.ui, &m);
+        let token = push_id(self.ui, m);
 
         if imgui::CollapsingHeader::new(&header_label).build(self.ui.inner()) {
             self.ui.inner().indent();
@@ -199,12 +199,13 @@ where
             for (i, e) in t.iter().enumerate() {
                 let id: i32 = i.try_into().unwrap();
                 let token = self.ui.inner().push_id(id);
+                let idx: u8 = i.try_into().expect("Too many elements");
                 self.visit(
                     e,
                     &Meta {
                         type_name: std::any::type_name::<T>(),
                         range: None,
-                        origin: MetaOrigin::TupleField { idx: i },
+                        origin: MetaOrigin::TupleField { idx },
                     },
                 );
                 token.pop();
@@ -218,12 +219,13 @@ where
             for (i, e) in t.iter_mut().enumerate() {
                 let id: i32 = i.try_into().unwrap();
                 let token = self.ui.inner().push_id(id);
+                let idx: u8 = i.try_into().expect("Too many elements");
                 self.visit_mut(
                     e,
                     &Meta {
                         type_name: std::any::type_name::<T>(),
                         range: None,
-                        origin: MetaOrigin::TupleField { idx: i },
+                        origin: MetaOrigin::TupleField { idx },
                     },
                 );
                 token.pop();

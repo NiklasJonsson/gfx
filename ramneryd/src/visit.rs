@@ -6,7 +6,7 @@ use std::ops::Range;
 /// A struct carrying reflection information for a type
 pub enum MetaOrigin {
     NamedField { name: &'static str },
-    TupleField { idx: usize },
+    TupleField { idx: u8 },
     Standalone,
 }
 

@@ -38,7 +38,7 @@ impl Camera {
         crate::math::perspective_vk(self.fov_y_radians, self.aspect_ratio, self.near, self.far)
     }
 
-    /// Compute a bounding box, in camera space, covering the view-frustrum of this camera
+    /// Compute a bounding box, in camera space, covering the view-frustum of this camera
     pub fn view_obb(&self) -> Obb {
         debug_assert!(self.fov_y_radians > 0.0);
         debug_assert!(self.far > self.near);

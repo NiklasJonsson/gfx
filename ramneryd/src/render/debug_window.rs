@@ -158,12 +158,14 @@ fn build_lights_tab(
                 light: light.clone(),
             };
 
+            let idx: u8 = i.try_into().expect("Too many lights");
+
             visitor.visit_mut(
                 &mut l,
                 &Meta {
                     type_name: "Light",
                     range: None,
-                    origin: MetaOrigin::TupleField { idx: i },
+                    origin: MetaOrigin::TupleField { idx },
                 },
             );
         }
@@ -345,12 +347,14 @@ fn build_cameras_tab(world: &mut World, visitor: &mut ImguiVisitor, frame: &UiFr
                 main_render_camera: main_cam.is_some(),
                 entity: ent,
             };
+
+            let idx: u8 = i.try_into().expect("Too many lights");
             visitor.visit_mut(
                 &mut c,
                 &Meta {
                     type_name: "Camera",
                     range: None,
-                    origin: MetaOrigin::TupleField { idx: i },
+                    origin: MetaOrigin::TupleField { idx },
                 },
             );
         }
