@@ -58,8 +58,7 @@ impl Default for Transform {
 
 impl From<Transform> for Mat4 {
     fn from(t: Transform) -> Self {
-        Self::translation_3d(t.position)
-            * (Self::from(t.rotation.normalized()) * Self::scaling_3d(t.scale))
+        Self::translation_3d(t.position) * (Self::from(t.rotation) * Self::scaling_3d(t.scale))
     }
 }
 

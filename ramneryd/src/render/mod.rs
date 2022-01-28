@@ -37,7 +37,7 @@ use mesh::Mesh;
 
 use crate::camera::*;
 use crate::ecs;
-use crate::math::{ModelMatrix, Transform, Vec3};
+use crate::math::{Mat4, ModelMatrix, Transform, Vec3};
 use material::{GpuMaterial, PendingMaterial};
 use ramneryd_derive::Visitable;
 
@@ -473,18 +473,13 @@ pub fn draw_frame(world: &mut World, ui: &mut ui::UIContext, renderer: &mut Rend
     {
         let mut cameras = world.write_component::<Camera>();
         let transforms = world.read_component::<Transform>();
-        // TODO: Instead of using the state here, we should just use the inverse of the rotation of the transform,
-        // but it is not updated properly by the camera systems. Only the positions is reliable
-        let states = world.read_component::<FreeFlyCameraState>();
-
         let camera = cameras.get_mut(cam_entity).unwrap();
         camera.aspect_ratio = aspect_ratio;
         let tfm = transforms
             .get(cam_entity)
             .expect("Camera needs a transform");
-        let state = states.get(cam_entity).expect("Camera needs state");
 
-        let view_matrix = state.view_matrix_with_pos(tfm.position);
+        let view_matrix = Mat4::from(*tfm).inverted();
         let view_proj = camera.proj_matrix() * view_matrix;
         let view_data = uniform::ViewData {
             view_proj: view_proj.into_col_array(),

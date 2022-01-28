@@ -154,22 +154,19 @@ pub struct ShadowViewer;
 /// Compute the bounds of the view are that we want to cast shadows on.
 /// The coordinates are in world-space.
 fn compute_shadow_bounds(world: &World) -> Option<Obb> {
-    use crate::camera::{Camera, FreeFlyCameraState};
+    use crate::camera::Camera;
 
     type SysData<'a> = (
         ReadStorage<'a, Camera>,
         ReadStorage<'a, Transform>,
-        ReadStorage<'a, FreeFlyCameraState>,
         ReadStorage<'a, ShadowViewer>,
     );
 
-    let (cameras, transforms, states, markers) = SysData::fetch(world);
+    let (cameras, transforms, markers) = SysData::fetch(world);
     let mut obb = None;
-    for (cam, tfm, state, _marker) in (&cameras, &transforms, &states, &markers).join() {
+    for (cam, tfm, _marker) in (&cameras, &transforms, &markers).join() {
         // TODO: Some sites suggest to use view_proj.inverse() * NDC cube, try this.
-
-        // TODO: Invert tfm instead of using state to compute view_matrix
-        let view_matrix = state.view_matrix_with_pos(tfm.position);
+        let view_matrix = Mat4::from(*tfm).inverted();
         if obb.is_none() {
             obb = Some(view_matrix.inverted() * cam.view_obb());
         } else {

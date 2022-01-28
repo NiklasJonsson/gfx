@@ -6,7 +6,7 @@ use crate::io::input::{
     DeviceAxis, Input, InputContext, InputContextError, KeyCode, MappedInput, MouseButton, RangeId,
     Sensitivity, StateId,
 };
-use crate::math::{Extent, Mat4, Obb, Transform, Vec3};
+use crate::math::{Extent, Mat4, Obb, Quat, Transform, Vec3};
 use crate::time::Time;
 use ecs::prelude::*;
 
@@ -58,6 +58,15 @@ impl Camera {
             },
         )
     }
+
+    pub fn view_direction(tfm: &Transform) -> Vec3 {
+        tfm.rotation
+            * Vec3 {
+                x: 0.0,
+                y: 0.0,
+                z: -1.0,
+            }
+    }
 }
 
 #[derive(Debug)]
@@ -77,7 +86,9 @@ pub struct FreeFlyCameraState {
 }
 
 impl FreeFlyCameraState {
-    fn clamp_orientation(&mut self) {
+    fn add_pitch(&mut self, v: f32) {
+        self.pitch += v;
+
         if self.pitch > MAX_PITCH {
             self.pitch = MAX_PITCH;
         }
@@ -87,66 +98,12 @@ impl FreeFlyCameraState {
         }
     }
 
-    pub fn view_matrix_with_pos(&self, pos: Vec3) -> Mat4 {
-        let CameraOrientation {
-            view_direction: view_dir,
-            up,
-        } = self.orientation();
-
-        // Based on https://learnopengl.com/Getting-started/Camera
-        // Which is based on Gram-Schmidt process:
-        // https://en.wikipedia.org/wiki/Gram%E2%80%93Schmidt_process
-        // The difference is the direction of 'cameraDirection'/'view_dir'. The tutorial uses the negative view direction but here,
-        // we switch the argument order for the cross ops and then negate view direction when constructing the matrix.
-
-        // If the camera is looking at the origin, view_dir is the vector that
-        // goes from the camera towards the origin. Right and up is in relation
-        // to the view direction.
-        // We need a right vector
-        let cam_right = view_dir.cross(up).normalized();
-
-        // Create a new up vector for orthonormal basis
-        let cam_up = cam_right.cross(view_dir).normalized();
-        // cam_transform = T * R, view = inverse(cam_transform) = inv(R) * inv(T)
-
-        // This is the code from the opengl tutorial
-        let translation_inv = Mat4::translation_3d(-pos);
-
-        let rotation_inv = Mat4::new(
-            cam_right.x,
-            cam_right.y,
-            cam_right.z,
-            0.0,
-            cam_up.x,
-            cam_up.y,
-            cam_up.z,
-            0.0,
-            -view_dir.x,
-            -view_dir.y,
-            -view_dir.z,
-            0.0,
-            0.0,
-            0.0,
-            0.0,
-            1.0,
-        );
-
-        rotation_inv * translation_inv
+    fn add_yaw(&mut self, v: f32) {
+        self.yaw += v;
     }
 
-    pub fn orientation(&self) -> CameraOrientation {
-        // Disallow roll => y will only be a function of pitch
-        let view_direction = Vec3::new(
-            self.yaw.cos() * self.pitch.cos(),
-            self.pitch.sin(),
-            self.yaw.sin() * self.pitch.cos(),
-        )
-        .normalized();
-
-        // This means Q/E will always be up/down in WORLD coordinates
-        let up = Vec3::new(0.0, 1.0, 0.0);
-
-        CameraOrientation { view_direction, up }
+    fn as_quat(&self) -> Quat {
+        (Quat::rotation_y(-self.yaw) * Quat::rotation_x(self.pitch)).normalized()
     }
 }
 
@@ -160,7 +117,7 @@ enum CameraMovement {
     Right,
     Up,
     Down,
-    Move,
+    AllowRotation,
 }
 
 impl From<StateId> for CameraMovement {
@@ -246,7 +203,7 @@ fn get_input_context() -> Result<InputContext, InputContextError> {
         .with_state(KeyCode::D, Right)?
         .with_state(KeyCode::E, Up)?
         .with_state(KeyCode::Q, Down)?
-        .with_state(MouseButton::Right, Move)?
+        .with_state(MouseButton::Right, AllowRotation)?
         .with_range(DeviceAxis::MouseX, CameraRotation::YawDelta, sens)?
         // Switch y sign since the delta is computed from top-left corner
         .with_range(DeviceAxis::MouseY, CameraRotation::PitchDelta, -sens)?
@@ -264,46 +221,50 @@ impl<'a> ecs::System<'a> for FreeFlyCameraController {
     fn run(&mut self, data: Self::SystemData) {
         let (mut mapped_inputs, mut transforms, mut cam_states, time) = data;
 
-        for (mi, transform, state) in (&mut mapped_inputs, &mut transforms, &mut cam_states).join()
-        {
-            let mut moving = false;
+        for (mi, tfm, state) in (&mut mapped_inputs, &mut transforms, &mut cam_states).join() {
+            let mut allow_rotation = false;
             for input in mi.iter() {
                 match input {
-                    Input::Range(id, val) => {
-                        if moving {
+                    &Input::Range(id, val) => {
+                        if allow_rotation {
                             log::trace!("Found range, applying");
-                            let rot: CameraRotation = (*id).into();
+                            let rot: CameraRotation = id.into();
                             if rot == CameraRotation::YawDelta {
-                                state.yaw += *val as f32;
+                                state.add_yaw(val as f32)
                             } else {
                                 assert_eq!(rot, CameraRotation::PitchDelta);
-                                state.pitch += *val as f32;
+                                state.add_pitch(val as f32);
                             }
 
-                            state.clamp_orientation();
+                            tfm.rotation = state.as_quat();
                         }
                     }
-                    Input::State(id) => {
-                        if let CameraMovement::Move = (*id).into() {
-                            moving = true;
+                    &Input::State(id) => {
+                        if let CameraMovement::AllowRotation = id.into() {
+                            allow_rotation = true;
                             continue;
                         }
 
-                        let CameraOrientation { view_direction, up } = state.orientation();
+                        let view_direction = Camera::view_direction(tfm);
+                        let up = Vec3 {
+                            x: 0.0,
+                            y: 1.0,
+                            z: 0.0,
+                        };
                         use CameraMovement::*;
                         let dir = time.delta_sim()
                             * state.speed
-                            * match (*id).into() {
+                            * match id.into() {
                                 Forward => view_direction,
                                 Backward => -view_direction,
                                 Left => up.cross(view_direction).normalized(),
                                 Right => -up.cross(view_direction).normalized(),
                                 Up => up,
                                 Down => -up,
-                                Move => unreachable!("Handled separately"),
+                                AllowRotation => unreachable!("Handled separately"),
                             };
 
-                        transform.position += dir;
+                        tfm.position += dir;
                     }
                     _ => unreachable!("No actions for FreeFlyCamera!"),
                 }
@@ -333,8 +294,8 @@ impl crate::Module for DefaultCamera {
             .with(input_context)
             .with(Camera::default())
             .with(FreeFlyCameraState {
-                yaw: 4.0,
-                pitch: -0.4,
+                yaw: 0.0,
+                pitch: 0.0,
                 speed: DEFAULT_MOVEMENT_SPEED,
             })
             .with(crate::render::light::ShadowViewer)
@@ -378,51 +339,6 @@ mod test {
             [-1.2, -0.7, -101.0],
             [0.0, 0.0, 0.0],
         ];
-        check_obb_points(&obb, &outside_positions, false);
-    }
-
-    #[test]
-    fn camera_view_obb_worldspace() {
-        let free_fly_state = FreeFlyCameraState {
-            yaw: 4.0,
-            pitch: -0.4,
-            speed: DEFAULT_MOVEMENT_SPEED,
-        };
-
-        let cam = Camera {
-            near: 0.1,
-            far: 100.0,
-            ..Default::default()
-        };
-
-        let obb = cam.view_obb();
-        let view = free_fly_state.view_matrix_with_pos(Vec3::new(2.0, 2.0, 2.0));
-        let obb = view * obb;
-
-        let mulp = |m: Mat4, p: [f32; 3]| -> Vec3 { (m * Vec3::from(p).with_w(1.0)).xyz() };
-
-        let inside_positions: Vec<Vec3> = [
-            [-1.2, -0.7, -1.4], // view direction
-            [-1.2, -0.7, -0.5],
-            [-1.2, -0.7, -0.11],
-        ]
-        .into_iter()
-        .map(|p| mulp(view, p))
-        .collect();
-
-        check_obb_points(&obb, &inside_positions, true);
-
-        let outside_positions: Vec<Vec3> = [
-            [-1.2, -0.7, -0.05],
-            [-1.2, -0.7, 1.0],
-            [-1.2, -0.7, 10.0],
-            [-1.2, -0.7, -101.0],
-            [0.0, 0.0, 0.0],
-        ]
-        .into_iter()
-        .map(|p| mulp(view, p))
-        .collect();
-
         check_obb_points(&obb, &outside_positions, false);
     }
 }

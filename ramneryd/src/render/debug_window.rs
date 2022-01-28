@@ -338,11 +338,9 @@ fn build_cameras_tab(world: &mut World, visitor: &mut ImguiVisitor, frame: &UiFr
                 });
             }
 
-            // TODO: Remove knowledge of state here
-            let orientation = state.orientation();
             let mut c = CameraInfo {
                 pos: tfm.position,
-                view_dir: orientation.view_direction,
+                view_dir: Camera::view_direction(tfm),
                 shadow_viewer: shadow_viewer.is_some(),
                 main_render_camera: main_cam.is_some(),
                 entity: ent,
