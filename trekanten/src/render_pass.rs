@@ -118,6 +118,12 @@ impl<'a> RenderPassEncoder<'a> {
         self
     }
 
+    pub fn draw(&mut self, n_vertices: u32, vertices_index: u32) -> &mut Self {
+        self.command_buffer.draw(n_vertices, vertices_index);
+
+        self
+    }
+
     pub fn set_scissor(&mut self, scissor: util::Rect2D) -> &mut Self {
         self.command_buffer.set_scissor(scissor);
 

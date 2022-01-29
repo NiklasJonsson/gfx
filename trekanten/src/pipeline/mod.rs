@@ -144,6 +144,27 @@ impl From<TriangleCulling> for vk::CullModeFlags {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum PrimitiveTopology {
+    TriangleList,
+    LineStrip,
+}
+
+impl Default for PrimitiveTopology {
+    fn default() -> Self {
+        Self::TriangleList
+    }
+}
+
+impl From<PrimitiveTopology> for vk::PrimitiveTopology {
+    fn from(pt: PrimitiveTopology) -> Self {
+        match pt {
+            PrimitiveTopology::LineStrip => Self::LINE_STRIP,
+            PrimitiveTopology::TriangleList => Self::TRIANGLE_LIST,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum TriangleWinding {
     Clockwise,
     CounterClockwise,
@@ -198,6 +219,16 @@ pub enum PolygonMode {
 impl Default for PolygonMode {
     fn default() -> Self {
         Self::Fill
+    }
+}
+
+impl From<PolygonMode> for vk::PolygonMode {
+    fn from(pm: PolygonMode) -> Self {
+        match pm {
+            PolygonMode::Fill => vk::PolygonMode::FILL,
+            PolygonMode::Line => vk::PolygonMode::LINE,
+            PolygonMode::Point => vk::PolygonMode::POINT,
+        }
     }
 }
 
@@ -325,19 +356,13 @@ impl GraphicsPipeline {
         }
 
         let input_assembly_info = vk::PipelineInputAssemblyStateCreateInfo::builder()
-            .topology(vk::PrimitiveTopology::TRIANGLE_LIST)
+            .topology(desc.primitive_topology.into())
             .primitive_restart_enable(false);
-
-        let vk_polygon_mode = match desc.polygon_mode {
-            PolygonMode::Fill => vk::PolygonMode::FILL,
-            PolygonMode::Line => vk::PolygonMode::LINE,
-            PolygonMode::Point => vk::PolygonMode::POINT,
-        };
 
         let raster_state_info = vk::PipelineRasterizationStateCreateInfo::builder()
             .depth_clamp_enable(false)
             .rasterizer_discard_enable(false)
-            .polygon_mode(vk_polygon_mode)
+            .polygon_mode(desc.polygon_mode.into())
             .line_width(1.0)
             .cull_mode(desc.culling.into())
             .front_face(desc.winding.into())
@@ -494,6 +519,8 @@ pub struct GraphicsPipelineDescriptor {
     pub depth_testing: DepthTest,
     #[builder(default)]
     pub polygon_mode: PolygonMode,
+    #[builder(default)]
+    pub primitive_topology: PrimitiveTopology,
 }
 
 impl GraphicsPipelineDescriptorBuilder {

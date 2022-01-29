@@ -391,6 +391,6 @@ pub fn register_systems<'a, 'b>(builder: ExecutorBuilder<'a, 'b>) -> ExecutorBui
     builder.with(
         RenderLightVolumes,
         std::any::type_name::<RenderLightVolumes>(),
-        &[crate::render::debug_window::ApplySettings::ID],
+        &[crate::render::debug::window::ApplySettings::ID],
     )
 }

@@ -126,7 +126,7 @@ impl UIModule for EditorUiModule {
         {
             let mut y_offset = 0.0;
             let funcs = [
-                crate::render::debug_window::build_ui,
+                crate::render::debug::window::build_ui,
                 crate::io::input::build_ui,
             ];
             for func in funcs.iter() {

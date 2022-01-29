@@ -128,16 +128,6 @@ impl<'a> System<'a> for RenderSettingsSys {
     }
 }
 
-pub fn register_systems<'a, 'b>(builder: ExecutorBuilder<'a, 'b>) -> ExecutorBuilder<'a, 'b> {
-    builder
-        .with(
-            RenderSettingsSys { input_entity: None },
-            RenderSettingsSys::ID,
-            &[],
-        )
-        .with(ApplySettings, ApplySettings::ID, &[RenderSettingsSys::ID])
-}
-
 #[derive(Visitable)]
 struct LightInfo {
     transform: Transform,
@@ -513,4 +503,14 @@ impl<'a> System<'a> for ApplySettings {
             render_light_cmds.clear();
         }
     }
+}
+
+pub fn register_systems<'a, 'b>(builder: ExecutorBuilder<'a, 'b>) -> ExecutorBuilder<'a, 'b> {
+    builder
+        .with(
+            RenderSettingsSys { input_entity: None },
+            RenderSettingsSys::ID,
+            &[],
+        )
+        .with(ApplySettings, ApplySettings::ID, &[RenderSettingsSys::ID])
 }

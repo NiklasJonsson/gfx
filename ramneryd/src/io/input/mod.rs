@@ -161,6 +161,7 @@ pub enum ExternalInput {
     RawChar(char),
 }
 
+#[allow(dead_code)]
 #[derive(Debug, Default)]
 struct InputManager {
     pressed_buttons: HashSet<Button>,

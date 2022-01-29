@@ -1,14 +1,14 @@
 use polymap::polymap;
 use trekanten::buffer::{
-    BufferMutability, DeviceIndexBuffer, DeviceVertexBuffer, HostIndexBuffer, HostVertexBuffer,
-    IndexBufferDescriptor, VertexBufferDescriptor,
+    BufferMutability, DeviceIndexBuffer, DeviceVertexBuffer, IndexBufferDescriptor,
+    VertexBufferDescriptor,
 };
 use trekanten::descriptor::DescriptorSet;
 use trekanten::pipeline::{
     BlendState, DepthTest, GraphicsPipeline, GraphicsPipelineDescriptor, ShaderDescriptor,
     ShaderStage, TriangleCulling,
 };
-use trekanten::resource::{MutResourceManager, ResourceManager};
+use trekanten::resource::{MutResourceManager as _, ResourceManager as _};
 use trekanten::texture::{MipMaps, Texture, TextureDescriptor};
 use trekanten::util::{cast_transparent_slice, Extent2D, Format, Offset2D, Rect2D, Viewport};
 use trekanten::vertex::{VertexDefinition, VertexFormat};
@@ -583,12 +583,10 @@ impl UIContext {
             std::mem::size_of::<ImGuiVertex>(),
             "Mismatch in imgui vertex type"
         );
-        let vbuf = HostVertexBuffer::from_vec(vertices);
 
         // TODO: This could be a borrow when reusing the allocation
-        let vbuf_desc = VertexBufferDescriptor::from_host_buffer(&vbuf, BufferMutability::Mutable);
-        let ibuf = HostIndexBuffer::from_vec(indices);
-        let ibuf_desc = IndexBufferDescriptor::from_host_buffer(&ibuf, BufferMutability::Mutable);
+        let vbuf_desc = VertexBufferDescriptor::from_vec(vertices, BufferMutability::Mutable);
+        let ibuf_desc = IndexBufferDescriptor::from_vec(indices, BufferMutability::Mutable);
 
         let (vertex_buffer, index_buffer) = if let Some(per_frame_data) = self.per_frame_data {
             frame

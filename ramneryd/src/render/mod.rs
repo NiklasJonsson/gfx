@@ -21,7 +21,7 @@ use trekanten::{
 };
 
 mod bounding_box;
-pub mod debug_window;
+pub mod debug;
 pub mod geometry;
 pub mod light;
 pub mod material;
@@ -387,9 +387,6 @@ fn draw_entities<'a>(world: &World, cmd_buf: &mut RenderPassEncoder<'a>, mode: D
             (GpuResource::Available(vbuf), GpuResource::Available(ibuf)) => (vbuf, ibuf),
             _ => continue,
         };
-        if !mesh.is_available_gpu() {
-            continue;
-        }
 
         let tfm = uniform::Model {
             model: mtx.0.into_col_array(),
@@ -434,6 +431,19 @@ fn draw_entities<'a>(world: &World, cmd_buf: &mut RenderPassEncoder<'a>, mode: D
     }
 }
 
+fn draw_square(world: &mut World) {
+    let dr = world.read_resource::<debug::DebugRendererRes>();
+    let mut dr = dr.lock().expect("bad mutex");
+    let data = [
+        Vec3::new(2.0, 1.0, 2.0),
+        Vec3::new(2.0, 1.0, -2.0),
+        Vec3::new(-2.0, 1.0, -2.0),
+        Vec3::new(-2.0, 1.0, 2.0),
+        Vec3::new(2.0, 1.0, 2.0),
+    ];
+    dr.draw_line_strip(&data);
+}
+
 #[profiling::function]
 pub fn draw_frame(world: &mut World, ui: &mut ui::UIContext, renderer: &mut Renderer) {
     let cam_entity = match ecs::find_singleton_entity::<MainRenderCamera>(world) {
@@ -443,6 +453,8 @@ pub fn draw_frame(world: &mut World, ui: &mut ui::UIContext, renderer: &mut Rend
         }
         Some(e) => e,
     };
+
+    draw_square(world);
 
     GpuUpload::resolve_pending(world, renderer);
     create_renderables(renderer, world);
@@ -460,6 +472,12 @@ pub fn draw_frame(world: &mut World, ui: &mut ui::UIContext, renderer: &mut Rend
         e => e,
     }
     .expect("Failed to get next frame");
+
+    {
+        let debug_renderer = world.write_resource::<debug::DebugRendererRes>();
+        let mut debug_renderer = debug_renderer.lock().expect("Bad mutex for debug renderer");
+        debug_renderer.upload(&mut frame);
+    }
 
     let ui_draw_commands = ui.build_ui(world, &mut frame);
 
@@ -489,8 +507,6 @@ pub fn draw_frame(world: &mut World, ui: &mut ui::UIContext, renderer: &mut Rend
         frame
             .update_uniform_blocking(&frame_resources.main_camera_view_data, &view_data)
             .expect("Failed to update uniform");
-
-        view_matrix.inverted()
     };
 
     let mut cmd_buffer =
@@ -533,6 +549,11 @@ pub fn draw_frame(world: &mut World, ui: &mut ui::UIContext, renderer: &mut Rend
 
         if let Some(ui_draw_commands) = ui_draw_commands {
             ui_draw_commands.record_draw_commands(&mut main_rp);
+        }
+        {
+            let debug_renderer = world.write_resource::<debug::DebugRendererRes>();
+            let mut debug_renderer = debug_renderer.lock().expect("Bad mutex for debug renderer");
+            debug_renderer.record_commands(&mut main_rp);
         }
 
         cmd_buffer = main_rp.end().expect("Failed to end main presentation pass");
@@ -719,17 +740,10 @@ pub fn setup_resources(world: &mut World, mut renderer: &mut Renderer) {
     use trekanten::pipeline::ShaderStage;
     use uniform::UniformBlock as _;
 
-    {
-        let shader_compiler =
-            pipeline::ShaderCompiler::new().expect("Failed to create shader compiler");
-
-        world.insert(shader_compiler);
-        world.insert(renderer.loader().unwrap());
-    }
+    let shader_compiler =
+        pipeline::ShaderCompiler::new().expect("Failed to create shader compiler");
 
     let frame_data = {
-        let shader_compiler = world.read_resource::<pipeline::ShaderCompiler>();
-
         log::trace!("Creating frame gpu resources");
 
         let main_render_pass = renderer
@@ -851,7 +865,19 @@ pub fn setup_resources(world: &mut World, mut renderer: &mut Renderer) {
         }
     };
 
+    let debug_renderer = {
+        let dr = debug::DebugRenderer::new(
+            &shader_compiler,
+            &frame_data.main_render_pass,
+            &frame_data.main_camera_view_data,
+            renderer,
+        );
+        std::sync::Mutex::new(dr)
+    };
+    world.insert(debug_renderer);
+    world.insert(renderer.loader().unwrap());
     world.insert(frame_data);
+    world.insert(shader_compiler);
     log::trace!("Done");
 }
 
@@ -1130,7 +1156,7 @@ impl<'a> System<'a> for GpuUpload {
 }
 
 pub fn register_systems<'a, 'b>(builder: ExecutorBuilder<'a, 'b>) -> ExecutorBuilder<'a, 'b> {
-    register_module_systems!(builder, debug_window, bounding_box, light, geometry).with(
+    register_module_systems!(builder, debug, bounding_box, light, geometry).with(
         GpuUpload,
         GpuUpload::ID,
         &[],

@@ -335,7 +335,7 @@ impl CommandBuffer {
 
     pub fn draw_indexed(
         &mut self,
-        n_vertices: u32,
+        n_indices: u32,
         indices_index: u32,
         vertices_index: i32,
     ) -> &mut Self {
@@ -344,12 +344,23 @@ impl CommandBuffer {
         unsafe {
             self.vk_device.cmd_draw_indexed(
                 self.vk_cmd_buffer,
-                n_vertices,
+                n_indices,
                 1,
                 indices_index,
                 vertices_index,
                 0,
             );
+        }
+
+        self
+    }
+
+    pub fn draw(&mut self, n_vertices: u32, vertices_index: u32) -> &mut Self {
+        assert!(self.queue_flags.contains(vk::QueueFlags::GRAPHICS));
+
+        unsafe {
+            self.vk_device
+                .cmd_draw(self.vk_cmd_buffer, n_vertices, 1, vertices_index, 0);
         }
 
         self
