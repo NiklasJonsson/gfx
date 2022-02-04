@@ -40,7 +40,7 @@ struct Engine {
     systems: ecs::Executor<'static, 'static>,
     renderer: trekanten::Renderer,
     #[allow(dead_code)]
-    spec: EngineSpec,
+    spec: Init,
 }
 
 /* Unused for now
@@ -165,11 +165,11 @@ fn default_modules() -> Modules {
     Modules(vec![Box::new(camera::DefaultCamera)])
 }
 
-pub struct EngineSpec {
+pub struct Init {
     modules: Modules,
 }
 
-impl EngineSpec {
+impl Init {
     pub fn with_module(mut self, module: impl Module + 'static) -> Self {
         self.modules.0.push(Box::new(module));
 
@@ -177,9 +177,7 @@ impl EngineSpec {
     }
 
     pub fn new() -> Self {
-        Self {
-            modules: default_modules(),
-        }
+        Self::default()
     }
 
     pub fn run(self) -> ! {
@@ -187,7 +185,15 @@ impl EngineSpec {
     }
 }
 
-fn run(mut spec: EngineSpec) -> ! {
+impl Default for Init {
+    fn default() -> Self {
+        Self {
+            modules: default_modules(),
+        }
+    }
+}
+
+fn run(mut spec: Init) -> ! {
     env_logger::init();
 
     #[cfg(feature = "profile-with-puffin")]

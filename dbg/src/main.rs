@@ -90,7 +90,7 @@ impl Module for Spawn {
 }
 
 fn main() {
-    ramneryd::EngineSpec::new()
+    ramneryd::Init::new()
         .with_module(Args::from_args())
         .with_module(Spawn {
             spawn_plane: true,
