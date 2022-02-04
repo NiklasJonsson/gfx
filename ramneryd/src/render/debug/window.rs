@@ -277,6 +277,7 @@ struct CameraInfo {
     shadow_viewer: bool,
     main_render_camera: bool,
     entity: Entity,
+    draw_frustum: bool,
 }
 
 struct MainCameraData {
@@ -288,6 +289,7 @@ struct MainCameraData {
 }
 
 fn build_cameras_tab(world: &mut World, visitor: &mut ImguiVisitor, frame: &UiFrame) {
+    use crate::render::debug::DrawFrustum;
     use crate::render::light::ShadowViewer;
     use crate::render::{Camera, MainRenderCamera};
 
@@ -298,14 +300,22 @@ fn build_cameras_tab(world: &mut World, visitor: &mut ImguiVisitor, frame: &UiFr
         ReadStorage<'a, FreeFlyCameraState>,
         ReadStorage<'a, ShadowViewer>,
         ReadStorage<'a, MainRenderCamera>,
+        WriteStorage<'a, DrawFrustum>,
     );
 
     // TODO (perf): tmp alloc here
     let mut camera_entities = Vec::new();
     let mut main_camera_data = None;
     {
-        let (entities, cameras, transforms, states, shadow_viewers, main_render_cameras) =
-            SysData::fetch(world);
+        let (
+            entities,
+            cameras,
+            transforms,
+            states,
+            shadow_viewers,
+            main_render_cameras,
+            mut draw_frustum_tags,
+        ) = SysData::fetch(world);
         for (i, (ent, cam, tfm, state, shadow_viewer, main_cam)) in (
             &entities,
             &cameras,
@@ -328,12 +338,14 @@ fn build_cameras_tab(world: &mut World, visitor: &mut ImguiVisitor, frame: &UiFr
                 });
             }
 
+            let has_draw_frustum = draw_frustum_tags.get(ent).is_some();
             let mut c = CameraInfo {
                 pos: tfm.position,
                 view_dir: Camera::view_direction(tfm),
                 shadow_viewer: shadow_viewer.is_some(),
                 main_render_camera: main_cam.is_some(),
                 entity: ent,
+                draw_frustum: has_draw_frustum,
             };
 
             let idx: u8 = i.try_into().expect("Too many lights");
@@ -345,6 +357,20 @@ fn build_cameras_tab(world: &mut World, visitor: &mut ImguiVisitor, frame: &UiFr
                     origin: MetaOrigin::TupleField { idx },
                 },
             );
+
+            if c.draw_frustum && !has_draw_frustum {
+                // User checked the box
+                draw_frustum_tags
+                    .insert(ent, DrawFrustum)
+                    .expect("Failed to add DrawFrustum");
+            }
+
+            if !c.draw_frustum && has_draw_frustum {
+                // User unchecked the box
+                draw_frustum_tags
+                    .remove(ent)
+                    .expect("Failed to remove DrawFrustum");
+            }
         }
     }
 

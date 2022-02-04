@@ -11,7 +11,10 @@ use trekanten::{RenderPass, RenderPassEncoder};
 
 use std::sync::Mutex;
 
+pub mod camera_frustum;
 pub mod window;
+
+pub use camera_frustum::DrawFrustum;
 
 #[allow(dead_code)]
 #[derive(Debug, Clone, Copy)]
@@ -180,5 +183,5 @@ impl DebugRenderer {
 pub fn register_systems<'a, 'b>(
     builder: crate::ecs::ExecutorBuilder<'a, 'b>,
 ) -> crate::ecs::ExecutorBuilder<'a, 'b> {
-    register_module_systems!(builder, window)
+    register_module_systems!(builder, window, camera_frustum)
 }

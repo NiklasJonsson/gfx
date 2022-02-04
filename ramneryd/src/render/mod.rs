@@ -431,19 +431,6 @@ fn draw_entities<'a>(world: &World, cmd_buf: &mut RenderPassEncoder<'a>, mode: D
     }
 }
 
-fn draw_square(world: &mut World) {
-    let dr = world.read_resource::<debug::DebugRendererRes>();
-    let mut dr = dr.lock().expect("bad mutex");
-    let data = [
-        Vec3::new(2.0, 1.0, 2.0),
-        Vec3::new(2.0, 1.0, -2.0),
-        Vec3::new(-2.0, 1.0, -2.0),
-        Vec3::new(-2.0, 1.0, 2.0),
-        Vec3::new(2.0, 1.0, 2.0),
-    ];
-    dr.draw_line_strip(&data);
-}
-
 #[profiling::function]
 pub fn draw_frame(world: &mut World, ui: &mut ui::UIContext, renderer: &mut Renderer) {
     let cam_entity = match ecs::find_singleton_entity::<MainRenderCamera>(world) {
@@ -453,8 +440,6 @@ pub fn draw_frame(world: &mut World, ui: &mut ui::UIContext, renderer: &mut Rend
         }
         Some(e) => e,
     };
-
-    draw_square(world);
 
     GpuUpload::resolve_pending(world, renderer);
     create_renderables(renderer, world);
@@ -547,13 +532,14 @@ pub fn draw_frame(world: &mut World, ui: &mut ui::UIContext, renderer: &mut Rend
             draw_entities(world, &mut main_rp, DrawMode::Unlit);
         }
 
-        if let Some(ui_draw_commands) = ui_draw_commands {
-            ui_draw_commands.record_draw_commands(&mut main_rp);
-        }
         {
             let debug_renderer = world.write_resource::<debug::DebugRendererRes>();
             let mut debug_renderer = debug_renderer.lock().expect("Bad mutex for debug renderer");
             debug_renderer.record_commands(&mut main_rp);
+        }
+
+        if let Some(ui_draw_commands) = ui_draw_commands {
+            ui_draw_commands.record_draw_commands(&mut main_rp);
         }
 
         cmd_buffer = main_rp.end().expect("Failed to end main presentation pass");
