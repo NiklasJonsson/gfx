@@ -224,8 +224,8 @@ impl<'a> ecs::System<'a> for FreeFlyCameraController {
         for (mi, tfm, state) in (&mut mapped_inputs, &mut transforms, &mut cam_states).join() {
             let mut allow_rotation = false;
             for input in mi.iter() {
-                match input {
-                    &Input::Range(id, val) => {
+                match *input {
+                    Input::Range(id, val) => {
                         if allow_rotation {
                             log::trace!("Found range, applying");
                             let rot: CameraRotation = id.into();
@@ -239,7 +239,7 @@ impl<'a> ecs::System<'a> for FreeFlyCameraController {
                             tfm.rotation = state.as_quat();
                         }
                     }
-                    &Input::State(id) => {
+                    Input::State(id) => {
                         if let CameraMovement::AllowRotation = id.into() {
                             allow_rotation = true;
                             continue;

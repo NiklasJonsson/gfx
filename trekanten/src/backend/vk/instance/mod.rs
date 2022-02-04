@@ -33,7 +33,7 @@ fn has_extension(available: &[ash::vk::ExtensionProperties], req: &CStr) -> bool
             return true;
         }
     }
-    return false;
+    false
 }
 
 fn check_extensions<T: AsRef<CStr>>(

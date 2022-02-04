@@ -29,9 +29,10 @@ fn push_id<'a, T>(frame: &UiFrame<'a>, m: &Meta<T>) -> imgui::IdStackToken<'a> {
     }
 }
 
+type InspectorCallback = for<'a> fn(&'static str, &mut ImguiVisitor<'a>, &World, Entity);
+
 pub struct Inspector {
-    components:
-        HashMap<&'static str, for<'a> fn(&'static str, &mut ImguiVisitor<'a>, &World, Entity)>,
+    components: HashMap<&'static str, InspectorCallback>,
 }
 
 impl Inspector {

@@ -242,7 +242,7 @@ impl InputContextBuilder {
     pub fn build(self) -> InputContext {
         InputContext {
             name: self.name,
-            description: self.description.unwrap_or_else(String::default),
+            description: self.description.unwrap_or_default(),
             action_map: self.action_map,
             state_map: self.state_map,
             axis_converter: self.axis_converter,

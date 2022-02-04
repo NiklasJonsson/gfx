@@ -50,7 +50,7 @@ impl DebugRenderer {
         let count: u32 = points.len().try_into().expect("Too big!");
         self.line_buffer.reserve(points.len());
         self.line_buffer
-            .extend(points.into_iter().map(|&pos| Vertex { pos }));
+            .extend(points.iter().map(|&pos| Vertex { pos }));
         self.queue.push(DrawCmd::Lines { start, count });
     }
 }
@@ -106,7 +106,7 @@ impl DebugRenderer {
             .expect("Failed to build pipeline descriptor for debug renderer");
 
         let pipeline = renderer
-            .create_gfx_pipeline(pipeline_desc, &render_pass)
+            .create_gfx_pipeline(pipeline_desc, render_pass)
             .expect("Failed to create pipeline for shadow");
 
         Self {

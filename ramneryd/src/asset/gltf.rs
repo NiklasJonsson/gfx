@@ -248,10 +248,10 @@ fn load_node_rec(ctx: &mut RecGltfCtx, src: &gltf::Node) -> ecs::Entity {
         .data
         .entities
         .build_entity()
-        .with(tfm, &mut ctx.data.transforms);
+        .with(tfm, ctx.data.transforms);
 
     if let Some(name) = src.name() {
-        node = node.with(Name::from(name), &mut ctx.data.names);
+        node = node.with(Name::from(name), ctx.data.names);
     }
 
     let node = node.build();
@@ -283,15 +283,15 @@ fn load_node_rec(ctx: &mut RecGltfCtx, src: &gltf::Node) -> ecs::Entity {
                 .with(material, ctx.data.pb_materials)
                 .build();
             graph::add_edge(
-                &mut ctx.data.children_storage,
-                &mut ctx.data.parent_storage,
+                ctx.data.children_storage,
+                ctx.data.parent_storage,
                 mesh_child,
                 prim_child,
             );
         }
         graph::add_edge(
-            &mut ctx.data.children_storage,
-            &mut ctx.data.parent_storage,
+            ctx.data.children_storage,
+            ctx.data.parent_storage,
             node,
             mesh_child,
         );
@@ -317,8 +317,8 @@ fn load_node_rec(ctx: &mut RecGltfCtx, src: &gltf::Node) -> ecs::Entity {
     for gltf_child in src.children() {
         let child = load_node_rec(ctx, &gltf_child);
         graph::add_edge(
-            &mut ctx.data.children_storage,
-            &mut ctx.data.parent_storage,
+            ctx.data.children_storage,
+            ctx.data.parent_storage,
             node,
             child,
         );
@@ -495,8 +495,8 @@ impl<'a> System<'a> for GltfLoader {
 
                 let root = load_node_rec(&mut rec_ctx, &node);
                 graph::add_edge(
-                    &mut rec_ctx.data.children_storage,
-                    &mut rec_ctx.data.parent_storage,
+                    rec_ctx.data.children_storage,
+                    rec_ctx.data.parent_storage,
                     ent,
                     root,
                 );

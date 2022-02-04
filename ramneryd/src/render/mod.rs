@@ -736,7 +736,7 @@ fn build_shadow_data(
     }
 }
 
-pub fn setup_resources(world: &mut World, mut renderer: &mut Renderer) {
+pub fn setup_resources(world: &mut World, renderer: &mut Renderer) {
     use trekanten::pipeline::ShaderStage;
     use uniform::UniformBlock as _;
 
@@ -805,7 +805,7 @@ pub fn setup_resources(world: &mut World, mut renderer: &mut Renderer) {
 
             assert_eq!(uniform::LightingData::SET, uniform::ViewData::SET);
             let texture_itr = shadow_data.spotlights.iter().map(|x| (x.texture, true));
-            let shader_resource_group = DescriptorSet::builder(&mut renderer)
+            let shader_resource_group = DescriptorSet::builder(renderer)
                 .add_buffer(
                     &main_camera_view_data,
                     uniform::ViewData::BINDING,
@@ -829,7 +829,7 @@ pub fn setup_resources(world: &mut World, mut renderer: &mut Renderer) {
         };
 
         let unlit_resources = {
-            let shader_resource_group = DescriptorSet::builder(&mut renderer)
+            let shader_resource_group = DescriptorSet::builder(renderer)
                 .add_buffer(
                     &main_camera_view_data,
                     uniform::ViewData::BINDING,
