@@ -481,9 +481,9 @@ impl<'a> System<'a> for ApplySettings {
         ReadStorage<'a, render::material::GpuMaterial>,
         WriteStorage<'a, render::ReloadMaterial>,
         ReadStorage<'a, crate::math::Aabb>,
-        WriteStorage<'a, render::bounding_box::RenderBoundingBox>,
+        WriteStorage<'a, super::bounding_box::RenderBoundingBox>,
         ReadStorage<'a, Light>,
-        WriteStorage<'a, render::light::RenderLightVolume>,
+        WriteStorage<'a, super::light::RenderLightVolume>,
     );
 
     fn run(&mut self, data: Self::SystemData) {
@@ -511,7 +511,7 @@ impl<'a> System<'a> for ApplySettings {
             for (ent, _bbox) in (&entities, &bounding_boxes).join() {
                 if render_bbox.get(ent).is_none() {
                     render_bbox
-                        .insert(ent, render::bounding_box::RenderBoundingBox)
+                        .insert(ent, super::bounding_box::RenderBoundingBox)
                         .expect("Failed to insert");
                 }
             }
@@ -521,7 +521,7 @@ impl<'a> System<'a> for ApplySettings {
             for (ent, _light) in (&entities, &lights).join() {
                 if render_light_cmds.get(ent).is_none() {
                     render_light_cmds
-                        .insert(ent, render::light::RenderLightVolume)
+                        .insert(ent, super::light::RenderLightVolume)
                         .expect("Failed to insert");
                 }
             }

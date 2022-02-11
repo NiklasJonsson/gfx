@@ -20,7 +20,6 @@ use trekanten::{
     texture::TextureUsage,
 };
 
-mod bounding_box;
 pub mod debug;
 pub mod geometry;
 pub mod light;
@@ -1152,9 +1151,5 @@ impl<'a> System<'a> for GpuUpload {
 }
 
 pub fn register_systems<'a, 'b>(builder: ExecutorBuilder<'a, 'b>) -> ExecutorBuilder<'a, 'b> {
-    register_module_systems!(builder, debug, bounding_box, light, geometry).with(
-        GpuUpload,
-        GpuUpload::ID,
-        &[],
-    )
+    register_module_systems!(builder, debug, geometry).with(GpuUpload, GpuUpload::ID, &[])
 }

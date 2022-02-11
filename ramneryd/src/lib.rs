@@ -1,6 +1,4 @@
-
 #![allow(clippy::type_complexity)]
-
 
 use std::sync::Arc;
 
