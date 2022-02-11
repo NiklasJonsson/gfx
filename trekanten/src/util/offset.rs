@@ -2,7 +2,7 @@ use super::Extent2D;
 
 use std::ops::Add;
 
-#[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
+#[derive(Debug, Default, Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct Offset2D {
     pub x: i32,
     pub y: i32,

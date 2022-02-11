@@ -52,13 +52,17 @@ where
     const ALIGNMENT: usize = crate::util::round_to_multiple(T::ALIGNMENT, 16);
 }
 
+/// # Safety
+/// Has to fulfill the requirements of vulkan uniform. I.e. no padding in the struct.
 pub unsafe trait Uniform: Copy {
-    // The size of a uniform in bytes. Note that there cannot be padding in a struct
+    // The size of a uniform in bytes.
     fn size() -> u16;
 }
 
+/// # Safety
+/// Has to fulfill the requirements of vulkan push constants. I.e. no padding in the struct.
 pub unsafe trait PushConstant: Copy {
-    // The size of a pust constant in bytes. Note that there cannot be padding in a struct
+    // The size of a pust constant in bytes
     fn size() -> u16;
 }
 

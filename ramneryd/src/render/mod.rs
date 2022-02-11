@@ -444,19 +444,26 @@ pub fn draw_frame(world: &mut World, ui: &mut ui::UIContext, renderer: &mut Rend
     GpuUpload::resolve_pending(world, renderer);
     create_renderables(renderer, world);
 
+    let main_window_extents = world.read_resource::<crate::io::MainWindow>().extents();
+
     let aspect_ratio = renderer.aspect_ratio();
     let mut frame = match renderer.next_frame() {
         frame @ Ok(_) => frame,
         Err(trekanten::RenderError::NeedsResize(reason)) => {
             log::debug!("Resize reason: {:?}", reason);
             renderer
-                .resize(world.read_resource::<crate::io::MainWindow>().extents())
+                .resize(main_window_extents)
                 .expect("Failed to resize renderer");
             renderer.next_frame()
         }
         e => e,
     }
     .expect("Failed to get next frame");
+
+    let reset_scissors = util::Rect2D {
+        extent: main_window_extents,
+        ..Default::default()
+    };
 
     {
         let debug_renderer = world.write_resource::<debug::DebugRendererRes>();
@@ -510,6 +517,7 @@ pub fn draw_frame(world: &mut World, ui: &mut ui::UIContext, renderer: &mut Rend
             .expect("Failed to begin render pass");
 
         {
+            // PBR
             let PhysicallyBasedUniformResources {
                 dummy_pipeline,
                 shader_resource_group,
@@ -522,6 +530,7 @@ pub fn draw_frame(world: &mut World, ui: &mut ui::UIContext, renderer: &mut Rend
         }
 
         {
+            // Unlit
             let UnlitFrameUniformResources {
                 dummy_pipeline,
                 shader_resource_group,
@@ -532,14 +541,15 @@ pub fn draw_frame(world: &mut World, ui: &mut ui::UIContext, renderer: &mut Rend
             draw_entities(world, &mut main_rp, DrawMode::Unlit);
         }
 
+        if let Some(ui_draw_commands) = ui_draw_commands {
+            ui_draw_commands.record_draw_commands(&mut main_rp);
+            main_rp.set_scissor(reset_scissors);
+        }
+
         {
             let debug_renderer = world.write_resource::<debug::DebugRendererRes>();
             let mut debug_renderer = debug_renderer.lock().expect("Bad mutex for debug renderer");
             debug_renderer.record_commands(&mut main_rp);
-        }
-
-        if let Some(ui_draw_commands) = ui_draw_commands {
-            ui_draw_commands.record_draw_commands(&mut main_rp);
         }
 
         cmd_buffer = main_rp.end().expect("Failed to end main presentation pass");

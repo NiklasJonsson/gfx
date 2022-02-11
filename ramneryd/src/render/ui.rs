@@ -20,6 +20,7 @@ use trekanten::{BufferHandle, Handle, Std140Compat};
 use crate::common::Name;
 use crate::io::input;
 use crate::io::input::KeyCode;
+use crate::math::Vec2;
 use crate::render::pipeline::{Defines, ShaderCompiler, ShaderType};
 use crate::time::Time;
 
@@ -524,45 +525,53 @@ impl UIContext {
                             },
                     } => {
                         // Project scissor/clipping rectangles into framebuffer space
-                        let mut clip_rect = [
-                            (clip_rect[0] - clip_offset[0]) * clip_scale[0],
-                            (clip_rect[1] - clip_offset[1]) * clip_scale[1],
-                            (clip_rect[2] - clip_offset[0]) * clip_scale[0],
-                            (clip_rect[3] - clip_offset[1]) * clip_scale[1],
-                        ];
+                        let mut clip_min = Vec2 {
+                            x: (clip_rect[0] - clip_offset[0]) * clip_scale[0],
+                            y: (clip_rect[1] - clip_offset[1]) * clip_scale[1],
+                        };
+                        let mut clip_max = Vec2 {
+                            x: (clip_rect[2] - clip_offset[0]) * clip_scale[0],
+                            y: (clip_rect[3] - clip_offset[1]) * clip_scale[1],
+                        };
 
-                        if clip_rect[0] < fb_width
-                            && clip_rect[1] < fb_height
-                            && clip_rect[2] >= 0.0
-                            && clip_rect[3] >= 0.0
-                        {
-                            // Negative offsets are illegal for vkCmdSetScissor
-                            if clip_rect[0] < 0.0 {
-                                clip_rect[0] = 0.0;
-                            }
-
-                            if clip_rect[1] < 0.0 {
-                                clip_rect[1] = 0.0;
-                            }
-
-                            let scissor = Rect2D {
-                                offset: Offset2D {
-                                    x: clip_rect[0] as i32,
-                                    y: clip_rect[1] as i32,
-                                },
-                                extent: Extent2D {
-                                    width: (clip_rect[2] - clip_rect[0]) as u32,
-                                    height: (clip_rect[3] - clip_rect[1]) as u32,
-                                },
-                            };
-
-                            commands.push(UIDrawCommand {
-                                scissor,
-                                vertices_idx: (vtx_offset + global_vertices_idx) as i32,
-                                indices_idx: (idx_offset + global_indices_idx) as u32,
-                                count: count as u32,
-                            });
+                        // Negative offsets are illegal for vkCmdSetScissor
+                        if clip_min.x < 0.0 {
+                            clip_min.y = 0.0;
                         }
+
+                        if clip_min.y < 0.0 {
+                            clip_min.y = 0.0;
+                        }
+
+                        if clip_max.x > fb_width {
+                            clip_max.x = fb_width;
+                        }
+
+                        if clip_max.y > fb_height {
+                            clip_max.y = fb_height;
+                        }
+
+                        if clip_max.x <= clip_min.x || clip_max.y <= clip_min.y {
+                            continue;
+                        }
+
+                        let scissor = Rect2D {
+                            offset: Offset2D {
+                                x: clip_min.x as i32,
+                                y: clip_min.y as i32,
+                            },
+                            extent: Extent2D {
+                                width: (clip_max.x - clip_min.x) as u32,
+                                height: (clip_max.y - clip_min.y) as u32,
+                            },
+                        };
+
+                        commands.push(UIDrawCommand {
+                            scissor,
+                            vertices_idx: (vtx_offset + global_vertices_idx) as i32,
+                            indices_idx: (idx_offset + global_indices_idx) as u32,
+                            count: count as u32,
+                        });
                     }
                     DrawCmd::ResetRenderState => {
                         unimplemented!("Dear ImGui ResetRenderState is not supported!")

@@ -3,7 +3,7 @@ use ash::vk;
 use super::extent::Extent2D;
 use super::offset::Offset2D;
 
-#[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
+#[derive(Debug, Default, Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct Rect2D {
     pub offset: Offset2D,
     pub extent: Extent2D,

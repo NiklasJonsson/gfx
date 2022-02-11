@@ -1,6 +1,7 @@
 use crate::ecs::prelude::*;
 use serde::{Deserialize, Serialize};
 
+pub type Vec2 = vek::Vec2<f32>;
 pub type Vec3 = vek::Vec3<f32>;
 pub type Vec4 = vek::Vec4<f32>;
 pub type Mat3 = vek::Mat3<f32>;
