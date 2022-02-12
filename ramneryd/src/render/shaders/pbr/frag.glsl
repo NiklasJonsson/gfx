@@ -172,9 +172,11 @@ float normal_distribution_function(float cos_angle, float alpha_roughness) {
     return top / bottom;
 }
 
+#define DEBUG_SHADOW_MAP 0
+
 vec3 debug_color(uint shadow_idx) {
 
-#ifdef DEBUG_SHADOW_MAP
+#if DEBUG_SHADOW_MAP
     vec3 coords = vs_out.shadow_coords[shadow_idx].xyz / vs_out.shadow_coords[shadow_idx].w;
 
     if (coords.z > 1.0 || coords.z < -1.0) {
