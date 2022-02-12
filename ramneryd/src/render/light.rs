@@ -164,7 +164,7 @@ pub fn light_and_shadow_pass(
             Light::Directional { color } => {
                 let (min, max) = {
                     let obb_lightspace = to_lightspace * light_bounds_ws;
-                    let mut aabb_lightspace = Aabb::from(obb_lightspace);
+                    let aabb_lightspace = Aabb::from(obb_lightspace);
 
                     // Ensure that the aabb only moves in texel-sized increments. This stops shadows from moving around as the
                     // camera moves around (as the shadow aabb is computed from the camera). The idea is to fix the aabb to the
@@ -174,27 +174,23 @@ pub fn light_and_shadow_pass(
                     // that depth buffer texel will no longer have the depth of the camera. If instead, the grid only shifts in texel-sized
                     // increments. The triangle will always overlap the subtexel area in the same way, even if the grid has shifted.
                     // See https://docs.microsoft.com/en-us{/windows/win32/dxtecharts/cascaded-shadow-maps for details.
-                    let shadow_map_w = super::SHADOW_MAP_EXTENT.width as f32;
-                    let shadow_map_h = super::SHADOW_MAP_EXTENT.height as f32;
-                    let texel_size_lightspace = Vec2 {
-                        x: (aabb_lightspace.max.x - aabb_lightspace.min.x) / shadow_map_w,
-                        y: (aabb_lightspace.max.y - aabb_lightspace.min.y) / shadow_map_h,
+                    let shadow_map_extents = Vec2 {
+                        x: super::SHADOW_MAP_EXTENT.width as f32,
+                        y: super::SHADOW_MAP_EXTENT.height as f32,
                     };
 
-                    aabb_lightspace.min.x = (aabb_lightspace.min.x / texel_size_lightspace.x)
-                        .floor()
-                        * texel_size_lightspace.x;
-                    aabb_lightspace.min.y = (aabb_lightspace.min.y / texel_size_lightspace.y)
-                        .floor()
-                        * texel_size_lightspace.y;
-                    aabb_lightspace.max.x = (aabb_lightspace.max.x / texel_size_lightspace.x)
-                        .floor()
-                        * texel_size_lightspace.x;
-                    aabb_lightspace.max.y = (aabb_lightspace.max.y / texel_size_lightspace.y)
-                        .floor()
-                        * texel_size_lightspace.y;
+                    let min = aabb_lightspace.min.xy();
+                    let max = aabb_lightspace.max.xy();
 
-                    (aabb_lightspace.min, aabb_lightspace.max)
+                    let texel_size_lightspace = (max - min) / shadow_map_extents;
+
+                    let min = (min / texel_size_lightspace).floor() * texel_size_lightspace;
+                    let max = (max / texel_size_lightspace).floor() * texel_size_lightspace;
+
+                    (
+                        min.with_z(aabb_lightspace.min.z),
+                        max.with_z(aabb_lightspace.max.z),
+                    )
                 };
 
                 let proj: Mat4 = orthographic_vk(FrustrumPlanes {
