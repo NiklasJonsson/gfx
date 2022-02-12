@@ -66,7 +66,7 @@ pub struct ShadowViewer;
 
 /// Compute the bounds of the view are that we want to cast shadows on.
 /// The coordinates are in world-space.
-fn compute_shadow_bounds(world: &World) -> Option<Obb> {
+pub fn compute_shadow_bounds(world: &World) -> Option<Obb> {
     use crate::camera::Camera;
 
     type SysData<'a> = (

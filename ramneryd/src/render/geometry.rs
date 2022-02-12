@@ -274,6 +274,30 @@ pub fn cone_mesh(radius: f32, height: f32) -> Mesh {
     Mesh::new(vertices, indices)
 }
 
+pub fn obb_line_strip(obb: &crate::math::Obb) -> [Vec3; 16] {
+    let [u, v, w] = obb.uvw();
+    let c = obb.center();
+    // TODO: Can we shrink this?
+    [
+        c + u - v + w,
+        c + u + v + w,
+        c - u + v + w,
+        c - u - v + w,
+        c - u - v - w,
+        c - u + v - w,
+        c + u + v - w,
+        c + u - v - w,
+        c + u - v + w,
+        c - u - v + w,
+        c - u + v + w,
+        c - u + v - w,
+        c - u - v - w,
+        c + u - v - w,
+        c + u + v - w,
+        c + u + v + w,
+    ]
+}
+
 #[derive(Debug, Component, Visitable, Clone, Copy)]
 pub enum Shape {
     Box { width: f32, height: f32, depth: f32 },

@@ -430,6 +430,15 @@ fn draw_entities<'a>(world: &World, cmd_buf: &mut RenderPassEncoder<'a>, mode: D
     }
 }
 
+fn debug_shadow_bounds(world: &World) {
+    let obb = light::compute_shadow_bounds(world).expect("No shadow bounds?");
+    let points = geometry::obb_line_strip(&obb);
+
+    let debug_renderer = world.write_resource::<debug::DebugRendererRes>();
+    let mut debug_renderer = debug_renderer.lock().expect("Bad mutex for debug renderer");
+    debug_renderer.draw_line_strip(&points);
+}
+
 #[profiling::function]
 pub fn draw_frame(world: &mut World, ui: &mut ui::UIContext, renderer: &mut Renderer) {
     let cam_entity = match ecs::find_singleton_entity::<MainRenderCamera>(world) {
@@ -439,6 +448,8 @@ pub fn draw_frame(world: &mut World, ui: &mut ui::UIContext, renderer: &mut Rend
         }
         Some(e) => e,
     };
+
+    debug_shadow_bounds(world);
 
     GpuUpload::resolve_pending(world, renderer);
     create_renderables(renderer, world);
