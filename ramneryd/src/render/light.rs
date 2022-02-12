@@ -1,6 +1,6 @@
 use crate::ecs::prelude::*;
 use crate::math::{
-    orthographic_vk, perspective_vk, Aabb, FrustrumPlanes, Mat4, Obb, Rgb, Transform, Vec3,
+    orthographic_vk, perspective_vk, Aabb, FrustrumPlanes, Mat4, Obb, Rgb, Transform, Vec2, Vec3,
 };
 
 use trekanten::CommandBuffer;
@@ -164,7 +164,36 @@ pub fn light_and_shadow_pass(
             Light::Directional { color } => {
                 let (min, max) = {
                     let obb_lightspace = to_lightspace * light_bounds_ws;
-                    let aabb_lightspace = Aabb::from(obb_lightspace);
+                    let mut aabb_lightspace = Aabb::from(obb_lightspace);
+
+                    // Ensure that the aabb only moves in texel-sized increments. This stops shadows from moving around as the
+                    // camera moves around (as the shadow aabb is computed from the camera). The idea is to fix the aabb to the
+                    // grid of the shadow map in space, ensuring that the rasterized objects during a shadow pass consistently
+                    // overlaps the right texel. Hard to explain in text but if a triangle is drawn accross a grid. Then the grid
+                    // shifts very slightly (less than a texex size) so that the triangle no longer covers the centre of a cell (texel),
+                    // that depth buffer texel will no longer have the depth of the camera. If instead, the grid only shifts in texel-sized
+                    // increments. The triangle will always overlap the subtexel area in the same way, even if the grid has shifted.
+                    // See https://docs.microsoft.com/en-us{/windows/win32/dxtecharts/cascaded-shadow-maps for details.
+                    let shadow_map_w = super::SHADOW_MAP_EXTENT.width as f32;
+                    let shadow_map_h = super::SHADOW_MAP_EXTENT.height as f32;
+                    let texel_size_lightspace = Vec2 {
+                        x: (aabb_lightspace.max.x - aabb_lightspace.min.x) / shadow_map_w,
+                        y: (aabb_lightspace.max.y - aabb_lightspace.min.y) / shadow_map_h,
+                    };
+
+                    aabb_lightspace.min.x = (aabb_lightspace.min.x / texel_size_lightspace.x)
+                        .floor()
+                        * texel_size_lightspace.x;
+                    aabb_lightspace.min.y = (aabb_lightspace.min.y / texel_size_lightspace.y)
+                        .floor()
+                        * texel_size_lightspace.y;
+                    aabb_lightspace.max.x = (aabb_lightspace.max.x / texel_size_lightspace.x)
+                        .floor()
+                        * texel_size_lightspace.x;
+                    aabb_lightspace.max.y = (aabb_lightspace.max.y / texel_size_lightspace.y)
+                        .floor()
+                        * texel_size_lightspace.y;
+
                     (aabb_lightspace.min, aabb_lightspace.max)
                 };
 
