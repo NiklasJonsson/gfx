@@ -66,7 +66,7 @@ pub struct ShadowViewer;
 
 /// Compute the bounds of the view are that we want to cast shadows on.
 /// The coordinates are in world-space.
-pub fn compute_shadow_bounds(world: &World) -> Option<Obb> {
+pub fn compute_world_shadow_bounds(world: &World) -> Option<Obb> {
     use crate::camera::Camera;
 
     type SysData<'a> = (
@@ -89,6 +89,41 @@ pub fn compute_shadow_bounds(world: &World) -> Option<Obb> {
     obb
 }
 
+fn compute_directional_shadow_bounds(shadow_bounds_ls: Obb) -> Aabb {
+    // Use the diagonal of the obb to define the size of the resulting abb. This means
+    // the aabb will have a fixed size (it's maximum) regardless of the orientation of the obb.
+    let [u, v, w] = shadow_bounds_ls.uvw();
+    let diagonal = Vec3::from(((u + v + w) * 2.0).magnitude());
+    let mut aabb_lightspace = Aabb::from(shadow_bounds_ls);
+    aabb_lightspace.max = aabb_lightspace.min + diagonal;
+
+    // Ensure that the aabb only moves in texel-sized increments. This stops shadows from moving around as the
+    // camera moves around (as the shadow aabb is computed from the camera). The idea is to fix the aabb to the
+    // grid of the shadow map in space, ensuring that the rasterized objects during a shadow pass consistently
+    // overlaps the right texel. Hard to explain in text but if a triangle is drawn across a grid. Then the grid
+    // shifts very slightly (less than a texex size) so that the triangle no longer covers the centre of a cell (texel),
+    // that depth buffer texel will no longer have the depth of the camera. If instead, the grid only shifts in texel-sized
+    // increments. The triangle will always overlap the subtexel area in the same way, even if the grid has shifted.
+    // See https://docs.microsoft.com/en-us{/windows/win32/dxtecharts/cascaded-shadow-maps for details.
+    let shadow_map_extents = Vec2 {
+        x: super::SHADOW_MAP_EXTENT.width as f32,
+        y: super::SHADOW_MAP_EXTENT.height as f32,
+    };
+
+    let min = aabb_lightspace.min.xy();
+    let max = aabb_lightspace.max.xy();
+
+    let texel_size_lightspace = (max - min) / shadow_map_extents;
+
+    let min = (min / texel_size_lightspace).floor() * texel_size_lightspace;
+    let max = (max / texel_size_lightspace).floor() * texel_size_lightspace;
+
+    Aabb {
+        min: min.with_z(aabb_lightspace.min.z),
+        max: max.with_z(aabb_lightspace.max.z),
+    }
+}
+
 pub fn light_and_shadow_pass(
     world: &World,
     frame: &mut trekanten::Frame,
@@ -96,7 +131,7 @@ pub fn light_and_shadow_pass(
     mut cmd_buffer: CommandBuffer,
 ) -> CommandBuffer {
     let light_bounds_ws =
-        compute_shadow_bounds(world).expect("Failed to compute bounds for shadows");
+        compute_world_shadow_bounds(world).expect("Failed to compute bounds for shadows");
 
     use trekanten::raw_vk;
     let mut lighting_data = LightingData::default();
@@ -162,44 +197,16 @@ pub fn light_and_shadow_pass(
                 )
             }
             Light::Directional { color } => {
-                let (min, max) = {
-                    let obb_lightspace = to_lightspace * light_bounds_ws;
-                    let aabb_lightspace = Aabb::from(obb_lightspace);
-
-                    // Ensure that the aabb only moves in texel-sized increments. This stops shadows from moving around as the
-                    // camera moves around (as the shadow aabb is computed from the camera). The idea is to fix the aabb to the
-                    // grid of the shadow map in space, ensuring that the rasterized objects during a shadow pass consistently
-                    // overlaps the right texel. Hard to explain in text but if a triangle is drawn accross a grid. Then the grid
-                    // shifts very slightly (less than a texex size) so that the triangle no longer covers the centre of a cell (texel),
-                    // that depth buffer texel will no longer have the depth of the camera. If instead, the grid only shifts in texel-sized
-                    // increments. The triangle will always overlap the subtexel area in the same way, even if the grid has shifted.
-                    // See https://docs.microsoft.com/en-us{/windows/win32/dxtecharts/cascaded-shadow-maps for details.
-                    let shadow_map_extents = Vec2 {
-                        x: super::SHADOW_MAP_EXTENT.width as f32,
-                        y: super::SHADOW_MAP_EXTENT.height as f32,
-                    };
-
-                    let min = aabb_lightspace.min.xy();
-                    let max = aabb_lightspace.max.xy();
-
-                    let texel_size_lightspace = (max - min) / shadow_map_extents;
-
-                    let min = (min / texel_size_lightspace).floor() * texel_size_lightspace;
-                    let max = (max / texel_size_lightspace).floor() * texel_size_lightspace;
-
-                    (
-                        min.with_z(aabb_lightspace.min.z),
-                        max.with_z(aabb_lightspace.max.z),
-                    )
-                };
+                let light_bounds_ls = to_lightspace * light_bounds_ws;
+                let aabb = compute_directional_shadow_bounds(light_bounds_ls);
 
                 let proj: Mat4 = orthographic_vk(FrustrumPlanes {
-                    left: min.x,
-                    right: max.x,
-                    bottom: min.y,
-                    top: max.y,
-                    near: min.z,
-                    far: max.z,
+                    left: aabb.min.x,
+                    right: aabb.max.x,
+                    bottom: aabb.min.y,
+                    top: aabb.max.y,
+                    near: aabb.min.z,
+                    far: aabb.max.z,
                 });
 
                 (

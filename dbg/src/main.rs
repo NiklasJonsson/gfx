@@ -93,8 +93,8 @@ fn main() {
     ramneryd::Init::new()
         .with_module(Args::from_args())
         .with_module(Spawn {
-            spawn_plane: true,
-            spawn_cube: true,
+            spawn_plane: false,
+            spawn_cube: false,
         })
         .run();
 }

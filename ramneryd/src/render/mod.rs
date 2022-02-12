@@ -431,7 +431,7 @@ fn draw_entities<'a>(world: &World, cmd_buf: &mut RenderPassEncoder<'a>, mode: D
 }
 
 fn debug_shadow_bounds(world: &World) {
-    let obb = light::compute_shadow_bounds(world).expect("No shadow bounds?");
+    let obb = light::compute_world_shadow_bounds(world).expect("No shadow bounds?");
     let points = geometry::obb_line_strip(&obb);
 
     let debug_renderer = world.write_resource::<debug::DebugRendererRes>();
