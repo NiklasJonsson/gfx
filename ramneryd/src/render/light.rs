@@ -6,17 +6,31 @@ use crate::math::{
 use trekanten::CommandBuffer;
 
 use crate::render::uniform::{LightingData, PackedLight, ShadowMatrices, ViewData, MAX_NUM_LIGHTS};
+use std::ops::Range;
 
 #[derive(
     Component, ramneryd_derive::Visitable, serde::Serialize, serde::Deserialize, Clone, Debug,
 )]
 pub enum Light {
     // Range is the radius of the sphere
-    Point { color: Rgb, range: f32 },
-    Directional { color: Rgb },
-    // Angle is from the center line of the cone & range the height of the cone
-    Spot { color: Rgb, angle: f32, range: f32 },
-    Ambient { color: Rgb, strength: f32 },
+    Point {
+        color: Rgb,
+        range: f32,
+    },
+    Directional {
+        color: Rgb,
+    },
+    /// `angle` is from the center line of the cone.
+    /// `range` the start and end of the cone.
+    Spot {
+        color: Rgb,
+        angle: f32,
+        range: Range<f32>,
+    },
+    Ambient {
+        color: Rgb,
+        strength: f32,
+    },
 }
 
 impl Light {
@@ -38,7 +52,10 @@ impl Default for Light {
                 b: 1.0,
             },
             angle: std::f32::consts::FRAC_PI_8,
-            range: 5.0,
+            range: Range {
+                start: 0.1,
+                end: 5.0,
+            },
         }
     }
 }
@@ -128,17 +145,17 @@ pub fn light_and_shadow_pass(
         let (packed_light, shadow_view_data) = match light {
             Light::Spot {
                 angle,
-                range,
                 color,
+                range,
             } => {
-                let proj = perspective_vk(angle * 2.0, 1.0, 1.0, *range);
+                let proj = perspective_vk(angle * 2.0, 1.0, range.start, range.end);
                 let pos = tfm.position.with_w(1.0).into_array();
 
                 (
                     PackedLight {
                         pos,
                         dir_cutoff: [direction.x, direction.y, direction.z, angle.cos()],
-                        color_range: [color.r, color.g, color.b, *range],
+                        color_range: [color.r, color.g, color.b, range.end],
                         ..Default::default()
                     },
                     Some(proj),

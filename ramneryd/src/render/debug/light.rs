@@ -62,11 +62,11 @@ impl<'a> System<'a> for RenderLightVolumes {
                     angle,
                     range,
                 } => {
-                    let radius = angle.tan() * range;
-                    let mesh = geometry::cone_mesh(radius, *range);
+                    let radius = angle.tan() * range.end;
+                    let mesh = geometry::cone_mesh(radius, range.end);
                     // Cone mesh has base at origin, apex at (0, range, 0). We want to have apex at origin (translation) and then
                     // rotated to Light::DEFAULT_FACING
-                    let translation = Transform::pos(0.0, -*range, 0.0);
+                    let translation = Transform::pos(0.0, -range.end, 0.0);
                     let rotation = Transform {
                         rotation: Quat::rotation_from_to_3d(
                             Vec3::new(0.0, -1.0, 0.0),

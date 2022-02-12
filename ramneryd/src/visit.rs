@@ -52,6 +52,38 @@ pub trait Visitable<V> {
     fn variant_idx(&self) -> usize;
 }
 
+mod impl_std {
+    use super::{Meta, Visitable, Visitor};
+
+    impl<T, V> Visitable<V> for std::ops::Range<T>
+    where
+        V: Visitor<T>,
+    {
+        const IS_ENUM: bool = false;
+        fn has_fields(&self) -> bool {
+            true
+        }
+
+        fn visit_fields(&self, visitor: &mut V) {
+            visitor.visit(&self.start, &Meta::field("start"));
+            visitor.visit(&self.end, &Meta::field("end"));
+        }
+
+        fn visit_fields_mut(&mut self, visitor: &mut V) {
+            visitor.visit_mut(&mut self.start, &Meta::field("start"));
+            visitor.visit_mut(&mut self.end, &Meta::field("end"));
+        }
+
+        fn variant_name(&self) -> &str {
+            unreachable!()
+        }
+
+        fn variant_idx(&self) -> usize {
+            unreachable!()
+        }
+    }
+}
+
 #[cfg(not)]
 mod unused {
     struct PrintVisitor {

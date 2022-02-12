@@ -207,7 +207,10 @@ fn build_lights_tab(
                                 b: 1.0,
                             },
                             angle: std::f32::consts::FRAC_PI_8,
-                            range: 5.0,
+                            range: std::ops::Range {
+                                start: 0.1,
+                                end: 5.0,
+                            },
                         },
                         3 => Light::Ambient {
                             color: Rgb {
