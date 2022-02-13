@@ -93,7 +93,7 @@ impl<'a> System<'a> for CreateRenderedBoundingBoxes {
     }
 }
 
-pub fn register_systems<'a, 'b>(builder: ExecutorBuilder<'a, 'b>) -> ExecutorBuilder<'a, 'b> {
+pub fn register_systems(builder: ExecutorBuilder) -> ExecutorBuilder {
     builder.with(
         CreateRenderedBoundingBoxes,
         std::any::type_name::<CreateRenderedBoundingBoxes>(),

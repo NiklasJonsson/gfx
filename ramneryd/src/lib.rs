@@ -39,7 +39,7 @@ struct Engine {
     event_queue: Arc<io::EventQueue>,
     ui: render::ui::UIContext,
     state: State,
-    systems: ecs::Executor<'static, 'static>,
+    systems: ecs::Executor,
     renderer: trekanten::Renderer,
     #[allow(dead_code)]
     spec: Init,
@@ -64,15 +64,17 @@ impl Engine {
 */
 
 impl Engine {
-    fn init_dispatcher<'a, 'b>() -> Executor<'a, 'b> {
+    fn init_executor<'a, 'b>() -> ExecutorBuilder {
         let mut builder = ExecutorBuilder::new();
         // Input needs to go before as most systems depends on it
         builder = register_module_systems!(builder, io::input);
 
         builder = builder.with_barrier();
 
-        builder = register_module_systems!(builder, asset, camera, render);
+        register_module_systems!(builder, asset, camera, render)
+    }
 
+    fn finalize_executor<'a, 'b>(builder: ExecutorBuilder) -> Executor {
         builder
             .with_barrier()
             .with(
@@ -157,7 +159,7 @@ impl Engine {
 
 #[allow(unused_variables)]
 pub trait Module: Send {
-    fn load(&mut self, world: &mut World) {}
+    fn load(&mut self, world: &mut World, exec_builder: &mut ExecutorBuilder) {}
 }
 
 #[derive(Default)]
@@ -221,22 +223,23 @@ fn run(mut spec: Init) -> ! {
             profiling::register_thread!("ramneryd::engine");
 
             let mut world = World::new();
-            let mut systems = Engine::init_dispatcher();
 
             ecs::meta::register_all_components(&mut world);
 
             world.insert(Time::default());
             ecs::serde::setup_resources(&mut world);
 
-            systems.setup(&mut world);
             io::setup(&mut world, window);
             render::setup_resources(&mut world, &mut renderer);
             let ui_modules = vec![editor::ui_module()];
             let ui = render::ui::UIContext::new(&mut renderer, &mut world, ui_modules);
 
+            let mut builder = Engine::init_executor();
             for m in spec.modules.0.iter_mut() {
-                m.load(&mut world);
+                m.load(&mut world, &mut builder);
             }
+            let mut systems = Engine::finalize_executor(builder);
+            systems.setup(&mut world);
 
             Engine {
                 world,

@@ -182,8 +182,6 @@ impl DebugRenderer {
     }
 }
 
-pub fn register_systems<'a, 'b>(
-    builder: crate::ecs::ExecutorBuilder<'a, 'b>,
-) -> crate::ecs::ExecutorBuilder<'a, 'b> {
+pub fn register_systems(builder: crate::ecs::ExecutorBuilder) -> crate::ecs::ExecutorBuilder {
     register_module_systems!(builder, window, camera_frustum, light, bounding_box)
 }

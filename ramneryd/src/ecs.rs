@@ -1,3 +1,6 @@
+/// specs ecs wrapper
+/// - Wrap or alias specs types to not leak specs namespaces throughout code base
+/// - Remove lifetime args for dispatcher and dispatcher builder (and rename them)
 pub type World = specs::World;
 pub use ramneryd_derive::Component;
 
@@ -127,9 +130,6 @@ pub trait System<'a> {
     fn setup(&mut self, _world: &mut specs::World) {}
 }
 
-// Too many lifetimes below, not sure how they work. Mostly taken from specs impl.
-// It does compile and run though :)
-
 pub struct SpecsSystem<S>
 where
     for<'a> S: System<'a> + Sync,
@@ -165,11 +165,11 @@ where
     }
 }
 
-pub struct Executor<'a, 'b> {
-    dispatcher: specs::Dispatcher<'a, 'b>,
+pub struct Executor {
+    dispatcher: specs::Dispatcher<'static, 'static>,
 }
 
-impl<'a, 'b> Executor<'a, 'b> {
+impl Executor {
     pub fn execute(&mut self, world: &specs::World) {
         self.dispatcher.dispatch(world);
     }
@@ -179,26 +179,26 @@ impl<'a, 'b> Executor<'a, 'b> {
     }
 }
 
-pub struct ExecutorBuilder<'a, 'b> {
-    builder: specs::DispatcherBuilder<'a, 'b>,
+pub struct ExecutorBuilder {
+    builder: specs::DispatcherBuilder<'static, 'static>,
 }
 
-impl<'a, 'b> ExecutorBuilder<'a, 'b> {
+impl ExecutorBuilder {
     pub fn with<S>(mut self, s: S, id: &str, deps: &[&str]) -> Self
     where
-        S: for<'c> System<'c> + Send + 'a + Sync,
+        S: for<'a> System<'a> + Send + 'static + Sync,
     {
         self.builder.add(SpecsSystem::new(s), id, deps);
         self
     }
 
-    pub fn build(self) -> Executor<'a, 'b> {
+    pub fn build(self) -> Executor {
         Executor {
             dispatcher: self.builder.build(),
         }
     }
 
-    pub fn with_barrier(mut self) -> ExecutorBuilder<'a, 'b> {
+    pub fn with_barrier(mut self) -> ExecutorBuilder {
         self.builder.add_barrier();
         self
     }
@@ -210,7 +210,7 @@ impl<'a, 'b> ExecutorBuilder<'a, 'b> {
     }
 }
 
-impl<'a, 'b> Default for ExecutorBuilder<'a, 'b> {
+impl Default for ExecutorBuilder {
     fn default() -> Self {
         Self::new()
     }

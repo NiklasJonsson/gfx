@@ -107,7 +107,7 @@ impl<'a> System<'a> for RenderLightVolumes {
     }
 }
 
-pub fn register_systems<'a, 'b>(builder: ExecutorBuilder<'a, 'b>) -> ExecutorBuilder<'a, 'b> {
+pub fn register_systems(builder: ExecutorBuilder) -> ExecutorBuilder {
     builder.with(
         RenderLightVolumes,
         std::any::type_name::<RenderLightVolumes>(),

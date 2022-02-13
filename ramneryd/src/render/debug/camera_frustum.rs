@@ -58,8 +58,6 @@ impl<'a> System<'a> for ViewFrustumDrawer {
     }
 }
 
-pub fn register_systems<'a, 'b>(
-    builder: crate::ecs::ExecutorBuilder<'a, 'b>,
-) -> crate::ecs::ExecutorBuilder<'a, 'b> {
+pub fn register_systems(builder: crate::ecs::ExecutorBuilder) -> crate::ecs::ExecutorBuilder {
     builder.with(ViewFrustumDrawer::default(), ViewFrustumDrawer::NAME, &[])
 }

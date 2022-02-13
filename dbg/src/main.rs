@@ -20,7 +20,7 @@ struct Args {
 }
 
 impl Module for Args {
-    fn load(&mut self, world: &mut World) {
+    fn load(&mut self, world: &mut World, _: &mut ExecutorBuilder) {
         self.gltf_files
             .iter()
             .for_each(|f| ramneryd::asset::gltf::load_asset(world, f));
@@ -36,8 +36,8 @@ struct Spawn {
 }
 
 impl Module for Spawn {
-    fn load(&mut self, world: &mut World) {
-        let plane_side = 1000.0;
+    fn load(&mut self, world: &mut World, _: &mut ExecutorBuilder) {
+        let plane_side = 100.0;
         let plane_height = 1.0;
         if self.spawn_plane {
             world
@@ -93,8 +93,8 @@ fn main() {
     ramneryd::Init::new()
         .with_module(Args::from_args())
         .with_module(Spawn {
-            spawn_plane: false,
-            spawn_cube: false,
+            spawn_plane: true,
+            spawn_cube: true,
         })
         .run();
 }

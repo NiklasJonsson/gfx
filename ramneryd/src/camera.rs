@@ -273,14 +273,14 @@ impl<'a> ecs::System<'a> for FreeFlyCameraController {
     }
 }
 
-pub fn register_systems<'a, 'b>(builder: ExecutorBuilder<'a, 'b>) -> ExecutorBuilder<'a, 'b> {
+pub fn register_systems(builder: ExecutorBuilder) -> ExecutorBuilder {
     builder.with(FreeFlyCameraController, "free_fly_camera", &[])
 }
 
 pub struct DefaultCamera;
 
 impl crate::Module for DefaultCamera {
-    fn load(&mut self, world: &mut World) {
+    fn load(&mut self, world: &mut World, _: &mut ExecutorBuilder) {
         let t = Transform {
             position: Vec3::new(2.0, 2.0, 2.0),
             ..Default::default()

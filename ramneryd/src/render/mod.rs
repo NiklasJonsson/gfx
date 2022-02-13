@@ -1161,6 +1161,6 @@ impl<'a> System<'a> for GpuUpload {
     }
 }
 
-pub fn register_systems<'a, 'b>(builder: ExecutorBuilder<'a, 'b>) -> ExecutorBuilder<'a, 'b> {
+pub fn register_systems(builder: ExecutorBuilder) -> ExecutorBuilder {
     register_module_systems!(builder, debug, geometry).with(GpuUpload, GpuUpload::ID, &[])
 }

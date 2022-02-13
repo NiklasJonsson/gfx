@@ -338,7 +338,7 @@ impl<'a> System<'a> for InputManager {
 
 pub const INPUT_MANAGER_SYSTEM_ID: &str = "input_manager_sys";
 
-pub fn register_systems<'a, 'b>(builder: ExecutorBuilder<'a, 'b>) -> ExecutorBuilder<'a, 'b> {
+pub fn register_systems(builder: ExecutorBuilder) -> ExecutorBuilder {
     builder.with(InputManager::new(), INPUT_MANAGER_SYSTEM_ID, &[])
 }
 

@@ -8,7 +8,7 @@ macro_rules! register_module_systems {
             // For some reason, without the 'as' cast, the compiler thinks each block is a separate type.
             // The cast is there to tell it all types are the same.
             $(
-                { use $mod as base; base::register_systems } as fn(crate::ecs::ExecutorBuilder<'a, 'b>) -> crate::ecs::ExecutorBuilder<'a, 'b>,
+                { use $mod as base; base::register_systems } as fn(crate::ecs::ExecutorBuilder) -> crate::ecs::ExecutorBuilder,
             )+
         ]
         .iter()

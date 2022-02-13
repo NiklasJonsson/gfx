@@ -52,6 +52,6 @@ impl<'a> System<'a> for RsfLoader {
     }
 }
 
-pub fn register_systems<'a, 'b>(builder: ExecutorBuilder<'a, 'b>) -> ExecutorBuilder<'a, 'b> {
+pub fn register_systems(builder: ExecutorBuilder) -> ExecutorBuilder {
     builder.with(RsfLoader, RsfLoader::ID, &[])
 }
