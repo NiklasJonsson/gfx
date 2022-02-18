@@ -1,6 +1,7 @@
 /// specs ecs wrapper
 /// - Wrap or alias specs types to not leak specs namespaces throughout code base
 /// - Remove lifetime args for dispatcher and dispatcher builder (and rename them)
+
 pub type World = specs::World;
 pub use ramneryd_derive::Component;
 
@@ -190,6 +191,13 @@ impl ExecutorBuilder {
     {
         self.builder.add(SpecsSystem::new(s), id, deps);
         self
+    }
+
+    pub fn add<S>(&mut self, s: S, id: &str, deps: &[&str])
+    where
+        S: for<'a> System<'a> + Send + 'static + Sync,
+    {
+        self.builder.add(SpecsSystem::new(s), id, deps);
     }
 
     pub fn build(self) -> Executor {
