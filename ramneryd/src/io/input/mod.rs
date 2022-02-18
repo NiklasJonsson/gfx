@@ -37,6 +37,10 @@ impl CurrentFrameExternalInputs {
     fn len(&self) -> usize {
         self.0.len()
     }
+
+    fn clear(&mut self) {
+        self.0.clear();
+    }
 }
 
 #[derive(Debug, Clone, Copy, Hash, PartialEq, Eq, Visitable)]
@@ -197,12 +201,12 @@ impl InputManager {
 impl<'a> System<'a> for InputManager {
     type SystemData = (
         ReadStorage<'a, InputContext>,
-        Read<'a, CurrentFrameExternalInputs>,
+        Write<'a, CurrentFrameExternalInputs>,
         Entities<'a>,
         WriteStorage<'a, MappedInput>,
     );
 
-    fn run(&mut self, (contexts, inputs, entities, mut mapped): Self::SystemData) {
+    fn run(&mut self, (contexts, mut inputs, entities, mut mapped): Self::SystemData) {
         log::trace!("InputManager: run");
         let mut action_keys = Vec::with_capacity(inputs.len());
         let mut axes = Vec::with_capacity(inputs.len());
@@ -333,21 +337,24 @@ impl<'a> System<'a> for InputManager {
                 break;
             }
         }
+
+        inputs.clear();
     }
 }
 
-pub const INPUT_MANAGER_SYSTEM_ID: &str = "input_manager_sys";
-
-pub fn register_systems(builder: ExecutorBuilder) -> ExecutorBuilder {
-    builder.with(InputManager::new(), INPUT_MANAGER_SYSTEM_ID, &[])
+impl InputManager {
+    pub const ID: &'static str = "InputManager";
 }
 
-pub fn build_ui<'a>(
-    _world: &mut World,
-    _ui: &crate::render::ui::UiFrame<'a>,
-    _pos: [f32; 2],
-) -> [f32; 2] {
-    [0.0, 0.0]
+pub struct InputModule;
+
+impl crate::Module for InputModule {
+    fn load(&mut self, loader: &mut crate::ModuleLoader) {
+        loader.world.insert(CurrentFrameExternalInputs(Vec::new()));
+        loader.add_system(InputManager::new(), InputManager::ID, &[]);
+        // TODO: We shouldn't make a local decision about this.
+        loader.add_barrier();
+    }
 }
 
 #[cfg(test)]
@@ -467,8 +474,10 @@ mod tests {
 
         let contexts = vec![ctx0, ctx1, ctx2];
 
+        let mut executor = ExecutorBuilder::new()
+            .with(InputManager::new(), "id", &[])
+            .build();
         let mut world = World::new();
-        let mut executor = register_systems(ExecutorBuilder::new()).build();
 
         let external_inputs = vec![
             ExternalInput::Press(Button::from(KeyCode::O)),

@@ -380,6 +380,13 @@ pub fn orthographic_vk(planes: FrustrumPlanes) -> Mat4 {
     m
 }
 
+pub fn register_components(w: &mut World) {
+    w.register::<Transform>();
+    w.register::<Aabb>();
+    w.register::<Obb>();
+    w.register::<ModelMatrix>();
+}
+
 #[cfg(test)]
 mod tests {
 

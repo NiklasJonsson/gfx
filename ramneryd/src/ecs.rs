@@ -1,6 +1,10 @@
-/// specs ecs wrapper
-/// - Wrap or alias specs types to not leak specs namespaces throughout code base
-/// - Remove lifetime args for dispatcher and dispatcher builder (and rename them)
+/// specs ecs wrapper to Wrap or alias specs types to not leak specs namespaces throughout code base
+
+// TODO: Improvements to specs:
+// - Drain filter for storage
+// - Remove lifetime args for dispatcher and dispatcher builder
+// - Write<Resource> requires Sync
+// - Decouple system component auto setup and setting up entities for that system.
 
 pub type World = specs::World;
 pub use ramneryd_derive::Component;
@@ -128,19 +132,22 @@ pub trait System<'a> {
     type SystemData: specs::SystemData<'a>;
 
     fn run(&mut self, data: Self::SystemData);
-    fn setup(&mut self, _world: &mut specs::World) {}
+    fn setup(&mut self, world: &mut specs::World) {
+        use specs::SystemData as _;
+        Self::SystemData::setup(world);
+    }
 }
 
 pub struct SpecsSystem<S>
 where
-    for<'a> S: System<'a> + Sync,
+    for<'a> S: System<'a>,
 {
     s: S,
 }
 
 impl<S> SpecsSystem<S>
 where
-    for<'a> S: System<'a> + Sync,
+    for<'a> S: System<'a>,
 {
     pub fn new(s: S) -> Self {
         Self { s }
@@ -149,7 +156,7 @@ where
 
 impl<'a, S> specs::System<'a> for SpecsSystem<S>
 where
-    for<'b> S: System<'b> + Sync,
+    for<'b> S: System<'b>,
 {
     type SystemData = <S as System<'a>>::SystemData;
 
@@ -187,7 +194,7 @@ pub struct ExecutorBuilder {
 impl ExecutorBuilder {
     pub fn with<S>(mut self, s: S, id: &str, deps: &[&str]) -> Self
     where
-        S: for<'a> System<'a> + Send + 'static + Sync,
+        S: for<'a> System<'a> + Send + 'static,
     {
         self.builder.add(SpecsSystem::new(s), id, deps);
         self
@@ -195,7 +202,7 @@ impl ExecutorBuilder {
 
     pub fn add<S>(&mut self, s: S, id: &str, deps: &[&str])
     where
-        S: for<'a> System<'a> + Send + 'static + Sync,
+        S: for<'a> System<'a> + Send + 'static,
     {
         self.builder.add(SpecsSystem::new(s), id, deps);
     }
@@ -211,6 +218,10 @@ impl ExecutorBuilder {
         self
     }
 
+    pub fn add_barrier(&mut self) {
+        self.builder.add_barrier();
+    }
+
     pub fn new() -> Self {
         Self {
             builder: specs::DispatcherBuilder::new(),
@@ -221,27 +232,5 @@ impl ExecutorBuilder {
 impl Default for ExecutorBuilder {
     fn default() -> Self {
         Self::new()
-    }
-}
-
-pub mod meta {
-    use linkme::distributed_slice;
-
-    #[distributed_slice]
-    pub static ALL_COMPONENTS: [Component] = [..];
-
-    pub struct Component {
-        pub name: &'static str,
-        pub size: usize,
-        pub has: fn(world: &super::World, ent: super::Entity) -> bool,
-        pub register: fn(world: &mut super::World),
-    }
-
-    pub fn register_all_components(world: &mut super::World) {
-        use specs::WorldExt;
-        world.register::<super::serde::Marker>();
-        for comp in ALL_COMPONENTS {
-            (comp.register)(world);
-        }
     }
 }

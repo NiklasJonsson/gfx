@@ -52,6 +52,10 @@ impl<'a> System<'a> for RsfLoader {
     }
 }
 
-pub fn register_systems(builder: ExecutorBuilder) -> ExecutorBuilder {
-    builder.with(RsfLoader, RsfLoader::ID, &[])
+pub struct RsfModule;
+
+impl crate::Module for RsfModule {
+    fn load(&mut self, loader: &mut crate::ModuleLoader) {
+        loader.add_system(RsfLoader, RsfLoader::ID, &[])
+    }
 }

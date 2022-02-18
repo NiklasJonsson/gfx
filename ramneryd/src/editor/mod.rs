@@ -1,9 +1,8 @@
 use specs::prelude::*;
 
 use crate::common::Name;
-use crate::ecs;
 use crate::graph;
-use imgui::{CollapsingHeader, Condition, InputFloat3, TreeNode};
+use imgui::{Condition, InputFloat3, TreeNode};
 pub type Ui<'a> = crate::render::ui::UiFrame<'a>;
 
 use crate::visit::{Meta, Visitor as _};
@@ -60,36 +59,19 @@ fn build_inspector<'a>(world: &mut World, ui: &crate::render::ui::UiFrame<'a>, e
     let mut storage = ui.storage();
     let inspector = match storage.entry(String::from("inspectable_components")) {
         polymap::polymap::Entry::Vacant(entry) => {
-            let mut i = inspector::Inspector::new();
-            i.add::<crate::render::Shape>(crate::render::Shape::meta().name);
-            i.add::<crate::render::light::Light>(crate::render::light::Light::meta().name);
-            i.add::<crate::math::Transform>(crate::math::Transform::meta().name);
-            i.add::<crate::camera::Camera>(crate::camera::Camera::meta().name);
-            i.add::<crate::camera::FreeFlyCameraState>(
-                crate::camera::FreeFlyCameraState::meta().name,
-            );
-            i.add::<crate::common::Name>(crate::common::Name::meta().name);
-            //i.add::<crate::io::input::InputContext>(crate::io::input::InputContext::meta().name);
+            let mut i = inspector::Inspector::default();
+            i.add::<crate::render::Shape>();
+            i.add::<crate::render::light::Light>();
+            i.add::<crate::math::Transform>();
+            i.add::<crate::camera::Camera>();
+            i.add::<crate::camera::FreeFlyCameraState>();
+            i.add::<crate::common::Name>();
             entry.insert(i)
         }
         polymap::polymap::Entry::Occupied(entry) => entry.into_mut(),
     };
 
-    for comp in ecs::meta::ALL_COMPONENTS {
-        if (comp.has)(world, ent) {
-            if comp.size == 0 {
-                let _open = CollapsingHeader::new(&imgui::ImString::from(String::from(comp.name)))
-                    .leaf(true)
-                    .build(ui.inner());
-            } else if inspector.can_inspect(comp.name) {
-                inspector.inspect(comp.name, &mut visitor, world, ent);
-            } else if CollapsingHeader::new(&imgui::ImString::from(format!("struct {}", comp.name)))
-                .build(ui.inner())
-            {
-                ui.inner().text("unimplemented");
-            }
-        }
-    }
+    inspector.inspect_components(&mut visitor, world, ent);
 }
 
 struct SelectedEntity {
@@ -117,18 +99,12 @@ impl UIModule for EditorUiModule {
                     .read_only(true)
                     .build();
 
-                frame
-                    .inner()
-                    .text(format!("#components: {}", ecs::meta::ALL_COMPONENTS.len()));
                 frame.inner().text("Right handed coordinate system");
             });
 
         {
             let mut y_offset = 0.0;
-            let funcs = [
-                crate::render::debug::window::build_ui,
-                crate::io::input::build_ui,
-            ];
+            let funcs = [crate::render::debug::window::build_ui];
             for func in funcs.iter() {
                 let size = func(world, frame, [0.0, y_offset]);
                 y_offset += size[1];

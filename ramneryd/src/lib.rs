@@ -64,18 +64,8 @@ impl Engine {
 */
 
 impl Engine {
-    fn init_executor<'a, 'b>() -> ExecutorBuilder {
-        let mut builder = ExecutorBuilder::new();
-        // Input needs to go before as most systems depends on it
-        builder = register_module_systems!(builder, io::input);
-
-        builder = builder.with_barrier();
-
-        register_module_systems!(builder, asset, camera, render)
-    }
-
-    fn finalize_executor<'a, 'b>(builder: ExecutorBuilder) -> Executor {
-        builder
+    fn finalize_executor(builder: ExecutorBuilder) -> Executor {
+        register_module_systems!(builder, render)
             .with_barrier()
             .with(
                 graph::TransformPropagation,
@@ -104,7 +94,6 @@ impl Engine {
     #[profiling::function]
     fn post_frame(&mut self) {
         self.world.maintain();
-        io::post_frame(&mut self.world);
     }
 
     #[profiling::function]
@@ -150,23 +139,48 @@ impl Engine {
 
             self.systems.execute(&self.world);
             render::draw_frame(&mut self.world, &mut self.ui, &mut self.renderer);
-
             self.post_frame();
+
             profiling::finish_frame!();
         }
     }
 }
 
+pub struct ModuleLoader {
+    pub world: World,
+    executor_builder: ExecutorBuilder,
+}
+
+impl ModuleLoader {
+    pub fn add_system<S>(&mut self, s: S, id: &str, deps: &[&str])
+    where
+        S: for<'a> System<'a> + Send + 'static,
+    {
+        S::SystemData::setup(&mut self.world);
+        self.executor_builder.add(s, id, deps);
+    }
+
+    pub fn add_barrier(&mut self) {
+        self.executor_builder.add_barrier();
+    }
+}
+
 #[allow(unused_variables)]
 pub trait Module: Send {
-    fn load(&mut self, world: &mut World, exec_builder: &mut ExecutorBuilder) {}
+    fn load(&mut self, loader: &mut ModuleLoader);
 }
 
 #[derive(Default)]
 struct Modules(Vec<Box<dyn Module>>);
 
 fn default_modules() -> Modules {
-    Modules(vec![Box::new(camera::DefaultCamera)])
+    Modules(vec![
+        Box::new(io::InputModule),
+        Box::new(camera::FPSCamera),
+        Box::new(camera::DefaultCamera),
+        Box::new(asset::GltfModule),
+        Box::new(asset::RsfModule),
+    ])
 }
 
 pub struct Init {
@@ -223,23 +237,32 @@ fn run(mut spec: Init) -> ! {
             profiling::register_thread!("ramneryd::engine");
 
             let mut world = World::new();
-
-            ecs::meta::register_all_components(&mut world);
-
             world.insert(Time::default());
-            ecs::serde::setup_resources(&mut world);
+            world.insert(crate::io::MainWindow::new(window));
+            math::register_components(&mut world);
+            render::register_components(&mut world);
 
-            io::setup(&mut world, window);
+            let mut loader = ModuleLoader {
+                world,
+                executor_builder: ExecutorBuilder::new(),
+            };
+            for m in spec.modules.0.iter_mut() {
+                m.load(&mut loader);
+            }
+
+            let ModuleLoader {
+                mut world,
+                executor_builder,
+            } = loader;
+
+            let mut systems = Engine::finalize_executor(executor_builder);
+            systems.setup(&mut world);
+
+            ecs::serde::setup_resources(&mut world);
             render::setup_resources(&mut world, &mut renderer);
+
             let ui_modules = vec![editor::ui_module()];
             let ui = render::ui::UIContext::new(&mut renderer, &mut world, ui_modules);
-
-            let mut builder = Engine::init_executor();
-            for m in spec.modules.0.iter_mut() {
-                m.load(&mut world, &mut builder);
-            }
-            let mut systems = Engine::finalize_executor(builder);
-            systems.setup(&mut world);
 
             Engine {
                 world,

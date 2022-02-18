@@ -1,10 +1,9 @@
 pub mod event;
 pub mod input;
-use crate::ecs::prelude::*;
 
 use winit::window::Window;
 
-use crate::ecs::World;
+pub use input::InputModule;
 
 // Commands from runner thread to event thread
 pub enum Command {
@@ -25,6 +24,10 @@ pub fn window_extents(window: &winit::window::Window) -> trekanten::util::Extent
 
 #[allow(dead_code)]
 impl MainWindow {
+    pub fn new(window: Window) -> Self {
+        Self { window }
+    }
+
     pub fn cursor_grab(&mut self, cursor_grab: bool) {
         self.window
             .set_cursor_grab(cursor_grab)
@@ -35,14 +38,4 @@ impl MainWindow {
     pub fn extents(&self) -> trekanten::util::Extent2D {
         window_extents(&self.window)
     }
-}
-
-pub fn setup(world: &mut World, window: winit::window::Window) {
-    world.insert(input::CurrentFrameExternalInputs(Vec::new()));
-    world.insert(MainWindow { window });
-}
-
-pub fn post_frame(world: &mut World) {
-    let mut cur_inputs = world.write_resource::<input::CurrentFrameExternalInputs>();
-    cur_inputs.0.clear()
 }

@@ -1164,3 +1164,26 @@ impl<'a> System<'a> for GpuUpload {
 pub fn register_systems(builder: ExecutorBuilder) -> ExecutorBuilder {
     register_module_systems!(builder, debug, geometry).with(GpuUpload, GpuUpload::ID, &[])
 }
+
+pub fn register_components(world: &mut World) {
+    world.register::<geometry::Shape>();
+
+    world.register::<RenderableMaterial>();
+    world.register::<material::GpuMaterial>();
+    world.register::<material::PendingMaterial>();
+    world.register::<material::PhysicallyBased>();
+    world.register::<material::Unlit>();
+
+    world.register::<mesh::Mesh>();
+
+    world.register::<light::ShadowViewer>();
+    world.register::<light::Light>();
+
+    world.register::<debug::light::RenderLightVolume>();
+    world.register::<debug::light::LightVolumeRenderer>();
+
+    world.register::<debug::bounding_box::RenderBoundingBox>();
+    world.register::<debug::bounding_box::BoundingBoxRenderer>();
+
+    world.register::<debug::camera::DrawFrustum>();
+}

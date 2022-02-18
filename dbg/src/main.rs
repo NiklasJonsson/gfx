@@ -4,7 +4,7 @@ use ramneryd::render;
 
 use ramneryd::common::Name;
 use ramneryd::ecs::prelude::*;
-use ramneryd::Module;
+use ramneryd::{Module, ModuleLoader};
 
 use structopt::StructOpt;
 
@@ -20,7 +20,9 @@ struct Args {
 }
 
 impl Module for Args {
-    fn load(&mut self, world: &mut World, _: &mut ExecutorBuilder) {
+    fn load(&mut self, loader: &mut ModuleLoader) {
+        let world = &mut loader.world;
+
         self.gltf_files
             .iter()
             .for_each(|f| ramneryd::asset::gltf::load_asset(world, f));
@@ -36,7 +38,9 @@ struct Spawn {
 }
 
 impl Module for Spawn {
-    fn load(&mut self, world: &mut World, _: &mut ExecutorBuilder) {
+    fn load(&mut self, loader: &mut ModuleLoader) {
+        let world = &mut loader.world;
+
         let plane_side = 100.0;
         let plane_height = 1.0;
         if self.spawn_plane {

@@ -1,5 +1,5 @@
 use ramneryd::ecs::prelude::*;
-use ramneryd::Module;
+use ramneryd::{Module, ModuleLoader};
 
 use structopt::StructOpt;
 
@@ -13,11 +13,13 @@ struct GltfViewer {
 }
 
 impl Module for GltfViewer {
-    fn load(&mut self, world: &mut World, _: &mut ExecutorBuilder) {
+    fn load(&mut self, loader: &mut ModuleLoader) {
         use ramneryd::{
             math::{Quat, Rgb, Transform, Vec3},
             render::Light,
         };
+
+        let world = &mut loader.world;
 
         ramneryd::asset::gltf::load_asset(world, &self.file);
 

@@ -511,6 +511,10 @@ impl<'a> System<'a> for GltfLoader {
     }
 }
 
-pub fn register_systems(builder: ExecutorBuilder) -> ExecutorBuilder {
-    builder.with(GltfLoader, GltfLoader::ID, &[])
+pub struct GltfModule;
+
+impl crate::Module for GltfModule {
+    fn load(&mut self, loader: &mut crate::ModuleLoader) {
+        loader.add_system(GltfLoader, GltfLoader::ID, &[]);
+    }
 }

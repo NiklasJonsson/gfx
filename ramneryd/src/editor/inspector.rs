@@ -2,7 +2,6 @@ use crate::ecs::prelude::*;
 use crate::visit::{Meta, MetaOrigin, Visitable, Visitor};
 
 use std::borrow::Cow;
-use std::collections::HashMap;
 
 use crate::render::ui::UiFrame;
 
@@ -29,61 +28,57 @@ fn push_id<'a, T>(frame: &UiFrame<'a>, m: &Meta<T>) -> imgui::IdStackToken<'a> {
     }
 }
 
-type InspectorCallback = for<'a> fn(&'static str, &mut ImguiVisitor<'a>, &World, Entity);
+type InspectorCallback = for<'a> fn(&mut ImguiVisitor<'a>, &World, Entity);
 
+#[derive(Default)]
 pub struct Inspector {
-    components: HashMap<&'static str, InspectorCallback>,
-}
-
-impl Inspector {
-    pub fn new() -> Self {
-        Self {
-            components: HashMap::default(),
-        }
-    }
+    components: Vec<InspectorCallback>,
 }
 
 pub trait ImguiVisitableComponent<'a>: Visitable<ImguiVisitor<'a>> + Component + 'static {}
 impl<'a, T: Visitable<ImguiVisitor<'a>> + Component + 'static> ImguiVisitableComponent<'a> for T {}
 
-fn inspect_component<'a, C>(
-    type_name: &'static str,
-    v: &mut ImguiVisitor<'a>,
-    world: &World,
-    e: Entity,
-) where
+fn inspect_component<'a, C>(v: &mut ImguiVisitor<'a>, world: &World, e: Entity)
+where
     for<'b> C: ImguiVisitableComponent<'b>,
 {
+    let type_name = std::any::type_name::<C>();
+    let size = std::mem::size_of::<C>();
     let mut storage = world.write_component::<C>();
-    let component = storage
-        .get_mut(e)
-        .expect("component not available for entity");
 
-    v.visit_mut(
-        component,
-        &Meta {
-            range: None,
-            type_name,
-            origin: MetaOrigin::Standalone,
-        },
-    );
+    let component = if let Some(component) = storage.get_mut(e) {
+        component
+    } else {
+        return;
+    };
+
+    if size == 0 {
+        let _open = imgui::CollapsingHeader::new(&imgui::ImString::from(String::from(type_name)))
+            .leaf(true)
+            .build(v.ui.inner());
+    } else {
+        v.visit_mut(
+            component,
+            &Meta {
+                range: None,
+                type_name,
+                origin: MetaOrigin::Standalone,
+            },
+        );
+    }
 }
 impl Inspector {
-    pub fn add<C>(&mut self, name: &'static str)
+    pub fn add<C>(&mut self)
     where
         for<'a> C: ImguiVisitableComponent<'a>,
     {
-        self.components.insert(name, inspect_component::<C>);
+        self.components.push(inspect_component::<C>);
     }
 
-    pub fn can_inspect(&self, k: &'static str) -> bool {
-        self.components.contains_key(k)
-    }
-
-    pub fn inspect<'a>(&mut self, k: &'static str, v: &mut ImguiVisitor<'a>, w: &World, e: Entity) {
-        self.components
-            .get(k)
-            .expect("Missing component for inspector")(k, v, w, e);
+    pub fn inspect_components<'a>(&self, v: &mut ImguiVisitor<'a>, w: &World, e: Entity) {
+        for comp in &self.components {
+            comp(v, w, e);
+        }
     }
 }
 
