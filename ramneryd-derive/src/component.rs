@@ -42,8 +42,8 @@ pub(crate) fn impl_component(di: &DeriveInput) -> TokenStream {
 
     quote! {
         /// specs
-        impl #impl_generics crate::ecs::prelude::Component for #name #ty_generics #where_clause {
-            type Storage = crate::ecs::prelude::#storage<Self>;
+        impl #impl_generics ::ramneryd::ecs::prelude::Component for #name #ty_generics #where_clause {
+            type Storage = ::ramneryd::ecs::prelude::#storage<Self>;
         }
     }
 }

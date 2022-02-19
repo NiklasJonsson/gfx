@@ -1,5 +1,11 @@
 #![allow(clippy::type_complexity)]
 
+// This thing lets us refer to our own crate by its name instead of self. This is useful for making
+// derives that refer to this crate work both in this crate and outside. See
+// https://github.com/rust-lang/rust/pull/55275
+// for more details.
+extern crate self as ramneryd;
+
 use std::sync::Arc;
 
 #[macro_use]
@@ -16,7 +22,7 @@ pub mod render;
 mod time;
 mod visit;
 
-use time::Time;
+pub use time::Time;
 
 use ecs::prelude::*;
 use io::event::Event;
