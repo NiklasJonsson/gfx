@@ -6,17 +6,21 @@ use ramneryd::common::Name;
 use ramneryd::ecs::prelude::*;
 use ramneryd::{Module, ModuleLoader};
 
-use structopt::StructOpt;
+use clap::Parser;
 
 use std::path::PathBuf;
 
-#[derive(Debug, StructOpt)]
-#[structopt(name = "dbg", about = "ramneryd debug utils")]
+#[derive(Debug, Parser)]
+#[clap(author, version, about = "ramneryd debug binary")]
 struct Args {
-    #[structopt(parse(from_os_str), name = "gltf-file", long)]
+    #[clap(parse(from_os_str), name = "gltf-file", long)]
     gltf_files: Vec<PathBuf>,
-    #[structopt(parse(from_os_str), name = "rsf-file", long)]
+    #[clap(parse(from_os_str), name = "rsf-file", long)]
     rsf_files: Vec<PathBuf>,
+    #[clap(long)]
+    spawn_plane: bool,
+    #[clap(long)]
+    spawn_cube: bool,
 }
 
 impl Module for Args {
@@ -29,17 +33,6 @@ impl Module for Args {
         self.rsf_files
             .iter()
             .for_each(|f| ramneryd::asset::rsf::load_asset(world, f));
-    }
-}
-
-struct Spawn {
-    spawn_plane: bool,
-    spawn_cube: bool,
-}
-
-impl Module for Spawn {
-    fn load(&mut self, loader: &mut ModuleLoader) {
-        let world = &mut loader.world;
 
         let plane_side = 100.0;
         let plane_height = 1.0;
@@ -94,11 +87,5 @@ impl Module for Spawn {
 }
 
 fn main() {
-    ramneryd::Init::new()
-        .with_module(Args::from_args())
-        .with_module(Spawn {
-            spawn_plane: true,
-            spawn_cube: true,
-        })
-        .run();
+    ramneryd::Init::new().with_module(Args::parse()).run();
 }
