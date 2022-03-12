@@ -117,6 +117,7 @@ enum CameraMovement {
     Right,
     Up,
     Down,
+    Boost,
     AllowRotation,
 }
 
@@ -170,6 +171,7 @@ fn get_input_context() -> Result<InputContext, InputContextError> {
         .with_state(KeyCode::E, Up)?
         .with_state(KeyCode::Q, Down)?
         .with_state(MouseButton::Right, AllowRotation)?
+        .with_state(KeyCode::Space, Boost)?
         .with_range(DeviceAxis::MouseX, CameraRotation::YawDelta, sens)?
         // Switch y sign since the delta is computed from top-left corner
         .with_range(DeviceAxis::MouseY, CameraRotation::PitchDelta, -sens)?
@@ -189,6 +191,7 @@ impl<'a> ecs::System<'a> for FreeFlyCameraController {
 
         for (mi, tfm, state) in (&mut mapped_inputs, &mut transforms, &mut cam_states).join() {
             let mut allow_rotation = false;
+            let mut boost = false;
             for input in mi.iter() {
                 match *input {
                     Input::Range(id, val) => {
@@ -206,10 +209,7 @@ impl<'a> ecs::System<'a> for FreeFlyCameraController {
                         }
                     }
                     Input::State(id) => {
-                        if let CameraMovement::AllowRotation = id.into() {
-                            allow_rotation = true;
-                            continue;
-                        }
+                        use CameraMovement as CM;
 
                         let view_direction = Camera::view_direction(tfm);
                         let up = Vec3 {
@@ -217,17 +217,25 @@ impl<'a> ecs::System<'a> for FreeFlyCameraController {
                             y: 1.0,
                             z: 0.0,
                         };
-                        use CameraMovement::*;
+                        let extra = if boost { 4.0 } else { 1.0 };
                         let dir = time.delta_sim()
+                            * extra
                             * state.speed
                             * match id.into() {
-                                Forward => view_direction,
-                                Backward => -view_direction,
-                                Left => up.cross(view_direction).normalized(),
-                                Right => -up.cross(view_direction).normalized(),
-                                Up => up,
-                                Down => -up,
-                                AllowRotation => unreachable!("Handled separately"),
+                                CM::AllowRotation => {
+                                    allow_rotation = true;
+                                    continue;
+                                }
+                                CM::Boost => {
+                                    boost = true;
+                                    continue;
+                                }
+                                CM::Forward => view_direction,
+                                CM::Backward => -view_direction,
+                                CM::Left => up.cross(view_direction).normalized(),
+                                CM::Right => -up.cross(view_direction).normalized(),
+                                CM::Up => up,
+                                CM::Down => -up,
                             };
 
                         tfm.position += dir;
