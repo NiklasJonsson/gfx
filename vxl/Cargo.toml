@@ -1,0 +1,15 @@
+[package]
+name = "vxl"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+winit = "0.25.0"
+vek = { version = "0.15.5", features = ["serde"] }
+trekanten = { path = "../trekanten" }
+
+env_logger = "0.6.2"
+log = "0.4.8"
+
+# Remove?
+raw-window-handle = "0.3.3"

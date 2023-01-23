@@ -1,5 +1,5 @@
 [workspace]
-members = ["trekanten", "trekanten-derive", "resurs", "ramneryd-derive", "ramneryd", "dbg"]
+members = ["trekanten", "trekanten-derive", "resurs", "ramneryd-derive", "ramneryd", "dbg", "vxl"]
 
 [profile.release]
 debug = true
