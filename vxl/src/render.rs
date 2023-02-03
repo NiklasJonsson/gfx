@@ -5,6 +5,7 @@ use trekanten::pipeline::{
 };
 use trekanten::{buffer, util};
 use trekanten::{BufferHandle, Handle, RenderPass, Std140Compat};
+use vek::Vec3;
 
 use std::error::Error;
 use std::path::Path;
@@ -19,6 +20,34 @@ struct ViewData {
 struct Model {
     model: [f32; 16],
     model_it: [f32; 16],
+}
+
+#[derive(Copy, Clone, Debug, Std140Compat)]
+#[repr(C, packed)]
+pub struct PackedLight {
+    pub pos: [f32; 4],         // position for point/spot light
+    pub dir_cutoff: [f32; 4], // direction for spot/directional light. .w is the cos(cutoff_angle) of the spotlight
+    pub color_range: [f32; 4], // color for all light types. .w is the range of point/spot lights
+}
+
+impl Default for PackedLight {
+    fn default() -> Self {
+        Self {
+            pos: [0.0; 4],
+            dir_cutoff: [0.0; 4],
+            color_range: [0.0; 4],
+        }
+    }
+}
+
+pub const MAX_NUM_LIGHTS: usize = 16;
+#[derive(Copy, Clone, Debug, Default, Std140Compat)]
+#[repr(C, packed)]
+pub struct LightingData {
+    pub punctual_lights: [PackedLight; MAX_NUM_LIGHTS],
+    pub ambient: [f32; 4],
+    // v4 is needed for padding at the end. Use only the first value.
+    pub num_lights: [u32; 4],
 }
 
 // TODO: Share math code
@@ -40,9 +69,10 @@ fn next_viewdata(aspect_ratio: f32) -> ViewData {
     let target = vek::Vec4::new(2_f32, 0., 2., 1.);
     let view = vek::Mat4::<f32>::look_at_rh(eye, target, vek::Vec4::unit_y());
     let proj = perspective_vk(std::f32::consts::FRAC_PI_2, aspect_ratio, 0.1, 100.0);
+    let pos = [0.0; 4];
     ViewData {
         view_proj: (proj * view).into_col_array(),
-        view_pos: todo!("Get position from matrix"),
+        view_pos: pos,
     }
 }
 
@@ -67,13 +97,13 @@ fn shader_compile_error(err: shaderc::Error) {
     use shaderc::Error;
 
     match err {
-       Error::CompilationError(count, msg) => {
-        println!("Compilation errors: {count}");
-        for line in msg.lines() {
-            println!("{}", line);
+        Error::CompilationError(count, msg) => {
+            println!("Compilation errors: {count}");
+            for line in msg.lines() {
+                println!("{}", line);
+            }
         }
-       }
-       e => panic!("{}", e.to_string()),
+        e => panic!("{}", e.to_string()),
     }
 }
 
@@ -119,6 +149,7 @@ pub struct Rendering {
     pub renderer: trekanten::Renderer,
     render_pass: Handle<RenderPass>,
     viewdata: buffer::BufferHandle<buffer::DeviceUniformBuffer>,
+    lightingdata: buffer::BufferHandle<buffer::DeviceUniformBuffer>,
     gfx_pipeline: Handle<GraphicsPipeline>,
     desc_set: Handle<DescriptorSet>,
 }
@@ -140,14 +171,17 @@ impl Rendering {
         let render_pass = renderer.presentation_render_pass(4)?;
 
         let viewdata = create_viewdata_ubuf(&mut renderer);
+        let lightingdata = create_lightdata_ubuf(&mut renderer);
         let gfx_pipeline = create_pipeline(&mut renderer, &mut compiler, &render_pass);
 
         let desc_set = trekanten::descriptor::DescriptorSet::builder(&mut renderer)
-            .add_buffer(&viewdata, 0, ShaderStage::VERTEX)
+            .add_buffer(&viewdata, 0, ShaderStage::VERTEX | ShaderStage::FRAGMENT)
+            .add_buffer(&lightingdata, 1, ShaderStage::FRAGMENT)
             .build();
 
         Ok(Self {
             viewdata,
+            lightingdata,
             render_pass,
             renderer,
             gfx_pipeline,
@@ -216,6 +250,21 @@ fn create_viewdata_ubuf(
         view_proj: Default::default(),
         view_pos: Default::default(),
     }];
+
+    let uniform_buffer_desc =
+        buffer::UniformBufferDescriptor::from_slice(&data, buffer::BufferMutability::Mutable);
+
+    renderer
+        .create_resource_blocking(uniform_buffer_desc)
+        .expect("Failed to create uniform buffer")
+}
+
+fn create_lightdata_ubuf(
+    renderer: &mut trekanten::Renderer,
+) -> buffer::BufferHandle<buffer::DeviceUniformBuffer> {
+    use trekanten::ResourceManager as _;
+
+    let data = [LightingData::default()];
 
     let uniform_buffer_desc =
         buffer::UniformBufferDescriptor::from_slice(&data, buffer::BufferMutability::Mutable);

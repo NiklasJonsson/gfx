@@ -36,7 +36,6 @@ impl State {
         (
             Self {
                 window,
-
                 frame_times: [std::time::Duration::default(); 10],
                 frame_time_idx: 0,
                 start: Instant::now(),
@@ -89,9 +88,7 @@ fn main() {
     let mut rendering =
         vxl::Rendering::new(&state.window, state.extents()).expect("Failed to init");
 
-    let chunk = vxl::Chunk {
-        data: [0; vxl::voxel::Chunk::LEN as usize],
-    };
+    let chunk = vxl::procgen::run([0; 32]);
     let vxl::Mesh { vertices, indices } = vxl::meshing::mesh(&chunk);
     let vertices = rendering
         .renderer

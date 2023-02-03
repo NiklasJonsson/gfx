@@ -12,5 +12,7 @@ shaderc = "0.6.2"
 env_logger = "0.6.2"
 log = "0.4.8"
 
+rand = { version = "0.8.5", features = ["small_rng"]}
+
 # Remove?
 raw-window-handle = "0.3.3"

@@ -1,4 +1,5 @@
 pub mod meshing;
+pub mod procgen;
 pub mod render;
 pub mod voxel;
 
