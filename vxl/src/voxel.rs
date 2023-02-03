@@ -9,6 +9,6 @@ impl Chunk {
     pub const LEN: u32 = N * N * N;
 
     pub fn index(&self, x: u32, y: u32, z: u32) -> u32 {
-        return x + Self::SIDE * y + Self::SIDE * Self::SIDE * z;
+        x + Self::SIDE * y + Self::SIDE * Self::SIDE * z
     }
 }

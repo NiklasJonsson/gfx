@@ -1,6 +1,6 @@
+use trekanten::buffer;
 use trekanten::util;
 use trekanten::vertex::{VertexDefinition, VertexFormat};
-use trekanten::buffer;
 
 use crate::Chunk;
 
@@ -28,14 +28,11 @@ pub struct Mesh {
 const VOXEL_CUBE_SIDE: f32 = 1.0;
 
 fn add_cube(mesh: &mut Mesh, point: [f32; 3], size: f32) {
-    let [x,y,z] = point;
+    let [x, y, z] = point;
 
     let mk_pos = |x_rel: f32, y_rel: f32, z_rel: f32| -> [f32; 3] {
-        [(x_rel * size + x), 
-        (y_rel * size + y), 
-        (z_rel * size + z)
-        ] };
-
+        [(x_rel * size + x), (y_rel * size + y), (z_rel * size + z)]
+    };
 
     let vertices = [
         // Bottom
@@ -153,7 +150,10 @@ fn add_cube(mesh: &mut Mesh, point: [f32; 3], size: f32) {
 }
 
 pub fn mesh(chunk: &crate::voxel::Chunk) -> Mesh {
-    let mut m = Mesh { vertices: Vec::new(), indices: Vec::new() };
+    let mut m = Mesh {
+        vertices: Vec::new(),
+        indices: Vec::new(),
+    };
 
     for z in 0..Chunk::SIDE {
         for y in 0..Chunk::SIDE {

@@ -6,6 +6,9 @@ use trekanten::pipeline::{
 use trekanten::{buffer, util};
 use trekanten::{BufferHandle, Handle, RenderPass, Std140Compat};
 
+use std::error::Error;
+use std::path::Path;
+
 #[derive(Clone, Copy, Std140Compat)]
 struct ViewData {
     view_proj: [f32; 16],
@@ -19,7 +22,12 @@ struct Model {
 }
 
 // TODO: Share math code
-pub fn perspective_vk(fov_y_radians: f32, aspect_ratio: f32, near: f32, far: f32) -> vek::Mat4<f32> {
+pub fn perspective_vk(
+    fov_y_radians: f32,
+    aspect_ratio: f32,
+    near: f32,
+    far: f32,
+) -> vek::Mat4<f32> {
     let mut m = vek::Mat4::perspective_rh_zo(fov_y_radians, aspect_ratio, near, far);
     // vulkan has the y-axis inverted (right-handed upside-down).
     m[(1, 1)] *= -1.0;
@@ -38,14 +46,63 @@ fn next_viewdata(aspect_ratio: f32) -> ViewData {
     }
 }
 
+fn compile_shader(
+    compiler: &mut shaderc::Compiler,
+    path: &Path,
+    shader_kind: shaderc::ShaderKind,
+    options: Option<&shaderc::CompileOptions>,
+) -> Result<shaderc::CompilationArtifact, shaderc::Error> {
+    let vert =
+        std::fs::read_to_string(path).expect(&format!("Failed to read file {}", path.display()));
+    compiler.compile_into_spirv(
+        &vert,
+        shader_kind,
+        path.to_str().unwrap_or("INVALID_SHADER_PATH"),
+        "main",
+        options,
+    )
+}
+
+fn shader_compile_error(err: shaderc::Error) {
+    use shaderc::Error;
+
+    match err {
+       Error::CompilationError(count, msg) => {
+        println!("Compilation errors: {count}");
+        for line in msg.lines() {
+            println!("{}", line);
+        }
+       }
+       e => panic!("{}", e.to_string()),
+    }
+}
+
 fn create_pipeline(
     renderer: &mut trekanten::Renderer,
+    compiler: &mut shaderc::Compiler,
     render_pass: &Handle<RenderPass>,
 ) -> Handle<GraphicsPipeline> {
     use trekanten::vertex::VertexDefinition as _;
+    let vert = compile_shader(
+        compiler,
+        Path::new("vxl/src/shaders/vert.glsl"),
+        shaderc::ShaderKind::Vertex,
+        None,
+    )
+    .map_err(shader_compile_error)
+    .expect("Failed to compile vert shader");
+    let frag = compile_shader(
+        compiler,
+        Path::new("vxl/src/shaders/frag.glsl"),
+        shaderc::ShaderKind::Fragment,
+        None,
+    )
+    .map_err(shader_compile_error)
+    .expect("Failed to compile frag shader");
 
-    let vert = ShaderDescriptor::FromRawSpirv(todo!("Write shaders"));
-    let frag = ShaderDescriptor::FromRawSpirv(todo!("Write shaders"));
+    let vert = ShaderDescriptor::FromRawSpirv(vert.as_binary().to_vec());
+    let frag = ShaderDescriptor::FromRawSpirv(frag.as_binary().to_vec());
+
     let pipeline_descriptor = GraphicsPipelineDescriptor::builder()
         .vert(vert)
         .frag(frag)
@@ -78,11 +135,12 @@ impl Rendering {
         W: raw_window_handle::HasRawWindowHandle,
     {
         let mut renderer = trekanten::Renderer::new(window, window_extent)?;
+        let mut compiler = shaderc::Compiler::new().expect("Failed to create shaderc");
 
         let render_pass = renderer.presentation_render_pass(4)?;
 
         let viewdata = create_viewdata_ubuf(&mut renderer);
-        let gfx_pipeline = create_pipeline(&mut renderer, &render_pass);
+        let gfx_pipeline = create_pipeline(&mut renderer, &mut compiler, &render_pass);
 
         let desc_set = trekanten::descriptor::DescriptorSet::builder(&mut renderer)
             .add_buffer(&viewdata, 0, ShaderStage::VERTEX)
