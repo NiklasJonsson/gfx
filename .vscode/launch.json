@@ -1,0 +1,230 @@
+{
+    // Use IntelliSense to learn about possible attributes.
+    // Hover to view descriptions of existing attributes.
+    // For more information, visit: https://go.microsoft.com/fwlink/?linkid=830387
+    "version": "0.2.0",
+    "configurations": [
+        {
+            "type": "lldb",
+            "request": "launch",
+            "name": "Debug unit tests in library 'trekanten'",
+            "cargo": {
+                "args": [
+                    "test",
+                    "--no-run",
+                    "--lib",
+                    "--package=trekanten"
+                ],
+                "filter": {
+                    "name": "trekanten",
+                    "kind": "lib"
+                }
+            },
+            "args": [],
+            "cwd": "${workspaceFolder}"
+        },
+        {
+            "type": "lldb",
+            "request": "launch",
+            "name": "Debug example 'vulkan-tutorial-threaded'",
+            "cargo": {
+                "args": [
+                    "build",
+                    "--example=vulkan-tutorial-threaded",
+                    "--package=trekanten"
+                ],
+                "filter": {
+                    "name": "vulkan-tutorial-threaded",
+                    "kind": "example"
+                }
+            },
+            "args": [],
+            "cwd": "${workspaceFolder}"
+        },
+        {
+            "type": "lldb",
+            "request": "launch",
+            "name": "Debug unit tests in example 'vulkan-tutorial-threaded'",
+            "cargo": {
+                "args": [
+                    "test",
+                    "--no-run",
+                    "--example=vulkan-tutorial-threaded",
+                    "--package=trekanten"
+                ],
+                "filter": {
+                    "name": "vulkan-tutorial-threaded",
+                    "kind": "example"
+                }
+            },
+            "args": [],
+            "cwd": "${workspaceFolder}"
+        },
+        {
+            "type": "lldb",
+            "request": "launch",
+            "name": "Debug example 'vulkan-tutorial'",
+            "cargo": {
+                "args": [
+                    "build",
+                    "--example=vulkan-tutorial",
+                    "--package=trekanten"
+                ],
+                "filter": {
+                    "name": "vulkan-tutorial",
+                    "kind": "example"
+                }
+            },
+            "args": [],
+            "cwd": "${workspaceFolder}"
+        },
+        {
+            "type": "lldb",
+            "request": "launch",
+            "name": "Debug unit tests in example 'vulkan-tutorial'",
+            "cargo": {
+                "args": [
+                    "test",
+                    "--no-run",
+                    "--example=vulkan-tutorial",
+                    "--package=trekanten"
+                ],
+                "filter": {
+                    "name": "vulkan-tutorial",
+                    "kind": "example"
+                }
+            },
+            "args": [],
+            "cwd": "${workspaceFolder}"
+        },
+        {
+            "type": "lldb",
+            "request": "launch",
+            "name": "Debug unit tests in library 'resurs'",
+            "cargo": {
+                "args": [
+                    "test",
+                    "--no-run",
+                    "--lib",
+                    "--package=resurs"
+                ],
+                "filter": {
+                    "name": "resurs",
+                    "kind": "lib"
+                }
+            },
+            "args": [],
+            "cwd": "${workspaceFolder}"
+        },
+        {
+            "type": "lldb",
+            "request": "launch",
+            "name": "Debug benchmark 'storage'",
+            "cargo": {
+                "args": [
+                    "test",
+                    "--no-run",
+                    "--bench=storage",
+                    "--package=resurs"
+                ],
+                "filter": {
+                    "name": "storage",
+                    "kind": "bench"
+                }
+            },
+            "args": [],
+            "cwd": "${workspaceFolder}"
+        },
+        {
+            "type": "lldb",
+            "request": "launch",
+            "name": "gltf-viewer",
+            "cargo": {
+                "args": [
+                    "build",
+                    "--bin=gltf-viewer",
+                    "--package=gltf-viewer"
+                ],
+                "filter": {
+                    "name": "gltf-viewer",
+                    "kind": "bin"
+                }
+            },
+            "args": ["C:\\Users\\jonss\\src\\glTF-Sample-Models\\2.0\\Box\\glTF\\Box.gltf"],
+            "cwd": "${workspaceFolder}"
+        },
+        {
+            "type": "lldb",
+            "request": "launch",
+            "name": "dbg",
+            "cargo": {
+                "args": [
+                    "build",
+                    "--bin=dbg",
+                    "--package=dbg"
+                ],
+                "filter": {
+                    "name": "dbg",
+                    "kind": "bin"
+                }
+            },
+            "args": ["--rsf-file", ".\\data\\ambient_light.ron.rsf", "--spawn-cube", "--spawn-plane"],
+            "cwd": "${workspaceFolder}"
+        },
+        {
+            "type": "lldb",
+            "request": "launch",
+            "name": "vxl",
+            "cargo": {
+                "args": [
+                    "build",
+                    "--bin=vxl",
+                    "--package=vxl"
+                ],
+                "filter": {
+                    "name": "vxl",
+                    "kind": "bin"
+                }
+            },
+            "cwd": "${workspaceFolder}"
+        },
+        {
+            "type": "lldb",
+            "request": "launch",
+            "name": "Debug unit tests in executable 'gltf-viewer'",
+            "cargo": {
+                "args": [
+                    "test",
+                    "--no-run",
+                    "--bin=gltf-viewer",
+                    "--package=gltf-viewer"
+                ],
+                "filter": {
+                    "name": "gltf-viewer",
+                    "kind": "bin"
+                }
+            },
+            "args": [],
+            "cwd": "${workspaceFolder}"
+        },
+        {
+            "type": "lldb",
+            "request": "launch",
+            "name": "Debug unit tests in library 'ramneryd'",
+            "cargo": {
+                "args": [
+                    "test",
+                    "--no-run",
+                    "--lib",
+                    "--package=ramneryd"
+                ],
+                "filter": {
+                    "name": "ramneryd",
+                    "kind": "lib"
+                }
+            },
+            "args": [],
+            "cwd": "${workspaceFolder}"
+        }
+    ]
+}
