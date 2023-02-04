@@ -82,8 +82,8 @@ fn compile_shader(
     shader_kind: shaderc::ShaderKind,
     options: Option<&shaderc::CompileOptions>,
 ) -> Result<shaderc::CompilationArtifact, shaderc::Error> {
-    let vert =
-        std::fs::read_to_string(path).expect(&format!("Failed to read file {}", path.display()));
+    let vert = std::fs::read_to_string(path)
+        .unwrap_or_else(|_| panic!("Failed to read file {}", path.display()));
     compiler.compile_into_spirv(
         &vert,
         shader_kind,
@@ -151,7 +151,7 @@ pub struct Rendering {
     viewdata: buffer::BufferHandle<buffer::DeviceUniformBuffer>,
     lightingdata: buffer::BufferHandle<buffer::DeviceUniformBuffer>,
     gfx_pipeline: Handle<GraphicsPipeline>,
-    desc_set: Handle<DescriptorSet>,
+    frame_desc_set: Handle<DescriptorSet>,
 }
 
 #[derive(Clone, Copy)]
@@ -174,7 +174,7 @@ impl Rendering {
         let lightingdata = create_lightdata_ubuf(&mut renderer);
         let gfx_pipeline = create_pipeline(&mut renderer, &mut compiler, &render_pass);
 
-        let desc_set = trekanten::descriptor::DescriptorSet::builder(&mut renderer)
+        let frame_desc_set = trekanten::descriptor::DescriptorSet::builder(&mut renderer)
             .add_buffer(&viewdata, 0, ShaderStage::VERTEX | ShaderStage::FRAGMENT)
             .add_buffer(&lightingdata, 1, ShaderStage::FRAGMENT)
             .build();
@@ -185,7 +185,7 @@ impl Rendering {
             render_pass,
             renderer,
             gfx_pipeline,
-            desc_set,
+            frame_desc_set,
         })
     }
     pub fn render(&mut self, window_extents: util::Extent2D, cmds: &[RenderCmd]) {

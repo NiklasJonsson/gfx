@@ -25,8 +25,6 @@ pub struct Mesh {
     pub indices: Vec<u32>,
 }
 
-const VOXEL_CUBE_SIDE: f32 = 1.0;
-
 fn add_cube(mesh: &mut Mesh, point: [f32; 3], size: f32) {
     let [x, y, z] = point;
 
@@ -148,6 +146,8 @@ fn add_cube(mesh: &mut Mesh, point: [f32; 3], size: f32) {
     mesh.vertices.extend_from_slice(&vertices);
     mesh.indices.extend_from_slice(&indices);
 }
+
+const VOXEL_CUBE_SIDE: f32 = 1.0;
 
 pub fn mesh(chunk: &crate::voxel::Chunk) -> Mesh {
     let mut m = Mesh {

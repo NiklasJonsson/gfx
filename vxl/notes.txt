@@ -1,0 +1,11 @@
+Currently, the matrial color is a uniform. This means it is uniform per-drawcall but the color is
+not uniform per chunk, each block should have its own color.
+
+1. Get current way of rendering to work with single uniform color.
+  * There are probably bugs here
+2. Associate color with each block
+  * Each block in a chunk should have a color
+  * Vertex color?
+  * Go with block type instead and make it a lookup thing in the shader?    
+  * Block-type and shader atlas? IIRC, this is the minecraft way
+3. Re-read John-Lis blog on voxel engine
