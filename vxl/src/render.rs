@@ -5,9 +5,7 @@ use trekanten::pipeline::{
 };
 use trekanten::{buffer, util};
 use trekanten::{BufferHandle, Handle, RenderPass, Std140Compat};
-use vek::Vec3;
 
-use std::error::Error;
 use std::path::Path;
 
 #[derive(Clone, Copy, Std140Compat)]
@@ -27,7 +25,7 @@ struct Model {
 pub struct PackedLight {
     pub pos: [f32; 4],         // position for point/spot light
     pub dir_cutoff: [f32; 4], // direction for spot/directional light. .w is the cos(cutoff_angle) of the spotlight
-    pub color_range: [f32; 4], // color for all light types. .w is the range of point/spot lights
+    pub color_range: [f32; 4], // olor for all light types. .w is the range of point/spot lights
 }
 
 impl Default for PackedLight {
@@ -50,6 +48,12 @@ pub struct LightingData {
     pub num_lights: [u32; 4],
 }
 
+#[derive(Copy, Clone, Debug, Default, Std140Compat)]
+#[repr(C, packed)]
+pub struct MaterialData {
+    pub color: [f32; 4],
+}
+
 // TODO: Share math code
 pub fn perspective_vk(
     fov_y_radians: f32,
@@ -68,11 +72,12 @@ fn next_viewdata(aspect_ratio: f32) -> ViewData {
     let eye = vek::Vec4::new(1_f32, 0., 1., 1.);
     let target = vek::Vec4::new(2_f32, 0., 2., 1.);
     let view = vek::Mat4::<f32>::look_at_rh(eye, target, vek::Vec4::unit_y());
-    let proj = perspective_vk(std::f32::consts::FRAC_PI_2, aspect_ratio, 0.1, 100.0);
-    let pos = [0.0; 4];
+    let near = 0.1;
+    let far = 100.0;
+    let proj = perspective_vk(std::f32::consts::FRAC_PI_2, aspect_ratio, near, far);
     ViewData {
         view_proj: (proj * view).into_col_array(),
-        view_pos: pos,
+        view_pos: eye.into_array(),
     }
 }
 
@@ -150,8 +155,10 @@ pub struct Rendering {
     render_pass: Handle<RenderPass>,
     viewdata: buffer::BufferHandle<buffer::DeviceUniformBuffer>,
     lightingdata: buffer::BufferHandle<buffer::DeviceUniformBuffer>,
-    gfx_pipeline: Handle<GraphicsPipeline>,
+    material_data: buffer::BufferHandle<buffer::DeviceUniformBuffer>,
     frame_desc_set: Handle<DescriptorSet>,
+    material_desc_set: Handle<DescriptorSet>,
+    gfx_pipeline: Handle<GraphicsPipeline>,
 }
 
 #[derive(Clone, Copy)]
@@ -172,6 +179,7 @@ impl Rendering {
 
         let viewdata = create_viewdata_ubuf(&mut renderer);
         let lightingdata = create_lightdata_ubuf(&mut renderer);
+        let material_data = create_material_data_ubuf(&mut renderer);
         let gfx_pipeline = create_pipeline(&mut renderer, &mut compiler, &render_pass);
 
         let frame_desc_set = trekanten::descriptor::DescriptorSet::builder(&mut renderer)
@@ -179,13 +187,19 @@ impl Rendering {
             .add_buffer(&lightingdata, 1, ShaderStage::FRAGMENT)
             .build();
 
+        let material_desc_set = trekanten::descriptor::DescriptorSet::builder(&mut renderer)
+            .add_buffer(&material_data, 0, ShaderStage::FRAGMENT)
+            .build();
+
         Ok(Self {
             viewdata,
             lightingdata,
+            material_data,
             render_pass,
             renderer,
-            gfx_pipeline,
             frame_desc_set,
+            material_desc_set,
+            gfx_pipeline,
         })
     }
     pub fn render(&mut self, window_extents: util::Extent2D, cmds: &[RenderCmd]) {
@@ -216,7 +230,16 @@ impl Rendering {
 
         builder
             .bind_graphics_pipeline(&self.gfx_pipeline)
-            .bind_shader_resource_group(0, &self.desc_set, &self.gfx_pipeline);
+            .bind_shader_resource_group(0, &self.frame_desc_set, &self.gfx_pipeline)
+            .bind_shader_resource_group(1, &self.material_desc_set, &self.gfx_pipeline);
+
+        let m = vek::Mat4::<f32>::identity().into_col_array();
+        let minv = vek::Mat4::<f32>::identity().into_col_array();
+        let model = Model {
+            model: m,
+            model_it: minv,
+        };
+        builder.bind_push_constant(&self.gfx_pipeline, ShaderStage::VERTEX, &model);
 
         for cmd in cmds {
             builder.draw_mesh(&cmd.vertices, &cmd.indices);
@@ -264,7 +287,25 @@ fn create_lightdata_ubuf(
 ) -> buffer::BufferHandle<buffer::DeviceUniformBuffer> {
     use trekanten::ResourceManager as _;
 
-    let data = [LightingData::default()];
+    let mut data = [LightingData::default()];
+    data[0].ambient = [0.2, 0.3, 0.4, 0.1];
+
+    let uniform_buffer_desc =
+        buffer::UniformBufferDescriptor::from_slice(&data, buffer::BufferMutability::Mutable);
+
+    renderer
+        .create_resource_blocking(uniform_buffer_desc)
+        .expect("Failed to create uniform buffer")
+}
+
+fn create_material_data_ubuf(
+    renderer: &mut trekanten::Renderer,
+) -> buffer::BufferHandle<buffer::DeviceUniformBuffer> {
+    use trekanten::ResourceManager as _;
+
+    let data = [MaterialData {
+        color: [0.1, 0.4, 0.1, 0.0],
+    }];
 
     let uniform_buffer_desc =
         buffer::UniformBufferDescriptor::from_slice(&data, buffer::BufferMutability::Mutable);

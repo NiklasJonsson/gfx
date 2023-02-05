@@ -150,7 +150,7 @@
                     "kind": "bin"
                 }
             },
-            "args": ["C:\\Users\\jonss\\src\\glTF-Sample-Models\\2.0\\Box\\glTF\\Box.gltf"],
+            "args": ["C:\\Users\\jonss\\src\\glTF-Sample-Models\\2.0\\Sponza\\glTF\\Sponza.gltf"],
             "cwd": "${workspaceFolder}"
         },
         {

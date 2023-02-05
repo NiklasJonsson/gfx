@@ -14,7 +14,10 @@ macro_rules! impl_gt3 {
 
 impl_gt3!(4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 32, 64);
 
-/// Std140 according to the opengl spec. Use the trekanten::Std140 to derive
+/// Std140 according to the opengl spec. Use the trekanten::Std140Compat to derive
+/// # Safety
+///
+/// Std140 has specific size and alignment requirements that doesn't necessarily conform to repr(c) or standard layout
 pub unsafe trait Std140 {
     const SIZE: usize;
     const ALIGNMENT: usize;

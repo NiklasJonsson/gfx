@@ -141,7 +141,8 @@ fn add_cube(mesh: &mut Mesh, point: [f32; 3], size: f32) {
         0, 1, 2, 2, 3, 0, 4, 5, 6, 6, 7, 4, // Bottom/top
         8, 9, 10, 10, 11, 8, 12, 13, 14, 14, 15, 12, // Front/back
         16, 17, 18, 18, 19, 16, 20, 21, 22, 22, 23, 20, // Left/right
-    ];
+    ]
+    .map(|i| i + mesh.vertices.len() as u32);
 
     mesh.vertices.extend_from_slice(&vertices);
     mesh.indices.extend_from_slice(&indices);
