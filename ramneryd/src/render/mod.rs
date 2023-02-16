@@ -102,23 +102,16 @@ pub struct MainRenderCamera;
 pub struct ReloadMaterial;
 
 #[derive(Component, Visitable)]
-pub enum RenderableMaterial {
-    PBR {
-        gfx_pipeline: Handle<GraphicsPipeline>,
-        shadow_pipeline: Handle<GraphicsPipeline>,
-        material_descriptor_set: Handle<DescriptorSet>,
-    },
-    Unlit {
-        gfx_pipeline: Handle<GraphicsPipeline>,
-        material_descriptor_set: Handle<DescriptorSet>,
-    },
+pub struct RenderableMaterial {
+    gfx_pipeline: Handle<GraphicsPipeline>,
+    shadow_pipeline: Option<Handle<GraphicsPipeline>>,
+    material_descriptor_set: Handle<DescriptorSet>,
 }
 
 impl RenderableMaterial {
     fn set_pipeline(&mut self, h: Handle<GraphicsPipeline>) {
         match self {
-            RenderableMaterial::PBR { gfx_pipeline, .. } => *gfx_pipeline = h,
-            RenderableMaterial::Unlit { gfx_pipeline, .. } => *gfx_pipeline = h,
+            RenderableMaterial { gfx_pipeline, .. } => *gfx_pipeline = h,
         }
     }
 }
@@ -254,7 +247,7 @@ fn get_pipeline_for(
             renderer.create_gfx_pipeline(desc, &frame_data.main_render_pass)?
         }
         material::GpuMaterial::Unlit { polygon_mode, .. } => {
-            let desc = unlit_pipeline_desc(&shader_compiler, vertex_format, *polygon_mode)?;
+            let desc = unlit_pipeline_desc(&*shader_compiler, vertex_format, *polygon_mode)?;
             renderer.create_gfx_pipeline(desc, &frame_data.main_render_pass)?
         }
     };
@@ -293,7 +286,8 @@ fn get_shadow_pipeline_for(
         .add_attribute(trekanten::util::Format::FLOAT3) // pos
         .skip(vertex_format_size - trekanten::util::Format::FLOAT3.size())
         .build();
-    let descriptor = shadow_pipeline_desc(&shader_compiler, shadow_vertex_format)?;
+
+    let descriptor = shadow_pipeline_desc(&*shader_compiler, shadow_vertex_format)?;
     Ok(renderer.create_gfx_pipeline(descriptor, &frame_data.shadow.render_pass)?)
 }
 
@@ -307,17 +301,19 @@ fn create_renderable(
     let material_descriptor_set = create_material_descriptor_set(renderer, material);
     let gfx_pipeline =
         get_pipeline_for(renderer, world, mesh, material).expect("Failed to get pipeline");
-    match material {
-        material::GpuMaterial::PBR { .. } => RenderableMaterial::PBR {
-            gfx_pipeline,
-            shadow_pipeline: get_shadow_pipeline_for(renderer, world, mesh)
+    let shadow_pipeline = if let material::GpuMaterial::PBR { .. } = material {
+        Some(
+            get_shadow_pipeline_for(renderer, world, mesh)
                 .expect("Failed to create shadow pipeline"),
-            material_descriptor_set,
-        },
-        material::GpuMaterial::Unlit { .. } => RenderableMaterial::Unlit {
-            gfx_pipeline,
-            material_descriptor_set,
-        },
+        )
+    } else {
+        None
+    };
+
+    RenderableMaterial {
+        gfx_pipeline,
+        shadow_pipeline,
+        material_descriptor_set,
     }
 }
 
@@ -340,7 +336,7 @@ fn create_renderables(renderer: &mut Renderer, world: &mut World) {
                     log::trace!("Reloading shader for {:?}", ent);
                     // TODO: Destroy the previous pipeline
                     match get_pipeline_for(renderer, world, mesh, mat) {
-                        Ok(pipeline) => entry.get_mut().set_pipeline(pipeline),
+                        Ok(pipeline) => entry.get_mut().gfx_pipeline = pipeline,
                         Err(e) => log::error!("Failed to compile pipeline: {}", e),
                     }
                 }
@@ -394,8 +390,9 @@ fn draw_entities<'a>(world: &World, cmd_buf: &mut RenderPassEncoder<'a>, mode: D
 
         match (renderable, mode) {
             (
-                RenderableMaterial::PBR {
-                    shadow_pipeline, ..
+                RenderableMaterial {
+                    shadow_pipeline: Some(shadow_pipeline),
+                    ..
                 },
                 DrawMode::ShadowsOnly,
             ) => {
@@ -405,19 +402,12 @@ fn draw_entities<'a>(world: &World, cmd_buf: &mut RenderPassEncoder<'a>, mode: D
                     .draw_mesh(vertex_buffer, index_buffer);
             }
             (
-                RenderableMaterial::PBR {
+                RenderableMaterial {
                     gfx_pipeline,
                     material_descriptor_set,
                     ..
                 },
                 DrawMode::Lit,
-            )
-            | (
-                RenderableMaterial::Unlit {
-                    gfx_pipeline,
-                    material_descriptor_set,
-                },
-                DrawMode::Unlit,
             ) => {
                 bind_pipeline(cmd_buf, gfx_pipeline);
                 cmd_buf
