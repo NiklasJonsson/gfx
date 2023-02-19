@@ -115,6 +115,28 @@ impl VertexFormat {
     }
 }
 
+impl From<&[util::Format]> for VertexFormat {
+    fn from(formats: &[util::Format]) -> Self {
+        let mut builder = VertexFormatBuilder::new();
+        for format in formats {
+            builder = builder.add_attribute(*format);
+        }
+        builder.build()
+    }
+}
+
+impl<const N: usize> From<[util::Format; N]> for VertexFormat {
+    fn from(formats: [util::Format; N]) -> Self {
+        Self::from(formats.as_slice())
+    }
+}
+
+impl From<util::Format> for VertexFormat {
+    fn from(format: util::Format) -> Self {
+        Self::from([format])
+    }
+}
+
 pub struct VertexFormatBuilder {
     format: VertexFormat,
 }

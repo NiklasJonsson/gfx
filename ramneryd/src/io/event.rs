@@ -86,7 +86,7 @@ impl EventManager {
         let mut resolve = false;
         match event {
             WinEvent::MainEventsCleared => {
-                log::info!("Received MainEventsClear, resolving current event");
+                log::debug!("Received MainEventsClear, resolving current event");
                 resolve = true;
             }
             WinEvent::LoopDestroyed
@@ -245,7 +245,7 @@ pub fn event_thread_work(
 
     match event_manager.collect_event(winit_event) {
         EventLoopControl::SendEvent(event) => {
-            log::info!("Sending event on queue: {:?}", event);
+            log::debug!("Sending event on queue: {:?}", event);
             event_queue.push(event)
         }
         EventLoopControl::Continue => (),

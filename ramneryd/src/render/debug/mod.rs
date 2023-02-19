@@ -27,9 +27,7 @@ struct Vertex {
 
 impl VertexDefinition for Vertex {
     fn format() -> VertexFormat {
-        VertexFormat::builder()
-            .add_attribute(trekanten::util::Format::FLOAT3)
-            .build()
+        VertexFormat::from(trekanten::util::Format::FLOAT3)
     }
 }
 
@@ -84,7 +82,7 @@ impl DebugRenderer {
 
         let vertex_format = Vertex::format();
 
-        let vertex = shader_compiler
+        let vert = shader_compiler
             .compile(
                 &shader::Defines::empty(),
                 "render/shaders/world_pos_only_vert.glsl",
@@ -92,7 +90,7 @@ impl DebugRenderer {
             )
             .expect("Failed to compile vert shader for debug renderer");
 
-        let fragment = shader_compiler
+        let frag = shader_compiler
             .compile(
                 &shader::Defines::empty(),
                 "render/shaders/red_frag.glsl",
@@ -100,9 +98,18 @@ impl DebugRenderer {
             )
             .expect("Failed to compile frag shader for debug renderer");
 
+        let vert = ShaderDescriptor {
+            debug_name: Some("debug-lines-vert".to_owned()),
+            spirv_code: vert.data(),
+        };
+        let frag = ShaderDescriptor {
+            debug_name: Some("debug-lines-frag".to_owned()),
+            spirv_code: frag.data(),
+        };
+
         let pipeline_desc = GraphicsPipelineDescriptor::builder()
-            .vert(ShaderDescriptor::FromRawSpirv(vertex.data()))
-            .frag(ShaderDescriptor::FromRawSpirv(fragment.data()))
+            .vert(vert)
+            .frag(frag)
             .vertex_format(vertex_format)
             .culling(TriangleCulling::None)
             .polygon_mode(PolygonMode::Line)

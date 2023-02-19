@@ -124,6 +124,7 @@ fn compute_directional_shadow_bounds(shadow_bounds_ls: Obb) -> Aabb {
     }
 }
 
+// TODO: Separate draw calls and data writes
 pub fn light_and_shadow_pass(
     world: &World,
     frame: &mut trekanten::Frame,

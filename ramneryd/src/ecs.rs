@@ -11,6 +11,7 @@ pub use ramneryd_derive::Component;
 
 pub mod prelude {
     pub use specs::prelude::ResourceId;
+    pub use specs::prelude::SystemData as _;
     pub use specs::SystemData;
     pub use specs::{DenseVecStorage, HashMapStorage, NullStorage, VecStorage};
     pub use specs::{Entities, Entity};
@@ -52,12 +53,6 @@ pub mod serde {
     // This cannot be called.
     impl From<std::convert::Infallible> for Error {
         fn from(_: std::convert::Infallible) -> Self {
-            unreachable!()
-        }
-    }
-
-    impl From<specs::error::NoError> for Error {
-        fn from(_: specs::error::NoError) -> Self {
             unreachable!()
         }
     }

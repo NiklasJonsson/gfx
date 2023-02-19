@@ -1,4 +1,3 @@
-use shaderc::Compiler;
 use std::path::Path;
 use std::path::PathBuf;
 use thiserror::Error;

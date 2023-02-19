@@ -109,11 +109,11 @@ struct Vertex {
 
 impl VertexDefinition for Vertex {
     fn format() -> VertexFormat {
-        VertexFormat::builder()
-            .add_attribute(util::Format::FLOAT3)
-            .add_attribute(util::Format::FLOAT3)
-            .add_attribute(util::Format::FLOAT2)
-            .build()
+        VertexFormat::from([
+            util::Format::FLOAT3,
+            util::Format::FLOAT3,
+            util::Format::FLOAT2,
+        ])
     }
 }
 
@@ -307,8 +307,14 @@ fn create_pipeline(
     renderer: &mut Renderer,
     render_pass: &Handle<RenderPass>,
 ) -> Handle<GraphicsPipeline> {
-    let vert = ShaderDescriptor::FromRawSpirv(RAW_VERT_SPV.to_vec());
-    let frag = ShaderDescriptor::FromRawSpirv(RAW_FRAG_SPV.to_vec());
+    let vert = ShaderDescriptor {
+        debug_name: Some("vulkan-tutorial-vert".to_owned()),
+        spirv_code: RAW_VERT_SPV.to_vec(),
+    };
+    let frag = ShaderDescriptor {
+        debug_name: Some("vulkan-tutorial-frag".to_owned()),
+        spirv_code: RAW_FRAG_SPV.to_vec(),
+    };
     let pipeline_descriptor = GraphicsPipelineDescriptor::builder()
         .vert(vert)
         .frag(frag)

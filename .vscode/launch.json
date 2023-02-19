@@ -1,0 +1,222 @@
+{
+    // Use IntelliSense to learn about possible attributes.
+    // Hover to view descriptions of existing attributes.
+    // For more information, visit: https://go.microsoft.com/fwlink/?linkid=830387
+    "version": "0.2.0",
+    "configurations": [
+        {
+            "type": "lldb",
+            "request": "launch",
+            "name": "Debug unit tests in library 'trekanten'",
+            "cargo": {
+                "args": [
+                    "test",
+                    "--no-run",
+                    "--lib",
+                    "--package=trekanten"
+                ],
+                "filter": {
+                    "name": "trekanten",
+                    "kind": "lib"
+                }
+            },
+            "args": [],
+            "cwd": "${workspaceFolder}"
+        },
+        {
+            "type": "lldb",
+            "request": "launch",
+            "name": "Debug example 'vulkan-tutorial-threaded'",
+            "cargo": {
+                "args": [
+                    "build",
+                    "--example=vulkan-tutorial-threaded",
+                    "--package=trekanten"
+                ],
+                "filter": {
+                    "name": "vulkan-tutorial-threaded",
+                    "kind": "example"
+                }
+            },
+            "args": [],
+            "cwd": "${workspaceFolder}"
+        },
+        {
+            "type": "lldb",
+            "request": "launch",
+            "name": "Debug unit tests in example 'vulkan-tutorial-threaded'",
+            "cargo": {
+                "args": [
+                    "test",
+                    "--no-run",
+                    "--example=vulkan-tutorial-threaded",
+                    "--package=trekanten"
+                ],
+                "filter": {
+                    "name": "vulkan-tutorial-threaded",
+                    "kind": "example"
+                }
+            },
+            "args": [],
+            "cwd": "${workspaceFolder}"
+        },
+        {
+            "type": "lldb",
+            "request": "launch",
+            "name": "Debug example 'vulkan-tutorial'",
+            "cargo": {
+                "args": [
+                    "build",
+                    "--example=vulkan-tutorial",
+                    "--package=trekanten"
+                ],
+                "filter": {
+                    "name": "vulkan-tutorial",
+                    "kind": "example"
+                }
+            },
+            "args": [],
+            "cwd": "${workspaceFolder}"
+        },
+        {
+            "type": "lldb",
+            "request": "launch",
+            "name": "Debug unit tests in example 'vulkan-tutorial'",
+            "cargo": {
+                "args": [
+                    "test",
+                    "--no-run",
+                    "--example=vulkan-tutorial",
+                    "--package=trekanten"
+                ],
+                "filter": {
+                    "name": "vulkan-tutorial",
+                    "kind": "example"
+                }
+            },
+            "args": [],
+            "cwd": "${workspaceFolder}"
+        },
+        {
+            "type": "lldb",
+            "request": "launch",
+            "name": "Debug integration test 'test-derive-macro'",
+            "cargo": {
+                "args": [
+                    "test",
+                    "--no-run",
+                    "--test=test-derive-macro",
+                    "--package=trekanten"
+                ],
+                "filter": {
+                    "name": "test-derive-macro",
+                    "kind": "test"
+                }
+            },
+            "args": [],
+            "cwd": "${workspaceFolder}"
+        },
+        {
+            "type": "lldb",
+            "request": "launch",
+            "name": "Debug unit tests in library 'resurs'",
+            "cargo": {
+                "args": [
+                    "test",
+                    "--no-run",
+                    "--lib",
+                    "--package=resurs"
+                ],
+                "filter": {
+                    "name": "resurs",
+                    "kind": "lib"
+                }
+            },
+            "args": [],
+            "cwd": "${workspaceFolder}"
+        },
+        {
+            "type": "lldb",
+            "request": "launch",
+            "name": "Debug benchmark 'storage'",
+            "cargo": {
+                "args": [
+                    "test",
+                    "--no-run",
+                    "--bench=storage",
+                    "--package=resurs"
+                ],
+                "filter": {
+                    "name": "storage",
+                    "kind": "bench"
+                }
+            },
+            "args": [],
+            "cwd": "${workspaceFolder}"
+        },
+        {
+            "type": "lldb",
+            "request": "launch",
+            "name": "Debug unit tests in library 'ramneryd'",
+            "cargo": {
+                "args": [
+                    "test",
+                    "--no-run",
+                    "--lib",
+                    "--package=ramneryd"
+                ],
+                "filter": {
+                    "name": "ramneryd",
+                    "kind": "lib"
+                }
+            },
+            "args": [],
+            "cwd": "${workspaceFolder}"
+        },
+        {
+            "type": "lldb",
+            "request": "launch",
+            "name": "Debug executable 'dbg'",
+            "cargo": {
+                "args": [
+                    "build",
+                    "--release",
+                    "--bin=dbg",
+                    "--package=dbg"
+                ],
+                "filter": {
+                    "name": "dbg",
+                    "kind": "bin"
+                }
+            },
+            "args": [
+                "--gltf-file",
+                "../glTF-Sample-Models/2.0/Sponza/glTF/Sponza.gltf",
+                "--rsf-file",
+                "data/ambient_light.ron.rsf",
+                "--rsf-file",
+                "data/spot_light.ron.rsf",
+            ],
+            "cwd": "${workspaceFolder}"
+        },
+        {
+            "type": "lldb",
+            "request": "launch",
+            "name": "Debug unit tests in executable 'dbg'",
+            "cargo": {
+                "args": [
+                    "test",
+                    "--no-run",
+                    "--bin=dbg",
+                    "--package=dbg"
+                ],
+                "filter": {
+                    "name": "dbg",
+                    "kind": "bin"
+                }
+            },
+            "args": [],
+            "cwd": "${workspaceFolder}"
+        }
+    ]
+}

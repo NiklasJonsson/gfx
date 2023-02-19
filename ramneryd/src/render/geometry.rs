@@ -16,10 +16,7 @@ struct Vertex {
 
 impl VertexDefinition for Vertex {
     fn format() -> VertexFormat {
-        VertexFormat::builder()
-            .add_attribute(Format::FLOAT3)
-            .add_attribute(Format::FLOAT3)
-            .build()
+        VertexFormat::from([Format::FLOAT3; 2])
     }
 }
 

@@ -4,12 +4,7 @@ use ash::vk;
 use derive_builder::Builder;
 
 use std::ffi::CStr;
-use std::fs::File;
-use std::io;
-use std::path::Path;
-use std::path::PathBuf;
-
-use std::borrow::Cow;
+use std::fmt::Debug;
 
 use crate::backend::render_pass::RenderPass;
 use crate::device::HasVkDevice;
@@ -30,7 +25,7 @@ bitflags::bitflags! {
     }
 }
 
-fn hash<T: std::hash::Hash>(t: &T) -> u64 {
+fn hash<T: std::hash::Hash>(t: T) -> u64 {
     use std::collections::hash_map::DefaultHasher;
     use std::hash::Hasher;
 
@@ -53,20 +48,6 @@ impl From<ShaderStage> for vk::ShaderStageFlags {
 
         out
     }
-}
-
-#[derive(Debug, Hash)]
-struct RawShader<'a> {
-    pub data: Cow<'a, [u32]>,
-}
-
-fn read_shader(path: &Path) -> io::Result<RawShader> {
-    log::trace!("Reading shader from {}", path.display());
-    let mut file = File::open(path)?;
-    let words = ash::util::read_spv(&mut file)?;
-    Ok(RawShader {
-        data: Cow::from(words),
-    })
 }
 
 struct ShaderModule {
@@ -93,9 +74,9 @@ impl std::ops::Drop for ShaderModule {
 }
 
 impl ShaderModule {
-    pub fn new<D: HasVkDevice>(device: &D, raw: &RawShader) -> Result<Self, PipelineError> {
-        log::trace!("Creating shader module from data (hash) {:?}", hash(raw));
-        let info = vk::ShaderModuleCreateInfo::builder().code(&raw.data);
+    pub fn new<D: HasVkDevice>(device: &D, spirv: &[u32]) -> Result<Self, PipelineError> {
+        log::trace!("Creating shader module from data (hash) {}", hash(spirv));
+        let info = vk::ShaderModuleCreateInfo::builder().code(spirv);
 
         let vk_device = device.vk_device();
 
@@ -284,30 +265,17 @@ impl GraphicsPipeline {
         desc: &'a ShaderDescriptor,
         stage: vk::ShaderStageFlags,
     ) -> Result<PipelineCreationInfo, PipelineError> {
-        log::trace!("Creating shader for pipeline");
-        let raw = match desc {
-            ShaderDescriptor::FromRawSpirv(data) => {
-                log::trace!("from raw");
-                RawShader {
-                    data: Cow::from(data),
-                }
-            }
-            ShaderDescriptor::FromPath(path) => {
-                log::trace!("from path \"{}\"", path.display());
-                read_shader(path)?
-            }
-        };
-
+        log::trace!("Creating shader ({desc:?}) for pipeline");
         let name = CStr::from_bytes_with_nul(DEFAULT_SPV_ENTRY_NAME_NULLED).unwrap();
 
-        let shader_module = ShaderModule::new(device, &raw)?;
+        let shader_module = ShaderModule::new(device, &desc.spirv_code)?;
         let create_info = vk::PipelineShaderStageCreateInfo::builder()
             .stage(stage)
             .module(shader_module.vk_shader_module)
             .name(name)
             .build();
 
-        let new_refl_data = parse_spirv(&raw.data).map_err(PipelineError::Reflection)?;
+        let new_refl_data = parse_spirv(&desc.spirv_code).map_err(PipelineError::Reflection)?;
 
         refl_data.merge(new_refl_data);
 
@@ -495,10 +463,45 @@ impl GraphicsPipeline {
     }
 }
 
-#[derive(Clone, Debug, PartialEq, Eq, Hash)]
-pub enum ShaderDescriptor {
-    FromRawSpirv(Vec<u32>),
-    FromPath(PathBuf),
+#[derive(Clone)]
+pub struct ShaderDescriptor {
+    pub debug_name: Option<String>,
+    pub spirv_code: Vec<u32>,
+}
+
+impl Debug for ShaderDescriptor {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_fmt(format_args!(
+            "ShaderDescriptor {{\
+    debug_name: {} \
+    spirv_code: {{ start: {:p}, size: {}, hash: {:#X} }}
+}}",
+            self.debug_name
+                .as_ref()
+                .map(String::as_str)
+                .unwrap_or("N/A"),
+            self.spirv_code.as_ptr(),
+            self.spirv_code.len(),
+            hash(&self.spirv_code)
+        ))
+    }
+}
+
+impl PartialEq for ShaderDescriptor {
+    fn eq(&self, other: &Self) -> bool {
+        self.spirv_code == other.spirv_code
+    }
+}
+
+impl Eq for ShaderDescriptor {}
+
+impl std::hash::Hash for ShaderDescriptor {
+    fn hash<H>(&self, state: &mut H)
+    where
+        H: std::hash::Hasher,
+    {
+        self.spirv_code.hash(state);
+    }
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Hash, Builder)]

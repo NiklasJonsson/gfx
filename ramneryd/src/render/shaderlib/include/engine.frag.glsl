@@ -23,6 +23,9 @@ uint num_lights() {
     return min(lighting_data.num_lights.x, MAX_NUM_LIGHTS);
 }
 
+#define NUM_SPOTLIGHT_SHADOW_MAPS (16)
+layout(set = 0, binding = 2) uniform sampler2D spotlight_shadow_maps[NUM_SPOTLIGHT_SHADOW_MAPS];
+
 struct Light {
     vec3 color;
     float attenuation;
@@ -83,9 +86,6 @@ Light unpack_light(PackedLight l, vec3 world_pos) {
     }
     return r;
 }
-
-#define NUM_SPOTLIGHT_SHADOW_MAPS (16)
-layout(set = 0, binding = 2) uniform sampler2D spotlight_shadow_maps[NUM_SPOTLIGHT_SHADOW_MAPS];
 
 bool light_has_shadow(Light l) {
     return l.shadow_idx < NUM_SPOTLIGHT_SHADOW_MAPS;

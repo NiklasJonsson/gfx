@@ -103,6 +103,7 @@ fn interleave_vertex_buffer<'a>(
     let has_vertex_colors = colors.is_some();
 
     // TODO: How to map this to shader layout?
+    // TODO: Generalize with format writer
     let it = positions.zip(normals);
     match (colors, tex_coords, tangents) {
         (None, Some(tex_coords), Some(tangents)) => {

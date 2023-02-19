@@ -8,8 +8,7 @@ edition = "2021"
 ramneryd-derive = { path = "../ramneryd-derive" }
 
 # ECS
-specs-hierarchy = "0.6.0"
-specs = { version = "0.16.1", features = ["specs-derive", "serde"] }
+specs = { version = "0.19.0", features = ["derive", "serde"] }
 
 # Rendering/Graphics
 winit = "0.22.2"
@@ -31,7 +30,6 @@ log = "0.4.8"
 env_logger = "0.6.2"
 thiserror = "1.0.20"
 resurs = { path = "../resurs" }
-linkme = "0.2.2"
 serde = "1.0"
 polymap = "0.3.0"
 

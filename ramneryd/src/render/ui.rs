@@ -35,11 +35,7 @@ struct ImGuiVertex(imgui::DrawVert);
 
 impl VertexDefinition for ImGuiVertex {
     fn format() -> VertexFormat {
-        VertexFormat::builder()
-            .add_attribute(Format::FLOAT2)
-            .add_attribute(Format::FLOAT2)
-            .add_attribute(Format::RGBA_UNORM)
-            .build()
+        VertexFormat::from([Format::FLOAT2, Format::FLOAT2, Format::RGBA_UNORM])
     }
 }
 
@@ -344,8 +340,14 @@ impl UIContext {
             (vert, frag)
         };
 
-        let vert = ShaderDescriptor::FromRawSpirv(vert.data());
-        let frag = ShaderDescriptor::FromRawSpirv(frag.data());
+        let vert = ShaderDescriptor {
+            debug_name: Some("imgui-vert".to_owned()),
+            spirv_code: vert.data(),
+        };
+        let frag = ShaderDescriptor {
+            debug_name: Some("imgui-frag".to_owned()),
+            spirv_code: frag.data(),
+        };
         let pipeline_descriptor = GraphicsPipelineDescriptor::builder()
             .vert(vert)
             .frag(frag)

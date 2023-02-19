@@ -75,12 +75,10 @@ struct ShadowData {
 
 struct UnlitFrameUniformResources {
     dummy_pipeline: Handle<GraphicsPipeline>,
-    shader_resource_group: Handle<DescriptorSet>,
 }
 
 struct PhysicallyBasedUniformResources {
     dummy_pipeline: Handle<GraphicsPipeline>,
-    shader_resource_group: Handle<DescriptorSet>,
     light_buffer: BufferHandle<DeviceUniformBuffer>,
     shadow_matrices_buffer: BufferHandle<DeviceUniformBuffer>,
 }
@@ -88,6 +86,7 @@ struct PhysicallyBasedUniformResources {
 pub struct FrameData {
     main_render_pass: Handle<trekanten::RenderPass>,
     main_camera_view_data: BufferHandle<DeviceUniformBuffer>,
+    engine_shader_resource_group: Handle<DescriptorSet>,
     unlit_resources: UnlitFrameUniformResources,
     pbr_resources: PhysicallyBasedUniformResources,
     shadow: ShadowData,
@@ -177,20 +176,28 @@ fn unlit_pipeline_desc(
     vertex_format: VertexFormat,
     polygon_mode: trekanten::pipeline::PolygonMode,
 ) -> Result<GraphicsPipelineDescriptor, MaterialError> {
-    let vertex = shader_compiler.compile(
+    let vert = shader_compiler.compile(
         &shader::Defines::empty(),
         "render/shaders/unlit/vert.glsl",
         shader::ShaderType::Vertex,
     )?;
-    let fragment = shader_compiler.compile(
+    let frag = shader_compiler.compile(
         &shader::Defines::empty(),
         "render/shaders/unlit/frag.glsl",
         shader::ShaderType::Fragment,
     )?;
 
+    let vert = ShaderDescriptor {
+        debug_name: Some("unlit-vert".to_owned()),
+        spirv_code: vert.data(),
+    };
+    let frag = ShaderDescriptor {
+        debug_name: Some("unlit-frag".to_owned()),
+        spirv_code: frag.data(),
+    };
     Ok(GraphicsPipelineDescriptor::builder()
-        .vert(ShaderDescriptor::FromRawSpirv(vertex.data()))
-        .frag(ShaderDescriptor::FromRawSpirv(fragment.data()))
+        .vert(vert)
+        .frag(frag)
         .vertex_format(vertex_format)
         .culling(trekanten::pipeline::TriangleCulling::None)
         .polygon_mode(polygon_mode)
@@ -229,9 +236,18 @@ fn get_pipeline_for(
             };
 
             let (vert, frag) = shader::pbr_gltf::compile(&*shader_compiler, &def)?;
+
+            let vert = ShaderDescriptor {
+                debug_name: Some("pbr-vert".to_owned()),
+                spirv_code: vert.data(),
+            };
+            let frag = ShaderDescriptor {
+                debug_name: Some("pbr-frag".to_owned()),
+                spirv_code: frag.data(),
+            };
             let desc = GraphicsPipelineDescriptor::builder()
-                .vert(ShaderDescriptor::FromRawSpirv(vert.data()))
-                .frag(ShaderDescriptor::FromRawSpirv(frag.data()))
+                .vert(vert)
+                .frag(frag)
                 .vertex_format(vertex_format)
                 .polygon_mode(trekanten::pipeline::PolygonMode::Fill)
                 .build()?;
@@ -258,9 +274,14 @@ fn shadow_pipeline_desc(
         shader::ShaderType::Vertex,
     )?;
 
+    let vert = ShaderDescriptor {
+        debug_name: Some("shadow-pos-only-vert".to_owned()),
+        spirv_code: vert.data(),
+    };
+
     Ok(GraphicsPipelineDescriptor::builder()
         .vertex_format(format)
-        .vert(ShaderDescriptor::FromRawSpirv(vert.data()))
+        .vert(vert)
         .culling(trekanten::pipeline::TriangleCulling::Front)
         .build()?)
 }
@@ -431,6 +452,10 @@ pub fn draw_frame(world: &mut World, ui: &mut ui::UIContext, renderer: &mut Rend
         Some(e) => e,
     };
 
+    // TODO: Refactor! It would be nice to split the frame in:
+    // 1. Data send
+    // 2. Draw calls
+
     debug_shadow_bounds(world);
 
     GpuUpload::resolve_pending(world, renderer);
@@ -471,7 +496,6 @@ pub fn draw_frame(world: &mut World, ui: &mut ui::UIContext, renderer: &mut Rend
         .new_command_buffer()
         .expect("Failed to create command buffer");
 
-    // View data main render pass
     {
         let mut cameras = world.write_component::<Camera>();
         let transforms = world.read_component::<Transform>();
@@ -502,6 +526,7 @@ pub fn draw_frame(world: &mut World, ui: &mut ui::UIContext, renderer: &mut Rend
             main_render_pass,
             unlit_resources,
             pbr_resources,
+            engine_shader_resource_group,
             ..
         } = frame_resources;
         let mut main_rp = frame
@@ -510,26 +535,19 @@ pub fn draw_frame(world: &mut World, ui: &mut ui::UIContext, renderer: &mut Rend
 
         {
             // PBR
-            let PhysicallyBasedUniformResources {
-                dummy_pipeline,
-                shader_resource_group,
-                ..
-            } = &pbr_resources;
+            let PhysicallyBasedUniformResources { dummy_pipeline, .. } = &pbr_resources;
             main_rp
                 .bind_graphics_pipeline(dummy_pipeline)
-                .bind_shader_resource_group(0u32, shader_resource_group, dummy_pipeline);
+                .bind_shader_resource_group(0u32, engine_shader_resource_group, dummy_pipeline);
             draw_entities(world, &mut main_rp, DrawMode::Lit);
         }
 
         {
             // Unlit
-            let UnlitFrameUniformResources {
-                dummy_pipeline,
-                shader_resource_group,
-            } = &unlit_resources;
+            let UnlitFrameUniformResources { dummy_pipeline } = &unlit_resources;
             main_rp
                 .bind_graphics_pipeline(dummy_pipeline)
-                .bind_shader_resource_group(0u32, shader_resource_group, dummy_pipeline);
+                .bind_shader_resource_group(0u32, engine_shader_resource_group, dummy_pipeline);
             draw_entities(world, &mut main_rp, DrawMode::Unlit);
         }
 
@@ -707,9 +725,7 @@ fn build_shadow_data(
         unsafe { std::mem::transmute(data) }
     };
     let shadow_dummy_pipeline = {
-        let pos_only_vertex_format = VertexFormat::builder()
-            .add_attribute(util::Format::FLOAT3)
-            .build();
+        let pos_only_vertex_format = VertexFormat::from(util::Format::FLOAT3);
         let pipeline_desc = shadow_pipeline_desc(shader_compiler, pos_only_vertex_format)
             .expect("Failed to create graphics pipeline descriptor for shadows");
         renderer
@@ -745,24 +761,64 @@ pub fn setup_resources(world: &mut World, renderer: &mut Renderer) {
         let main_camera_view_data = renderer.create_resource_blocking(view_data).expect("FAIL");
         let shadow_data = build_shadow_data(&shader_compiler, renderer);
 
-        let pbr_resources = {
-            let vertex_format = VertexFormat::builder()
-                .add_attribute(util::Format::FLOAT3)
-                .add_attribute(util::Format::FLOAT3)
-                .build();
+        let light_data = uniform::LightingData {
+            punctual_lights: [uniform::PackedLight::default(); uniform::MAX_NUM_LIGHTS],
+            ambient: [0.0; 4],
+            num_lights: [0; 4],
+        };
+        let light_data =
+            UniformBufferDescriptor::from_single(light_data, BufferMutability::Mutable);
+        let light_buffer = renderer.create_resource_blocking(light_data).expect("FAIL");
 
+        let shadow_matrices = uniform::ShadowMatrices {
+            matrices: [uniform::Mat4::default(); uniform::MAX_NUM_LIGHTS],
+            num_matrices: [0; 4],
+        };
+        let shadow_matrices =
+            UniformBufferDescriptor::from_single(shadow_matrices, BufferMutability::Mutable);
+        let shadow_matrices_buffer = renderer
+            .create_resource_blocking(shadow_matrices)
+            .expect("Failed to create shadow matrix uniform buffer");
+
+        let texture_itr = shadow_data.spotlights.iter().map(|x| (x.texture, true));
+        let engine_shader_resource_group = DescriptorSet::builder(renderer)
+            .add_buffer(
+                &main_camera_view_data,
+                uniform::ViewData::BINDING,
+                ShaderStage::VERTEX | ShaderStage::FRAGMENT,
+            )
+            .add_buffer(
+                &light_buffer,
+                uniform::LightingData::BINDING,
+                ShaderStage::FRAGMENT,
+            )
+            .add_textures(texture_itr, 2, ShaderStage::FRAGMENT)
+            .add_buffer(&shadow_matrices_buffer, 3, ShaderStage::VERTEX)
+            .build();
+
+        let pbr_resources = {
+            let vertex_format = VertexFormat::from([util::Format::FLOAT3; 2]);
             let result = shader::pbr_gltf::compile_default(&shader_compiler);
             let (vert, frag) = match result {
-                Ok(r) => r,
                 Err(e) => {
                     log::error!("{}", e);
                     return;
                 }
+                Ok(r) => r,
+            };
+
+            let vert = ShaderDescriptor {
+                debug_name: Some("dummy-pbr-vert".to_owned()),
+                spirv_code: vert.data(),
+            };
+            let frag = ShaderDescriptor {
+                debug_name: Some("dummy-pbr-frag".to_owned()),
+                spirv_code: frag.data(),
             };
 
             let desc = GraphicsPipelineDescriptor::builder()
-                .vert(ShaderDescriptor::FromRawSpirv(vert.data()))
-                .frag(ShaderDescriptor::FromRawSpirv(frag.data()))
+                .vert(vert)
+                .frag(frag)
                 .vertex_format(vertex_format)
                 .build()
                 .expect("Failed to build graphics pipeline descriptor");
@@ -770,63 +826,17 @@ pub fn setup_resources(world: &mut World, renderer: &mut Renderer) {
                 .create_gfx_pipeline(desc, &main_render_pass)
                 .expect("FAIL");
 
-            // TODO: Single elem uniform buffer here. Add to the same buffer?
-            let light_data = uniform::LightingData {
-                punctual_lights: [uniform::PackedLight::default(); uniform::MAX_NUM_LIGHTS],
-                ambient: [0.0; 4],
-                num_lights: [0; 4],
-            };
-            let light_data =
-                UniformBufferDescriptor::from_single(light_data, BufferMutability::Mutable);
-            let light_buffer = renderer.create_resource_blocking(light_data).expect("FAIL");
-
-            let shadow_matrices = uniform::ShadowMatrices {
-                matrices: [uniform::Mat4::default(); uniform::MAX_NUM_LIGHTS],
-                num_matrices: [0; 4],
-            };
-            let shadow_matrices =
-                UniformBufferDescriptor::from_single(shadow_matrices, BufferMutability::Mutable);
-            let shadow_matrices_buffer = renderer
-                .create_resource_blocking(shadow_matrices)
-                .expect("Failed to create shadow matrix uniform buffer");
-
             assert_eq!(uniform::LightingData::SET, uniform::ViewData::SET);
-            let texture_itr = shadow_data.spotlights.iter().map(|x| (x.texture, true));
-            let shader_resource_group = DescriptorSet::builder(renderer)
-                .add_buffer(
-                    &main_camera_view_data,
-                    uniform::ViewData::BINDING,
-                    ShaderStage::VERTEX | ShaderStage::FRAGMENT,
-                )
-                .add_buffer(
-                    &light_buffer,
-                    uniform::LightingData::BINDING,
-                    ShaderStage::FRAGMENT,
-                )
-                .add_textures(texture_itr, 2, ShaderStage::FRAGMENT)
-                .add_buffer(&shadow_matrices_buffer, 3, ShaderStage::VERTEX)
-                .build();
 
             PhysicallyBasedUniformResources {
                 dummy_pipeline,
                 light_buffer,
                 shadow_matrices_buffer,
-                shader_resource_group,
             }
         };
 
         let unlit_resources = {
-            let shader_resource_group = DescriptorSet::builder(renderer)
-                .add_buffer(
-                    &main_camera_view_data,
-                    uniform::ViewData::BINDING,
-                    ShaderStage::VERTEX,
-                )
-                .build();
-
-            let vertex_format = VertexFormat::builder()
-                .add_attribute(util::Format::FLOAT3)
-                .build();
+            let vertex_format = VertexFormat::from(util::Format::FLOAT3);
             let desc = unlit_pipeline_desc(
                 &shader_compiler,
                 vertex_format,
@@ -837,10 +847,7 @@ pub fn setup_resources(world: &mut World, renderer: &mut Renderer) {
                 .create_gfx_pipeline(desc, &main_render_pass)
                 .expect("Failed to create unlit dummy pipeline");
 
-            UnlitFrameUniformResources {
-                dummy_pipeline,
-                shader_resource_group,
-            }
+            UnlitFrameUniformResources { dummy_pipeline }
         };
 
         FrameData {
@@ -848,6 +855,7 @@ pub fn setup_resources(world: &mut World, renderer: &mut Renderer) {
             main_camera_view_data,
             pbr_resources,
             unlit_resources,
+            engine_shader_resource_group,
             shadow: shadow_data,
         }
     };
