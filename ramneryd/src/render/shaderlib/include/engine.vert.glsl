@@ -14,11 +14,11 @@ uint num_shadow_matrices() {
     return max(min(MAX_NUM_LIGHTS, shadow_matrices.num_matrices.x), 0);
 }
 
-Vec4 world_to_clip(Vec3 world_pos) {
-    return view_data.view_proj * Vec4(world_pos, 1.0);
+vec4 world_to_clip(vec3 world_pos) {
+    return view_data.view_proj * vec4(world_pos, 1.0);
 }
 
-Vec4 world_to_clip(Vec4 world_pos) {
+vec4 world_to_clip(vec4 world_pos) {
     return view_data.view_proj * world_pos;
 }
 
@@ -32,8 +32,8 @@ const mat4 clip_to_unit = mat4(
 );
 
 void write_shadow_coords(vec3 world_pos, out vec4 shadow_coords_out[MAX_NUM_LIGHTS]) {
-    int n = num_shadow_matrices();
-    for (int i = 0; i < n; ++i) {
+    uint n = num_shadow_matrices();
+    for (uint i = 0; i < n; ++i) {
         shadow_coords_out[i] = clip_to_unit * shadow_matrices.matrices[i] * vec4(world_pos, 1.0);
     }
 }

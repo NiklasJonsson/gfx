@@ -1,3 +1,4 @@
+use shaderc::Compiler;
 use std::path::Path;
 use std::path::PathBuf;
 use thiserror::Error;
@@ -109,8 +110,16 @@ pub mod pbr_gltf {
     ) -> Result<(SpvBinary, SpvBinary), CompilerError> {
         assert!(def.is_valid());
         let defines = def.defines();
-        let vert = compiler.compile(&defines, Path::new("pbr/vert.glsl"), ShaderType::Vertex)?;
-        let frag = compiler.compile(&defines, Path::new("pbr/frag.glsl"), ShaderType::Fragment)?;
+        let vert = compiler.compile(
+            &defines,
+            Path::new("render/shaders/pbr/vert.glsl"),
+            ShaderType::Vertex,
+        )?;
+        let frag = compiler.compile(
+            &defines,
+            Path::new("render/shaders/pbr/frag.glsl"),
+            ShaderType::Fragment,
+        )?;
 
         Ok((vert, frag))
     }
@@ -156,10 +165,14 @@ const SHADER_PATH: &str = concat!(env!("OUT_DIR"), "/builtin-shaders");
 pub enum CompilerError {
     #[error("Failed to initialize")]
     Init,
-    #[error("Failed to read shader {0}")]
+    #[error("Failed to read shader: {0}")]
     IO(#[from] std::io::Error),
-    #[error("Failed to compile shader {0}")]
-    ShaderC(#[from] shaderc::Error),
+    #[error("Failed to compile shader {rel_path} (resolved to {path}), due to: {source}", path=.full_path.display())]
+    ShaderC {
+        source: shaderc::Error,
+        rel_path: String,
+        full_path: PathBuf,
+    },
     #[error("Compiler mutex has been posioned")]
     Sync,
 }
@@ -170,6 +183,49 @@ fn log_compilation(defines: &Defines, rel_path: &Path, ty: ShaderType) {
     for d in defines.iter() {
         log::trace!("{} = {}", d.0, d.1);
     }
+}
+
+fn include_callback(
+    include_request: &str,
+    ty: shaderc::IncludeType,
+    include_source: &str,
+    _depth: usize,
+) -> shaderc::IncludeCallbackResult {
+    let path = PathBuf::from(SHADER_PATH).join("render/shaderlib/include");
+    let dir = std::fs::read_dir(path).expect("Failed to read shaderlib dir");
+
+    if ty == shaderc::IncludeType::Relative {
+        return Err(format!("Tried to '#include \"{include_request}\" in {include_source} but *relative* imports are not supported (yet)!"));
+    }
+
+    for entry in dir {
+        match entry {
+            Ok(entry) if entry.file_name() == include_request => {
+                let path = entry.path();
+                let content = match std::fs::read_to_string(&path) {
+                    Ok(c) => c,
+                    Err(e) => {
+                        return Err(format!(
+                            "Failed to read from {p} due to {e}",
+                            p = path.display()
+                        ))
+                    }
+                };
+
+                let display_path = format!("shaderlib/include/{include_request}");
+                return Ok(shaderc::ResolvedInclude {
+                    resolved_name: display_path,
+                    content,
+                });
+            }
+            Err(e) => log::debug!("Failed to read shaderlib dir entry with error: {e}"),
+            _ => (), // Ignore non-matching files
+        }
+    }
+
+    Err(format!(
+        "Failed to find include '{include_request}', requested from {include_source}"
+    ))
 }
 
 impl ShaderCompiler {
@@ -193,6 +249,8 @@ impl ShaderCompiler {
             options.add_macro_definition(&d.0, Some(&d.1));
         }
 
+        options.set_include_callback(include_callback);
+
         log_compilation(defines, rel_path, ty);
 
         let stage = match ty {
@@ -202,7 +260,7 @@ impl ShaderCompiler {
 
         let path = PathBuf::from(SHADER_PATH).join(rel_path);
 
-        let source = std::fs::read_to_string(path)?;
+        let source = std::fs::read_to_string(&path)?;
 
         let binary_result = self
             .compiler
@@ -214,11 +272,18 @@ impl ShaderCompiler {
                 rel_path.to_str().expect("Bad shader path"),
                 "main",
                 Some(&options),
-            )?;
+            );
 
-        Ok(SpvBinary {
-            _ty: ty,
-            data: Vec::from(binary_result.as_binary()),
-        })
+        match binary_result {
+            Err(e) => Err(CompilerError::ShaderC {
+                source: e,
+                rel_path: rel_path.display().to_string(),
+                full_path: path,
+            }),
+            Ok(bin) => Ok(SpvBinary {
+                _ty: ty,
+                data: Vec::from(bin.as_binary()),
+            }),
+        }
     }
 }

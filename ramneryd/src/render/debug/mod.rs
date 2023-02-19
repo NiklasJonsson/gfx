@@ -1,4 +1,4 @@
-use super::pipeline;
+use super::shader;
 use crate::math::Vec3;
 
 use trekanten::buffer::{DeviceUniformBuffer, DeviceVertexBuffer};
@@ -63,7 +63,7 @@ impl DebugRenderer {
 /// Renderer interaction
 impl DebugRenderer {
     pub fn new(
-        shader_compiler: &pipeline::ShaderCompiler,
+        shader_compiler: &shader::ShaderCompiler,
         render_pass: &Handle<RenderPass>,
         view_data_buf: &BufferHandle<DeviceUniformBuffer>,
         renderer: &mut trekanten::Renderer,
@@ -86,17 +86,17 @@ impl DebugRenderer {
 
         let vertex = shader_compiler
             .compile(
-                &pipeline::Defines::empty(),
-                "world_pos_only_vert.glsl",
-                pipeline::ShaderType::Vertex,
+                &shader::Defines::empty(),
+                "render/shaders/world_pos_only_vert.glsl",
+                shader::ShaderType::Vertex,
             )
             .expect("Failed to compile vert shader for debug renderer");
 
         let fragment = shader_compiler
             .compile(
-                &pipeline::Defines::empty(),
-                "red_frag.glsl",
-                pipeline::ShaderType::Fragment,
+                &shader::Defines::empty(),
+                "render/shaders/red_frag.glsl",
+                shader::ShaderType::Fragment,
             )
             .expect("Failed to compile frag shader for debug renderer");
 

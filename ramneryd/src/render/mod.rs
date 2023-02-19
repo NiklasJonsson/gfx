@@ -25,7 +25,7 @@ pub mod geometry;
 pub mod light;
 pub mod material;
 pub mod mesh;
-pub mod pipeline;
+pub mod shader;
 pub mod ui;
 pub mod uniform;
 
@@ -108,14 +108,6 @@ pub struct RenderableMaterial {
     material_descriptor_set: Handle<DescriptorSet>,
 }
 
-impl RenderableMaterial {
-    fn set_pipeline(&mut self, h: Handle<GraphicsPipeline>) {
-        match self {
-            RenderableMaterial { gfx_pipeline, .. } => *gfx_pipeline = h,
-        }
-    }
-}
-
 // TODO: Bindings here need to match with shader
 fn create_material_descriptor_set(
     renderer: &mut Renderer,
@@ -177,23 +169,23 @@ pub enum MaterialError {
     #[error("Pipeline error: {0}")]
     Pipeline(#[from] PipelineError),
     #[error("GLSL compiler error: {0}")]
-    GlslCompiler(#[from] pipeline::CompilerError),
+    GlslCompiler(#[from] shader::CompilerError),
 }
 
 fn unlit_pipeline_desc(
-    shader_compiler: &pipeline::ShaderCompiler,
+    shader_compiler: &shader::ShaderCompiler,
     vertex_format: VertexFormat,
     polygon_mode: trekanten::pipeline::PolygonMode,
 ) -> Result<GraphicsPipelineDescriptor, MaterialError> {
     let vertex = shader_compiler.compile(
-        &pipeline::Defines::empty(),
-        "pos_only_vert.glsl",
-        pipeline::ShaderType::Vertex,
+        &shader::Defines::empty(),
+        "render/shaders/unlit/vert.glsl",
+        shader::ShaderType::Vertex,
     )?;
     let fragment = shader_compiler.compile(
-        &pipeline::Defines::empty(),
-        "uniform_color_frag.glsl",
-        pipeline::ShaderType::Fragment,
+        &shader::Defines::empty(),
+        "render/shaders/unlit/frag.glsl",
+        shader::ShaderType::Fragment,
     )?;
 
     Ok(GraphicsPipelineDescriptor::builder()
@@ -214,7 +206,7 @@ fn get_pipeline_for(
     let vertex_format = mesh.cpu_vertex_buffer.format().clone();
 
     let frame_data = world.read_resource::<FrameData>();
-    let shader_compiler = world.read_resource::<pipeline::ShaderCompiler>();
+    let shader_compiler = world.read_resource::<shader::ShaderCompiler>();
     let pipe = match mat {
         material::GpuMaterial::PBR {
             normal_map,
@@ -227,7 +219,7 @@ fn get_pipeline_for(
             let has_nm = normal_map.is_some();
             let has_bc = base_color_texture.is_some();
             let has_mr = metallic_roughness_texture.is_some();
-            let def = pipeline::pbr_gltf::ShaderDefinition {
+            let def = shader::pbr_gltf::ShaderDefinition {
                 has_tex_coords: has_nm || has_bc || has_mr,
                 has_vertex_colors: *has_vertex_colors,
                 has_tangents: has_nm,
@@ -236,7 +228,7 @@ fn get_pipeline_for(
                 has_normal_map: has_nm,
             };
 
-            let (vert, frag) = pipeline::pbr_gltf::compile(&*shader_compiler, &def)?;
+            let (vert, frag) = shader::pbr_gltf::compile(&*shader_compiler, &def)?;
             let desc = GraphicsPipelineDescriptor::builder()
                 .vert(ShaderDescriptor::FromRawSpirv(vert.data()))
                 .frag(ShaderDescriptor::FromRawSpirv(frag.data()))
@@ -256,14 +248,14 @@ fn get_pipeline_for(
 }
 
 fn shadow_pipeline_desc(
-    shader_compiler: &pipeline::ShaderCompiler,
+    shader_compiler: &shader::ShaderCompiler,
     format: VertexFormat,
 ) -> Result<GraphicsPipelineDescriptor, MaterialError> {
-    let no_defines = pipeline::Defines::empty();
+    let no_defines = shader::Defines::empty();
     let vert = shader_compiler.compile(
         &no_defines,
-        "pos_only_vert.glsl",
-        pipeline::ShaderType::Vertex,
+        "render/shaders/pos_only_vert.glsl",
+        shader::ShaderType::Vertex,
     )?;
 
     Ok(GraphicsPipelineDescriptor::builder()
@@ -278,7 +270,7 @@ fn get_shadow_pipeline_for(
     world: &World,
     mesh: &Mesh,
 ) -> Result<Handle<GraphicsPipeline>, MaterialError> {
-    let shader_compiler = world.read_resource::<pipeline::ShaderCompiler>();
+    let shader_compiler = world.read_resource::<shader::ShaderCompiler>();
     let frame_data = world.read_resource::<FrameData>();
 
     let vertex_format_size = mesh.cpu_vertex_buffer.format().size();
@@ -674,7 +666,7 @@ fn shadow_render_target(
 }
 
 fn build_shadow_data(
-    shader_compiler: &pipeline::ShaderCompiler,
+    shader_compiler: &shader::ShaderCompiler,
     renderer: &mut Renderer,
 ) -> ShadowData {
     use uniform::UniformBlock as _;
@@ -736,8 +728,7 @@ pub fn setup_resources(world: &mut World, renderer: &mut Renderer) {
     use trekanten::pipeline::ShaderStage;
     use uniform::UniformBlock as _;
 
-    let shader_compiler =
-        pipeline::ShaderCompiler::new().expect("Failed to create shader compiler");
+    let shader_compiler = shader::ShaderCompiler::new().expect("Failed to create shader compiler");
 
     let frame_data = {
         log::trace!("Creating frame gpu resources");
@@ -760,7 +751,7 @@ pub fn setup_resources(world: &mut World, renderer: &mut Renderer) {
                 .add_attribute(util::Format::FLOAT3)
                 .build();
 
-            let result = pipeline::pbr_gltf::compile_default(&shader_compiler);
+            let result = shader::pbr_gltf::compile_default(&shader_compiler);
             let (vert, frag) = match result {
                 Ok(r) => r,
                 Err(e) => {

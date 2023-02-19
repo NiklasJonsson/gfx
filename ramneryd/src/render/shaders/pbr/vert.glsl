@@ -1,7 +1,7 @@
 #version 450
 #extension GL_ARB_separate_shader_objects : enable
 
-#include <engine/vert.glsl>
+#include <engine.vert.glsl>
 
 layout(push_constant) uniform Model {
     mat4 model;

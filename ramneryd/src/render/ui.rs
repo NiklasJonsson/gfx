@@ -21,7 +21,7 @@ use crate::common::Name;
 use crate::io::input;
 use crate::io::input::KeyCode;
 use crate::math::Vec2;
-use crate::render::pipeline::{Defines, ShaderCompiler, ShaderType};
+use crate::render::shader::{Defines, ShaderCompiler, ShaderType};
 use crate::time::Time;
 
 use specs::world::WorldExt;
@@ -328,10 +328,18 @@ impl UIContext {
             let compiler = world.read_resource::<ShaderCompiler>();
             let defines = Defines::default();
             let vert = compiler
-                .compile(&defines, Path::new("imgui/vert.glsl"), ShaderType::Vertex)
+                .compile(
+                    &defines,
+                    Path::new("render/shaders/imgui/vert.glsl"),
+                    ShaderType::Vertex,
+                )
                 .expect("Failed to compile imgui vert");
             let frag = compiler
-                .compile(&defines, Path::new("imgui/frag.glsl"), ShaderType::Fragment)
+                .compile(
+                    &defines,
+                    Path::new("render/shaders/imgui/frag.glsl"),
+                    ShaderType::Fragment,
+                )
                 .expect("Failed to compile imgui frag");
             (vert, frag)
         };
