@@ -3,7 +3,7 @@ use ash::vk;
 use crate::backend::vk::{
     command::CommandBuffer, device::AllocatorHandle, util::stride, MemoryError,
 };
-use vk_mem::{Allocation, AllocationCreateInfo, MemoryUsage};
+use vma::{Alloc as _, Allocation, AllocationCreateInfo, MemoryUsage};
 
 pub struct Buffer {
     allocator: AllocatorHandle,
@@ -18,18 +18,24 @@ impl std::fmt::Debug for Buffer {
         let allocation_info = self.allocator.get_allocation_info(&self.allocation);
         f.debug_struct("Buffer")
             .field("vk_buffer", &self.vk_buffer)
-            .field("allocation", &self.allocation)
-            .field("size", &self.size)
             .field("allocation_info", &allocation_info)
+            .field("size", &self.size)
+            .field("is_mapped", &self.is_mapped)
             .finish()
     }
 }
 
+enum Mappability {
+    Mappable,
+    NonMappable,
+}
+
 impl Buffer {
-    pub fn empty(
+    fn empty(
         allocator: &AllocatorHandle,
         size: usize,
         buffer_usage_flags: vk::BufferUsageFlags,
+        map: Mappability,
         mem_usage: MemoryUsage,
     ) -> Result<Self, MemoryError> {
         log::trace!("Creating empty DeviceBuffer with:");
@@ -45,14 +51,23 @@ impl Buffer {
             ..Default::default()
         };
 
+        let flags = match map {
+            Mappability::Mappable => {
+                vma::AllocationCreateFlags::HOST_ACCESS_RANDOM | vma::AllocationCreateFlags::MAPPED
+            }
+            Mappability::NonMappable => vma::AllocationCreateFlags::empty(),
+        };
+
         let allocation_create_info = AllocationCreateInfo {
+            flags,
             usage: mem_usage,
             ..Default::default()
         };
 
-        let (vk_buffer, allocation, allocation_info) = allocator
-            .create_buffer(&buffer_info, &allocation_create_info)
-            .map_err(MemoryError::BufferCreation)?;
+        let (vk_buffer, allocation) =
+            unsafe { allocator.create_buffer(&buffer_info, &allocation_create_info) }
+                .map_err(MemoryError::BufferCreation)?;
+        let allocation_info = allocator.get_allocation_info(&allocation);
         log::trace!("Allocation succeeded: {:?}", &allocation_info);
         log::trace!("Created buffer: {:?}", vk_buffer);
 
@@ -87,7 +102,13 @@ impl Buffer {
         let size = stride as usize * n_elems;
         log::trace!("Total buffer size: {}", size);
 
-        let mut buffer = Buffer::empty(allocator, size, buffer_usage, mem_usage)?;
+        let mut buffer = Buffer::empty(
+            allocator,
+            size,
+            buffer_usage,
+            Mappability::Mappable,
+            mem_usage,
+        )?;
         let dst = buffer.map()?;
         let src = data.as_ptr() as *const u8;
         if elem_size == elem_align {
@@ -126,7 +147,7 @@ impl Buffer {
             elem_size,
             elem_align,
             vk::BufferUsageFlags::TRANSFER_SRC,
-            MemoryUsage::CpuOnly,
+            MemoryUsage::AutoPreferHost,
             true,
         )
     }
@@ -145,7 +166,7 @@ impl Buffer {
             elem_size,
             elem_align,
             usage,
-            MemoryUsage::CpuToGpu,
+            MemoryUsage::Auto,
             false,
         )
     }
@@ -165,7 +186,8 @@ impl Buffer {
             allocator,
             staging.size(),
             vk::BufferUsageFlags::TRANSFER_DST | usage,
-            MemoryUsage::GpuOnly,
+            Mappability::NonMappable,
+            MemoryUsage::AutoPreferDevice,
         )?;
 
         command_buffer.copy_buffer(staging.vk_buffer(), dst_buffer.vk_buffer(), staging.size());
@@ -177,29 +199,27 @@ impl Buffer {
 impl Buffer {
     pub fn map(&mut self) -> Result<*mut u8, MemoryError> {
         self.is_mapped = true;
-        self.allocator
-            .map_memory(&self.allocation)
+        unsafe { self.allocator.map_memory(&mut self.allocation) }
             .map_err(MemoryError::MemoryMapping)
     }
 
     pub fn unmap(&mut self) {
         assert!(self.is_mapped);
         self.is_mapped = false;
-        self.allocator.unmap_memory(&self.allocation)
+        unsafe { self.allocator.unmap_memory(&mut self.allocation) }
     }
 
     pub fn vk_buffer(&self) -> &vk::Buffer {
         &self.vk_buffer
     }
 
-    pub fn update_data_at(&mut self, data: &[u8], offset: usize) -> Result<(), MemoryError> {
+    pub fn update_data_at(&mut self, data: &[u8], offset: usize) {
         assert!(self.is_mapped);
         let size = data.len();
         let dst_base = self
             .allocator
             .get_allocation_info(&self.allocation)
-            .map_err(MemoryError::MemoryMapping)?
-            .get_mapped_data();
+            .mapped_data as *mut u8;
 
         let src = data.as_ptr() as *const u8;
         unsafe {
@@ -207,8 +227,6 @@ impl Buffer {
             let dst = dst_base.add(offset);
             std::ptr::copy_nonoverlapping::<u8>(src, dst, size);
         }
-
-        Ok(())
     }
 
     pub fn size(&self) -> usize {
@@ -221,7 +239,9 @@ impl std::ops::Drop for Buffer {
         if self.is_mapped {
             self.unmap();
         }
-        self.allocator
-            .destroy_buffer(self.vk_buffer, &self.allocation);
+        unsafe {
+            self.allocator
+                .destroy_buffer(self.vk_buffer, &mut self.allocation);
+        }
     }
 }

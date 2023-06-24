@@ -22,19 +22,19 @@ use thiserror::Error;
 #[derive(Debug, Error)]
 pub enum MemoryError {
     #[error("Failed to create buffer {0}")]
-    BufferCreation(vk_mem::Error),
+    BufferCreation(ash::vk::Result),
     #[error("Failed to create image {0}")]
-    ImageCreation(vk_mem::Error),
+    ImageCreation(ash::vk::Result),
     #[error("command error during copy {0}")]
     CopyCommand(#[from] CommandError),
     #[error("queue submission failed {0}")]
     CopySubmit(#[from] QueueError),
     #[error("memory mapping failed {0}")]
-    MemoryMapping(vk_mem::Error),
+    MemoryMapping(ash::vk::Result),
     #[error("realloc failed {0}")]
-    Realloc(vk_mem::Error),
+    Realloc(ash::vk::Result),
     #[error("memory binding failed {0}")]
-    MemoryBinding(vk_mem::Error),
+    MemoryBinding(ash::vk::Result),
 }
 
 pub fn n_to_sample_count(n: u8) -> ash::vk::SampleCountFlags {

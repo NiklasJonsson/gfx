@@ -1,7 +1,7 @@
 use crate::backend::instance::Instance;
 use crate::util::lifetime::LifetimeToken;
 
-use ash::{version::EntryV1_0, Entry};
+use ash::Entry;
 
 use ash::extensions::ext;
 use ash::vk;
@@ -87,8 +87,16 @@ impl DebugUtilsEnabled {
         let loader = ext::DebugUtils::new(instance.entry(), instance.vk_instance());
 
         let info = vk::DebugUtilsMessengerCreateInfoEXT::builder()
-            .message_severity(vk::DebugUtilsMessageSeverityFlagsEXT::all())
-            .message_type(vk::DebugUtilsMessageTypeFlagsEXT::all())
+            .message_severity(
+                vk::DebugUtilsMessageSeverityFlagsEXT::INFO
+                    | vk::DebugUtilsMessageSeverityFlagsEXT::WARNING
+                    | vk::DebugUtilsMessageSeverityFlagsEXT::ERROR,
+            )
+            .message_type(
+                vk::DebugUtilsMessageTypeFlagsEXT::VALIDATION
+                    | vk::DebugUtilsMessageTypeFlagsEXT::PERFORMANCE
+                    | vk::DebugUtilsMessageTypeFlagsEXT::GENERAL,
+            )
             .pfn_user_callback(Some(vk_debug_callback));
 
         let callback_handle = unsafe {

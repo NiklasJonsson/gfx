@@ -1,7 +1,5 @@
 use ash::vk;
 
-use ash::version::DeviceV1_0;
-
 use thiserror::Error;
 
 use crate::backend;

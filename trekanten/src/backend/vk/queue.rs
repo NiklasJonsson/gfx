@@ -1,4 +1,3 @@
-use ash::version::DeviceV1_0;
 use ash::vk;
 
 use thiserror::Error;
@@ -20,7 +19,7 @@ pub struct QueueFamily {
     pub props: vk::QueueFamilyProperties,
 }
 struct VkSubmitFn(
-    extern "system" fn(
+    unsafe extern "system" fn(
         queue: vk::Queue,
         submit_count: u32,
         p_submits: *const vk::SubmitInfo,
@@ -48,12 +47,14 @@ impl Queue {
 
     pub fn submit(&self, info: &vk::SubmitInfo, fence: &Fence) -> Result<(), QueueError> {
         let infos = [*info];
-        let result = (self.vk_submit_fn.0)(
-            self.vk_queue,
-            infos.len() as u32,
-            infos.as_ptr(),
-            *fence.vk_fence(),
-        );
+        let result = unsafe {
+            (self.vk_submit_fn.0)(
+                self.vk_queue,
+                infos.len() as u32,
+                infos.as_ptr(),
+                *fence.vk_fence(),
+            )
+        };
 
         if result == vk::Result::SUCCESS {
             Ok(())

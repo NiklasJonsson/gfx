@@ -1,4 +1,3 @@
-use ash::version::DeviceV1_0;
 use ash::vk;
 
 use derive_builder::Builder;
@@ -341,7 +340,7 @@ impl GraphicsPipeline {
             .rasterization_samples(render_pass.msaa_sample_count());
 
         let color_blend_attach_info = vk::PipelineColorBlendAttachmentState::builder()
-            .color_write_mask(vk::ColorComponentFlags::all());
+            .color_write_mask(vk::ColorComponentFlags::RGBA);
 
         let color_blend_attach_info = match desc.blend_state {
             BlendState::Disabled => color_blend_attach_info.blend_enable(false),

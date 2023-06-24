@@ -1,4 +1,3 @@
-use ash::version::DeviceV1_0;
 use ash::vk;
 
 use thiserror::Error;
@@ -8,7 +7,7 @@ use crate::backend;
 use backend::command::{CommandBuffer, CommandBufferType};
 use backend::device::{HasVkDevice, VkDeviceHandle};
 use backend::{buffer::Buffer, AllocatorHandle, MemoryError};
-use vk_mem::{Allocation, AllocationCreateInfo, AllocationInfo, MemoryUsage};
+use vma::{Alloc as _, Allocation, AllocationCreateInfo, MemoryUsage};
 
 use crate::util;
 
@@ -276,7 +275,6 @@ pub struct Image {
     allocator: AllocatorHandle,
     vk_image: vk::Image,
     allocation: Allocation,
-    _allocation_info: AllocationInfo,
     extent: util::Extent2D,
     format: util::Format,
 }
@@ -317,15 +315,14 @@ impl Image {
             usage: mem_usage,
             ..Default::default()
         };
-        let (vk_image, allocation, _allocation_info) = allocator
-            .create_image(&info, &allocation_create_info)
-            .map_err(MemoryError::ImageCreation)?;
+        let (vk_image, allocation) =
+            unsafe { allocator.create_image(&info, &allocation_create_info) }
+                .map_err(MemoryError::ImageCreation)?;
 
         Ok(Self {
             allocator: AllocatorHandle::clone(allocator),
             vk_image,
             allocation,
-            _allocation_info,
             format,
             extent,
         })
@@ -350,7 +347,7 @@ impl Image {
             extent,
             format,
             usage,
-            MemoryUsage::GpuOnly,
+            MemoryUsage::AutoPreferDevice,
             1,
             vk::SampleCountFlags::TYPE_1,
         )?;
@@ -396,7 +393,7 @@ impl Image {
             extent,
             format,
             usage,
-            MemoryUsage::GpuOnly,
+            MemoryUsage::AutoPreferDevice,
             mip_levels,
             vk::SampleCountFlags::TYPE_1,
         )?;
@@ -433,8 +430,10 @@ impl Image {
 
 impl std::ops::Drop for Image {
     fn drop(&mut self) {
-        self.allocator
-            .destroy_image(self.vk_image, &self.allocation);
+        unsafe {
+            self.allocator
+                .destroy_image(self.vk_image, &mut self.allocation);
+        }
     }
 }
 

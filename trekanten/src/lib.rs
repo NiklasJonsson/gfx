@@ -31,7 +31,6 @@ pub use traits::{PushConstant, Std140, Uniform};
 
 pub use trekanten_derive::Std140Compat;
 
-use ash::version::DeviceV1_0;
 use backend::device::HasVkDevice as _;
 use backend::{command, device, framebuffer, instance, surface, swapchain, sync};
 use common::MAX_FRAMES_IN_FLIGHT;
@@ -512,7 +511,7 @@ impl Renderer {
         let msaa_sample_count = render_pass.0.msaa_sample_count();
         let extent = self.swapchain_extent();
         let mip_levels = 1; // No mip maps
-        let props = vk_mem::MemoryUsage::GpuOnly;
+        let props = vma::MemoryUsage::AutoPreferDevice;
 
         let depth_buffer = {
             let format = self.device.depth_buffer_format().into();
@@ -595,7 +594,7 @@ impl Renderer {
 impl Renderer {
     pub fn new<W>(window: &W, window_extent: util::Extent2D) -> Result<Self, RenderError>
     where
-        W: raw_window_handle::HasRawWindowHandle,
+        W: raw_window_handle::HasRawWindowHandle + raw_window_handle::HasRawDisplayHandle,
     {
         let instance = instance::Instance::new(window)?;
         let _debug_utils = backend::validation_layers::DebugUtils::new(&instance)?;
@@ -822,8 +821,8 @@ impl Renderer {
             .get_buffered_mut(h, self.frame_idx as usize)
             .ok_or_else(|| RenderError::InvalidHandle(h.handle().id()))?;
 
-        ubuf.update_with(data, h.idx() as u64)
-            .map_err(RenderError::UniformBuffer)
+        ubuf.update_with(data, h.idx() as u64);
+        Ok(())
     }
 
     fn current_present_target(&self) -> &Handle<render_target::RenderTarget> {
@@ -987,7 +986,7 @@ impl Renderer {
                 extent,
                 format,
                 usage,
-                vk_mem::MemoryUsage::GpuOnly,
+                vma::MemoryUsage::AutoPreferDevice,
                 mip_levels,
                 vk::SampleCountFlags::TYPE_1,
             )

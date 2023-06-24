@@ -138,13 +138,13 @@ pub struct UniformBufferType {
 impl BufferType for UniformBufferType {
     const USAGE: vk::BufferUsageFlags = vk::BufferUsageFlags::UNIFORM_BUFFER;
     fn elem_align(&self, allocator: &AllocatorHandle) -> Option<u16> {
-        Some(
-            allocator
-                .get_physical_device_properties()
-                .expect("Bad allocator")
-                .limits
-                .min_uniform_buffer_offset_alignment as u16,
-        )
+        let props = unsafe { allocator.get_physical_device_properties() }.expect("Bad allocator");
+        let alignment = props.limits.min_uniform_buffer_offset_alignment;
+        if alignment == 0 {
+            Some(256)
+        } else {
+            Some(0)
+        }
     }
     fn elem_size(&self) -> u16 {
         self.size
@@ -322,7 +322,7 @@ impl<BT: BufferType + Clone> DeviceBuffer<BT> {
                 stride,
             )?;
         } else {
-            self.buffer.update_data_at(descriptor.data(), 0)?;
+            self.buffer.update_data_at(descriptor.data(), 0);
         }
         self.stride = stride;
         Ok(())
@@ -369,11 +369,7 @@ impl DeviceIndexBuffer {
 
 pub type DeviceUniformBuffer = DeviceBuffer<UniformBufferType>;
 impl DeviceUniformBuffer {
-    pub fn update_with<T: Uniform + Copy>(
-        &mut self,
-        data: &T,
-        idx: u64,
-    ) -> Result<(), MemoryError> {
+    pub fn update_with<T: Uniform + Copy>(&mut self, data: &T, idx: u64) {
         // SAFETY: The Uniform trait garantues that we can pass this as bytes to the gpu (or will atleast...)
         let raw_data = unsafe { as_bytes(data) };
         let offset = (idx * self.stride() as u64) as usize;

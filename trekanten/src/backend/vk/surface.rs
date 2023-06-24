@@ -22,13 +22,19 @@ pub struct Surface {
 }
 
 impl Surface {
-    pub fn new<W: raw_window_handle::HasRawWindowHandle>(
-        instance: &Instance,
-        w: &W,
-    ) -> Result<Self, SurfaceError> {
+    pub fn new<W>(instance: &Instance, w: &W) -> Result<Self, SurfaceError>
+    where
+        W: raw_window_handle::HasRawDisplayHandle + raw_window_handle::HasRawWindowHandle,
+    {
         let handle = unsafe {
-            ash_window::create_surface(instance.vk_entry(), instance.vk_instance(), w, None)
-                .map_err(SurfaceError::Creation)
+            ash_window::create_surface(
+                instance.vk_entry(),
+                instance.vk_instance(),
+                w.raw_display_handle(),
+                w.raw_window_handle(),
+                None,
+            )
+            .map_err(SurfaceError::Creation)
         }?;
 
         Ok(Self {

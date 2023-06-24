@@ -11,7 +11,7 @@ ramneryd-derive = { path = "../ramneryd-derive" }
 specs = { version = "0.19.0", features = ["derive", "serde"] }
 
 # Rendering/Graphics
-winit = "0.22.2"
+winit = "0.28.6"
 trekanten = { path = "../trekanten" }
 imgui = "0.8.2"
 shaderc = "0.6.2"
@@ -40,9 +40,24 @@ crossbeam = "0.7.3"
 profiling = "1.0.3"
 
 [features]
-profile-with-puffin = ["profiling/profile-with-puffin", "trekanten/profile-with-puffin"]
-profile-with-optick = ["profiling/profile-with-optick", "trekanten/profile-with-optick"]
-profile-with-superluminal = ["profiling/profile-with-superluminal", "trekanten/profile-with-superluminal"]
-profile-with-tracing = ["profiling/profile-with-tracing", "trekanten/profile-with-tracing"]
-profile-with-tracy = ["profiling/profile-with-tracy", "trekanten/profile-with-tracy"]
+profile-with-puffin = [
+    "profiling/profile-with-puffin",
+    "trekanten/profile-with-puffin",
+]
+profile-with-optick = [
+    "profiling/profile-with-optick",
+    "trekanten/profile-with-optick",
+]
+profile-with-superluminal = [
+    "profiling/profile-with-superluminal",
+    "trekanten/profile-with-superluminal",
+]
+profile-with-tracing = [
+    "profiling/profile-with-tracing",
+    "trekanten/profile-with-tracing",
+]
+profile-with-tracy = [
+    "profiling/profile-with-tracy",
+    "trekanten/profile-with-tracy",
+]
 validation-layers = ["trekanten/validation-layers"]

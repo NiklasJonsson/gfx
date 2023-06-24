@@ -2,7 +2,7 @@ use super::input;
 use input::ExternalInput;
 
 use std::sync::Arc;
-use winit::dpi::LogicalPosition;
+use winit::dpi::PhysicalPosition;
 use winit::event::DeviceEvent;
 use winit::event::ElementState;
 use winit::event::MouseScrollDelta;
@@ -183,7 +183,7 @@ impl EventManager {
                             x: (-x).into(),
                             y: y.into(),
                         },
-                        MouseScrollDelta::PixelDelta(LogicalPosition { x, y }) => {
+                        MouseScrollDelta::PixelDelta(PhysicalPosition { x, y }) => {
                             ExternalInput::ScrollDelta { x: (-x), y }
                         }
                     };

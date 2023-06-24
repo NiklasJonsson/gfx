@@ -1,6 +1,5 @@
 use std::path::{Path, PathBuf};
 
-use ash::version::DeviceV1_0;
 use ash::vk;
 
 use thiserror::Error;
@@ -352,7 +351,7 @@ impl Texture {
         } = descriptor
         {
             let image_usage = vk::ImageUsageFlags::from(*usage) | vk::ImageUsageFlags::SAMPLED;
-            let mem_usage = vk_mem::MemoryUsage::GpuOnly;
+            let mem_usage = vma::MemoryUsage::AutoPreferDevice;
             let mip_levels = 1;
             let sample_count = vk::SampleCountFlags::TYPE_1;
             let aspect_mask = if usage.contains(TextureUsage::DEPTH_STENCIL_ATTACHMENT) {

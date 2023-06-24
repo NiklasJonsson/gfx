@@ -26,5 +26,5 @@ pub enum DeviceError {
     #[error("vkWaitIdle() failed: {0}")]
     WaitIdle(vk::Result),
     #[error("Allocation failure {0}")]
-    Allocation(#[from] vk_mem::error::Error),
+    Allocation(#[from] vk::Result),
 }

@@ -29,8 +29,13 @@ impl MainWindow {
     }
 
     pub fn cursor_grab(&mut self, cursor_grab: bool) {
+        let mode = if cursor_grab {
+            winit::window::CursorGrabMode::Locked
+        } else {
+            winit::window::CursorGrabMode::None
+        };
         self.window
-            .set_cursor_grab(cursor_grab)
+            .set_cursor_grab(mode)
             .expect("Unable to grab cursor");
         self.window.set_cursor_visible(!cursor_grab);
     }

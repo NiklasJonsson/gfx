@@ -1,5 +1,7 @@
-use ash::version::InstanceV1_0; // For destroy_instance
-use ash::{version::EntryV1_0, vk, Entry};
+use ash::Entry;
+
+use ash::vk;
+
 use std::ffi::CStr;
 
 use crate::util::ffi::{c_char, log_cstrings, vec_cstring_from_raw, vec_cstring_to_raw};
@@ -36,17 +38,16 @@ fn has_extension(available: &[ash::vk::ExtensionProperties], req: &CStr) -> bool
     false
 }
 
-fn check_extensions<T: AsRef<CStr>>(
-    required: &[T],
+fn check_extensions(
+    required: &[&CStr],
     available: &[ash::vk::ExtensionProperties],
 ) -> Result<(), InstanceError> {
-    for req in required.iter() {
-        if !has_extension(available, req.as_ref()) {
-            let string: String = req
-                .as_ref()
+    for &req in required.iter() {
+        if !has_extension(available, req) {
+            let string = req
                 .to_owned()
                 .into_string()
-                .expect("CString to String failed");
+                .expect("CString to String conversion failed");
             return Err(InstanceError::MissingExtension(string));
         }
     }
@@ -54,19 +55,30 @@ fn check_extensions<T: AsRef<CStr>>(
     Ok(())
 }
 
-fn choose_instance_extensions<W: raw_window_handle::HasRawWindowHandle>(
+fn choose_instance_extensions<W>(
     entry: &Entry,
     window: &W,
-) -> Result<Vec<*const c_char>, InstanceError> {
+) -> Result<Vec<*const c_char>, InstanceError>
+where
+    W: raw_window_handle::HasRawWindowHandle + raw_window_handle::HasRawDisplayHandle,
+{
     let available = entry
-        .enumerate_instance_extension_properties()
+        .enumerate_instance_extension_properties(None)
         .map_err(|e| InstanceError::InternalVulkan(e, "Instance extension enumeration"))?;
-    let mut required = ash_window::enumerate_required_extensions(window).map_err(|e| {
-        InstanceError::InternalVulkan(
-            e,
-            "Couldn't infer required window/surface extensions from window handle",
-        )
-    })?;
+
+    let mut required = Vec::new();
+
+    for ext in
+        ash_window::enumerate_required_extensions(window.raw_display_handle()).map_err(|e| {
+            InstanceError::InternalVulkan(
+                e,
+                "Couldn't infer required window/surface extensions from window handle",
+            )
+        })?
+    {
+        assert!(!ext.is_null());
+        required.push(unsafe { CStr::from_ptr(*ext) });
+    }
 
     if super::validation_layers::use_vk_validation() {
         if !has_extension(&available, ash::extensions::ext::DebugUtils::name()) {
@@ -85,13 +97,14 @@ fn choose_instance_extensions<W: raw_window_handle::HasRawWindowHandle>(
 }
 
 impl Instance {
-    pub fn new<W: raw_window_handle::HasRawWindowHandle>(
-        window: &W,
-    ) -> Result<Self, InstanceError> {
-        let entry = Entry::new().expect("Failed to create Entry!");
+    pub fn new<W>(window: &W) -> Result<Self, InstanceError>
+    where
+        W: raw_window_handle::HasRawDisplayHandle + raw_window_handle::HasRawWindowHandle,
+    {
+        let entry = unsafe { Entry::load() }.expect("Failed to create Entry!");
 
         let app_info = vk::ApplicationInfo {
-            api_version: vk::make_version(1, 2, 0),
+            api_version: vk::make_api_version(0, 1, 2, 0),
             ..Default::default()
         };
 
@@ -108,7 +121,7 @@ impl Instance {
         let vk_instance = unsafe {
             entry
                 .create_instance(&create_info, None)
-                .map_err(InstanceError::from)?
+                .map_err(InstanceError::Creation)?
         };
 
         let _owned_layers = vec_cstring_from_raw(layers_ptrs);

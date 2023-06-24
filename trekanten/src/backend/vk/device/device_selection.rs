@@ -1,4 +1,3 @@
-use ash::version::InstanceV1_0;
 use ash::vk;
 
 use std::ffi::CStr;
@@ -440,10 +439,6 @@ pub fn device_selection(
         }
     }
 
-    let validation_layers =
-        super::super::validation_layers::choose_validation_layers(instance.vk_entry());
-    let layers_ptrs = util::ffi::vec_cstring_to_raw(validation_layers);
-
     let extensions = required_device_extensions();
     let extensions_ptrs = util::ffi::vec_cstring_to_raw(extensions);
 
@@ -451,7 +446,6 @@ pub fn device_selection(
 
     let device_info = vk::DeviceCreateInfo::builder()
         .queue_create_infos(&queue_infos)
-        .enabled_layer_names(&layers_ptrs)
         .enabled_extension_names(&extensions_ptrs)
         .enabled_features(&features);
 
@@ -462,7 +456,6 @@ pub fn device_selection(
             .map_err(DeviceCreationError::Creation)?
     };
 
-    let _owned_layers = util::ffi::vec_cstring_from_raw(layers_ptrs);
     let _owned_extensions = util::ffi::vec_cstring_from_raw(extensions_ptrs);
 
     Ok((vk_device, vk_phys_device, queue_families))

@@ -1,8 +1,6 @@
-use ash::version::DeviceV1_0;
-use ash::version::InstanceV1_0;
 use ash::vk;
 
-use vk_mem::Allocator;
+use vma::Allocator;
 
 use std::sync::Arc;
 
@@ -192,12 +190,11 @@ impl Device {
             }
         };
 
-        let allocator = AllocatorHandle::new(Allocator::new(&vk_mem::AllocatorCreateInfo {
-            physical_device: vk_phys_device,
-            device: (*vk_device).clone(),
-            instance: instance.vk_instance().clone(),
-            ..Default::default()
-        })?);
+        let allocator = AllocatorHandle::new(Allocator::new(vma::AllocatorCreateInfo::new(
+            instance.vk_instance(),
+            &vk_device,
+            vk_phys_device,
+        ))?);
 
         let inner_device = InnerDevice { vk_device };
 

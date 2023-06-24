@@ -13,12 +13,3 @@ pub enum InstanceError {
     #[error("Internal vulkan error: {0} {1}")]
     InternalVulkan(vk::Result, &'static str),
 }
-
-impl From<ash::InstanceError> for InstanceError {
-    fn from(e: ash::InstanceError) -> Self {
-        match e {
-            ash::InstanceError::VkError(r) => InstanceError::Creation(r),
-            ash::InstanceError::LoadError(v) => InstanceError::LoadError(v),
-        }
-    }
-}
