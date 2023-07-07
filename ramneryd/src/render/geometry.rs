@@ -271,9 +271,9 @@ pub fn cone_mesh(radius: f32, height: f32) -> Mesh {
     Mesh::new(vertices, indices)
 }
 
-pub fn obb_line_strip(obb: &crate::math::Obb) -> [Vec3; 16] {
-    let [u, v, w] = obb.uvw();
-    let c = obb.center();
+fn box_lines_strip(bounds: [Vec3; 3], center: Vec3) -> [Vec3; 16] {
+    let [u, v, w] = bounds;
+    let c = center;
     // TODO: Can we shrink this?
     [
         c + u - v + w,
@@ -293,6 +293,21 @@ pub fn obb_line_strip(obb: &crate::math::Obb) -> [Vec3; 16] {
         c + u + v - w,
         c + u + v + w,
     ]
+}
+
+pub fn obb_line_strip(obb: crate::math::Obb) -> [Vec3; 16] {
+    box_lines_strip(obb.uvw(), obb.center())
+}
+
+pub fn aabb_line_strip(aabb: crate::math::Aabb) -> [Vec3; 16] {
+    let dims = (aabb.max - aabb.min) / Vec3::from(2.0);
+    let bounds = [
+        Vec3::unit_x() * dims.x,
+        Vec3::unit_y() * dims.y,
+        Vec3::unit_z() * dims.z,
+    ];
+    let c = (aabb.max + aabb.min) / Vec3::from(2.0);
+    box_lines_strip(bounds, c)
 }
 
 #[derive(Debug, Component, Visitable, Clone, Copy)]

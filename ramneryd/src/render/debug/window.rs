@@ -3,19 +3,20 @@ use crate::common::Name;
 use crate::ecs::prelude::*;
 use crate::io::input::{ActionId, InputContext, InputContextError, KeyCode, MappedInput};
 use crate::math::{Rgb, Transform, Vec3};
-use crate::render;
+use crate::render::{self};
 use crate::visit::{Meta, MetaOrigin, Visitor};
 use render::Light;
 
-use crate::editor::inspector::ImguiVisitor;
+use crate::ui::inspector::ImguiVisitor;
 use crate::visit::Visitable as _;
-use render::ui::UiFrame;
+use render::imgui::UiFrame;
 
 use ramneryd_derive::Visitable;
 
 use num_derive::FromPrimitive;
 
 use std::borrow::Cow;
+use std::sync::Mutex;
 
 #[derive(Debug, Copy, Clone, PartialEq, Eq, FromPrimitive, Visitable)]
 pub enum RenderMode {
@@ -137,7 +138,7 @@ struct LightInfo {
 fn build_lights_tab(
     world: &mut World,
     visitor: &mut ImguiVisitor,
-    frame: &crate::render::ui::UiFrame,
+    frame: &crate::render::imgui::UiFrame,
 ) {
     {
         let mut lights = world.write_storage::<Light>();
@@ -268,9 +269,51 @@ fn build_lights_tab(
     }
 }
 
-fn build_overview_tab(world: &mut World, visitor: &mut ImguiVisitor, _frame: &UiFrame) {
-    let mut settings = world.write_resource::<RenderSettings>();
-    settings.visit_fields_mut(visitor);
+pub struct OneShotDebugUIFunction {
+    fun: Box<dyn FnOnce(&mut World, &UiFrame) + Send>,
+}
+
+pub struct OneShotDebugUI {
+    functions: Mutex<Vec<OneShotDebugUIFunction>>,
+}
+
+impl OneShotDebugUI {
+    pub fn add<F>(&self, f: F)
+    where
+        F: FnOnce(&mut World, &UiFrame) + Send + 'static,
+    {
+        let mut guard = self
+            .functions
+            .lock()
+            .expect("Bad mutex for one shot debug functions");
+        guard.push(OneShotDebugUIFunction { fun: Box::new(f) });
+    }
+
+    pub fn new() -> Self {
+        Self {
+            functions: Mutex::new(Vec::new()),
+        }
+    }
+}
+
+fn build_overview_tab(world: &mut World, visitor: &mut ImguiVisitor, frame: &UiFrame) {
+    {
+        let mut settings = world.write_resource::<RenderSettings>();
+        settings.visit_fields_mut(visitor);
+    }
+
+    let mut oneoffs = {
+        let oneoffs = world.read_resource::<OneShotDebugUI>();
+        let mut oneoffs = oneoffs
+            .functions
+            .lock()
+            .expect("Bad mutex for debug one shots");
+        std::mem::take(&mut *oneoffs)
+    };
+
+    for oneoff in oneoffs.drain(..) {
+        (oneoff.fun)(world, frame);
+    }
 }
 
 #[derive(Debug, Visitable)]
@@ -441,14 +484,14 @@ fn build_cameras_tab(world: &mut World, visitor: &mut ImguiVisitor, frame: &UiFr
 
 pub(crate) fn build_ui<'a>(
     world: &mut World,
-    ui: &crate::render::ui::UiFrame<'a>,
+    ui: &crate::render::imgui::UiFrame<'a>,
     pos: [f32; 2],
 ) -> [f32; 2] {
     type TabItemFn = fn(&mut World, &mut ImguiVisitor, &UiFrame);
 
     let size = [300.0, 85.0];
 
-    let mut visitor = crate::editor::inspector::ImguiVisitor::new(ui);
+    let mut visitor = crate::ui::inspector::ImguiVisitor::new(ui);
     imgui::Window::new("Render debug")
         .position(pos, imgui::Condition::FirstUseEver)
         .size(size, imgui::Condition::FirstUseEver)

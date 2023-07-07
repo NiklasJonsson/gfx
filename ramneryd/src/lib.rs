@@ -14,14 +14,15 @@ pub mod asset;
 mod camera;
 pub mod common;
 pub mod ecs;
-mod editor;
 mod graph;
 mod io;
 pub mod math;
 pub mod render;
 mod time;
+mod ui;
 mod visit;
 
+pub use render::debug::DebugRenderer;
 pub use time::Time;
 
 use ecs::prelude::*;
@@ -43,7 +44,7 @@ enum Action {
 struct Engine {
     world: World,
     event_queue: Arc<io::EventQueue>,
-    ui: render::ui::UIContext,
+    ui: render::imgui::UIContext,
     state: State,
     systems: ecs::Executor,
     renderer: trekanten::Renderer,
@@ -267,8 +268,8 @@ fn run(mut spec: Init) -> ! {
             ecs::serde::setup_resources(&mut world);
             render::setup_resources(&mut world, &mut renderer);
 
-            let ui_modules = vec![editor::ui_module()];
-            let ui = render::ui::UIContext::new(&mut renderer, &mut world, ui_modules);
+            let ui_modules = vec![ui::ui_module()];
+            let ui = render::imgui::UIContext::new(&mut renderer, &mut world, ui_modules);
 
             Engine {
                 world,

@@ -1,4 +1,4 @@
-use ramneryd::math;
+use ramneryd::math::{self, Aabb};
 use ramneryd::math::{Quat, Rgb, Rgba, Vec3};
 use ramneryd::render;
 
@@ -170,6 +170,6 @@ impl Module for SunSimulation {
 fn main() {
     ramneryd::Init::new()
         .with_module(Args::parse())
-        //.with_module(SunSimulation)
+        .with_module(SunSimulation)
         .run();
 }

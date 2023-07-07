@@ -3,9 +3,9 @@ use crate::visit::{Meta, MetaOrigin, Visitable, Visitor};
 
 use std::borrow::Cow;
 
-use crate::render::ui::UiFrame;
+use crate::render::imgui::UiFrame;
 
-pub type Ui<'a> = crate::render::ui::UiFrame<'a>;
+pub type Ui<'a> = crate::render::imgui::UiFrame<'a>;
 
 fn label<T>(m: &Meta<T>) -> Cow<str> {
     match &m.origin {
@@ -439,4 +439,20 @@ impl<'a> Visitor<String> for ImguiVisitor<'a> {
         self.ui.inner().text(format!("{}: {}", label(m), &t));
         if imgui::InputText::new(self.ui.inner(), &label(m), t).build() {}
     }
+}
+
+pub fn draw_struct_mut<'a, T: Visitable<ImguiVisitor<'a>>>(
+    ui: &'a Ui<'a>,
+    title: &'static str,
+    v: &mut T,
+) {
+    let mut vis = ImguiVisitor::new(ui);
+    vis.visit_mut(
+        v,
+        &Meta {
+            type_name: title,
+            range: None,
+            origin: MetaOrigin::Standalone,
+        },
+    );
 }

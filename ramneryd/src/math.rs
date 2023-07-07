@@ -162,6 +162,14 @@ impl Aabb {
         self.min = Vec3::partial_min(self.min, other.min);
         self.max = Vec3::partial_max(self.max, other.max);
     }
+
+    pub fn extent(&self) -> Extent {
+        Extent {
+            w: self.max.x - self.min.x,
+            h: self.max.y - self.min.y,
+            d: self.max.z - self.min.z,
+        }
+    }
 }
 
 impl From<&[Vec3]> for Aabb {
@@ -224,7 +232,7 @@ pub struct Obb {
 impl Obb {
     /// Create an oriented bounding box (OBB) from a center position and three vectors,
     /// each from the center point to one of the faces. The vectors need to be orthogonal
-    /// (otherwise, this is not a box).
+    /// (otherwise this is not a box).
     pub fn new(center: Vec3, u: Vec3, v: Vec3, w: Vec3) -> Self {
         let (u_norm, u_len) = u.normalized_and_get_magnitude();
         let (v_norm, v_len) = v.normalized_and_get_magnitude();
@@ -244,7 +252,7 @@ impl Obb {
     /// Create an (axis-aligned) oriented bounding box (OBB) from a center position and three extents.
     ///
     /// This is similar to an [`Aabb`] but is useful when the bounding box needs to be rotated or
-    /// transformed into another coordinate space. An Aabb would not bw valid after a rotation.
+    /// transformed into another coordinate space. An Aabb would not be valid after a rotation.
     /// If no rotations are needed, prefer using [`Aabb`].
     pub fn axis_aligned(center: Vec3, dims: Extent) -> Self {
         Self::new(
@@ -253,6 +261,24 @@ impl Obb {
             Vec3::new(0.0, dims.h / 2.0, 0.0),
             Vec3::new(0.0, 0.0, dims.d / 2.0),
         )
+    }
+
+    pub fn max_diagonal(&self) -> [Vec3; 2] {
+
+        let corners = self.corners();
+        let mut max = [corners[0], corners[1]];
+
+        for wd in corners.windows(2).skip(1) {
+            let a = wd[0];
+            let b = wd[1];
+
+            if (a - b).magnitude() > (max[0] - max[1]).magnitude() {
+                max[0] = a;
+                max[1] = b;
+            }
+        }
+
+        max
     }
 
     /// Returns the center point of the box.

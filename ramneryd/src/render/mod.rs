@@ -22,11 +22,11 @@ use trekanten::{
 
 pub mod debug;
 pub mod geometry;
+pub mod imgui;
 pub mod light;
 pub mod material;
 pub mod mesh;
 pub mod shader;
-pub mod ui;
 pub mod uniform;
 
 pub use geometry::Shape;
@@ -433,17 +433,8 @@ fn draw_entities<'a>(world: &World, cmd_buf: &mut RenderPassEncoder<'a>, mode: D
     }
 }
 
-fn debug_shadow_bounds(world: &World) {
-    let obb = light::compute_world_shadow_bounds(world).expect("No shadow bounds?");
-    let points = geometry::obb_line_strip(&obb);
-
-    let debug_renderer = world.write_resource::<debug::DebugRendererRes>();
-    let mut debug_renderer = debug_renderer.lock().expect("Bad mutex for debug renderer");
-    debug_renderer.draw_line_strip(&points);
-}
-
 #[profiling::function]
-pub fn draw_frame(world: &mut World, ui: &mut ui::UIContext, renderer: &mut Renderer) {
+pub fn draw_frame(world: &mut World, ui: &mut imgui::UIContext, renderer: &mut Renderer) {
     let cam_entity = match ecs::find_singleton_entity::<MainRenderCamera>(world) {
         None => {
             log::warn!("Did not find a camera entity, can't render");
@@ -455,8 +446,6 @@ pub fn draw_frame(world: &mut World, ui: &mut ui::UIContext, renderer: &mut Rend
     // TODO: Refactor! It would be nice to split the frame in:
     // 1. Data send
     // 2. Draw calls
-
-    debug_shadow_bounds(world);
 
     GpuUpload::resolve_pending(world, renderer);
     create_renderables(renderer, world);
@@ -481,12 +470,6 @@ pub fn draw_frame(world: &mut World, ui: &mut ui::UIContext, renderer: &mut Rend
         extent: main_window_extents,
         ..Default::default()
     };
-
-    {
-        let debug_renderer = world.write_resource::<debug::DebugRendererRes>();
-        let mut debug_renderer = debug_renderer.lock().expect("Bad mutex for debug renderer");
-        debug_renderer.upload(&mut frame);
-    }
 
     let ui_draw_commands = ui.build_ui(world, &mut frame);
 
@@ -519,6 +502,11 @@ pub fn draw_frame(world: &mut World, ui: &mut ui::UIContext, renderer: &mut Rend
 
     let mut cmd_buffer =
         light::light_and_shadow_pass(world, &mut frame, frame_resources, cmd_buffer);
+
+    {
+        let debug_renderer = world.read_resource::<debug::DebugRenderer>();
+        debug_renderer.upload(&mut frame);
+    }
 
     {
         // main render pass
@@ -557,13 +545,13 @@ pub fn draw_frame(world: &mut World, ui: &mut ui::UIContext, renderer: &mut Rend
         }
 
         {
-            let debug_renderer = world.write_resource::<debug::DebugRendererRes>();
-            let mut debug_renderer = debug_renderer.lock().expect("Bad mutex for debug renderer");
+            let debug_renderer = world.read_resource::<debug::DebugRenderer>();
             debug_renderer.record_commands(&mut main_rp);
         }
 
         cmd_buffer = main_rp.end().expect("Failed to end main presentation pass");
     }
+
     frame.add_command_buffer(cmd_buffer);
 
     let frame = frame.finish();
@@ -826,8 +814,6 @@ pub fn setup_resources(world: &mut World, renderer: &mut Renderer) {
                 .create_gfx_pipeline(desc, &main_render_pass)
                 .expect("FAIL");
 
-            assert_eq!(uniform::LightingData::SET, uniform::ViewData::SET);
-
             PhysicallyBasedUniformResources {
                 dummy_pipeline,
                 light_buffer,
@@ -860,16 +846,15 @@ pub fn setup_resources(world: &mut World, renderer: &mut Renderer) {
         }
     };
 
-    let debug_renderer = {
-        let dr = debug::DebugRenderer::new(
-            &shader_compiler,
-            &frame_data.main_render_pass,
-            &frame_data.main_camera_view_data,
-            renderer,
-        );
-        std::sync::Mutex::new(dr)
-    };
+    let debug_renderer = debug::DebugRenderer::new(
+        &shader_compiler,
+        &frame_data.main_render_pass,
+        &frame_data.main_camera_view_data,
+        renderer,
+    );
+
     world.insert(debug_renderer);
+    world.insert(debug::OneShotDebugUI::new());
     world.insert(renderer.loader().unwrap());
     world.insert(frame_data);
     world.insert(shader_compiler);

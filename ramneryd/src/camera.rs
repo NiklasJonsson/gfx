@@ -69,12 +69,6 @@ impl Camera {
     }
 }
 
-#[derive(Debug)]
-pub struct CameraOrientation {
-    pub up: Vec3,
-    pub view_direction: Vec3,
-}
-
 // Avoid gimbal-lock by clamping pitch
 const MAX_PITCH: f32 = 0.99 * std::f32::consts::FRAC_PI_2;
 const MIN_PITCH: f32 = 0.99 * -std::f32::consts::FRAC_PI_2;

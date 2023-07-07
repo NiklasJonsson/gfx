@@ -23,6 +23,7 @@ pub use buffer::{BufferHandle, BufferMutability};
 pub use error::RenderError;
 pub use error::ResizeReason;
 pub use loader::Loader;
+pub use pipeline::ShaderStage;
 pub use render_pass::{RenderPass, RenderPassEncoder};
 pub use render_target::RenderTarget;
 pub use resource::{Async, Handle, MutResourceManager, ResourceManager};

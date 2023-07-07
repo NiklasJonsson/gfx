@@ -1,12 +1,16 @@
 use crate::ecs::prelude::*;
 use crate::math::{
-    orthographic_vk, perspective_vk, Aabb, FrustrumPlanes, Mat4, Obb, Rgb, Transform, Vec2, Vec3,
+    orthographic_vk, perspective_vk, Aabb, FrustrumPlanes, Mat4, Obb, Rgb, Rgba, Transform, Vec2,
+    Vec3,
 };
+use crate::render::debug::LineConfig;
 
 use trekanten::CommandBuffer;
 
 use crate::render::uniform::{LightingData, PackedLight, ShadowMatrices, ViewData, MAX_NUM_LIGHTS};
 use std::ops::Range;
+
+use super::imgui::UiFrame;
 
 #[derive(
     Component, ramneryd_derive::Visitable, serde::Serialize, serde::Deserialize, Clone, Debug,
@@ -20,11 +24,11 @@ pub enum Light {
     Directional {
         color: Rgb,
     },
-    /// `angle` is from the center line of the cone.
-    /// `range` the start and end of the cone.
     Spot {
         color: Rgb,
+        /// The angle from the center line of the cone.
         angle: f32,
+        /// `range` from the base to the point of the cone.
         range: Range<f32>,
     },
     Ambient {
@@ -90,7 +94,7 @@ pub fn compute_world_shadow_bounds(world: &World) -> Option<Obb> {
 }
 
 fn compute_directional_shadow_bounds(shadow_bounds_ls: Obb) -> Aabb {
-    // Use the diagonal of the obb to define the size of the resulting abb. This means
+    // Use the diagonal of the obb to define the size of the resulting aabb. This means
     // the aabb will have a fixed size (it's maximum) regardless of the orientation of the obb.
     let [u, v, w] = shadow_bounds_ls.uvw();
     let diagonal = Vec3::from(((u + v + w) * 2.0).magnitude());
@@ -124,6 +128,73 @@ fn compute_directional_shadow_bounds(shadow_bounds_ls: Obb) -> Aabb {
     }
 }
 
+fn debug_shadow_bounds(world: &World, shadow_bounds_ws: Obb) {
+    use std::fmt::Write as _;
+    // TODO: Also dump diagonal of the OBB
+    let debugger = world.read_resource::<super::debug::OneShotDebugUI>();
+    debugger.add(move |_: &mut World, ui: &UiFrame| {
+        let ui = ui.inner();
+        let mut text = "Shadow bounds (light) (WS):\n".to_owned();
+        let diag = shadow_bounds_ws.max_diagonal();
+
+        writeln!(&mut text, "DIAG: {}, {}", diag[0], diag[1]).unwrap();
+
+        for c in shadow_bounds_ws.corners() {
+            write!(&mut text, "\n\t{},", c).unwrap();
+        }
+        text.truncate(text.len() - 1);
+        ui.text(text);
+    });
+
+    let dr = world.read_resource::<super::debug::DebugRenderer>();
+    dr.draw_obb(
+        shadow_bounds_ws,
+        LineConfig {
+            color: Rgba::white(),
+        },
+    );
+}
+
+fn debug_directional_shadow_bounds(world: &World, light_bounds_ls: Obb, shadow_map_aabb: Aabb) {
+    let debugger = world.read_resource::<super::debug::OneShotDebugUI>();
+    debugger.add(move |_: &mut World, ui: &UiFrame| {
+        let ui = ui.inner();
+        let mut text = "Light space bounds (blue):".to_owned();
+        for c in light_bounds_ls.corners() {
+            text.push_str("\n\t");
+            use std::fmt::Write as _;
+            write!(&mut text, "{}", c).unwrap();
+            text.push(',');
+        }
+        text.truncate(text.len() - 1);
+        ui.text(text);
+
+        ui.text(format!(
+            "shadow_map_aabb (green): min {} {} {}. max {} {} {}",
+            shadow_map_aabb.min.x,
+            shadow_map_aabb.min.y,
+            shadow_map_aabb.min.z,
+            shadow_map_aabb.max.x,
+            shadow_map_aabb.max.y,
+            shadow_map_aabb.max.z
+        ));
+    });
+
+    let dr = world.read_resource::<super::debug::DebugRenderer>();
+    dr.draw_obb(
+        light_bounds_ls,
+        LineConfig {
+            color: Rgba::blue(),
+        },
+    );
+    dr.draw_aabb(
+        shadow_map_aabb,
+        LineConfig {
+            color: Rgba::green(),
+        },
+    );
+}
+
 // TODO: Separate draw calls and data writes
 pub fn light_and_shadow_pass(
     world: &World,
@@ -131,8 +202,12 @@ pub fn light_and_shadow_pass(
     frame_resources: &super::FrameData,
     mut cmd_buffer: CommandBuffer,
 ) -> CommandBuffer {
-    let light_bounds_ws =
+    let shadow_bounds_ws =
         compute_world_shadow_bounds(world).expect("Failed to compute bounds for shadows");
+
+    {
+        debug_shadow_bounds(world, shadow_bounds_ws);
+    }
 
     use trekanten::raw_vk;
     let mut lighting_data = LightingData::default();
@@ -198,8 +273,11 @@ pub fn light_and_shadow_pass(
                 )
             }
             Light::Directional { color } => {
-                let light_bounds_ls = to_lightspace * light_bounds_ws;
+                let light_bounds_ls = to_lightspace * shadow_bounds_ws;
                 let aabb = compute_directional_shadow_bounds(light_bounds_ls);
+                {
+                    debug_directional_shadow_bounds(world, light_bounds_ls, aabb);
+                }
 
                 let proj: Mat4 = orthographic_vk(FrustrumPlanes {
                     left: aabb.min.x,

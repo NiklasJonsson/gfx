@@ -1,7 +1,9 @@
 use specs::prelude::*;
 
+use crate::camera::Camera;
 use crate::common::Name;
 use crate::graph;
+use crate::render::imgui::{UIModule, UiFrame};
 use imgui::{Condition, InputFloat3, TreeNode};
 
 pub mod inspector;
@@ -14,7 +16,7 @@ fn name(world: &World, ent: Entity) -> String {
 
 fn build_tree<'a>(
     world: &World,
-    ui: &crate::render::ui::UiFrame<'a>,
+    ui: &crate::render::imgui::UiFrame<'a>,
     ent: specs::Entity,
 ) -> Option<specs::Entity> {
     let mut inspected = None;
@@ -36,7 +38,11 @@ fn build_tree<'a>(
     inspected
 }
 
-fn build_inspector<'a>(world: &mut World, ui: &crate::render::ui::UiFrame<'a>, ent: specs::Entity) {
+fn build_inspector<'a>(
+    world: &mut World,
+    ui: &crate::render::imgui::UiFrame<'a>,
+    ent: specs::Entity,
+) {
     use crate::render::ReloadMaterial;
 
     ui.inner().text(name(world, ent));
@@ -76,8 +82,6 @@ struct SelectedEntity {
 #[derive(Default)]
 pub struct EditorUiModule {}
 
-use crate::render::ui::{UIModule, UiFrame};
-
 impl UIModule for EditorUiModule {
     fn draw(&mut self, world: &mut World, frame: &UiFrame) {
         let dt = world.read_resource::<crate::time::Time>().delta_sim();
@@ -87,12 +91,38 @@ impl UIModule for EditorUiModule {
             .size(size, imgui::Condition::FirstUseEver)
             .position(pos, imgui::Condition::FirstUseEver)
             .build(frame.inner(), || {
-                frame.inner().text(format!("FPS: {:.3}", dt.as_fps()));
-                let mut p = crate::render::camera_pos(world).into_array();
+                let ui = frame.inner();
+                ui.text(format!("FPS: {:.3}", dt.as_fps()));
 
-                InputFloat3::new(frame.inner(), "Camera pos", &mut p)
-                    .read_only(true)
-                    .build();
+                if ui.collapsing_header("Camera", imgui::TreeNodeFlags::DEFAULT_OPEN) {
+                    let camera_entity =
+                        crate::ecs::get_singleton_entity::<crate::render::MainRenderCamera>(world);
+                    let mut tfm_storage = world.write_storage::<crate::math::Transform>();
+                    let tfm = tfm_storage
+                        .get_mut(camera_entity)
+                        .expect("No transform for camera");
+
+                    {
+                        let view_dir = Camera::view_direction(tfm);
+                        let mut arr = view_dir.into_array();
+                        InputFloat3::new(frame.inner(), "View direction", &mut arr)
+                            .read_only(true)
+                            .build();
+                    }
+                    {
+                        let pos = &mut tfm.position;
+                        let mut arr = pos.into_array();
+                        if InputFloat3::new(frame.inner(), "Position", &mut arr).build() {
+                            *pos = arr.into();
+                        }
+                    }
+
+                    {
+                        let mut cams = world.write_storage::<Camera>();
+                        let cam = cams.get_mut(camera_entity).unwrap();
+                        inspector::draw_struct_mut(frame, "Render camera", cam)
+                    }
+                }
 
                 frame.inner().text("Right handed coordinate system");
             });

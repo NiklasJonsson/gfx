@@ -1,12 +1,12 @@
-use super::shader;
-use crate::math::Vec3;
+use super::{geometry, shader};
+use crate::math::{Rgba, Vec3};
 
 use trekanten::buffer::{DeviceUniformBuffer, DeviceVertexBuffer};
 use trekanten::descriptor::DescriptorSet;
 use trekanten::pipeline::GraphicsPipeline;
 use trekanten::resource::{MutResourceManager as _, ResourceManager as _};
 use trekanten::vertex::{VertexDefinition, VertexFormat};
-use trekanten::{BufferHandle, Handle};
+use trekanten::{BufferHandle, Handle, PushConstant};
 use trekanten::{RenderPass, RenderPassEncoder};
 
 use std::sync::Mutex;
@@ -17,6 +17,7 @@ pub mod light;
 pub mod window;
 
 pub use camera::DrawFrustum;
+pub use window::{OneShotDebugUI, OneShotDebugUIFunction};
 
 #[allow(dead_code)]
 #[derive(Debug, Clone, Copy)]
@@ -31,12 +32,32 @@ impl VertexDefinition for Vertex {
     }
 }
 
-pub enum DrawCmd {
-    Lines { start: u32, count: u32 },
+#[derive(Clone, Copy)]
+#[repr(C)]
+struct Color {
+    v: [f32; 4],
+}
+
+unsafe impl PushConstant for Color {
+    fn size() -> u16 {
+        std::mem::size_of::<Color>() as u16
+    }
+}
+
+pub struct LineConfig {
+    pub color: Rgba,
+}
+
+enum DrawCmd {
+    Lines {
+        start: u32,
+        count: u32,
+        color: Color,
+    },
 }
 
 /// Queue simple one-off rendering commands
-pub struct DebugRenderer {
+struct DebugRendererDrawBuffer {
     line_buffer: Vec<Vertex>,
     line_buffer_device: Option<BufferHandle<DeviceVertexBuffer>>,
     queue: Vec<DrawCmd>,
@@ -44,17 +65,55 @@ pub struct DebugRenderer {
     view_data_srg: Handle<DescriptorSet>,
 }
 
-pub type DebugRendererRes = Mutex<DebugRenderer>;
-
-impl DebugRenderer {
-    pub fn draw_line_strip(&mut self, points: &[Vec3]) {
+impl DebugRendererDrawBuffer {
+    pub fn draw_line_strip(&mut self, points: &[Vec3], cfg: LineConfig) {
         assert!(!points.is_empty());
-        let start: u32 = self.line_buffer.len().try_into().expect("Too big!");
         let count: u32 = points.len().try_into().expect("Too big!");
+
+        let start: u32 = self.line_buffer.len().try_into().expect("Too big!");
         self.line_buffer.reserve(points.len());
         self.line_buffer
             .extend(points.iter().map(|&pos| Vertex { pos }));
-        self.queue.push(DrawCmd::Lines { start, count });
+        self.queue.push(DrawCmd::Lines {
+            start,
+            count,
+            color: Color {
+                v: cfg.color.into_array(),
+            },
+        });
+    }
+}
+
+impl Default for LineConfig {
+    fn default() -> Self {
+        Self { color: Rgba::red() }
+    }
+}
+
+pub struct DebugRenderer {
+    draw_buffer: Mutex<DebugRendererDrawBuffer>,
+}
+
+impl DebugRenderer {
+    pub fn draw_line_strip(&self, points: &[Vec3], cfg: LineConfig) {
+        let mut db = self.draw_buffer.lock().unwrap();
+        db.draw_line_strip(points, cfg);
+    }
+
+    pub fn draw_obb(&self, obb: crate::math::Obb, cfg: LineConfig) {
+        let lines = geometry::obb_line_strip(obb);
+        {
+            let mut db = self.draw_buffer.lock().unwrap();
+            db.draw_line_strip(&lines, cfg);
+        }
+    }
+
+    pub fn draw_aabb(&self, aabb: crate::math::Aabb, cfg: LineConfig) {
+        let lines = geometry::aabb_line_strip(aabb);
+        {
+            let mut db = self.draw_buffer.lock().unwrap();
+            db.draw_line_strip(&lines, cfg);
+        }
     }
 }
 
@@ -93,7 +152,7 @@ impl DebugRenderer {
         let frag = shader_compiler
             .compile(
                 &shader::Defines::empty(),
-                "render/shaders/red_frag.glsl",
+                "render/shaders/push_constant_color_frag.glsl",
                 shader::ShaderType::Fragment,
             )
             .expect("Failed to compile frag shader for debug renderer");
@@ -122,25 +181,29 @@ impl DebugRenderer {
             .expect("Failed to create pipeline for shadow");
 
         Self {
-            line_buffer: Vec::new(),
-            line_buffer_device: None,
-            queue: Vec::new(),
-            pipeline,
-            view_data_srg: shader_resource_group,
+            draw_buffer: Mutex::new(DebugRendererDrawBuffer {
+                line_buffer: Vec::new(),
+                line_buffer_device: None,
+                queue: Vec::new(),
+                pipeline,
+                view_data_srg: shader_resource_group,
+            }),
         }
     }
 
-    pub fn upload<'a>(&mut self, frame: &mut trekanten::Frame<'a>) {
+    pub fn upload<'a>(&self, frame: &mut trekanten::Frame<'a>) {
         use trekanten::buffer::{BufferMutability, VertexBufferDescriptor};
 
-        if self.line_buffer.is_empty() {
-            assert!(self.queue.is_empty());
+        let mut db = self.draw_buffer.lock().unwrap();
+
+        if db.line_buffer.is_empty() {
+            assert!(db.queue.is_empty());
             return;
         }
-        assert!(!self.queue.is_empty());
+        assert!(!db.queue.is_empty());
 
-        let desc = VertexBufferDescriptor::from_slice(&self.line_buffer, BufferMutability::Mutable);
-        let vertex_buffer = if let Some(buf) = self.line_buffer_device {
+        let desc = VertexBufferDescriptor::from_slice(&db.line_buffer, BufferMutability::Mutable);
+        let vertex_buffer = if let Some(buf) = db.line_buffer_device {
             frame
                 .recreate_resource_blocking(buf, desc)
                 .expect("Bad vbuf handle")
@@ -150,38 +213,49 @@ impl DebugRenderer {
                 .expect("Failed to create vertex buffer for debug renderer")
         };
 
-        self.line_buffer.clear();
-        self.line_buffer_device = Some(vertex_buffer);
+        db.line_buffer.clear();
+        db.line_buffer_device = Some(vertex_buffer);
     }
 
     /// Note that the scene view data needs to have been bound to set 0, idx 0 already.
-    pub fn record_commands(&mut self, renderpass: &mut RenderPassEncoder) {
+    pub fn record_commands(&self, renderpass: &mut RenderPassEncoder) {
+        let mut db = self.draw_buffer.lock().unwrap();
+
         assert!(
-            self.line_buffer.is_empty(),
+            db.line_buffer.is_empty(),
             "Recorded more commands after upload?"
         );
 
-        if self.queue.is_empty() {
+        if db.queue.is_empty() {
             log::debug!("Draw queue is empty");
             return;
         }
 
-        let vbuf = if let Some(vbuf) = self.line_buffer_device {
+        let vbuf = if let Some(vbuf) = db.line_buffer_device {
             vbuf
         } else {
-            log::debug!("No vertex buffer to draw!");
+            log::debug!("No vertex buffer for debug renderer to draw!");
             return;
         };
 
-        log::trace!("Drawing {} line commands", self.queue.len());
+        log::trace!("Drawing {} line commands", db.queue.len());
 
-        let range_all = 0..self.queue.len();
-        renderpass.bind_graphics_pipeline(&self.pipeline);
-        renderpass.bind_shader_resource_group(0, &self.view_data_srg, &self.pipeline);
+        let pipeline = db.pipeline;
+        renderpass.bind_graphics_pipeline(&pipeline);
+        renderpass.bind_shader_resource_group(0, &db.view_data_srg, &db.pipeline);
         renderpass.bind_vertex_buffer(&vbuf);
-        for cmd in self.queue.drain(range_all) {
+        for cmd in db.queue.drain(..) {
             match cmd {
-                DrawCmd::Lines { start, count } => {
+                DrawCmd::Lines {
+                    start,
+                    count,
+                    color,
+                } => {
+                    renderpass.bind_push_constant(
+                        &pipeline,
+                        trekanten::ShaderStage::FRAGMENT,
+                        &color,
+                    );
                     renderpass.draw(count, start);
                 }
             }

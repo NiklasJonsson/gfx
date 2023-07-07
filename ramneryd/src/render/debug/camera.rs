@@ -3,8 +3,6 @@ use crate::ecs::prelude::*;
 use crate::camera::Camera;
 use crate::math::{Mat4, Transform, Vec3};
 
-use super::DebugRendererRes;
-
 #[derive(Clone, Copy, Component)]
 #[component(stoage = "NullStorage")]
 pub struct DrawFrustum;
@@ -36,7 +34,7 @@ impl<'a> System<'a> for ViewFrustumDrawer {
         ReadStorage<'a, Transform>,
         ReadStorage<'a, Camera>,
         ReadStorage<'a, DrawFrustum>,
-        ReadExpect<'a, DebugRendererRes>,
+        ReadExpect<'a, super::DebugRenderer>,
     );
 
     fn run(&mut self, data: Self::SystemData) {
@@ -50,10 +48,7 @@ impl<'a> System<'a> for ViewFrustumDrawer {
                 world_with_w.xyz() / world_with_w.w
             }));
 
-            let mut debug_renderer = debug_renderer
-                .lock()
-                .expect("Failed to get mutex for debug_renderer");
-            debug_renderer.draw_line_strip(&self.reuse);
+            debug_renderer.draw_line_strip(&self.reuse, super::LineConfig::default());
         }
     }
 }
