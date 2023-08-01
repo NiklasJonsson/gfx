@@ -10,7 +10,7 @@ use backend::buffer::Buffer;
 use backend::command::CommandBuffer;
 use backend::{AllocatorHandle, MemoryError};
 
-use crate::raw_vk;
+use crate::vk;
 use crate::vertex::VertexDefinition;
 
 use std::sync::Arc;
@@ -136,7 +136,7 @@ impl<'a, BT> BufferDescriptor<'a, BT> {
 }
 
 impl<'a, BT: BufferType> BufferDescriptor<'a, BT> {
-    pub fn vk_usage_flags(&self) -> raw_vk::BufferUsageFlags {
+    pub fn vk_usage_flags(&self) -> vk::BufferUsageFlags {
         BT::USAGE
     }
 

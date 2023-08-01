@@ -1,6 +1,4 @@
-use ash::vk;
-
-pub use ash::vk as raw_vk;
+pub use ash::vk;
 
 mod backend;
 pub mod buffer;
@@ -19,22 +17,29 @@ pub mod util;
 pub mod vertex;
 
 pub use backend::command::CommandBuffer;
-pub use buffer::{BufferHandle, BufferMutability};
+pub use buffer::{
+    BufferHandle, BufferMutability, DeviceIndexBuffer, DeviceUniformBuffer, DeviceVertexBuffer,
+    IndexBufferDescriptor, UniformBufferDescriptor, VertexBufferDescriptor,
+};
+pub use descriptor::DescriptorSet;
 pub use error::RenderError;
 pub use error::ResizeReason;
 pub use loader::Loader;
-pub use pipeline::ShaderStage;
+pub use pipeline::{GraphicsPipeline, GraphicsPipelineDescriptor, PipelineError, ShaderStage};
 pub use render_pass::{RenderPass, RenderPassEncoder};
 pub use render_target::RenderTarget;
 pub use resource::{Async, Handle, MutResourceManager, ResourceManager};
-pub use texture::Texture;
+pub use texture::{SamplerDescriptor, Texture, TextureDescriptor, TextureUsage};
 pub use traits::{PushConstant, Std140, Uniform};
+pub use util::{Extent2D, Format};
+pub use vertex::VertexFormat;
 
 pub use trekanten_derive::Std140Compat;
 
 use backend::device::HasVkDevice as _;
 use backend::{command, device, framebuffer, instance, surface, swapchain, sync};
 use common::MAX_FRAMES_IN_FLIGHT;
+use texture::TextureError;
 
 use crate::backend::vk::{buffer::Buffer, image::Image, MemoryError};
 
@@ -907,8 +912,6 @@ impl_buffer_manager!(
     uniform_buffers
 );
 
-use pipeline::{GraphicsPipeline, GraphicsPipelineDescriptor, PipelineError};
-
 impl Renderer {
     pub fn get_pipeline(&self, handle: &Handle<GraphicsPipeline>) -> Option<&GraphicsPipeline> {
         self.resources.graphics_pipelines.get(handle)
@@ -934,7 +937,6 @@ impl Renderer {
     }
 }
 
-use crate::texture::{TextureDescriptor, TextureError};
 impl Renderer {
     pub fn get_texture(&self, handle: &Handle<Texture>) -> Option<&Texture> {
         self.resources.textures.get(handle)

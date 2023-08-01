@@ -6,12 +6,12 @@ layout(set = 0, binding = 0) uniform ViewData {
 #define MAX_NUM_LIGHTS (16)
 
 layout(set = 0, binding = 3) uniform ShadowMatrices {
-    mat4 matrices[MAX_NUM_LIGHTS];
+    mat4 matrices[];
     uvec4 num_matrices;
 } shadow_matrices;
 
 uint num_shadow_matrices() {
-    return max(min(MAX_NUM_LIGHTS, shadow_matrices.num_matrices.x), 0);
+    return min(MAX_NUM_LIGHTS, shadow_matrices.num_matrices.x);
 }
 
 vec4 world_to_clip(vec3 world_pos) {

@@ -5,12 +5,17 @@ layout(set = 0, binding = 0) uniform ViewData {
     vec4 view_pos;
 } view_data;
 
+#define SHADOW_TYPE_DIRECTIONAL (0)
+#define SHADOW_TYPE_SPOT (1)
+#define SHADOW_TYPE_POINT (2)
+#define SHADOW_TYPE_INVALID (0xFFFFFFFF)
+
 #define MAX_NUM_LIGHTS (16)
 struct PackedLight {
     vec4 pos;
     vec4 dir_cutoff;
     vec4 color_range; // .w is the range
-    uvec4 shadow_idx; // x is the index
+    uvec4 shadow_info; // x is the shadow type, y is the shadow index in that array
 };
 
 layout(set = 0, binding = 1) uniform LightingData {
@@ -23,13 +28,19 @@ uint num_lights() {
     return min(lighting_data.num_lights.x, MAX_NUM_LIGHTS);
 }
 
+layout(set = 0, binding = 2) uniform sampler2D directional_shadow_map;
+
 #define NUM_SPOTLIGHT_SHADOW_MAPS (16)
-layout(set = 0, binding = 2) uniform sampler2D spotlight_shadow_maps[NUM_SPOTLIGHT_SHADOW_MAPS];
+layout(set = 0, binding = 3) uniform sampler2D spotlight_shadow_maps[NUM_SPOTLIGHT_SHADOW_MAPS];
+
+#define NUM_POINTLIGHT_SHADOW_MAPS (16)
+layout(set = 0, binding = 4) uniform sampler2D pointlight_shadow_maps[NUM_POINTLIGHT_SHADOW_MAPS];
 
 struct Light {
     vec3 color;
     float attenuation;
     vec3 direction;
+    uint shadow_type;
     uint shadow_idx;
 };
 
@@ -91,10 +102,18 @@ bool light_has_shadow(Light l) {
     return l.shadow_idx < NUM_SPOTLIGHT_SHADOW_MAPS;
 }
 
-float sample_shadow_map(vec4 shadow_coords[MAX_NUM_LIGHTS], uint shadow_idx, float n_dot_l) {
+float sample_shadow_map(vec4 shadow_coords[MAX_NUM_LIGHTS], uint shadow_type, uint shadow_idx, float n_dot_l) {
     vec3 coords = shadow_coords[shadow_idx].xyz / shadow_coords[shadow_idx].w;
-    // Texture sample is done before 'if' to remain within uniform ctrl-flow 
-    float depth = texture(spotlight_shadow_maps[shadow_idx], coords.xy).r;
+    float depth = 1.0;
+    if (shadow_type == SHADOW_TYPE_DIRECTIONAL) {
+        depth = texture(directional_shadow_map, coords.xy).r;
+    } else if (shadow_type == SHADOW_TYPE_SPOT) {
+        depth = texture(spotlight_shadow_maps[shadow_idx], coords.xy).r;
+    } else {
+        depth = texture(pointlight_shadow_maps[shadow_idx], coords.xy).r;
+    }
+
+    // Texture sample is done before the depth if to remain within uniform ctrl-flow 
     // This would have been clipped during shadow pass => not in shadow
     // texture clamp_to_edge sampling mode handles xy clipping
     if (coords.z > 1.0 || coords.z < -1.0) {

@@ -31,13 +31,18 @@ impl UniformBlock for UnlitUniformData {
     const BINDING: u32 = 0;
 }
 
+pub const SHADOW_TYPE_DIRECTIONAL: u32 = 0;
+pub const SHADOW_TYPE_SPOT: u32 = 1;
+pub const SHADOW_TYPE_POINT: u32 = 2;
+pub const SHADOW_TYPE_INVALID: u32 = 0xFFFFFFFF;
+
 #[derive(Copy, Clone, Debug, Std140Compat)]
 #[repr(C, packed)]
 pub struct PackedLight {
     pub pos: [f32; 4],         // position for point/spot light
     pub dir_cutoff: [f32; 4], // direction for spot/directional light. .w is the cos(cutoff_angle) of the spotlight
     pub color_range: [f32; 4], // color for all light types. .w is the range of point/spot lights
-    pub shadow_idx: [u32; 4],
+    pub shadow_info: [u32; 4], // x is shadow type, y is index
 }
 
 impl Default for PackedLight {
@@ -46,7 +51,7 @@ impl Default for PackedLight {
             pos: [0.0; 4],
             dir_cutoff: [0.0; 4],
             color_range: [0.0; 4],
-            shadow_idx: [u32::MAX; 4],
+            shadow_info: [u32::MAX; 4],
         }
     }
 }
@@ -70,7 +75,7 @@ impl UniformBlock for ShadowMatrices {
 #[derive(Copy, Clone, Debug, Default, Std140Compat)]
 #[repr(C, packed)]
 pub struct LightingData {
-    pub punctual_lights: [PackedLight; MAX_NUM_LIGHTS],
+    pub lights: [PackedLight; MAX_NUM_LIGHTS],
     pub ambient: [f32; 4],
     // v4 is needed for padding at the end. Use only the first value.
     pub num_lights: [u32; 4],
@@ -96,6 +101,17 @@ pub struct ViewData {
 }
 
 impl UniformBlock for ViewData {
+    const SET: u32 = 0;
+    const BINDING: u32 = 0;
+}
+
+#[derive(Copy, Clone, Debug, Default, Std140Compat)]
+#[repr(C, packed)]
+pub struct PosOnlyViewData {
+    pub view_proj: Mat4,
+}
+
+impl UniformBlock for PosOnlyViewData {
     const SET: u32 = 0;
     const BINDING: u32 = 0;
 }

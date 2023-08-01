@@ -1,5 +1,3 @@
-use std::mem::MaybeUninit;
-
 use thiserror::Error;
 
 use crate::ecs::prelude::*;
@@ -58,21 +56,6 @@ pub fn camera_pos(world: &World) -> Vec3 {
         .position
 }
 
-struct SpotlightShadow {
-    render_target: Handle<trekanten::RenderTarget>,
-    view_data_buffer: BufferHandle<DeviceUniformBuffer>,
-    view_data_desc_set: Handle<DescriptorSet>,
-    texture: Handle<trekanten::Texture>,
-}
-
-const NUM_SPOTLIGHT_SHADOW_MAPS: usize = 16;
-
-struct ShadowData {
-    render_pass: Handle<trekanten::RenderPass>,
-    dummy_pipeline: Handle<GraphicsPipeline>,
-    spotlights: [SpotlightShadow; NUM_SPOTLIGHT_SHADOW_MAPS],
-}
-
 struct UnlitFrameUniformResources {
     dummy_pipeline: Handle<GraphicsPipeline>,
 }
@@ -89,7 +72,7 @@ pub struct FrameData {
     engine_shader_resource_group: Handle<DescriptorSet>,
     unlit_resources: UnlitFrameUniformResources,
     pbr_resources: PhysicallyBasedUniformResources,
-    shadow: ShadowData,
+    shadow: light::ShadowData,
 }
 
 #[derive(Component, Default)]
@@ -263,47 +246,6 @@ fn get_pipeline_for(
     Ok(pipe)
 }
 
-fn shadow_pipeline_desc(
-    shader_compiler: &shader::ShaderCompiler,
-    format: VertexFormat,
-) -> Result<GraphicsPipelineDescriptor, MaterialError> {
-    let no_defines = shader::Defines::empty();
-    let vert = shader_compiler.compile(
-        &no_defines,
-        "render/shaders/pos_only_vert.glsl",
-        shader::ShaderType::Vertex,
-    )?;
-
-    let vert = ShaderDescriptor {
-        debug_name: Some("shadow-pos-only-vert".to_owned()),
-        spirv_code: vert.data(),
-    };
-
-    Ok(GraphicsPipelineDescriptor::builder()
-        .vertex_format(format)
-        .vert(vert)
-        .culling(trekanten::pipeline::TriangleCulling::Front)
-        .build()?)
-}
-
-fn get_shadow_pipeline_for(
-    renderer: &mut Renderer,
-    world: &World,
-    mesh: &Mesh,
-) -> Result<Handle<GraphicsPipeline>, MaterialError> {
-    let shader_compiler = world.read_resource::<shader::ShaderCompiler>();
-    let frame_data = world.read_resource::<FrameData>();
-
-    let vertex_format_size = mesh.cpu_vertex_buffer.format().size();
-    let shadow_vertex_format = trekanten::vertex::VertexFormat::builder()
-        .add_attribute(trekanten::util::Format::FLOAT3) // pos
-        .skip(vertex_format_size - trekanten::util::Format::FLOAT3.size())
-        .build();
-
-    let descriptor = shadow_pipeline_desc(&*shader_compiler, shadow_vertex_format)?;
-    Ok(renderer.create_gfx_pipeline(descriptor, &frame_data.shadow.render_pass)?)
-}
-
 fn create_renderable(
     renderer: &mut Renderer,
     world: &World,
@@ -316,7 +258,7 @@ fn create_renderable(
         get_pipeline_for(renderer, world, mesh, material).expect("Failed to get pipeline");
     let shadow_pipeline = if let material::GpuMaterial::PBR { .. } = material {
         Some(
-            get_shadow_pipeline_for(renderer, world, mesh)
+            light::get_shadow_pipeline_for(renderer, world, mesh)
                 .expect("Failed to create shadow pipeline"),
         )
     } else {
@@ -473,11 +415,7 @@ pub fn draw_frame(world: &mut World, ui: &mut imgui::UIContext, renderer: &mut R
 
     let ui_draw_commands = ui.build_ui(world, &mut frame);
 
-    let frame_resources = &*world.write_resource::<FrameData>();
-
-    let cmd_buffer = frame
-        .new_command_buffer()
-        .expect("Failed to create command buffer");
+    let frame_data = &*world.write_resource::<FrameData>();
 
     {
         let mut cameras = world.write_component::<Camera>();
@@ -496,12 +434,24 @@ pub fn draw_frame(world: &mut World, ui: &mut imgui::UIContext, renderer: &mut R
         };
 
         frame
-            .update_uniform_blocking(&frame_resources.main_camera_view_data, &view_data)
+            .update_uniform_blocking(&frame_data.main_camera_view_data, &view_data)
             .expect("Failed to update uniform");
     };
 
-    let mut cmd_buffer =
-        light::light_and_shadow_pass(world, &mut frame, frame_resources, cmd_buffer);
+    let cmd_buffer = frame
+        .new_command_buffer()
+        .expect("Failed to create command buffer");
+
+    // START HERE:
+    // Implement the shadow coords computation.
+    // There seems to be two possibilites. Either, we just have the max amount of shadow passed
+    // in an array and put that in a uniform block or we use SSBO. But for the latter, how can we
+    // have a variable amount of out shadow coords? Seems hard, probably need a buffer but then
+    // we don't get interpolation for the fragment? How is this solved?
+    let (mut cmd_buffer, shadow_pass_output) =
+        light::shadow_pass(world, &mut frame, &frame_data.shadow, cmd_buffer);
+
+    light::write_lighting_data(world, &mut frame, &frame_data);
 
     {
         let debug_renderer = world.read_resource::<debug::DebugRenderer>();
@@ -516,7 +466,7 @@ pub fn draw_frame(world: &mut World, ui: &mut imgui::UIContext, renderer: &mut R
             pbr_resources,
             engine_shader_resource_group,
             ..
-        } = frame_resources;
+        } = frame_data;
         let mut main_rp = frame
             .begin_presentation_pass(cmd_buffer, main_render_pass)
             .expect("Failed to begin render pass");
@@ -568,166 +518,6 @@ pub fn draw_frame(world: &mut World, ui: &mut imgui::UIContext, renderer: &mut R
         .expect("Failed to submit frame");
 }
 
-fn shadow_render_pass(renderer: &mut Renderer) -> Handle<trekanten::RenderPass> {
-    use trekanten::raw_vk;
-    let depth_attach = raw_vk::AttachmentDescription {
-        format: raw_vk::Format::D16_UNORM,
-        samples: raw_vk::SampleCountFlags::TYPE_1,
-        load_op: raw_vk::AttachmentLoadOp::CLEAR,
-        store_op: raw_vk::AttachmentStoreOp::STORE,
-        stencil_load_op: raw_vk::AttachmentLoadOp::DONT_CARE,
-        stencil_store_op: raw_vk::AttachmentStoreOp::DONT_CARE,
-        initial_layout: raw_vk::ImageLayout::UNDEFINED,
-        final_layout: raw_vk::ImageLayout::DEPTH_STENCIL_READ_ONLY_OPTIMAL,
-        flags: raw_vk::AttachmentDescriptionFlags::empty(),
-    };
-
-    let depth_ref = raw_vk::AttachmentReference {
-        attachment: 0,
-        layout: raw_vk::ImageLayout::DEPTH_STENCIL_ATTACHMENT_OPTIMAL,
-    };
-
-    let subpass = raw_vk::SubpassDescription::builder()
-        .pipeline_bind_point(raw_vk::PipelineBindPoint::GRAPHICS)
-        .depth_stencil_attachment(&depth_ref);
-
-    // These subpass dependencies handle layout transistions, execution & memory dependencies
-    // When there are multiple shadow passes, it might be valuable to use one pipeline barrier
-    // for all of them instead of several subpass deps.
-    let deps = [
-        raw_vk::SubpassDependency {
-            // The source pass deps here refer to the previous frame (I think :))
-            src_subpass: raw_vk::SUBPASS_EXTERNAL,
-            // Any previous fragment shader reads should be done
-            src_stage_mask: raw_vk::PipelineStageFlags::FRAGMENT_SHADER,
-            src_access_mask: raw_vk::AccessFlags::SHADER_READ,
-            dst_subpass: 0,
-            // EARLY_FRAGMENT_TESTS include subpass load operations for depth/stencil
-            dst_stage_mask: raw_vk::PipelineStageFlags::EARLY_FRAGMENT_TESTS,
-            // We are writing to the depth attachment
-            dst_access_mask: raw_vk::AccessFlags::DEPTH_STENCIL_ATTACHMENT_WRITE,
-            // We don't need a global dependency for the whole framebuffer
-            dependency_flags: raw_vk::DependencyFlags::BY_REGION,
-        },
-        raw_vk::SubpassDependency {
-            src_subpass: 0,
-            // LATE_FRAGMENT_TESTS include subpass store operations for depth/stencil
-            src_stage_mask: raw_vk::PipelineStageFlags::LATE_FRAGMENT_TESTS,
-            src_access_mask: raw_vk::AccessFlags::DEPTH_STENCIL_ATTACHMENT_WRITE,
-
-            // We want this render pass to complete before any subsequent uses of the depth buffer as a texture
-            dst_subpass: raw_vk::SUBPASS_EXTERNAL,
-            dst_stage_mask: raw_vk::PipelineStageFlags::FRAGMENT_SHADER,
-            dst_access_mask: raw_vk::AccessFlags::SHADER_READ,
-            // Do we actually need a full dependency region here?
-            dependency_flags: raw_vk::DependencyFlags::empty(),
-        },
-    ];
-
-    let attachments = [depth_attach];
-    let subpasses = [subpass.build()];
-    let create_info = raw_vk::RenderPassCreateInfo::builder()
-        .attachments(&attachments)
-        .subpasses(&subpasses)
-        .dependencies(&deps);
-
-    renderer
-        .create_render_pass(&create_info)
-        .expect("Failed to create shadow render pass")
-}
-
-// TODO: Runtime
-const SHADOW_MAP_EXTENT: trekanten::util::Extent2D = trekanten::util::Extent2D {
-    width: 1024,
-    height: 1024,
-};
-
-fn shadow_render_target(
-    renderer: &mut Renderer,
-    render_pass: &Handle<trekanten::RenderPass>,
-) -> (Handle<trekanten::Texture>, Handle<trekanten::RenderTarget>) {
-    use trekanten::texture::{BorderColor, Filter, SamplerAddressMode};
-    let extent = SHADOW_MAP_EXTENT;
-    let format = util::Format::D16_UNORM;
-
-    let desc = TextureDescriptor::Empty {
-        extent,
-        format,
-        usage: TextureUsage::DEPTH_STENCIL_ATTACHMENT,
-        sampler: SamplerDescriptor {
-            filter: Filter::Linear,
-            address_mode: SamplerAddressMode::ClampToEdge,
-            max_anisotropy: None,
-            border_color: BorderColor::FloatOpaqueWhite,
-        },
-    };
-    let tex = renderer
-        .create_texture(desc)
-        .expect("Failed to create texture for shadow map");
-    let attachments = [&tex];
-    let render_target = renderer
-        .create_render_target(render_pass, &attachments)
-        .expect("Failed to create render target for shadow map");
-    (tex, render_target)
-}
-
-fn build_shadow_data(
-    shader_compiler: &shader::ShaderCompiler,
-    renderer: &mut Renderer,
-) -> ShadowData {
-    use uniform::UniformBlock as _;
-
-    let shadow_render_pass = shadow_render_pass(renderer);
-    let view_data = vec![
-        uniform::ViewData {
-            view_proj: [0.0; 16],
-            view_pos: [0.0; 4],
-        };
-        NUM_SPOTLIGHT_SHADOW_MAPS
-    ];
-    let view_data = UniformBufferDescriptor::from_vec(view_data, BufferMutability::Mutable);
-    let view_data_buffer_handles = renderer
-        .create_resource_blocking(view_data)
-        .expect("FAIL")
-        .split();
-    let spotlights: [SpotlightShadow; NUM_SPOTLIGHT_SHADOW_MAPS] = {
-        let mut data: [MaybeUninit<SpotlightShadow>; NUM_SPOTLIGHT_SHADOW_MAPS] =
-            unsafe { MaybeUninit::uninit().assume_init() };
-        for i in 0..NUM_SPOTLIGHT_SHADOW_MAPS {
-            let (texture, render_target) = shadow_render_target(renderer, &shadow_render_pass);
-            let view_data_buffer = view_data_buffer_handles[i];
-            let sh_view_data_set = DescriptorSet::builder(renderer)
-                .add_buffer(
-                    &view_data_buffer,
-                    uniform::ViewData::BINDING,
-                    trekanten::pipeline::ShaderStage::VERTEX,
-                )
-                .build();
-            data[i] = MaybeUninit::new(SpotlightShadow {
-                texture,
-                render_target,
-                view_data_buffer,
-                view_data_desc_set: sh_view_data_set,
-            });
-        }
-        unsafe { std::mem::transmute(data) }
-    };
-    let shadow_dummy_pipeline = {
-        let pos_only_vertex_format = VertexFormat::from(util::Format::FLOAT3);
-        let pipeline_desc = shadow_pipeline_desc(shader_compiler, pos_only_vertex_format)
-            .expect("Failed to create graphics pipeline descriptor for shadows");
-        renderer
-            .create_gfx_pipeline(pipeline_desc, &shadow_render_pass)
-            .expect("Failed to create pipeline for shadow")
-    };
-
-    ShadowData {
-        render_pass: shadow_render_pass,
-        dummy_pipeline: shadow_dummy_pipeline,
-        spotlights,
-    }
-}
-
 pub fn setup_resources(world: &mut World, renderer: &mut Renderer) {
     use trekanten::pipeline::ShaderStage;
     use uniform::UniformBlock as _;
@@ -747,10 +537,10 @@ pub fn setup_resources(world: &mut World, renderer: &mut Renderer) {
         };
         let view_data = UniformBufferDescriptor::from_single(view_data, BufferMutability::Mutable);
         let main_camera_view_data = renderer.create_resource_blocking(view_data).expect("FAIL");
-        let shadow_data = build_shadow_data(&shader_compiler, renderer);
+        let shadow_data = light::build_shadow_data(&shader_compiler, renderer);
 
         let light_data = uniform::LightingData {
-            punctual_lights: [uniform::PackedLight::default(); uniform::MAX_NUM_LIGHTS],
+            lights: [uniform::PackedLight::default(); uniform::MAX_NUM_LIGHTS],
             ambient: [0.0; 4],
             num_lights: [0; 4],
         };

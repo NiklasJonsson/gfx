@@ -5,7 +5,7 @@ use crate::util;
 use crate::backend;
 use crate::descriptor::DescriptorSet;
 use crate::pipeline::{GraphicsPipeline, ShaderStage};
-use crate::raw_vk;
+use crate::vk;
 use crate::resource::Resources;
 use crate::traits::PushConstant;
 
@@ -183,56 +183,56 @@ impl RenderPass {
         msaa_sample_count: u8,
     ) -> Result<Self, crate::error::RenderError> {
         let msaa_sample_count = backend::n_to_sample_count(msaa_sample_count);
-        let msaa_color_attach = raw_vk::AttachmentDescription::builder()
-            .format(raw_vk::Format::from(format))
+        let msaa_color_attach = vk::AttachmentDescription::builder()
+            .format(vk::Format::from(format))
             .samples(msaa_sample_count)
-            .load_op(raw_vk::AttachmentLoadOp::CLEAR)
-            .store_op(raw_vk::AttachmentStoreOp::DONT_CARE)
-            .stencil_load_op(raw_vk::AttachmentLoadOp::DONT_CARE)
-            .stencil_store_op(raw_vk::AttachmentStoreOp::DONT_CARE)
-            .initial_layout(raw_vk::ImageLayout::UNDEFINED)
-            .final_layout(raw_vk::ImageLayout::COLOR_ATTACHMENT_OPTIMAL);
+            .load_op(vk::AttachmentLoadOp::CLEAR)
+            .store_op(vk::AttachmentStoreOp::DONT_CARE)
+            .stencil_load_op(vk::AttachmentLoadOp::DONT_CARE)
+            .stencil_store_op(vk::AttachmentStoreOp::DONT_CARE)
+            .initial_layout(vk::ImageLayout::UNDEFINED)
+            .final_layout(vk::ImageLayout::COLOR_ATTACHMENT_OPTIMAL);
 
-        let resolve_color_attach = raw_vk::AttachmentDescription::builder()
-            .format(raw_vk::Format::from(format))
-            .samples(raw_vk::SampleCountFlags::TYPE_1)
-            .load_op(raw_vk::AttachmentLoadOp::DONT_CARE)
-            .store_op(raw_vk::AttachmentStoreOp::STORE)
-            .stencil_load_op(raw_vk::AttachmentLoadOp::DONT_CARE)
-            .stencil_store_op(raw_vk::AttachmentStoreOp::DONT_CARE)
-            .initial_layout(raw_vk::ImageLayout::UNDEFINED)
-            .final_layout(raw_vk::ImageLayout::PRESENT_SRC_KHR);
+        let resolve_color_attach = vk::AttachmentDescription::builder()
+            .format(vk::Format::from(format))
+            .samples(vk::SampleCountFlags::TYPE_1)
+            .load_op(vk::AttachmentLoadOp::DONT_CARE)
+            .store_op(vk::AttachmentStoreOp::STORE)
+            .stencil_load_op(vk::AttachmentLoadOp::DONT_CARE)
+            .stencil_store_op(vk::AttachmentStoreOp::DONT_CARE)
+            .initial_layout(vk::ImageLayout::UNDEFINED)
+            .final_layout(vk::ImageLayout::PRESENT_SRC_KHR);
 
-        let msaa_color_attach_ref = raw_vk::AttachmentReference {
+        let msaa_color_attach_ref = vk::AttachmentReference {
             attachment: 0,
-            layout: raw_vk::ImageLayout::COLOR_ATTACHMENT_OPTIMAL,
+            layout: vk::ImageLayout::COLOR_ATTACHMENT_OPTIMAL,
         };
 
-        let resolve_color_attach_ref = raw_vk::AttachmentReference {
+        let resolve_color_attach_ref = vk::AttachmentReference {
             attachment: 2,
-            layout: raw_vk::ImageLayout::COLOR_ATTACHMENT_OPTIMAL,
+            layout: vk::ImageLayout::COLOR_ATTACHMENT_OPTIMAL,
         };
 
-        let depth_attach = raw_vk::AttachmentDescription::builder()
+        let depth_attach = vk::AttachmentDescription::builder()
             .format(device.depth_buffer_format())
             .samples(msaa_sample_count)
-            .load_op(raw_vk::AttachmentLoadOp::CLEAR)
-            .store_op(raw_vk::AttachmentStoreOp::DONT_CARE)
-            .stencil_load_op(raw_vk::AttachmentLoadOp::DONT_CARE)
-            .stencil_store_op(raw_vk::AttachmentStoreOp::DONT_CARE)
-            .initial_layout(raw_vk::ImageLayout::UNDEFINED)
-            .final_layout(raw_vk::ImageLayout::DEPTH_STENCIL_ATTACHMENT_OPTIMAL);
+            .load_op(vk::AttachmentLoadOp::CLEAR)
+            .store_op(vk::AttachmentStoreOp::DONT_CARE)
+            .stencil_load_op(vk::AttachmentLoadOp::DONT_CARE)
+            .stencil_store_op(vk::AttachmentStoreOp::DONT_CARE)
+            .initial_layout(vk::ImageLayout::UNDEFINED)
+            .final_layout(vk::ImageLayout::DEPTH_STENCIL_ATTACHMENT_OPTIMAL);
 
-        let depth_attach_ref = raw_vk::AttachmentReference {
+        let depth_attach_ref = vk::AttachmentReference {
             attachment: 1,
-            layout: raw_vk::ImageLayout::DEPTH_STENCIL_ATTACHMENT_OPTIMAL,
+            layout: vk::ImageLayout::DEPTH_STENCIL_ATTACHMENT_OPTIMAL,
         };
 
         let color_attach_refs = [msaa_color_attach_ref];
         let resolve_attach_refs = [resolve_color_attach_ref];
 
-        let subpass = raw_vk::SubpassDescription::builder()
-            .pipeline_bind_point(raw_vk::PipelineBindPoint::GRAPHICS)
+        let subpass = vk::SubpassDescription::builder()
+            .pipeline_bind_point(vk::PipelineBindPoint::GRAPHICS)
             .color_attachments(&color_attach_refs)
             .resolve_attachments(&resolve_attach_refs)
             .depth_stencil_attachment(&depth_attach_ref);
@@ -240,17 +240,17 @@ impl RenderPass {
         let attachments = [*msaa_color_attach, *depth_attach, *resolve_color_attach];
         let subpasses = [*subpass];
 
-        let subpass_dependency = raw_vk::SubpassDependency::builder()
-            .src_subpass(raw_vk::SUBPASS_EXTERNAL)
+        let subpass_dependency = vk::SubpassDependency::builder()
+            .src_subpass(vk::SUBPASS_EXTERNAL)
             .dst_subpass(0)
-            .src_stage_mask(raw_vk::PipelineStageFlags::COLOR_ATTACHMENT_OUTPUT)
-            .src_access_mask(raw_vk::AccessFlags::empty())
-            .dst_stage_mask(raw_vk::PipelineStageFlags::COLOR_ATTACHMENT_OUTPUT)
-            .dst_access_mask(raw_vk::AccessFlags::COLOR_ATTACHMENT_WRITE);
+            .src_stage_mask(vk::PipelineStageFlags::COLOR_ATTACHMENT_OUTPUT)
+            .src_access_mask(vk::AccessFlags::empty())
+            .dst_stage_mask(vk::PipelineStageFlags::COLOR_ATTACHMENT_OUTPUT)
+            .dst_access_mask(vk::AccessFlags::COLOR_ATTACHMENT_WRITE);
 
         let dependencies = [subpass_dependency.build()];
 
-        let create_info = raw_vk::RenderPassCreateInfo::builder()
+        let create_info = vk::RenderPassCreateInfo::builder()
             .attachments(&attachments)
             .subpasses(&subpasses)
             .dependencies(&dependencies);
@@ -261,7 +261,7 @@ impl RenderPass {
 impl RenderPass {
     pub fn new_vk(
         device: &backend::device::Device,
-        create_info: &raw_vk::RenderPassCreateInfo,
+        create_info: &vk::RenderPassCreateInfo,
     ) -> Result<Self, crate::error::RenderError> {
         let rp = BackendRenderPass::new(device, create_info)
             .map_err(crate::error::RenderError::RenderPass)?;

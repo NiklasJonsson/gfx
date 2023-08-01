@@ -3,8 +3,11 @@
 // TODO: Improvements to specs:
 // - Drain filter for storage
 // - Remove lifetime args for dispatcher and dispatcher builder
-// - Write<Resource> requires Sync
+// - Write<Resource> requires Sync which it doesn't need
 // - Decouple system component auto setup and setting up entities for that system.
+// - Async? Would be cool for interacting with other external parts
+// - Remove the WorldExt trait
+// - read_component should return a specific component for an entity. read_storage should return the storage. read_resource should return the resource...
 
 pub type World = specs::World;
 pub use ramneryd_derive::Component;
@@ -13,8 +16,8 @@ pub mod prelude {
     pub use specs::prelude::ResourceId;
     pub use specs::prelude::SystemData as _;
     pub use specs::SystemData;
+    pub use specs::{world::EntitiesRes, Entities, Entity};
     pub use specs::{DenseVecStorage, HashMapStorage, NullStorage, VecStorage};
-    pub use specs::{Entities, Entity};
     pub use specs::{Read, ReadExpect, ReadStorage, Write, WriteExpect, WriteStorage};
 
     pub use specs::{Builder as _, Join as _, SystemData as _, WorldExt};
