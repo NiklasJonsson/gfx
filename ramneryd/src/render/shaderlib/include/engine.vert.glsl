@@ -3,7 +3,8 @@ layout(set = 0, binding = 0) uniform ViewData {
     vec4 view_pos;
 } view_data;
 
-#define MAX_NUM_LIGHTS (16)
+// 16 spotlights and 1 directional
+#define MAX_NUM_SHADOWS (17)
 
 layout(set = 0, binding = 3) uniform ShadowMatrices {
     mat4 matrices[];
@@ -11,7 +12,7 @@ layout(set = 0, binding = 3) uniform ShadowMatrices {
 } shadow_matrices;
 
 uint num_shadow_matrices() {
-    return min(MAX_NUM_LIGHTS, shadow_matrices.num_matrices.x);
+    return min(MAX_NUM_SHADOWS, shadow_matrices.num_matrices.x);
 }
 
 vec4 world_to_clip(vec3 world_pos) {
@@ -31,7 +32,7 @@ const mat4 clip_to_unit = mat4(
     0.5, 0.5, 0.0, 1.0
 );
 
-void write_shadow_coords(vec3 world_pos, out vec4 shadow_coords_out[MAX_NUM_LIGHTS]) {
+void write_shadow_coords(vec3 world_pos, out vec4 shadow_coords_out[MAX_NUM_SHADOWS]) {
     uint n = num_shadow_matrices();
     for (uint i = 0; i < n; ++i) {
         shadow_coords_out[i] = clip_to_unit * shadow_matrices.matrices[i] * vec4(world_pos, 1.0);

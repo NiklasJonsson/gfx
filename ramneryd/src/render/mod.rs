@@ -548,6 +548,10 @@ pub fn setup_resources(world: &mut World, renderer: &mut Renderer) {
             UniformBufferDescriptor::from_single(light_data, BufferMutability::Mutable);
         let light_buffer = renderer.create_resource_blocking(light_data).expect("FAIL");
 
+        // START HERE:
+        // 1. How many matrices, 16 or 17?
+        // 2. Double check that this is compatible with the matrices buffer from shadow data
+        // 3. Should this be dynamic? No, it can't, because how can we know the vertex outputs?
         let shadow_matrices = uniform::ShadowMatrices {
             matrices: [uniform::Mat4::default(); uniform::MAX_NUM_LIGHTS],
             num_matrices: [0; 4],

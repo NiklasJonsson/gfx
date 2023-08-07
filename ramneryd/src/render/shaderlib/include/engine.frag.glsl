@@ -36,12 +36,17 @@ layout(set = 0, binding = 3) uniform sampler2D spotlight_shadow_maps[NUM_SPOTLIG
 #define NUM_POINTLIGHT_SHADOW_MAPS (16)
 layout(set = 0, binding = 4) uniform sampler2D pointlight_shadow_maps[NUM_POINTLIGHT_SHADOW_MAPS];
 
+struct ShadowInfo {
+    uint type;
+    uint coords_idx;
+    uint texture_idx;
+};
+
 struct Light {
     vec3 color;
     float attenuation;
     vec3 direction;
-    uint shadow_type;
-    uint shadow_idx;
+    ShadowInfo shadow_info;
 };
 
 // This is based on the recommended impl for KHR_punctual_lights:
@@ -69,7 +74,9 @@ float remap(float x, float old_low, float old_high, float new_low, float new_hig
 Light unpack_light(PackedLight l, vec3 world_pos) {
     Light r;
     r.color = l.color_range.xyz;
-    r.shadow_idx = l.shadow_idx.x;
+    r.type = l.shadow_info.x;
+    r.coords_idx = l.shadow_info.y;
+    r.texture_idx = l.shadow_info.z;
     if (l.pos.w == 0.0) {
         // Directional
         r.direction = normalize(-l.dir_cutoff.xyz);
@@ -99,18 +106,18 @@ Light unpack_light(PackedLight l, vec3 world_pos) {
 }
 
 bool light_has_shadow(Light l) {
-    return l.shadow_idx < NUM_SPOTLIGHT_SHADOW_MAPS;
+    return l.shadow_type != SHADOW_TYPE_INVALID;
 }
 
-float sample_shadow_map(vec4 shadow_coords[MAX_NUM_LIGHTS], uint shadow_type, uint shadow_idx, float n_dot_l) {
-    vec3 coords = shadow_coords[shadow_idx].xyz / shadow_coords[shadow_idx].w;
+float sample_shadow_map(vec4 shadow_coords[MAX_NUM_LIGHTS], ShadowInfo info, float n_dot_l) {
+    vec3 coords = shadow_coords[info.coords_idx].xyz / shadow_coords[info.coords_idx].w;
     float depth = 1.0;
-    if (shadow_type == SHADOW_TYPE_DIRECTIONAL) {
+    if (info.type == SHADOW_TYPE_DIRECTIONAL) {
         depth = texture(directional_shadow_map, coords.xy).r;
-    } else if (shadow_type == SHADOW_TYPE_SPOT) {
-        depth = texture(spotlight_shadow_maps[shadow_idx], coords.xy).r;
+    } else if (info.type == SHADOW_TYPE_SPOT) {
+        depth = texture(spotlight_shadow_maps[info.texture_idx], coords.xy).r;
     } else {
-        depth = texture(pointlight_shadow_maps[shadow_idx], coords.xy).r;
+        depth = texture(pointlight_shadow_maps[info.texture_idx], coords.xy).r;
     }
 
     // Texture sample is done before the depth if to remain within uniform ctrl-flow 
