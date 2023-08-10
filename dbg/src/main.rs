@@ -170,6 +170,6 @@ impl Module for SunSimulation {
 fn main() {
     ramneryd::Init::new()
         .with_module(Args::parse())
-        .with_module(SunSimulation)
+        //.with_module(SunSimulation)
         .run();
 }

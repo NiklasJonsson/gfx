@@ -93,7 +93,6 @@ It now works like:
        This is the view projection matric for a specific light. It also holds a `ShadowType` enum,
        so that the main rendering pass can pass that info on to the fragment shader for texture
        lookups.
-    5. Also returns the shadow view projection matrices with a buffer handle.
 
 2. `light::write_lighting_data`
 

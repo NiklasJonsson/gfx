@@ -196,6 +196,7 @@
                 "--rsf-file",
                 "data/ambient_light.ron.rsf",
                 "--rsf-file",
+                //"data/directional_light.ron.rsf",
                 "data/spot_light.ron.rsf",
             ],
             "cwd": "${workspaceFolder}"

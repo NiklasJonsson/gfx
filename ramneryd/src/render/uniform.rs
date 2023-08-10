@@ -1,10 +1,5 @@
 use trekanten::Std140Compat;
 
-pub trait UniformBlock {
-    const SET: u32;
-    const BINDING: u32;
-}
-
 #[derive(Copy, Clone, Debug, Std140Compat)]
 #[repr(C, packed)]
 pub struct PBRMaterialData {
@@ -15,26 +10,19 @@ pub struct PBRMaterialData {
     pub _padding: f32,
 }
 
-impl UniformBlock for PBRMaterialData {
-    const SET: u32 = 1;
-    const BINDING: u32 = 0;
-}
-
 #[derive(Copy, Clone, Debug, Std140Compat)]
 #[repr(C, packed)]
 pub struct UnlitUniformData {
     pub color: [f32; 4],
 }
 
-impl UniformBlock for UnlitUniformData {
-    const SET: u32 = 1;
-    const BINDING: u32 = 0;
-}
-
 pub const SHADOW_TYPE_DIRECTIONAL: u32 = 0;
 pub const SHADOW_TYPE_SPOT: u32 = 1;
 pub const SHADOW_TYPE_POINT: u32 = 2;
 pub const SHADOW_TYPE_INVALID: u32 = 0xFFFFFFFF;
+
+pub const SPOTLIGHT_SHADOW_MAP_COUNT: u32 = 16;
+pub const DIRECTIONAL_SHADOW_MAP_COUNT: u32 = 1;
 
 #[derive(Copy, Clone, Debug, Std140Compat)]
 #[repr(C, packed)]
@@ -62,14 +50,10 @@ pub const MAX_NUM_LIGHTS: usize = 16;
 
 #[derive(Copy, Clone, Debug, Default, Std140Compat)]
 #[repr(C, packed)]
-pub struct ShadowMatrices {
+pub struct ShadowData {
     pub matrices: [Mat4; MAX_NUM_LIGHTS],
     // v4 is needed for padding at the end. Use only the first value.
-    pub num_matrices: [u32; 4],
-}
-impl UniformBlock for ShadowMatrices {
-    const SET: u32 = 0;
-    const BINDING: u32 = 3;
+    pub count: [u32; 4],
 }
 
 #[derive(Copy, Clone, Debug, Default, Std140Compat)]
@@ -79,11 +63,6 @@ pub struct LightingData {
     pub ambient: [f32; 4],
     // v4 is needed for padding at the end. Use only the first value.
     pub num_lights: [u32; 4],
-}
-
-impl UniformBlock for LightingData {
-    const SET: u32 = 0;
-    const BINDING: u32 = 1;
 }
 
 #[derive(Copy, Clone, Debug, Std140Compat)]
@@ -100,18 +79,8 @@ pub struct ViewData {
     pub view_pos: [f32; 4],
 }
 
-impl UniformBlock for ViewData {
-    const SET: u32 = 0;
-    const BINDING: u32 = 0;
-}
-
 #[derive(Copy, Clone, Debug, Default, Std140Compat)]
 #[repr(C, packed)]
 pub struct PosOnlyViewData {
     pub view_proj: Mat4,
-}
-
-impl UniformBlock for PosOnlyViewData {
-    const SET: u32 = 0;
-    const BINDING: u32 = 0;
 }

@@ -3,7 +3,7 @@ use crate::math::{
     orthographic_vk, perspective_vk, Aabb, FrustrumPlanes, Mat4, Obb, Rgb, Rgba, Transform, Vec2,
     Vec3,
 };
-use crate::render::debug::{light, LineConfig};
+use crate::render::debug::LineConfig;
 
 use trekanten::{
     vk, BufferHandle, BufferMutability, CommandBuffer, DescriptorSet, DeviceUniformBuffer,
@@ -15,7 +15,7 @@ use crate::render::uniform::{LightingData, PackedLight, MAX_NUM_LIGHTS};
 use std::ops::Range;
 
 use super::imgui::UiFrame;
-use super::uniform;
+use super::uniform::{self, ShadowData};
 
 #[derive(
     Component, ramneryd_derive::Visitable, serde::Serialize, serde::Deserialize, Clone, Debug,
@@ -72,6 +72,30 @@ impl Default for Light {
 #[derive(Default, Component)]
 #[component(storage = "NullStorage")]
 pub struct ShadowViewer;
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum ShadowType {
+    Directional = uniform::SHADOW_TYPE_DIRECTIONAL as isize,
+    Point = uniform::SHADOW_TYPE_POINT as isize,
+    Spot = uniform::SHADOW_TYPE_SPOT as isize,
+    Invalid = uniform::SHADOW_TYPE_INVALID as isize,
+}
+
+#[derive(Clone, Copy, Component)]
+pub struct ShadowMap {
+    view_proj: BufferHandle<DeviceUniformBuffer>,
+    shadow_type: ShadowType,
+    texture_idx: u32,
+}
+
+#[derive(Clone, Copy)]
+struct ShadowRenderPassInfo {
+    extent: Extent2D,
+    render_target: Handle<RenderTarget>,
+    view_data: Handle<DescriptorSet>,
+    shadow_map: ShadowMap,
+    light_entity: Entity,
+}
 
 /// Compute the bounds of the view are that we want to cast shadows on.
 /// The coordinates are in world-space.
@@ -207,19 +231,7 @@ pub struct Shadow {
     pub extent: Extent2D,
 }
 
-const NUM_SPOTLIGHT_SHADOW_MAPS: usize = 16;
-
-const SPOTLIGHT_SHADOW_MAP_EXTENT: Extent2D = Extent2D {
-    width: 1024,
-    height: 1024,
-};
-
-const DIRECTIONAL_LIGHT_SHADOW_MAP_EXTENT: Extent2D = Extent2D {
-    width: 4096,
-    height: 4096,
-};
-
-pub struct ShadowData {
+pub struct ShadowResources {
     pub render_pass: Handle<trekanten::RenderPass>,
     pub dummy_pipeline: Handle<GraphicsPipeline>,
     pub shadow_matrices_buf: BufferHandle<DeviceUniformBuffer>,
@@ -352,14 +364,9 @@ fn build_single_shadow(
     shadow_render_pass: Handle<RenderPass>,
     extent: Extent2D,
 ) -> Shadow {
-    use uniform::UniformBlock as _;
     let (texture, render_target) = shadow_render_target(renderer, &shadow_render_pass, extent);
     let sh_view_data_set = DescriptorSet::builder(renderer)
-        .add_buffer(
-            &view_data,
-            uniform::PosOnlyViewData::BINDING,
-            trekanten::pipeline::ShaderStage::VERTEX,
-        )
+        .add_buffer(&view_data, 0, trekanten::pipeline::ShaderStage::VERTEX)
         .build();
 
     Shadow {
@@ -378,7 +385,7 @@ pub fn get_shadow_pipeline_for(
 ) -> Result<Handle<GraphicsPipeline>, super::MaterialError> {
     // TODO: Less World, more asking the caller to provide the data
     let shader_compiler = world.read_resource::<super::shader::ShaderCompiler>();
-    let frame_data = world.read_resource::<super::FrameData>();
+    let frame_data = world.read_resource::<super::FrameResources>();
 
     let vertex_format_size = mesh.cpu_vertex_buffer.format().size();
     let shadow_vertex_format = trekanten::vertex::VertexFormat::builder()
@@ -390,41 +397,52 @@ pub fn get_shadow_pipeline_for(
     Ok(renderer.create_gfx_pipeline(descriptor, &frame_data.shadow.render_pass)?)
 }
 
-pub fn build_shadow_data(
+pub fn setup_shadow_resources(
     shader_compiler: &super::shader::ShaderCompiler,
     renderer: &mut Renderer,
-) -> ShadowData {
-    const MAX_SPOTLIGHTS: usize = NUM_SPOTLIGHT_SHADOW_MAPS;
-    const MAX_DIRECTIONALS: usize = 1;
-    const MAX_SHADOW_PASSES: usize = MAX_SPOTLIGHTS + MAX_DIRECTIONALS;
+) -> ShadowResources {
+    const SPOTLIGHT_SHADOW_MAP_EXTENT: Extent2D = Extent2D {
+        width: 1024,
+        height: 1024,
+    };
+
+    const DIRECTIONAL_LIGHT_SHADOW_MAP_EXTENT: Extent2D = Extent2D {
+        width: 4096,
+        height: 4096,
+    };
+
+    const NUM_SHADOW_MATRICES: u32 =
+        uniform::SPOTLIGHT_SHADOW_MAP_COUNT + uniform::DIRECTIONAL_SHADOW_MAP_COUNT;
 
     let shadow_render_pass = create_shadow_render_pass(renderer);
     let view_data = [uniform::PosOnlyViewData {
-        view_proj: [0.0; 16],
-    }; MAX_SHADOW_PASSES];
+        view_proj: uniform::Mat4::default(),
+    }; NUM_SHADOW_MATRICES as usize];
     let view_data = UniformBufferDescriptor::from_slice(&view_data, BufferMutability::Mutable);
 
-    let view_data_buf = renderer
+    let shadow_matrices_buf = renderer
         .create_resource_blocking(view_data)
         .expect("Failed to create buffer for shadow view and projection matrices");
 
-    let n_spotlights = MAX_SPOTLIGHTS;
-    let mut spotlights = Vec::with_capacity(n_spotlights);
-    for i in 0..n_spotlights {
+    let directional = build_single_shadow(
+        renderer,
+        BufferHandle::sub_buffer(shadow_matrices_buf, 0, 1),
+        shadow_render_pass,
+        DIRECTIONAL_LIGHT_SHADOW_MAP_EXTENT,
+    );
+
+    let n_spotlights = uniform::SPOTLIGHT_SHADOW_MAP_COUNT;
+    let mut spotlights = Vec::with_capacity(n_spotlights as usize);
+    for buf_i in 1..1 + n_spotlights {
         spotlights.push(build_single_shadow(
             renderer,
-            BufferHandle::sub_buffer(view_data_buf, i as u32, 1),
+            BufferHandle::sub_buffer(shadow_matrices_buf, buf_i as u32, 1),
             shadow_render_pass,
             SPOTLIGHT_SHADOW_MAP_EXTENT,
         ));
     }
 
-    let directional = build_single_shadow(
-        renderer,
-        BufferHandle::sub_buffer(view_data_buf, n_spotlights as u32, 1),
-        shadow_render_pass,
-        DIRECTIONAL_LIGHT_SHADOW_MAP_EXTENT,
-    );
+    // TODO: Init pointlights here
 
     let shadow_dummy_pipeline = {
         let pos_only_vertex_format = VertexFormat::from(trekanten::Format::FLOAT3);
@@ -435,17 +453,18 @@ pub fn build_shadow_data(
             .expect("Failed to create pipeline for shadow")
     };
 
-    ShadowData {
+    ShadowResources {
         render_pass: shadow_render_pass,
         dummy_pipeline: shadow_dummy_pipeline,
         spotlights,
-        shadow_matrices_buf: view_data_buf,
+        shadow_matrices_buf,
         directional,
     }
 }
 
 pub struct ShadowPassOutput {
-    pub shadow_matrices: BufferHandle<DeviceUniformBuffer>,
+    pub shadow_matrices: [uniform::Mat4; MAX_NUM_LIGHTS],
+    pub count: usize,
 }
 
 fn transition_unused_map(
@@ -481,33 +500,10 @@ fn transition_unused_map(
     );
 }
 
-#[derive(Clone, Copy, PartialEq, Eq)]
-enum ShadowType {
-    Directional = uniform::SHADOW_TYPE_DIRECTIONAL as isize,
-    Point = uniform::SHADOW_TYPE_POINT as isize,
-    Spot = uniform::SHADOW_TYPE_SPOT as isize,
-    Invalid = uniform::SHADOW_TYPE_INVALID as isize,
-}
-
-#[derive(Clone, Copy, Component)]
-struct ShadowMap {
-    view_proj: BufferHandle<DeviceUniformBuffer>,
-    shadow_type: ShadowType,
-}
-
-#[derive(Clone, Copy)]
-struct ShadowRenderPassInfo {
-    extent: Extent2D,
-    render_target: Handle<RenderTarget>,
-    view_data: Handle<DescriptorSet>,
-    shadow_map: ShadowMap,
-    light_entity: Entity,
-}
-
 pub fn shadow_pass(
     world: &World,
     frame: &mut trekanten::Frame,
-    shadow_data: &ShadowData,
+    shadow_data: &ShadowResources,
     mut cmd_buffer: CommandBuffer,
 ) -> (CommandBuffer, ShadowPassOutput) {
     const SHADOW_CLEAR_VALUES: [vk::ClearValue; 1] = [vk::ClearValue {
@@ -524,6 +520,11 @@ pub fn shadow_pass(
         debug_shadow_bounds(world, shadow_bounds_ws);
     }
 
+    // START HERE:
+    // It seems like the matrix for the directional light is not written correctly.
+    // Test with only spotlight and then only directional and then both
+    // Then test in Sponza
+
     let lights = world.read_storage::<Light>();
     let transforms = world.read_storage::<Transform>();
     let entities = world.read_resource::<EntitiesRes>();
@@ -531,13 +532,19 @@ pub fn shadow_pass(
     let mut shadow_matrices = [super::uniform::Mat4::default(); MAX_NUM_LIGHTS];
     let mut shadow_render_info: [Option<ShadowRenderPassInfo>; MAX_NUM_LIGHTS] =
         [None; MAX_NUM_LIGHTS];
+
+    const MAX_NUM_SPOTLIGHTS: usize = if MAX_NUM_LIGHTS > 0 {
+        MAX_NUM_LIGHTS - 1
+    } else {
+        0
+    };
     let mut n_shadows = 0;
     let mut n_spotlights = 0;
     let mut found_directional_light = false;
 
     // Collect rendering info.
-    for (idx, (e, light, tfm)) in (&entities, &lights, &transforms).join().enumerate() {
-        if idx >= MAX_NUM_LIGHTS {
+    for (e, light, tfm) in (&entities, &lights, &transforms).join() {
+        if n_shadows >= MAX_NUM_LIGHTS {
             log::warn!("Too many punctual lights, skipping remaining");
             break;
         }
@@ -545,6 +552,10 @@ pub fn shadow_pass(
         let to_lightspace = Mat4::from(*tfm).inverted();
         let (proj, render_info) = match light {
             Light::Spot { angle, range, .. } => {
+                if n_spotlights > MAX_NUM_SPOTLIGHTS {
+                    log::warn!("Too many spotlights, won't generate shadows for all of them (max is {MAX_NUM_SPOTLIGHTS})");
+                    break;
+                }
                 let proj = perspective_vk(angle * 2.0, 1.0, range.start, range.end);
 
                 let spot = &shadow_data.spotlights[n_spotlights];
@@ -558,6 +569,7 @@ pub fn shadow_pass(
                         shadow_map: ShadowMap {
                             view_proj: spot.view_data_buffer,
                             shadow_type: ShadowType::Spot,
+                            texture_idx: n_spotlights as u32,
                         },
                         light_entity: e,
                     },
@@ -596,6 +608,7 @@ pub fn shadow_pass(
                         shadow_map: ShadowMap {
                             view_proj: dir.view_data_buffer,
                             shadow_type: ShadowType::Directional,
+                            texture_idx: 0,
                         },
                         light_entity: e,
                     },
@@ -605,7 +618,8 @@ pub fn shadow_pass(
             Light::Ambient { .. } => continue,
         };
 
-        shadow_matrices[n_shadows] = proj.into_col_array();
+        let mtx_idx = render_info.shadow_map.view_proj.idx();
+        shadow_matrices[mtx_idx as usize] = proj.into_col_array();
         shadow_render_info[n_shadows] = Some(render_info);
         n_shadows += 1;
     }
@@ -617,6 +631,12 @@ pub fn shadow_pass(
     // TODO: Push all unused into a vec to iterate over?
 
     let mut shadow_maps = world.write_storage::<ShadowMap>();
+
+    assert_eq!(
+        n_shadows,
+        n_spotlights + if found_directional_light { 1 } else { 0 }
+    );
+
     // Render passes
     for i in 0..n_shadows {
         let ShadowRenderPassInfo {
@@ -648,19 +668,19 @@ pub fn shadow_pass(
             .expect("Failed to add shadow map for light entity");
     }
 
-    for spotlight in shadow_data.spotlights.iter().take(n_spotlights) {
+    for spotlight in shadow_data.spotlights.iter().skip(n_spotlights) {
         transition_unused_map(&mut cmd_buffer, frame, spotlight.texture);
     }
+
     if !found_directional_light {
         transition_unused_map(&mut cmd_buffer, frame, shadow_data.directional.texture);
     }
 
-    let out_buffer = BufferHandle::sub_buffer(shadow_data.shadow_matrices_buf, 0, n_shadows as u32);
-
     (
         cmd_buffer,
         ShadowPassOutput {
-            shadow_matrices: out_buffer,
+            shadow_matrices,
+            count: n_shadows,
         },
     )
 }
@@ -668,7 +688,8 @@ pub fn shadow_pass(
 pub fn write_lighting_data(
     world: &World,
     frame: &mut trekanten::Frame,
-    frame_resources: &super::FrameData,
+    frame_resources: &super::FrameResources,
+    shadow_pass_output: &ShadowPassOutput,
 ) {
     let mut lighting_data = LightingData::default();
 
@@ -731,14 +752,37 @@ pub fn write_lighting_data(
         if let Some(ShadowMap {
             view_proj,
             shadow_type,
+            texture_idx,
         }) = shadow_map
         {
-            // TODO: TextureIndex here as well?
-            light.shadow_info = [*shadow_type as u32, view_proj.idx(), u32::MAX, u32::MAX];
+            light.shadow_info = [*shadow_type as u32, view_proj.idx(), *texture_idx, u32::MAX];
         }
     }
 
     frame
-        .update_uniform_blocking(&frame_resources.pbr_resources.light_buffer, &lighting_data)
+        .update_uniform_blocking(
+            &frame_resources.engine_shader_resources.lighting_data,
+            &lighting_data,
+        )
         .expect("Failed to update uniform for lighting data");
+
+    {
+        let shadow_data = uniform::ShadowData {
+            matrices: shadow_pass_output.shadow_matrices,
+            count: [
+                shadow_pass_output.count as u32,
+                u32::MAX,
+                u32::MAX,
+                u32::MAX,
+            ],
+        };
+
+        // TODO: Merge into LightingData?
+        frame
+            .update_uniform_blocking(
+                &frame_resources.engine_shader_resources.shadow_data,
+                &shadow_data,
+            )
+            .expect("Failed to write the ShadowData uniform during the lighting pass");
+    }
 }

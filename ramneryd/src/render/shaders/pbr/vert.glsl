@@ -25,7 +25,7 @@ layout(location = TAN_LOC) in vec4 tangent;
 layout(location = 0) out VsOut {
     vec3 world_normal;
     vec3 world_pos;
-    vec4 shadow_coords[MAX_NUM_LIGHTS];
+    vec4 shadow_coords[MAX_NUM_SHADOWS];
 
 #if HAS_TEX_COORDS
     vec2 tex_coords_0;

@@ -18,7 +18,7 @@ struct PackedLight {
     uvec4 shadow_info; // x is the shadow type, y is the shadow index in that array
 };
 
-layout(set = 0, binding = 1) uniform LightingData {
+layout(set = 0, binding = 2) uniform LightingData {
     PackedLight lights[MAX_NUM_LIGHTS];
     vec4 ambient; // vec3 color + float strength
     uvec4 num_lights; // The number of lights in the array
@@ -28,13 +28,15 @@ uint num_lights() {
     return min(lighting_data.num_lights.x, MAX_NUM_LIGHTS);
 }
 
-layout(set = 0, binding = 2) uniform sampler2D directional_shadow_map;
+// TODO: Make this a 1-elem array to simplify?
+layout(set = 0, binding = 3) uniform sampler2D directional_shadow_map;
 
 #define NUM_SPOTLIGHT_SHADOW_MAPS (16)
-layout(set = 0, binding = 3) uniform sampler2D spotlight_shadow_maps[NUM_SPOTLIGHT_SHADOW_MAPS];
+layout(set = 0, binding = 4) uniform sampler2D spotlight_shadow_maps[NUM_SPOTLIGHT_SHADOW_MAPS];
 
 #define NUM_POINTLIGHT_SHADOW_MAPS (16)
-layout(set = 0, binding = 4) uniform sampler2D pointlight_shadow_maps[NUM_POINTLIGHT_SHADOW_MAPS];
+// TODO:
+//layout(set = 0, binding = 6) uniform sampler2D pointlight_shadow_maps[NUM_POINTLIGHT_SHADOW_MAPS];
 
 struct ShadowInfo {
     uint type;
@@ -74,9 +76,9 @@ float remap(float x, float old_low, float old_high, float new_low, float new_hig
 Light unpack_light(PackedLight l, vec3 world_pos) {
     Light r;
     r.color = l.color_range.xyz;
-    r.type = l.shadow_info.x;
-    r.coords_idx = l.shadow_info.y;
-    r.texture_idx = l.shadow_info.z;
+    r.shadow_info.type = l.shadow_info.x;
+    r.shadow_info.coords_idx = l.shadow_info.y;
+    r.shadow_info.texture_idx = l.shadow_info.z;
     if (l.pos.w == 0.0) {
         // Directional
         r.direction = normalize(-l.dir_cutoff.xyz);
@@ -106,7 +108,7 @@ Light unpack_light(PackedLight l, vec3 world_pos) {
 }
 
 bool light_has_shadow(Light l) {
-    return l.shadow_type != SHADOW_TYPE_INVALID;
+    return l.shadow_info.type != SHADOW_TYPE_INVALID;
 }
 
 float sample_shadow_map(vec4 shadow_coords[MAX_NUM_LIGHTS], ShadowInfo info, float n_dot_l) {
@@ -117,7 +119,8 @@ float sample_shadow_map(vec4 shadow_coords[MAX_NUM_LIGHTS], ShadowInfo info, flo
     } else if (info.type == SHADOW_TYPE_SPOT) {
         depth = texture(spotlight_shadow_maps[info.texture_idx], coords.xy).r;
     } else {
-        depth = texture(pointlight_shadow_maps[info.texture_idx], coords.xy).r;
+        // TODO
+        // depth = texture(pointlight_shadow_maps[info.texture_idx], coords.xy).r;
     }
 
     // Texture sample is done before the depth if to remain within uniform ctrl-flow 
@@ -136,7 +139,7 @@ float sample_shadow_map(vec4 shadow_coords[MAX_NUM_LIGHTS], ShadowInfo info, flo
 float compute_shadow_factor(vec4 shadow_coords[MAX_NUM_LIGHTS], Light light, float n_dot_l) {
     float shadow_factor = 1.0;
     if (light_has_shadow(light)) {
-        shadow_factor = sample_shadow_map(shadow_coords, light.shadow_idx, n_dot_l);
+        shadow_factor = sample_shadow_map(shadow_coords, light.shadow_info, n_dot_l);
     }
     return shadow_factor;
 }

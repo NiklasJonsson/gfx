@@ -56,23 +56,27 @@ pub fn camera_pos(world: &World) -> Vec3 {
         .position
 }
 
-struct UnlitFrameUniformResources {
+struct UnlitPassResources {
     dummy_pipeline: Handle<GraphicsPipeline>,
 }
 
-struct PhysicallyBasedUniformResources {
+struct PBRPassResources {
     dummy_pipeline: Handle<GraphicsPipeline>,
-    light_buffer: BufferHandle<DeviceUniformBuffer>,
-    shadow_matrices_buffer: BufferHandle<DeviceUniformBuffer>,
 }
 
-pub struct FrameData {
+struct EngineShaderResources {
+    view_data: BufferHandle<DeviceUniformBuffer>,
+    lighting_data: BufferHandle<DeviceUniformBuffer>,
+    shadow_data: BufferHandle<DeviceUniformBuffer>,
+    desc_set: Handle<DescriptorSet>,
+}
+
+pub struct FrameResources {
     main_render_pass: Handle<trekanten::RenderPass>,
-    main_camera_view_data: BufferHandle<DeviceUniformBuffer>,
-    engine_shader_resource_group: Handle<DescriptorSet>,
-    unlit_resources: UnlitFrameUniformResources,
-    pbr_resources: PhysicallyBasedUniformResources,
-    shadow: light::ShadowData,
+    engine_shader_resources: EngineShaderResources,
+    unlit_resources: UnlitPassResources,
+    pbr_resources: PBRPassResources,
+    shadow: light::ShadowResources,
 }
 
 #[derive(Component, Default)]
@@ -195,7 +199,7 @@ fn get_pipeline_for(
 ) -> Result<Handle<GraphicsPipeline>, MaterialError> {
     let vertex_format = mesh.cpu_vertex_buffer.format().clone();
 
-    let frame_data = world.read_resource::<FrameData>();
+    let frame_data = world.read_resource::<FrameResources>();
     let shader_compiler = world.read_resource::<shader::ShaderCompiler>();
     let pipe = match mat {
         material::GpuMaterial::PBR {
@@ -415,7 +419,7 @@ pub fn draw_frame(world: &mut World, ui: &mut imgui::UIContext, renderer: &mut R
 
     let ui_draw_commands = ui.build_ui(world, &mut frame);
 
-    let frame_data = &*world.write_resource::<FrameData>();
+    let frame_data = &*world.write_resource::<FrameResources>();
 
     {
         let mut cameras = world.write_component::<Camera>();
@@ -434,7 +438,7 @@ pub fn draw_frame(world: &mut World, ui: &mut imgui::UIContext, renderer: &mut R
         };
 
         frame
-            .update_uniform_blocking(&frame_data.main_camera_view_data, &view_data)
+            .update_uniform_blocking(&frame_data.engine_shader_resources.view_data, &view_data)
             .expect("Failed to update uniform");
     };
 
@@ -442,16 +446,10 @@ pub fn draw_frame(world: &mut World, ui: &mut imgui::UIContext, renderer: &mut R
         .new_command_buffer()
         .expect("Failed to create command buffer");
 
-    // START HERE:
-    // Implement the shadow coords computation.
-    // There seems to be two possibilites. Either, we just have the max amount of shadow passed
-    // in an array and put that in a uniform block or we use SSBO. But for the latter, how can we
-    // have a variable amount of out shadow coords? Seems hard, probably need a buffer but then
-    // we don't get interpolation for the fragment? How is this solved?
     let (mut cmd_buffer, shadow_pass_output) =
         light::shadow_pass(world, &mut frame, &frame_data.shadow, cmd_buffer);
 
-    light::write_lighting_data(world, &mut frame, &frame_data);
+    light::write_lighting_data(world, &mut frame, &frame_data, &shadow_pass_output);
 
     {
         let debug_renderer = world.read_resource::<debug::DebugRenderer>();
@@ -460,11 +458,11 @@ pub fn draw_frame(world: &mut World, ui: &mut imgui::UIContext, renderer: &mut R
 
     {
         // main render pass
-        let FrameData {
+        let FrameResources {
             main_render_pass,
             unlit_resources,
             pbr_resources,
-            engine_shader_resource_group,
+            engine_shader_resources,
             ..
         } = frame_data;
         let mut main_rp = frame
@@ -473,19 +471,27 @@ pub fn draw_frame(world: &mut World, ui: &mut imgui::UIContext, renderer: &mut R
 
         {
             // PBR
-            let PhysicallyBasedUniformResources { dummy_pipeline, .. } = &pbr_resources;
+            let PBRPassResources { dummy_pipeline, .. } = &pbr_resources;
             main_rp
                 .bind_graphics_pipeline(dummy_pipeline)
-                .bind_shader_resource_group(0u32, engine_shader_resource_group, dummy_pipeline);
+                .bind_shader_resource_group(
+                    0u32,
+                    &engine_shader_resources.desc_set,
+                    dummy_pipeline,
+                );
             draw_entities(world, &mut main_rp, DrawMode::Lit);
         }
 
         {
             // Unlit
-            let UnlitFrameUniformResources { dummy_pipeline } = &unlit_resources;
+            let UnlitPassResources { dummy_pipeline } = &unlit_resources;
             main_rp
                 .bind_graphics_pipeline(dummy_pipeline)
-                .bind_shader_resource_group(0u32, engine_shader_resource_group, dummy_pipeline);
+                .bind_shader_resource_group(
+                    0u32,
+                    &engine_shader_resources.desc_set,
+                    dummy_pipeline,
+                );
             draw_entities(world, &mut main_rp, DrawMode::Unlit);
         }
 
@@ -520,7 +526,6 @@ pub fn draw_frame(world: &mut World, ui: &mut imgui::UIContext, renderer: &mut R
 
 pub fn setup_resources(world: &mut World, renderer: &mut Renderer) {
     use trekanten::pipeline::ShaderStage;
-    use uniform::UniformBlock as _;
 
     let shader_compiler = shader::ShaderCompiler::new().expect("Failed to create shader compiler");
 
@@ -531,51 +536,61 @@ pub fn setup_resources(world: &mut World, renderer: &mut Renderer) {
             .presentation_render_pass(8)
             .expect("main render pass creation failed");
 
-        let view_data = uniform::ViewData {
-            view_proj: [0.0; 16],
-            view_pos: [0.0; 4],
-        };
-        let view_data = UniformBufferDescriptor::from_single(view_data, BufferMutability::Mutable);
-        let main_camera_view_data = renderer.create_resource_blocking(view_data).expect("FAIL");
-        let shadow_data = light::build_shadow_data(&shader_compiler, renderer);
+        // TODO: There is a lot of duplication here when we want to upload constant data
+        // to a buffer with a blocking call. Can we do something like:
+        // BufferManager.create_uniform_buffer_from<T>(T t, BufferMutability)?
 
-        let light_data = uniform::LightingData {
-            lights: [uniform::PackedLight::default(); uniform::MAX_NUM_LIGHTS],
-            ambient: [0.0; 4],
-            num_lights: [0; 4],
+        let view_data = {
+            let view_data = uniform::ViewData {
+                view_proj: [0.0; 16],
+                view_pos: [0.0; 4],
+            };
+            let view_data =
+                UniformBufferDescriptor::from_single(view_data, BufferMutability::Mutable);
+            renderer.create_resource_blocking(view_data).expect("FAIL")
         };
-        let light_data =
-            UniformBufferDescriptor::from_single(light_data, BufferMutability::Mutable);
-        let light_buffer = renderer.create_resource_blocking(light_data).expect("FAIL");
 
-        // START HERE:
-        // 1. How many matrices, 16 or 17?
-        // 2. Double check that this is compatible with the matrices buffer from shadow data
-        // 3. Should this be dynamic? No, it can't, because how can we know the vertex outputs?
-        let shadow_matrices = uniform::ShadowMatrices {
-            matrices: [uniform::Mat4::default(); uniform::MAX_NUM_LIGHTS],
-            num_matrices: [0; 4],
+        let shadow_resources = light::setup_shadow_resources(&shader_compiler, renderer);
+
+        let lighting_data = {
+            let light_data = uniform::LightingData {
+                lights: [uniform::PackedLight::default(); uniform::MAX_NUM_LIGHTS],
+                ambient: [0.0; 4],
+                num_lights: [0; 4],
+            };
+            let light_data =
+                UniformBufferDescriptor::from_single(light_data, BufferMutability::Mutable);
+            renderer.create_resource_blocking(light_data).expect("FAIL")
         };
-        let shadow_matrices =
-            UniformBufferDescriptor::from_single(shadow_matrices, BufferMutability::Mutable);
-        let shadow_matrices_buffer = renderer
-            .create_resource_blocking(shadow_matrices)
-            .expect("Failed to create shadow matrix uniform buffer");
 
-        let texture_itr = shadow_data.spotlights.iter().map(|x| (x.texture, true));
+        let shadow_data = {
+            let shadow_data = uniform::ShadowData {
+                matrices: Default::default(),
+                count: [u32::MAX; 4],
+            };
+            let shadow_data =
+                UniformBufferDescriptor::from_single(shadow_data, BufferMutability::Mutable);
+            renderer
+                .create_resource_blocking(shadow_data)
+                .expect("FAIL")
+        };
+
+        let spotlight_textures = shadow_resources
+            .spotlights
+            .iter()
+            .map(|x| (x.texture, true));
         let engine_shader_resource_group = DescriptorSet::builder(renderer)
-            .add_buffer(
-                &main_camera_view_data,
-                uniform::ViewData::BINDING,
-                ShaderStage::VERTEX | ShaderStage::FRAGMENT,
-            )
-            .add_buffer(
-                &light_buffer,
-                uniform::LightingData::BINDING,
+            .add_buffer(&view_data, 0, ShaderStage::VERTEX | ShaderStage::FRAGMENT)
+            .add_buffer(&shadow_data, 1, ShaderStage::VERTEX)
+            .add_buffer(&lighting_data, 2, ShaderStage::FRAGMENT)
+            .add_texture(
+                &shadow_resources.directional.texture,
+                3,
                 ShaderStage::FRAGMENT,
+                true,
             )
-            .add_textures(texture_itr, 2, ShaderStage::FRAGMENT)
-            .add_buffer(&shadow_matrices_buffer, 3, ShaderStage::VERTEX)
+            .add_textures(spotlight_textures, 4, ShaderStage::FRAGMENT)
+            // TODO: Add pointlights here
             .build();
 
         let pbr_resources = {
@@ -608,11 +623,7 @@ pub fn setup_resources(world: &mut World, renderer: &mut Renderer) {
                 .create_gfx_pipeline(desc, &main_render_pass)
                 .expect("FAIL");
 
-            PhysicallyBasedUniformResources {
-                dummy_pipeline,
-                light_buffer,
-                shadow_matrices_buffer,
-            }
+            PBRPassResources { dummy_pipeline }
         };
 
         let unlit_resources = {
@@ -627,23 +638,27 @@ pub fn setup_resources(world: &mut World, renderer: &mut Renderer) {
                 .create_gfx_pipeline(desc, &main_render_pass)
                 .expect("Failed to create unlit dummy pipeline");
 
-            UnlitFrameUniformResources { dummy_pipeline }
+            UnlitPassResources { dummy_pipeline }
         };
 
-        FrameData {
+        FrameResources {
             main_render_pass,
-            main_camera_view_data,
+            engine_shader_resources: EngineShaderResources {
+                view_data,
+                lighting_data,
+                shadow_data,
+                desc_set: engine_shader_resource_group,
+            },
             pbr_resources,
             unlit_resources,
-            engine_shader_resource_group,
-            shadow: shadow_data,
+            shadow: shadow_resources,
         }
     };
 
     let debug_renderer = debug::DebugRenderer::new(
         &shader_compiler,
         &frame_data.main_render_pass,
-        &frame_data.main_camera_view_data,
+        &frame_data.engine_shader_resources.view_data,
         renderer,
     );
 
@@ -945,6 +960,7 @@ pub fn register_components(world: &mut World) {
     world.register::<mesh::Mesh>();
 
     world.register::<light::ShadowViewer>();
+    world.register::<light::ShadowMap>();
     world.register::<light::Light>();
 
     world.register::<debug::light::RenderLightVolume>();

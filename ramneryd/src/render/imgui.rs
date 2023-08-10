@@ -359,7 +359,9 @@ impl UIContext {
             .expect("Failed to build graphics pipeline descriptor");
 
         let pipeline = {
-            let render_pass = &world.read_resource::<super::FrameData>().main_render_pass;
+            let render_pass = &world
+                .read_resource::<super::FrameResources>()
+                .main_render_pass;
             renderer
                 .create_gfx_pipeline(pipeline_descriptor, render_pass)
                 .expect("Failed to create graphics pipeline")

@@ -125,18 +125,13 @@ impl DebugRenderer {
         view_data_buf: &BufferHandle<DeviceUniformBuffer>,
         renderer: &mut trekanten::Renderer,
     ) -> Self {
-        use super::uniform::UniformBlock as _;
         use trekanten::pipeline::{
             GraphicsPipelineDescriptor, PolygonMode, PrimitiveTopology, ShaderDescriptor,
             ShaderStage, TriangleCulling,
         };
 
         let shader_resource_group = DescriptorSet::builder(renderer)
-            .add_buffer(
-                view_data_buf,
-                super::uniform::ViewData::BINDING,
-                ShaderStage::VERTEX,
-            )
+            .add_buffer(view_data_buf, 0, ShaderStage::VERTEX)
             .build();
 
         let vertex_format = Vertex::format();

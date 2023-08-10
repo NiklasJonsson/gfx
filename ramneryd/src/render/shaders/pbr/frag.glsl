@@ -71,9 +71,10 @@ float normal_distribution_function(float cos_angle, float alpha_roughness) {
 
 #define DEBUG_SHADOW_MAP 0
 
-vec3 debug_color(uint shadow_idx) {
+vec3 debug_color(ShadowInfo info) {
 
 #if DEBUG_SHADOW_MAP
+    uint shadow_idx = info.coords_idx;
     vec3 coords = vs_out.shadow_coords[shadow_idx].xyz / vs_out.shadow_coords[shadow_idx].w;
 
     if (coords.z > 1.0 || coords.z < -1.0) {
@@ -185,7 +186,7 @@ void main() {
         float n_dot_h = clamp(n_dot_h_unclamped, 0.0, 1.0);
         float h_dot_l = clamp(dot(bisect_light_view, light_dir), 0.0, 1.0);
 
-        color += debug_color(light.shadow_idx);
+        color += debug_color(light.shadow_info);
 
         float shadow_factor = compute_shadow_factor(vs_out.shadow_coords, light, n_dot_l);
         if (shadow_factor == 0.0) {
