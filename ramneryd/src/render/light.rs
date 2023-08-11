@@ -520,11 +520,6 @@ pub fn shadow_pass(
         debug_shadow_bounds(world, shadow_bounds_ws);
     }
 
-    // START HERE:
-    // It seems like the matrix for the directional light is not written correctly.
-    // Test with only spotlight and then only directional and then both
-    // Then test in Sponza
-
     let lights = world.read_storage::<Light>();
     let transforms = world.read_storage::<Transform>();
     let entities = world.read_resource::<EntitiesRes>();

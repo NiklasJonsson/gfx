@@ -196,9 +196,13 @@ pub struct Init {
 
 impl Init {
     pub fn with_module(mut self, module: impl Module + 'static) -> Self {
-        self.modules.0.push(Box::new(module));
+        self.add_module(module);
 
         self
+    }
+
+    pub fn add_module(&mut self, module: impl Module + 'static) {
+        self.modules.0.push(Box::new(module));
     }
 
     pub fn new() -> Self {

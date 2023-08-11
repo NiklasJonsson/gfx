@@ -21,9 +21,18 @@ struct Args {
     spawn_plane: bool,
     #[clap(long)]
     spawn_cube: bool,
+    #[clap(long)]
+    sun_simulation: bool,
 }
 
-impl Module for Args {
+struct Spawner {
+    spawn_plane: bool,
+    spawn_cube: bool,
+    gltf_files: Vec<PathBuf>,
+    rsf_files: Vec<PathBuf>,
+}
+
+impl Module for Spawner {
     fn load(&mut self, loader: &mut ModuleLoader) {
         let world = &mut loader.world;
 
@@ -168,8 +177,19 @@ impl Module for SunSimulation {
 }
 
 fn main() {
-    ramneryd::Init::new()
-        .with_module(Args::parse())
-        //.with_module(SunSimulation)
-        .run();
+    let args = Args::parse();
+    let mut init = ramneryd::Init::new();
+
+    init.add_module(Spawner {
+        spawn_cube: args.spawn_cube,
+        spawn_plane: args.spawn_plane,
+        gltf_files: args.gltf_files,
+        rsf_files: args.rsf_files,
+    });
+
+    if args.sun_simulation {
+        init.add_module(SunSimulation)
+    }
+
+    init.run();
 }
