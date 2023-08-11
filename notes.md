@@ -80,27 +80,6 @@ render pass.
 5. Bind the shadow coords
 6. Draw all entities
 
-### Solution
-
-It now works like:
-
-1. `light::shadow_pass()`
-
-    1. Build a buffer of view projection matrices for shadow lights.
-    2. Write the buffer to the gpu with a blocking call
-    3. Encode depth-only render passes, one for each of the shadow lights, for all entities.
-    4. Each of the shadow lights get a `ShadowMap` associated with it that holds a handle to a sub-buffer of (1).
-       This is the view projection matric for a specific light. It also holds a `ShadowType` enum,
-       so that the main rendering pass can pass that info on to the fragment shader for texture
-       lookups.
-
-2. `light::write_lighting_data`
-
-    This function writes the `LightingData` uniform that needs to be written before the main lit render pass.
-
-3. Main render pass
-  This uses the LightingData and the ShadowData to run the PBR shaders.
-
 ### Debugging the lights not showing up
 
 The scene is dark because no light hits the objects, it seems like. Why is light not hitting the objects?
@@ -116,3 +95,37 @@ Solution: Well yes, they were very wrong.
 ### Shadow map for direction light is from incorrect angle
 
 The shadow map for directional light looks like the light is aligned with the flat plane that is the ground.
+
+Solution: Make sure to not forget the view matrix...
+
+### Refactoring is done
+
+It now works like:
+
+1. `light::shadow_pass()`
+
+    1. Build a buffer of view projection matrices for shadow lights.
+    2. Write the buffer to the gpu with a blocking call, this is the buffer that each separate shadow pass will bind one
+    instance of for the vertex shader view_proj.
+    3. Encode depth-only render passes, one for each of the shadow lights, for all entities.
+    4. Each of the shadow lights get a `ShadowMap` associated with it that holds indices into the shadow maps and into the
+    matrices for a specific shadow pass. It also holds a `ShadowType` enum,
+    so that the main rendering pass can pass that info on to the fragment shader for texture
+    lookups.
+
+2. `light::write_lighting_data`
+
+    This function writes the `LightingData` and `ShadowData` uniforms that needs to be written before the main lit
+    render pass.
+
+3. Main render pass
+  This uses the LightingData and the ShadowData to run the PBR shaders.
+
+## Shader recompilation and failure management
+
+Goals:
+
+1. Bad shaders shouldn't crash the app on startup.
+2. Would be nice with a CLI tool to compile all shaders in the repo
+3. Live reload of shaders with manual action
+4. Live reload of shaders with a file watcher
