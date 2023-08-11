@@ -14,9 +14,8 @@ use trekanten::{
 use crate::render::uniform::{LightingData, PackedLight, MAX_NUM_LIGHTS};
 use std::ops::Range;
 
-use super::debug::light;
 use super::imgui::UiFrame;
-use super::uniform::{self, ShadowData};
+use super::uniform;
 
 #[derive(
     Component, ramneryd_derive::Visitable, serde::Serialize, serde::Deserialize, Clone, Debug,
@@ -83,15 +82,16 @@ enum ShadowType {
 
 #[derive(Clone, Copy, Component)]
 pub struct ShadowMap {
-    view_proj: BufferHandle<DeviceUniformBuffer>,
-    shadow_type: ShadowType,
+    matrix_idx: u32,
     texture_idx: u32,
+    shadow_type: ShadowType,
 }
 
 #[derive(Clone, Copy)]
 struct ShadowRenderPassInfo {
     extent: Extent2D,
     render_target: Handle<RenderTarget>,
+    view_data_buf: BufferHandle<DeviceUniformBuffer>,
     view_data: Handle<DescriptorSet>,
     shadow_map: ShadowMap,
     light_entity: Entity,
@@ -397,6 +397,9 @@ pub fn get_shadow_pipeline_for(
     Ok(renderer.create_gfx_pipeline(descriptor, &frame_data.shadow.render_pass)?)
 }
 
+const NUM_SHADOW_MATRICES: u32 =
+    uniform::SPOTLIGHT_SHADOW_MAP_COUNT + uniform::DIRECTIONAL_SHADOW_MAP_COUNT;
+
 pub fn setup_shadow_resources(
     shader_compiler: &super::shader::ShaderCompiler,
     renderer: &mut Renderer,
@@ -410,9 +413,6 @@ pub fn setup_shadow_resources(
         width: 4096,
         height: 4096,
     };
-
-    const NUM_SHADOW_MATRICES: u32 =
-        uniform::SPOTLIGHT_SHADOW_MAP_COUNT + uniform::DIRECTIONAL_SHADOW_MAP_COUNT;
 
     let shadow_render_pass = create_shadow_render_pass(renderer);
     let view_data = [uniform::PosOnlyViewData {
@@ -503,7 +503,7 @@ fn transition_unused_map(
 pub fn shadow_pass(
     world: &World,
     frame: &mut trekanten::Frame,
-    shadow_data: &ShadowResources,
+    shadow_resources: &ShadowResources,
     mut cmd_buffer: CommandBuffer,
 ) -> (CommandBuffer, ShadowPassOutput) {
     const SHADOW_CLEAR_VALUES: [vk::ClearValue; 1] = [vk::ClearValue {
@@ -524,8 +524,13 @@ pub fn shadow_pass(
     let transforms = world.read_storage::<Transform>();
     let entities = world.read_resource::<EntitiesRes>();
 
-    let mut shadow_matrices = [super::uniform::Mat4::default(); MAX_NUM_LIGHTS];
-    let mut shadow_render_info: [Option<ShadowRenderPassInfo>; MAX_NUM_LIGHTS] =
+    // Note that we are using two buffers of shadow matrices:
+    // 1. The buffer that is used for the shadow passes as the view proj matrix. This is allocated upfront to the max number of shadowing lights.
+    // 2. The buffer in the output of this pass: This is the shadow passes that were actually run and that may be used later by the light pass.
+    // Each ShadowMap component has an index into 2.
+    // TODO: Can we simplify the above? E.g. by late creation and binding of desc set
+    let mut shadow_matrices = [super::uniform::Mat4::default(); MAX_NUM_LIGHTS as usize];
+    let mut shadow_render_info: [Option<ShadowRenderPassInfo>; MAX_NUM_LIGHTS as usize] =
         [None; MAX_NUM_LIGHTS];
 
     const MAX_NUM_SPOTLIGHTS: usize = if MAX_NUM_LIGHTS > 0 {
@@ -553,18 +558,20 @@ pub fn shadow_pass(
                 }
                 let proj = perspective_vk(angle * 2.0, 1.0, range.start, range.end);
 
-                let spot = &shadow_data.spotlights[n_spotlights];
+                let idx = n_spotlights;
                 n_spotlights += 1;
+                let spot = &shadow_resources.spotlights[idx];
                 (
                     proj,
                     ShadowRenderPassInfo {
                         extent: spot.extent,
                         render_target: spot.render_target,
                         view_data: spot.view_data_desc_set,
+                        view_data_buf: spot.view_data_buffer,
                         shadow_map: ShadowMap {
-                            view_proj: spot.view_data_buffer,
+                            matrix_idx: n_shadows as u32,
+                            texture_idx: idx as u32,
                             shadow_type: ShadowType::Spot,
-                            texture_idx: n_spotlights as u32,
                         },
                         light_entity: e,
                     },
@@ -577,7 +584,7 @@ pub fn shadow_pass(
                 }
                 found_directional_light = true;
 
-                let dir = &shadow_data.directional;
+                let dir = &shadow_resources.directional;
 
                 let light_bounds_ls = to_lightspace * shadow_bounds_ws;
                 let aabb = compute_directional_shadow_bounds(light_bounds_ls, dir.extent);
@@ -600,8 +607,9 @@ pub fn shadow_pass(
                         extent: dir.extent,
                         render_target: dir.render_target,
                         view_data: dir.view_data_desc_set,
+                        view_data_buf: dir.view_data_buffer,
                         shadow_map: ShadowMap {
-                            view_proj: dir.view_data_buffer,
+                            matrix_idx: n_shadows as u32,
                             shadow_type: ShadowType::Directional,
                             texture_idx: 0,
                         },
@@ -613,14 +621,16 @@ pub fn shadow_pass(
             Light::Ambient { .. } => continue,
         };
 
-        let mtx_idx = render_info.shadow_map.view_proj.idx();
-        shadow_matrices[mtx_idx as usize] = proj.into_col_array();
+        // The shadow_map stores the index into the output shadow matrices buffer
+        // but the shadow pass will use this shadow matrix instead so write the proj matrix there.
+        shadow_matrices[render_info.view_data_buf.idx() as usize] =
+            (proj * to_lightspace).into_col_array();
         shadow_render_info[n_shadows] = Some(render_info);
         n_shadows += 1;
     }
 
     frame
-        .update_uniform_blocking(&shadow_data.shadow_matrices_buf, &shadow_matrices)
+        .update_uniform_blocking(&shadow_resources.shadow_matrices_buf, &shadow_matrices)
         .expect("Failed to update matrices for shadow coords");
 
     // TODO: Push all unused into a vec to iterate over?
@@ -632,6 +642,11 @@ pub fn shadow_pass(
         n_spotlights + if found_directional_light { 1 } else { 0 }
     );
 
+    let mut output = ShadowPassOutput {
+        shadow_matrices: Default::default(),
+        count: n_shadows,
+    };
+
     // Render passes
     for i in 0..n_shadows {
         let ShadowRenderPassInfo {
@@ -640,12 +655,13 @@ pub fn shadow_pass(
             view_data,
             shadow_map,
             light_entity,
+            view_data_buf,
         } = shadow_render_info[i].unwrap();
 
         let mut shadow_rp = frame
             .begin_render_pass(
                 cmd_buffer,
-                &shadow_data.render_pass,
+                &shadow_resources.render_pass,
                 &render_target,
                 extent,
                 &SHADOW_CLEAR_VALUES,
@@ -653,31 +669,26 @@ pub fn shadow_pass(
             .expect("Failed to shadow begin render pass");
 
         shadow_rp
-            .bind_graphics_pipeline(&shadow_data.dummy_pipeline)
-            .bind_shader_resource_group(0u32, &view_data, &shadow_data.dummy_pipeline);
+            .bind_graphics_pipeline(&shadow_resources.dummy_pipeline)
+            .bind_shader_resource_group(0u32, &view_data, &shadow_resources.dummy_pipeline);
         super::draw_entities(world, &mut shadow_rp, super::DrawMode::ShadowsOnly);
         cmd_buffer = shadow_rp.end().expect("Failed to end shadow render pass");
 
+        output.shadow_matrices[i] = shadow_matrices[view_data_buf.idx() as usize];
         shadow_maps
             .insert(light_entity, shadow_map)
             .expect("Failed to add shadow map for light entity");
     }
 
-    for spotlight in shadow_data.spotlights.iter().skip(n_spotlights) {
+    for spotlight in shadow_resources.spotlights.iter().skip(n_spotlights) {
         transition_unused_map(&mut cmd_buffer, frame, spotlight.texture);
     }
 
     if !found_directional_light {
-        transition_unused_map(&mut cmd_buffer, frame, shadow_data.directional.texture);
+        transition_unused_map(&mut cmd_buffer, frame, shadow_resources.directional.texture);
     }
 
-    (
-        cmd_buffer,
-        ShadowPassOutput {
-            shadow_matrices,
-            count: n_shadows,
-        },
-    )
+    (cmd_buffer, output)
 }
 
 pub fn write_lighting_data(
@@ -745,12 +756,12 @@ pub fn write_lighting_data(
 
         packed_light_count += 1;
         if let Some(ShadowMap {
-            view_proj,
+            matrix_idx,
             shadow_type,
             texture_idx,
         }) = shadow_map
         {
-            light.shadow_info = [*shadow_type as u32, view_proj.idx(), *texture_idx, u32::MAX];
+            light.shadow_info = [*shadow_type as u32, *matrix_idx, *texture_idx, u32::MAX];
         }
     }
     lighting_data.num_lights = [packed_light_count; 4];

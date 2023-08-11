@@ -104,3 +104,15 @@ It now works like:
 ### Debugging the lights not showing up
 
 The scene is dark because no light hits the objects, it seems like. Why is light not hitting the objects?
+
+Solution: Make sure to write LightingData::n_lights.
+
+### Debugging the shadow flickering for spot light
+
+It seems like the matrix indices are wrong.
+
+Solution: Well yes, they were very wrong.
+
+### Shadow map for direction light is from incorrect angle
+
+The shadow map for directional light looks like the light is aligned with the flat plane that is the ground.
