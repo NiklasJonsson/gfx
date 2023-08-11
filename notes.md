@@ -80,7 +80,7 @@ render pass.
 5. Bind the shadow coords
 6. Draw all entities
 
-## Solution
+### Solution
 
 It now works like:
 
@@ -99,4 +99,8 @@ It now works like:
     This function writes the `LightingData` uniform that needs to be written before the main lit render pass.
 
 3. Main render pass
-  This uses the LightingData and the
+  This uses the LightingData and the ShadowData to run the PBR shaders.
+
+### Debugging the lights not showing up
+
+The scene is dark because no light hits the objects, it seems like. Why is light not hitting the objects?

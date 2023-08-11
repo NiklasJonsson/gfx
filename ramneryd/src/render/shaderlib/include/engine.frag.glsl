@@ -5,10 +5,10 @@ layout(set = 0, binding = 0) uniform ViewData {
     vec4 view_pos;
 } view_data;
 
-#define SHADOW_TYPE_DIRECTIONAL (0)
-#define SHADOW_TYPE_SPOT (1)
-#define SHADOW_TYPE_POINT (2)
-#define SHADOW_TYPE_INVALID (0xFFFFFFFF)
+#define SHADOW_TYPE_INVALID (0)
+#define SHADOW_TYPE_DIRECTIONAL (1)
+#define SHADOW_TYPE_SPOT (2)
+#define SHADOW_TYPE_POINT (3)
 
 #define MAX_NUM_LIGHTS (16)
 struct PackedLight {

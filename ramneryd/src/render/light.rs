@@ -14,6 +14,7 @@ use trekanten::{
 use crate::render::uniform::{LightingData, PackedLight, MAX_NUM_LIGHTS};
 use std::ops::Range;
 
+use super::debug::light;
 use super::imgui::UiFrame;
 use super::uniform::{self, ShadowData};
 
@@ -78,7 +79,6 @@ enum ShadowType {
     Directional = uniform::SHADOW_TYPE_DIRECTIONAL as isize,
     Point = uniform::SHADOW_TYPE_POINT as isize,
     Spot = uniform::SHADOW_TYPE_SPOT as isize,
-    Invalid = uniform::SHADOW_TYPE_INVALID as isize,
 }
 
 #[derive(Clone, Copy, Component)]
@@ -753,6 +753,7 @@ pub fn write_lighting_data(
             light.shadow_info = [*shadow_type as u32, view_proj.idx(), *texture_idx, u32::MAX];
         }
     }
+    lighting_data.num_lights = [packed_light_count; 4];
 
     frame
         .update_uniform_blocking(

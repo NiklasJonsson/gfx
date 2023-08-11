@@ -188,7 +188,7 @@ fn main() {
     });
 
     if args.sun_simulation {
-        init.add_module(SunSimulation)
+        init.add_module(SunSimulation);
     }
 
     init.run();

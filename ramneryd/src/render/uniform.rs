@@ -16,10 +16,9 @@ pub struct UnlitUniformData {
     pub color: [f32; 4],
 }
 
-pub const SHADOW_TYPE_DIRECTIONAL: u32 = 0;
-pub const SHADOW_TYPE_SPOT: u32 = 1;
-pub const SHADOW_TYPE_POINT: u32 = 2;
-pub const SHADOW_TYPE_INVALID: u32 = 0xFFFFFFFF;
+pub const SHADOW_TYPE_DIRECTIONAL: u32 = 1;
+pub const SHADOW_TYPE_SPOT: u32 = 2;
+pub const SHADOW_TYPE_POINT: u32 = 3;
 
 pub const SPOTLIGHT_SHADOW_MAP_COUNT: u32 = 16;
 pub const DIRECTIONAL_SHADOW_MAP_COUNT: u32 = 1;
@@ -39,7 +38,7 @@ impl Default for PackedLight {
             pos: [0.0; 4],
             dir_cutoff: [0.0; 4],
             color_range: [0.0; 4],
-            shadow_info: [u32::MAX; 4],
+            shadow_info: [0; 4],
         }
     }
 }
