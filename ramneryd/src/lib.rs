@@ -23,6 +23,7 @@ mod ui;
 mod visit;
 
 pub use render::debug::DebugRenderer;
+pub use render::shader::ShaderCompiler;
 pub use time::Time;
 
 use ecs::prelude::*;

@@ -524,149 +524,147 @@ pub fn draw_frame(world: &mut World, ui: &mut imgui::UIContext, renderer: &mut R
         .expect("Failed to submit frame");
 }
 
-pub fn setup_resources(world: &mut World, renderer: &mut Renderer) {
+pub fn create_frame_resources(
+    renderer: &mut Renderer,
+    shader_compiler: &ShaderCompiler,
+) -> FrameResources {
     use trekanten::pipeline::ShaderStage;
 
+    log::trace!("Creating frame gpu resources");
+
+    let main_render_pass = renderer
+        .presentation_render_pass(8)
+        .expect("main render pass creation failed");
+
+    // TODO: There is a lot of duplication here when we want to upload constant data
+    // to a buffer with a blocking call. Can we do something like:
+    // BufferManager.create_uniform_buffer_from<T>(T t, BufferMutability)?
+
+    let view_data = {
+        let view_data = uniform::ViewData {
+            view_proj: [0.0; 16],
+            view_pos: [0.0; 4],
+        };
+        let view_data = UniformBufferDescriptor::from_single(view_data, BufferMutability::Mutable);
+        renderer.create_resource_blocking(view_data).expect("FAIL")
+    };
+
+    let shadow_resources = light::setup_shadow_resources(shader_compiler, renderer);
+
+    let lighting_data = {
+        let light_data = uniform::LightingData {
+            lights: [uniform::PackedLight::default(); uniform::MAX_NUM_LIGHTS],
+            ambient: [0.0; 4],
+            num_lights: [0; 4],
+        };
+        let light_data =
+            UniformBufferDescriptor::from_single(light_data, BufferMutability::Mutable);
+        renderer.create_resource_blocking(light_data).expect("FAIL")
+    };
+
+    let shadow_data = {
+        let shadow_data = uniform::ShadowData {
+            matrices: Default::default(),
+            count: [u32::MAX; 4],
+        };
+        let shadow_data =
+            UniformBufferDescriptor::from_single(shadow_data, BufferMutability::Mutable);
+        renderer
+            .create_resource_blocking(shadow_data)
+            .expect("FAIL")
+    };
+
+    let spotlight_textures = shadow_resources
+        .spotlights
+        .iter()
+        .map(|x| (x.texture, true));
+    let engine_shader_resource_group = DescriptorSet::builder(renderer)
+        .add_buffer(&view_data, 0, ShaderStage::VERTEX | ShaderStage::FRAGMENT)
+        .add_buffer(&shadow_data, 1, ShaderStage::VERTEX)
+        .add_buffer(&lighting_data, 2, ShaderStage::FRAGMENT)
+        .add_texture(
+            &shadow_resources.directional.texture,
+            3,
+            ShaderStage::FRAGMENT,
+            true,
+        )
+        .add_textures(spotlight_textures, 4, ShaderStage::FRAGMENT)
+        // TODO: Add pointlights here
+        .build();
+
+    let pbr_resources = {
+        // TODO: Share this code with get_pipeline_for?
+        let vertex_format = VertexFormat::from([util::Format::FLOAT3; 2]);
+        let (vert, frag) = shader::pbr_gltf::compile_default(&shader_compiler)
+            .expect("Failed to compile default PBR shaders");
+        let vert = ShaderDescriptor {
+            debug_name: Some("dummy-pbr-vert".to_owned()),
+            spirv_code: vert.data(),
+        };
+        let frag = ShaderDescriptor {
+            debug_name: Some("dummy-pbr-frag".to_owned()),
+            spirv_code: frag.data(),
+        };
+
+        let desc = GraphicsPipelineDescriptor::builder()
+            .vert(vert)
+            .frag(frag)
+            .vertex_format(vertex_format)
+            .build()
+            .expect("Failed to build graphics pipeline descriptor");
+        let dummy_pipeline = renderer
+            .create_gfx_pipeline(desc, &main_render_pass)
+            .expect("FAIL");
+
+        PBRPassResources { dummy_pipeline }
+    };
+
+    let unlit_resources = {
+        let vertex_format = VertexFormat::from(util::Format::FLOAT3);
+        let desc = unlit_pipeline_desc(
+            &shader_compiler,
+            vertex_format,
+            trekanten::pipeline::PolygonMode::Line,
+        )
+        .expect("Failed to create descriptor for unlit dummy pipeline");
+        let dummy_pipeline = renderer
+            .create_gfx_pipeline(desc, &main_render_pass)
+            .expect("Failed to create unlit dummy pipeline");
+
+        UnlitPassResources { dummy_pipeline }
+    };
+
+    FrameResources {
+        main_render_pass,
+        engine_shader_resources: EngineShaderResources {
+            view_data,
+            lighting_data,
+            shadow_data,
+            desc_set: engine_shader_resource_group,
+        },
+        pbr_resources,
+        unlit_resources,
+        shadow: shadow_resources,
+    }
+}
+
+pub fn setup_resources(world: &mut World, renderer: &mut Renderer) {
     let shader_compiler = shader::ShaderCompiler::new().expect("Failed to create shader compiler");
 
-    let frame_data = {
-        log::trace!("Creating frame gpu resources");
-
-        let main_render_pass = renderer
-            .presentation_render_pass(8)
-            .expect("main render pass creation failed");
-
-        // TODO: There is a lot of duplication here when we want to upload constant data
-        // to a buffer with a blocking call. Can we do something like:
-        // BufferManager.create_uniform_buffer_from<T>(T t, BufferMutability)?
-
-        let view_data = {
-            let view_data = uniform::ViewData {
-                view_proj: [0.0; 16],
-                view_pos: [0.0; 4],
-            };
-            let view_data =
-                UniformBufferDescriptor::from_single(view_data, BufferMutability::Mutable);
-            renderer.create_resource_blocking(view_data).expect("FAIL")
-        };
-
-        let shadow_resources = light::setup_shadow_resources(&shader_compiler, renderer);
-
-        let lighting_data = {
-            let light_data = uniform::LightingData {
-                lights: [uniform::PackedLight::default(); uniform::MAX_NUM_LIGHTS],
-                ambient: [0.0; 4],
-                num_lights: [0; 4],
-            };
-            let light_data =
-                UniformBufferDescriptor::from_single(light_data, BufferMutability::Mutable);
-            renderer.create_resource_blocking(light_data).expect("FAIL")
-        };
-
-        let shadow_data = {
-            let shadow_data = uniform::ShadowData {
-                matrices: Default::default(),
-                count: [u32::MAX; 4],
-            };
-            let shadow_data =
-                UniformBufferDescriptor::from_single(shadow_data, BufferMutability::Mutable);
-            renderer
-                .create_resource_blocking(shadow_data)
-                .expect("FAIL")
-        };
-
-        let spotlight_textures = shadow_resources
-            .spotlights
-            .iter()
-            .map(|x| (x.texture, true));
-        let engine_shader_resource_group = DescriptorSet::builder(renderer)
-            .add_buffer(&view_data, 0, ShaderStage::VERTEX | ShaderStage::FRAGMENT)
-            .add_buffer(&shadow_data, 1, ShaderStage::VERTEX)
-            .add_buffer(&lighting_data, 2, ShaderStage::FRAGMENT)
-            .add_texture(
-                &shadow_resources.directional.texture,
-                3,
-                ShaderStage::FRAGMENT,
-                true,
-            )
-            .add_textures(spotlight_textures, 4, ShaderStage::FRAGMENT)
-            // TODO: Add pointlights here
-            .build();
-
-        let pbr_resources = {
-            let vertex_format = VertexFormat::from([util::Format::FLOAT3; 2]);
-            let result = shader::pbr_gltf::compile_default(&shader_compiler);
-            let (vert, frag) = match result {
-                Err(e) => {
-                    log::error!("{}", e);
-                    return;
-                }
-                Ok(r) => r,
-            };
-
-            let vert = ShaderDescriptor {
-                debug_name: Some("dummy-pbr-vert".to_owned()),
-                spirv_code: vert.data(),
-            };
-            let frag = ShaderDescriptor {
-                debug_name: Some("dummy-pbr-frag".to_owned()),
-                spirv_code: frag.data(),
-            };
-
-            let desc = GraphicsPipelineDescriptor::builder()
-                .vert(vert)
-                .frag(frag)
-                .vertex_format(vertex_format)
-                .build()
-                .expect("Failed to build graphics pipeline descriptor");
-            let dummy_pipeline = renderer
-                .create_gfx_pipeline(desc, &main_render_pass)
-                .expect("FAIL");
-
-            PBRPassResources { dummy_pipeline }
-        };
-
-        let unlit_resources = {
-            let vertex_format = VertexFormat::from(util::Format::FLOAT3);
-            let desc = unlit_pipeline_desc(
-                &shader_compiler,
-                vertex_format,
-                trekanten::pipeline::PolygonMode::Line,
-            )
-            .expect("Failed to create descriptor for unlit dummy pipeline");
-            let dummy_pipeline = renderer
-                .create_gfx_pipeline(desc, &main_render_pass)
-                .expect("Failed to create unlit dummy pipeline");
-
-            UnlitPassResources { dummy_pipeline }
-        };
-
-        FrameResources {
-            main_render_pass,
-            engine_shader_resources: EngineShaderResources {
-                view_data,
-                lighting_data,
-                shadow_data,
-                desc_set: engine_shader_resource_group,
-            },
-            pbr_resources,
-            unlit_resources,
-            shadow: shadow_resources,
-        }
-    };
+    let frame_resources = create_frame_resources(renderer, &shader_compiler);
 
     let debug_renderer = debug::DebugRenderer::new(
         &shader_compiler,
-        &frame_data.main_render_pass,
-        &frame_data.engine_shader_resources.view_data,
+        &frame_resources.main_render_pass,
+        &frame_resources.engine_shader_resources.view_data,
         renderer,
     );
 
+    world.insert(shader_compiler);
     world.insert(debug_renderer);
     world.insert(debug::OneShotDebugUI::new());
     world.insert(renderer.loader().unwrap());
-    world.insert(frame_data);
-    world.insert(shader_compiler);
+    world.insert(frame_resources);
     log::trace!("Done");
 }
 
@@ -682,6 +680,8 @@ impl GpuUpload {
 }
 
 use resurs::Async;
+
+use self::shader::ShaderCompiler;
 fn map_pending_buffer_handle<BT>(
     h: &mut Pending<BufferHandle<Async<BT>>, BufferHandle<BT>>,
     old: BufferHandle<Async<BT>>,

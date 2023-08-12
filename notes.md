@@ -129,3 +129,8 @@ Goals:
 2. Would be nice with a CLI tool to compile all shaders in the repo
 3. Live reload of shaders with manual action
 4. Live reload of shaders with a file watcher
+
+For 1. the tricky thing for this is that the dummy pipelines are part of the render initialization and there is not a good
+way (currently) to handle that error graceful and still continue the rendering loop.
+
+For 2., added `check-shaders`.

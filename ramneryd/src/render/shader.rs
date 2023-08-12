@@ -257,9 +257,25 @@ impl ShaderCompiler {
             ShaderType::Vertex => shaderc::ShaderKind::Vertex,
         };
 
-        let path = PathBuf::from(SHADER_PATH).join(rel_path);
+        let search_locations = [
+            std::env::current_dir().unwrap_or(PathBuf::from(SHADER_PATH)),
+            PathBuf::from(SHADER_PATH),
+        ];
 
-        let source = std::fs::read_to_string(&path)?;
+        let mut shader_path = None;
+        for loc in search_locations {
+            let path = loc.join(rel_path);
+            if path.is_file() {
+                shader_path = Some(path);
+                break;
+            }
+        }
+        let shader_path = shader_path.ok_or(std::io::Error::new(
+            std::io::ErrorKind::NotFound,
+            format!("Failed to find shader: {p}", p = rel_path.display()),
+        ))?;
+
+        let source = std::fs::read_to_string(&shader_path)?;
 
         let binary_result = self
             .compiler
@@ -277,7 +293,7 @@ impl ShaderCompiler {
             Err(e) => Err(CompilerError::ShaderC {
                 source: e,
                 rel_path: rel_path.display().to_string(),
-                full_path: path,
+                full_path: shader_path,
             }),
             Ok(bin) => Ok(SpvBinary {
                 _ty: ty,

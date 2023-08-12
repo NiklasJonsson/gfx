@@ -1,5 +1,13 @@
 [workspace]
-members = ["trekanten", "trekanten-derive", "resurs", "ramneryd-derive", "ramneryd", "dbg"]
+members = [
+    "trekanten",
+    "trekanten-derive",
+    "resurs",
+    "ramneryd-derive",
+    "ramneryd",
+    "dbg",
+    "check-shaders",
+]
 
 [profile.release]
 debug = true
