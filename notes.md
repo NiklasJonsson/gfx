@@ -128,9 +128,29 @@ Goals:
 1. Bad shaders shouldn't crash the app on startup.
 2. Would be nice with a CLI tool to compile all shaders in the repo
 3. Live reload of shaders with manual action
-4. Live reload of shaders with a file watcher
 
-For 1. the tricky thing for this is that the dummy pipelines are part of the render initialization and there is not a good
-way (currently) to handle that error graceful and still continue the rendering loop.
+### The Work
 
-For 2., added `check-shaders`.
+For 1 the tricky thing for this is that the dummy pipelines are part of the render initialization and there is not a good
+way (currently) to handle them failing to compile graceful and still continue the rendering loop.
+
+For 2, added `check-shaders` that runs through all shaders and compiles them, emitting errors as it goes.
+
+For 3, The current (non-working) solution is to tag all entities that should have its material recomputed and effectively
+redo the entire creation. Setting aside the buggy behaviour, this might miss shaders that are not attached to entities,
+e.g. the shadow pass shaders, which won't be recompiled. A future solution might look like:
+
+1. The UI (keybind or button) generates recompile event. It could also be coming from a file watcher.
+2. This is intercepted somewhere were we have access to the renderer and we recreate all the pipelines with shaders.
+
+This means we have to be able to recreate shaders easily.
+
+* We'd need to register all `GraphicsPipelineDescriptors` that are used.
+* We might need to `WaitDeviceIdle` before replacing all the pipelines, to ensure none are in use.
+* We'd go through all the shaders (pipelines descriptors?) that are known, get the matching pipeline idx in the
+resources storage and recreate it. On subsequent uses, all rendering would use the new pipeline.
+* Currently, the pipeline descriptors only accept raw spirv so we'd need to associate the shader paths with the
+pipeline descriptor.
+* This would not support shaders that are not loaded from file unless we take a function that provides the source? This
+might be nice anyhow to make sure it is agnostic.
+* The recompilation system could live at the start of `draw_frame` as a manual call.
