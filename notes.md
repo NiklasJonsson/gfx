@@ -1,5 +1,9 @@
 # Notes
 
+A collection of notes collected during debugging, design of features etc. They are mainly useful to me to dump my
+thoughts so that if I switch computers or take a longer break from this, I can get back on track faster. The notes
+at the bottom are the most recent.
+
 ## Debugging the blocky directional shadows
 
 **Issue**: The directional shadow maps produce blocky shadows for small objects. This is especially visible when the
@@ -129,7 +133,7 @@ Goals:
 2. Would be nice with a CLI tool to compile all shaders in the repo
 3. Live reload of shaders with manual action
 
-### The Work
+### Findings
 
 For 1 the tricky thing for this is that the dummy pipelines are part of the render initialization and there is not a good
 way (currently) to handle them failing to compile graceful and still continue the rendering loop.
@@ -154,3 +158,39 @@ pipeline descriptor.
 * This would not support shaders that are not loaded from file unless we take a function that provides the source? This
 might be nice anyhow to make sure it is agnostic.
 * The recompilation system could live at the start of `draw_frame` as a manual call.
+
+Even tough the above system would be better, it is less work to get the current reload system working.
+
+## Material reload feature not working
+
+Problem: Neither using the 'R' key or clicking the button in the UI causes shaders to be recompiled and used for the rendering
+
+### Findings
+
+Turns out it is the feature that packages the shaders with the source code application that causes the issue. The
+renderer doesn't load the shaders from the source directory but from the build directory, which means the changes are
+not picked up unless there is a rebuild.
+
+To give some context, this was added because using the `ramneryd` lib from a different location would mean the shaders
+weren't found, as the loading was done relative to the CWD of the executable. This was again redone recently to support
+the `check-shaders` executable so that it can load shaders relaive to the CWD of the executable if it is not found.
+
+So, some goals for reworking this:
+
+1. An executable using `ramneryd` should always be able to execute the builtin shaders so they need to be packaged somehow.
+2. This packaging should not interfere with the reload feature, i.e. the latter should still work.
+3. Executables using `ramneryd` should be able to (re-)load custom shaders.
+
+Some ideas:
+
+* Reloading shaders passes a parameter that forbids the use of the build-dir shaders. Instead, it would look in the CWD
+(or some user-defined path) for the shaders.
+* Remove build-dir shaders. Not sure if it is possible to package this shaders in any other way. With that said, the
+current packaging feature would only work in the context of cargo but not generic packaging of an executable. For
+example, to introduce a new executable, "demo" we'd need to copy the shaders for the ramneryd lib as well. Even if we
+added the shaders into the executable code with `include_bytes` we'd still end up having to have a "don't use builtin"
+mode when wanting to iterate on the core shaders.
+
+Initial design: `ShaderCompiler::compile` now takes a `ShaderLocation` instead of a path, which means we can control
+the lookup dirs from the caller. The idea is that the reload feature is only expected to work when working with the
+ramneryd source code close. That what, we skip using the builtins and use absolute paths.

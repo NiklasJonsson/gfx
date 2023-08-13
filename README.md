@@ -47,7 +47,11 @@ Descriptor set 1 is material-specific.
 
 ### trekanten
 
-Vulkan wrapper
+Initially, the idea was for this to be (yet another) low-level graphics lib wrapping vulkan but with convenient API. I
+also had the idea that I might support WPGU as a separate backend to run in the browser. As time has passed, I've realized
+that I mostly want to learn how rendering works rather than abstracting backends so vulkan has leaked a bit more and more
+out of this lib, which I think is fine. It might move towards becoming less of a wrapper and more of a collection of utils
+when working with vulkan.
 
 ### Useful links
 

@@ -227,6 +227,88 @@ fn include_callback(
     ))
 }
 
+fn find_shader(path: &Path) -> Result<PathBuf, std::io::Error> {
+    let not_found_err = || {
+        Err(std::io::Error::new(
+            std::io::ErrorKind::NotFound,
+            format!("Failed to find shader at {p}", p = path.display()),
+        ))
+    };
+
+    if path.is_absolute() {
+        if !path.is_file() {
+            return not_found_err();
+        } else {
+            return Ok(path.to_path_buf());
+        }
+    }
+
+    let search_locations = [
+        std::env::current_dir().unwrap_or(PathBuf::from(SHADER_PATH)),
+        PathBuf::from(SHADER_PATH),
+    ];
+
+    for loc in search_locations {
+        let abspath = loc.join(path);
+        if abspath.is_file() {
+            return Ok(abspath);
+        }
+    }
+
+    not_found_err()
+}
+
+pub enum ShaderLocation {
+    /// Compile one of the builtin shaders. The path here is relative to `ramneryd/src`.
+    Builtin(PathBuf),
+    /// Compile a shader at an absolute path.
+    Absolute(PathBuf),
+    /// Compile a shader at a path relative to current working directory when calling `compile`.
+    CwdRelative(PathBuf),
+}
+
+impl ShaderLocation {
+    pub fn builtin<P>(p: P) -> Self
+    where
+        P: Into<PathBuf>,
+    {
+        Self::Builtin(p.into())
+    }
+
+    pub fn abs<P>(p: P) -> Self
+    where
+        P: Into<PathBuf>,
+    {
+        let pathbuf: PathBuf = p.into();
+        assert!(
+            pathbuf.is_absolute(),
+            "Tried to create a shader location referring to an absolute path but {p} is not absolute",
+            p = pathbuf.display()
+        );
+        Self::Absolute(pathbuf)
+    }
+}
+
+impl std::fmt::Display for ShaderLocation {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Absolute(p) => write!(f, "{p}", p = p.display()),
+            Self::Builtin(p) => write!(f, "<builtin>/{p}", p = p.display()),
+            Self::CwdRelative(p) => write!(f, "$CWD/{p}", p = p.display()),
+        }
+    }
+}
+
+fn read_shader(loc: &ShaderLocation) -> Result<String, std::io::Error> {
+    let path = match loc {
+        ShaderLocation::Absolute(path) => path,
+        ShaderLocation::Builtin(path) => &PathBuf::from(SHADER_PATH).join(path),
+        ShaderLocation::CwdRelative(path) => &std::env::current_dir()?.join(path),
+    };
+
+    std::fs::read_to_string(path)
+}
+
 impl ShaderCompiler {
     pub fn new() -> Result<Self, CompilerError> {
         let compiler = Arc::new(Mutex::new(
@@ -237,11 +319,10 @@ impl ShaderCompiler {
 
     pub fn compile<P: AsRef<Path>>(
         &self,
+        shader: ShaderLocation,
         defines: &Defines,
-        rel_path: P,
         ty: ShaderType,
     ) -> Result<SpvBinary, CompilerError> {
-        let rel_path = rel_path.as_ref();
         let mut options =
             shaderc::CompileOptions::new().expect("Failed to create compiler options");
         for d in defines.iter() {
@@ -250,32 +331,16 @@ impl ShaderCompiler {
 
         options.set_include_callback(include_callback);
 
-        log_compilation(defines, rel_path, ty);
+        log_compilation(defines, path, ty);
 
         let stage = match ty {
             ShaderType::Fragment => shaderc::ShaderKind::Fragment,
             ShaderType::Vertex => shaderc::ShaderKind::Vertex,
         };
 
-        let search_locations = [
-            std::env::current_dir().unwrap_or(PathBuf::from(SHADER_PATH)),
-            PathBuf::from(SHADER_PATH),
-        ];
+        let abspath = find_shader(path)?;
 
-        let mut shader_path = None;
-        for loc in search_locations {
-            let path = loc.join(rel_path);
-            if path.is_file() {
-                shader_path = Some(path);
-                break;
-            }
-        }
-        let shader_path = shader_path.ok_or(std::io::Error::new(
-            std::io::ErrorKind::NotFound,
-            format!("Failed to find shader: {p}", p = rel_path.display()),
-        ))?;
-
-        let source = std::fs::read_to_string(&shader_path)?;
+        let source = std::fs::read_to_string(&abspath)?;
 
         let binary_result = self
             .compiler
@@ -284,7 +349,7 @@ impl ShaderCompiler {
             .compile_into_spirv(
                 &source,
                 stage,
-                rel_path.to_str().expect("Bad shader path"),
+                path.to_str().expect("Bad shader path"),
                 "main",
                 Some(&options),
             );
@@ -292,8 +357,8 @@ impl ShaderCompiler {
         match binary_result {
             Err(e) => Err(CompilerError::ShaderC {
                 source: e,
-                rel_path: rel_path.display().to_string(),
-                full_path: shader_path,
+                rel_path: path.display().to_string(),
+                full_path: abspath,
             }),
             Ok(bin) => Ok(SpvBinary {
                 _ty: ty,
