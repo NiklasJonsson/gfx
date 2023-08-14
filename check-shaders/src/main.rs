@@ -1,4 +1,4 @@
-use ramneryd::render::shader::{Defines, ShaderType};
+use ramneryd::render::shader::{Defines, ShaderLocation, ShaderType};
 
 use std::fs::DirEntry;
 use std::path::PathBuf;
@@ -46,7 +46,8 @@ fn main() {
     for (idx, (shader, ty)) in shaders.into_iter().enumerate() {
         let display = shader.display();
         println!("[{i}/{count}] Checking {display}", i = idx + 1);
-        let result = shader_compiler.compile(&Defines::empty(), &shader, ty);
+        let loc = ShaderLocation::abs(&shader);
+        let result = shader_compiler.compile(&loc, &Defines::empty(), ty);
 
         match result {
             Err(e) => {

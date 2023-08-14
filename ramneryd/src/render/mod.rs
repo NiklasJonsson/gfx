@@ -3,6 +3,7 @@ use thiserror::Error;
 use crate::ecs::prelude::*;
 
 use trekanten::buffer::{BufferMutability, DeviceUniformBuffer, UniformBufferDescriptor};
+use trekanten::descriptor::DescriptorSet;
 use trekanten::pipeline::{
     GraphicsPipeline, GraphicsPipelineDescriptor, PipelineError, ShaderDescriptor,
 };
@@ -13,10 +14,6 @@ use trekanten::vertex::VertexFormat;
 use trekanten::BufferHandle;
 use trekanten::RenderPassEncoder;
 use trekanten::Renderer;
-use trekanten::{
-    descriptor::DescriptorSet, texture::SamplerDescriptor, texture::TextureDescriptor,
-    texture::TextureUsage,
-};
 
 pub mod debug;
 pub mod geometry;
@@ -164,13 +161,13 @@ fn unlit_pipeline_desc(
     polygon_mode: trekanten::pipeline::PolygonMode,
 ) -> Result<GraphicsPipelineDescriptor, MaterialError> {
     let vert = shader_compiler.compile(
+        &shader::ShaderLocation::builtin("render/shaders/unlit/vert.glsl"),
         &shader::Defines::empty(),
-        "render/shaders/unlit/vert.glsl",
         shader::ShaderType::Vertex,
     )?;
     let frag = shader_compiler.compile(
+        &shader::ShaderLocation::builtin("render/shaders/unlit/frag.glsl"),
         &shader::Defines::empty(),
-        "render/shaders/unlit/frag.glsl",
         shader::ShaderType::Fragment,
     )?;
 
@@ -196,6 +193,8 @@ fn get_pipeline_for(
     world: &World,
     mesh: &Mesh,
     mat: &material::GpuMaterial,
+    // TODO: Clean this up
+    use_builtin: bool,
 ) -> Result<Handle<GraphicsPipeline>, MaterialError> {
     let vertex_format = mesh.cpu_vertex_buffer.format().clone();
 
@@ -222,7 +221,7 @@ fn get_pipeline_for(
                 has_normal_map: has_nm,
             };
 
-            let (vert, frag) = shader::pbr_gltf::compile(&*shader_compiler, &def)?;
+            let (vert, frag) = shader::pbr_gltf::compile(&*shader_compiler, &def, use_builtin)?;
 
             let vert = ShaderDescriptor {
                 debug_name: Some("pbr-vert".to_owned()),
@@ -259,7 +258,7 @@ fn create_renderable(
     log::trace!("Creating renderable: {:?}", material);
     let material_descriptor_set = create_material_descriptor_set(renderer, material);
     let gfx_pipeline =
-        get_pipeline_for(renderer, world, mesh, material).expect("Failed to get pipeline");
+        get_pipeline_for(renderer, world, mesh, material, false).expect("Failed to get pipeline");
     let shadow_pipeline = if let material::GpuMaterial::PBR { .. } = material {
         Some(
             light::get_shadow_pipeline_for(renderer, world, mesh)
@@ -294,7 +293,7 @@ fn create_renderables(renderer: &mut Renderer, world: &mut World) {
                 if should_reload.contains(ent) {
                     log::trace!("Reloading shader for {:?}", ent);
                     // TODO: Destroy the previous pipeline
-                    match get_pipeline_for(renderer, world, mesh, mat) {
+                    match get_pipeline_for(renderer, world, mesh, mat, true) {
                         Ok(pipeline) => entry.get_mut().gfx_pipeline = pipeline,
                         Err(e) => log::error!("Failed to compile pipeline: {}", e),
                     }

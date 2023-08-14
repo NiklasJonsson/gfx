@@ -15,6 +15,7 @@ use crate::render::uniform::{LightingData, PackedLight, MAX_NUM_LIGHTS};
 use std::ops::Range;
 
 use super::imgui::UiFrame;
+use super::shader::ShaderLocation;
 use super::uniform;
 
 #[derive(
@@ -341,8 +342,8 @@ fn shadow_pipeline_desc(
 ) -> Result<trekanten::GraphicsPipelineDescriptor, super::MaterialError> {
     let no_defines = super::shader::Defines::empty();
     let vert = shader_compiler.compile(
+        &ShaderLocation::builtin("render/shaders/pos_only_vert.glsl"),
         &no_defines,
-        "render/shaders/pos_only_vert.glsl",
         super::shader::ShaderType::Vertex,
     )?;
 

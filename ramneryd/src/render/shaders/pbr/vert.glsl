@@ -57,6 +57,6 @@ void main() {
     vs_out.world_bitangent = normalize(cross(vs_out.world_normal, vs_out.world_tangent) * tangent.w);
 #endif
 
-    write_shadowsdf_coords(vs_out.world_pos, vs_out.shadow_coords);
+    write_shadow_coords(vs_out.world_pos, vs_out.shadow_coords);
     gl_Position = world_to_clip(vs_out.world_pos);
 }

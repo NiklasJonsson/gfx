@@ -138,16 +138,16 @@ impl DebugRenderer {
 
         let vert = shader_compiler
             .compile(
+                &shader::ShaderLocation::builtin("render/shaders/world_pos_only_vert.glsl"),
                 &shader::Defines::empty(),
-                "render/shaders/world_pos_only_vert.glsl",
                 shader::ShaderType::Vertex,
             )
             .expect("Failed to compile vert shader for debug renderer");
 
         let frag = shader_compiler
             .compile(
+                &shader::ShaderLocation::builtin("render/shaders/push_constant_color_frag.glsl"),
                 &shader::Defines::empty(),
-                "render/shaders/push_constant_color_frag.glsl",
                 shader::ShaderType::Fragment,
             )
             .expect("Failed to compile frag shader for debug renderer");
