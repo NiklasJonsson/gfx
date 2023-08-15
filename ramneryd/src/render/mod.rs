@@ -258,7 +258,7 @@ fn create_renderable(
     log::trace!("Creating renderable: {:?}", material);
     let material_descriptor_set = create_material_descriptor_set(renderer, material);
     let gfx_pipeline =
-        get_pipeline_for(renderer, world, mesh, material, false).expect("Failed to get pipeline");
+        get_pipeline_for(renderer, world, mesh, material, true).expect("Failed to get pipeline");
     let shadow_pipeline = if let material::GpuMaterial::PBR { .. } = material {
         Some(
             light::get_shadow_pipeline_for(renderer, world, mesh)
@@ -285,6 +285,13 @@ fn create_renderables(renderer: &mut Renderer, world: &mut World) {
     let mut renderables = world.write_storage::<RenderableMaterial>();
     let entities = world.entities();
 
+    if !should_reload.is_empty() {
+        log::info!(
+            "Reloading shaders, {} entities have the ReloadMaterial tag",
+            should_reload.count()
+        );
+    }
+
     for (ent, mesh, mat) in (&entities, &meshes, &materials).join() {
         let entry = renderables.entry(ent).expect("Failed to get entry!");
         match entry {
@@ -293,7 +300,7 @@ fn create_renderables(renderer: &mut Renderer, world: &mut World) {
                 if should_reload.contains(ent) {
                     log::trace!("Reloading shader for {:?}", ent);
                     // TODO: Destroy the previous pipeline
-                    match get_pipeline_for(renderer, world, mesh, mat, true) {
+                    match get_pipeline_for(renderer, world, mesh, mat, false) {
                         Ok(pipeline) => entry.get_mut().gfx_pipeline = pipeline,
                         Err(e) => log::error!("Failed to compile pipeline: {}", e),
                     }

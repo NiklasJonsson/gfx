@@ -107,6 +107,7 @@ pub mod pbr_gltf {
     pub fn compile(
         compiler: &ShaderCompiler,
         def: &ShaderDefinition,
+        // TODO: This is not pretty
         use_builtin: bool,
     ) -> Result<(SpvBinary, SpvBinary), CompilerError> {
         assert!(def.is_valid());
@@ -114,10 +115,9 @@ pub mod pbr_gltf {
 
         let shader_location = |path| {
             if use_builtin {
-                println!("Using builtin");
                 ShaderLocation::builtin(path)
             } else {
-                let path = PathBuf::from("src/ramneryd").join(path);
+                let path = PathBuf::from("ramneryd/src").join(path);
                 ShaderLocation::CwdRelative(path)
             }
         };
