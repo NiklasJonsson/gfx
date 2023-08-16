@@ -24,8 +24,6 @@ impl Defines {
 }
 
 pub mod pbr_gltf {
-    use crate::render::shader;
-
     use super::*;
 
     #[derive(Debug, Clone, PartialEq, Eq, Hash, Default)]

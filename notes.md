@@ -194,3 +194,11 @@ mode when wanting to iterate on the core shaders.
 Initial design: `ShaderCompiler::compile` now takes a `ShaderLocation` instead of a path, which means we can control
 the lookup dirs from the caller. The idea is that the reload feature is only expected to work when working with the
 ramneryd source code close. That what, we skip using the builtins and use absolute paths.
+
+### Solution
+
+Went with the `ShaderLocation` which seems to work fine altough the code that builds the PBR shaders doesn't look that nice.
+
+### Point light shadows
+
+TODO
