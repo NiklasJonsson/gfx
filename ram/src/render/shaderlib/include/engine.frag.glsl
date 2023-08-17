@@ -39,8 +39,7 @@ layout(set = 0, binding = 3) uniform sampler2D directional_shadow_map;
 layout(set = 0, binding = 4) uniform sampler2D spotlight_shadow_maps[NUM_SPOTLIGHT_SHADOW_MAPS];
 
 #define NUM_POINTLIGHT_SHADOW_MAPS (16)
-// TODO:
-//layout(set = 0, binding = 5) uniform sampler2D pointlight_shadow_maps[NUM_POINTLIGHT_SHADOW_MAPS];
+layout(set = 0, binding = 5) uniform samplerCube pointlight_shadow_maps[NUM_POINTLIGHT_SHADOW_MAPS];
 
 struct ShadowInfo {
     uint type;

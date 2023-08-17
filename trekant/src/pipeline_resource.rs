@@ -202,13 +202,13 @@ impl<'a> PipelineResourceSetBuilder<'a> {
         self.buffer_infos.push([
             vk::DescriptorBufferInfo {
                 buffer: buf0,
-                offset: buf_h.idx() as u64 * stride0 as u64,
-                range: buf_h.n_elems() as u64 * stride0 as u64,
+                offset: buf_h.offset() as u64 * stride0 as u64,
+                range: buf_h.len() as u64 * stride0 as u64,
             },
             vk::DescriptorBufferInfo {
                 buffer: buf1,
-                offset: buf_h.idx() as u64 * stride1 as u64,
-                range: buf_h.n_elems() as u64 * stride1 as u64,
+                offset: buf_h.offset() as u64 * stride1 as u64,
+                range: buf_h.len() as u64 * stride1 as u64,
             },
         ]);
 
@@ -243,7 +243,7 @@ impl<'a> PipelineResourceSetBuilder<'a> {
                 .get_texture(&tex_handle)
                 .expect("Failed to get texture");
 
-            let image_view = tex.image_view().vk_image_view();
+            let image_view = tex.full_image_view().vk_image_view();
             let sampler = tex.vk_sampler();
 
             let image_layout = if is_depth {

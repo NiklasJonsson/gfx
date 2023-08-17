@@ -12,8 +12,6 @@ pub mod sync;
 pub mod util;
 pub mod validation_layers;
 
-pub use device::AllocatorHandle;
-
 use command::CommandError;
 use queue::QueueError;
 

@@ -201,7 +201,7 @@ not picked up unless there is a rebuild.
 
 To give some context, this was added because using the `ram` lib from a different location would mean the shaders
 weren't found, as the loading was done relative to the CWD of the executable. This was again redone recently to support
-the `check-shaders` executable so that it can load shaders relaive to the CWD of the executable if it is not found.
+the `check-shaders` executable so that it can load shaders relative to the CWD of the executable if it is not found.
 
 So, some goals for reworking this:
 
@@ -221,70 +221,11 @@ mode when wanting to iterate on the core shaders.
 
 Initial design: `ShaderCompiler::compile` now takes a `ShaderLocation` instead of a path, which means we can control
 the lookup dirs from the caller. The idea is that the reload feature is only expected to work when working with the
-ram source code close. That what, we skip using the builtins and use absolute paths.
+ram source code close. With that, we skip using the builtins and use absolute paths.
 
 ### Solution
 
 Went with the `ShaderLocation` which seems to work fine altough the code that builds the PBR shaders doesn't look that nice.
-
-## Point light shadows
-
-Implement support for point light shadows. High-level implementation.
-
-1. Create the backing textures in ShadowResources.
-2. Create render passes for each of the faces.
-3. Render the cube maps.
-4. Figure out shadow matrices, one per light?
-
-### Sources
-
-1. There is a sasha willems example on [omni-directional shadow mapping](https://github.com/SaschaWillems/Vulkan/blob/master/examples/shadowmappingomni/shadowmappingomni.cpp)
-with the shaders located [here](https://github.com/SaschaWillems/Vulkan/tree/master/shaders/glsl/shadowmappingomni).
-2. learn opengl has a section on [point-shadows](https://learnopengl.com/Advanced-Lighting/Shadows/Point-Shadows).
-
-### Reading the examples
-
-Sascha Willems example uses this for the image create info:
-
-```cpp
-// 32 bit float format for higher precision
-VkFormat format = VK_FORMAT_R32_SFLOAT;
-// Cube map image description
-VkImageCreateInfo imageCreateInfo = vks::initializers::imageCreateInfo();
-imageCreateInfo.imageType = VK_IMAGE_TYPE_2D;
-imageCreateInfo.format = format;
-imageCreateInfo.extent = { shadowCubeMap.width, shadowCubeMap.height, 1 }; // 1024x1024
-imageCreateInfo.mipLevels = 1;
-imageCreateInfo.arrayLayers = 6;
-imageCreateInfo.samples = VK_SAMPLE_COUNT_1_BIT;
-imageCreateInfo.tiling = VK_IMAGE_TILING_OPTIMAL;
-imageCreateInfo.usage = VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_SAMPLED_BIT;
-imageCreateInfo.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
-imageCreateInfo.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
-imageCreateInfo.flags = VK_IMAGE_CREATE_CUBE_COMPATIBLE_BIT;
-```
-
-from [here](https://github.com/SaschaWillems/Vulkan/blob/94198a7548d0c5b899840c31c67190df919a61a0/examples/shadowmappingomni/shadowmappingomni.cpp#L155C3-L167C63).
-
-Image transition looks like:
-
-```cpp
-// Image barrier for optimal image (target)
-VkImageSubresourceRange subresourceRange = {};
-subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
-subresourceRange.baseMipLevel = 0;
-subresourceRange.levelCount = 1;
-subresourceRange.layerCount = 6;
-vks::tools::setImageLayout(
-    layoutCmd,
-    shadowCubeMap.image,
-    VK_IMAGE_LAYOUT_UNDEFINED,
-    VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
-    subresourceRange);
-```
-
-So it seems like we should not create 6 images but rather use array layers and expose the `VK_IMAGE_CREATE_CUBE_COMPATIBLE_BIT`.
-The current `Image` type in the vk backend does not expose any of these, so this needs to be implemented!
 
 ## Rework trekant image creation API
 
@@ -463,6 +404,99 @@ The fov_y variable which was 0.7 was truncated to 0 when it was cast to int to b
 Rewrite the UI-code to use `input_scalar` rather than `input_int` and skip all casting (thus truncation).
 Also, add support for more primitive types.
 
+## Point light shadows (WIP)
+
+Implement support for point light shadows.
+
+1. Create the backing textures in ShadowResources.
+2. Create render passes for each of the faces.
+3. Render the cube maps.
+4. Figure out shadow matrices, one per light?
+
+### Sources
+
+1. There is a sasha willems example on [omni-directional shadow mapping](https://github.com/SaschaWillems/Vulkan/blob/master/examples/shadowmappingomni/shadowmappingomni.cpp)
+with the shaders located [here](https://github.com/SaschaWillems/Vulkan/tree/master/shaders/glsl/shadowmappingomni).
+2. learn opengl has a section on [point-shadows](https://learnopengl.com/Advanced-Lighting/Shadows/Point-Shadows).
+
+### Reading the examples
+
+Sascha Willems example uses this for the image create info:
+
+```cpp
+// 32 bit float format for higher precision
+VkFormat format = VK_FORMAT_R32_SFLOAT;
+// Cube map image description
+VkImageCreateInfo imageCreateInfo = vks::initializers::imageCreateInfo();
+imageCreateInfo.imageType = VK_IMAGE_TYPE_2D;
+imageCreateInfo.format = format;
+imageCreateInfo.extent = { shadowCubeMap.width, shadowCubeMap.height, 1 }; // 1024x1024
+imageCreateInfo.mipLevels = 1;
+imageCreateInfo.arrayLayers = 6;
+imageCreateInfo.samples = VK_SAMPLE_COUNT_1_BIT;
+imageCreateInfo.tiling = VK_IMAGE_TILING_OPTIMAL;
+imageCreateInfo.usage = VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_SAMPLED_BIT;
+imageCreateInfo.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
+imageCreateInfo.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
+imageCreateInfo.flags = VK_IMAGE_CREATE_CUBE_COMPATIBLE_BIT;
+```
+
+from [here](https://github.com/SaschaWillems/Vulkan/blob/94198a7548d0c5b899840c31c67190df919a61a0/examples/shadowmappingomni/shadowmappingomni.cpp#L155C3-L167C63).
+
+Image transition looks like:
+
+```cpp
+// Image barrier for optimal image (target)
+VkImageSubresourceRange subresourceRange = {};
+subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+subresourceRange.baseMipLevel = 0;
+subresourceRange.levelCount = 1;
+subresourceRange.layerCount = 6;
+vks::tools::setImageLayout(
+    layoutCmd,
+    shadowCubeMap.image,
+    VK_IMAGE_LAYOUT_UNDEFINED,
+    VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
+    subresourceRange);
+```
+
+So it seems like we should not create 6 images but rather use array layers and expose the `VK_IMAGE_CREATE_CUBE_COMPATIBLE_BIT`.
+
+A problem seems to be the Texture abstraction in trekant. It bakes the image and the image view into one type. For cube maps,
+we need a single image with array_layers = 6 and then create 6 image views from this.
+
+WIP Solution:
+
+1. Introduce TextureType to define if a texture is a 2D texture or a cube texture.
+2. `Texture` exposes the `full_image_view() -> &vk::ImageView` and for cube maps, `sub_image_view(idx: usize) -> &vk::ImageView`
+3. Introduce a new `PointlightShadow` struct to hold rendering resources for pointlight shadows (rather than using the
+  generic `Shadow`)
+4. Split `add_shadow_pass` into two local helper lambdas to compose better.
+5. Some refactoring in how we setup shadows with `build_single_shadow`.
+
+### START HERE
+
+Current state: Code is compiling and running but the pointlight shadows are not working.
+
+Repro with:
+
+```bash
+cargo run --bin dbg -- --pointlight --spawn-plane --spawn-cube --rsf-file data\ambient_light.ron.rsf
+```
+
+Findings:
+
+* The shadow maps are completely white is due to all depth values being 1.0. This means the rasterization never hits the
+  geometry.
+* In renderdoc, the VS in looks correct but the VS out shows just a white rectangle.
+* In renderdoc, the viewproj matrix is just 0,0,0 but it is not on the CPU so it might be that the gpu memory is not
+  written correctly.
+
+There seems to have been issues with the buffer management code in that it is incorrectly allocating the viewproj
+buffer for the point lights. Also, writing the uniform buffer data during the shadow pass uses a fixed size stack
+array for the matrices but the underlying buffer is dynamic. The uniform management needs to be revisited from
+the ground up!
+
 ## Future work
 
 ### Loader API
@@ -483,3 +517,9 @@ this internally in the renderer and panic if it is not done correctly. In additi
 * The host buffer is only used in `ram::render::Mesh`. Consider moving it to `ram`.
 * Consider moving `elem_size` and `elem_align` into BufferDescriptor. This would reduce the contents for most of the enums.
 * Consider moving the `enqueue` functions to free functions.
+
+### Directional lights improvements
+
+* Directional lights improvements: Try to reproduce the scene bounds in the opengl or sascha willems examples for
+  directional light shadows and see if the issues with pixelated examples can be reproduced.
+* Implement cascaded shadow maps for directional lights.

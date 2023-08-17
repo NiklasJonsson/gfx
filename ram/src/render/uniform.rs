@@ -22,6 +22,7 @@ pub const SHADOW_TYPE_POINT: u32 = 3;
 
 pub const SPOTLIGHT_SHADOW_MAP_COUNT: u32 = 16;
 pub const DIRECTIONAL_SHADOW_MAP_COUNT: u32 = 1;
+pub const POINTLIGHT_SHADOW_MAP_COUNT: u32 = 16;
 
 #[derive(Copy, Clone, Debug, Std140, bytemuck::Pod, bytemuck::Zeroable)]
 #[repr(C, packed)]

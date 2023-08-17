@@ -43,15 +43,19 @@ pub trait BufferTypeTrait {
 pub struct BufferHandle {
     h: Handle<DeviceBuffer>,
     mutability: BufferMutability,
-    idx: u32,
-    n_elems: u32,
+    offset: u32,
+    len: u32,
     ty: BufferTypeId,
 }
 
 impl BufferHandle {
     pub fn sub_buffer(h: Self, idx: u32, n_elems: u32) -> Self {
-        assert!((idx + n_elems) <= (h.idx + h.n_elems));
-        Self { idx, n_elems, ..h }
+        assert!((idx + n_elems) <= (h.offset + h.len));
+        Self {
+            offset: idx,
+            len: n_elems,
+            ..h
+        }
     }
 
     /// # Safety
@@ -66,9 +70,31 @@ impl BufferHandle {
         Self {
             h: handle,
             mutability,
-            idx,
-            n_elems,
+            offset: idx,
+            len: n_elems,
             ty,
+        }
+    }
+
+    pub fn take_first(&mut self, n: u32) -> BufferHandle {
+        assert!(self.len >= n);
+        let idx = self.offset;
+
+        self.offset += n;
+        self.len -= n;
+
+        BufferHandle {
+            offset: idx,
+            len: n,
+            ..*self
+        }
+    }
+
+    pub fn slice(&self, start: u32, len: u32) -> BufferHandle {
+        BufferHandle {
+            offset: self.offset + start,
+            len,
+            ..*self
         }
     }
 
@@ -80,26 +106,20 @@ impl BufferHandle {
         self.mutability
     }
 
-    pub fn split(&self) -> Vec<Self> {
-        (0..self.n_elems)
-            .map(|i| Self {
-                idx: self.idx + i,
-                n_elems: 1,
-                ..*self
-            })
-            .collect::<Vec<_>>()
-    }
-
     pub fn is_empty(&self) -> bool {
-        self.n_elems == 0
+        self.len == 0
     }
 
-    pub fn idx(&self) -> u32 {
-        self.idx
+    pub fn end(&self) -> u32 {
+        self.offset + self.len
     }
 
-    pub fn n_elems(&self) -> u32 {
-        self.n_elems
+    pub fn offset(&self) -> u32 {
+        self.offset
+    }
+
+    pub fn len(&self) -> u32 {
+        self.len
     }
 
     pub fn buffer_type_id(&self) -> BufferTypeId {

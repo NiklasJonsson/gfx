@@ -1,7 +1,7 @@
 pub use ash::vk;
 
 mod buffer;
-pub mod loader;
+mod loader;
 pub mod pipeline;
 pub mod pipeline_resource;
 pub mod resource;
@@ -27,7 +27,7 @@ pub use buffer::{
 pub use descriptor::DescriptorData;
 pub use error::RenderError;
 pub use error::ResizeReason;
-pub use loader::Loader;
+pub use loader::{HandleMapping, Loader, LoaderError};
 pub use pipeline::{GraphicsPipeline, GraphicsPipelineDescriptor, PipelineError, ShaderStage};
 pub use pipeline_resource::PipelineResourceSet;
 pub use render_pass::{RenderPass, RenderPassEncoder};
@@ -36,7 +36,7 @@ pub use resource::{Async, Handle};
 pub use std140::{Std140, Std140Struct};
 pub use texture::{
     BorderColor, Filter, MipMaps, SamplerAddressMode, SamplerDescriptor, Texture,
-    TextureDescriptor, TextureUsage,
+    TextureDescriptor, TextureType, TextureUsage,
 };
 pub use traits::{PushConstant, Uniform};
 pub use trekant_derive::Std140;
@@ -357,6 +357,7 @@ impl Renderer {
                     extent,
                     format,
                     image_usage: usage,
+                    image_flags: vk::ImageCreateFlags::empty(),
                     mem_usage,
                     mip_levels,
                     sample_count: msaa_sample_count,
@@ -384,6 +385,7 @@ impl Renderer {
                     extent,
                     format,
                     image_usage: usage,
+                    image_flags: vk::ImageCreateFlags::empty(),
                     mem_usage,
                     mip_levels,
                     sample_count: msaa_sample_count,
@@ -700,7 +702,7 @@ impl Renderer {
         start: usize,
         data: &[T],
     ) -> Result<(), RenderError> {
-        assert!(h.n_elems() as usize >= data.len());
+        assert!(h.len() as usize >= data.len());
         assert_eq!(
             h.mutability(),
             BufferMutability::Mutable,
@@ -713,7 +715,7 @@ impl Renderer {
             .get_buffered_mut(h, self.frame_idx as usize)
             .ok_or_else(|| RenderError::InvalidHandle(h.handle().id()))?;
 
-        let dst_offset = (h.idx() as usize + start) * buf.stride() as usize;
+        let dst_offset = (h.offset() as usize + start) * buf.stride() as usize;
         let raw_data = util::as_byte_slice(data);
         buf.write(dst_offset, raw_data);
         Ok(())
@@ -905,6 +907,7 @@ impl Renderer {
                     extent,
                     format,
                     image_usage: usage,
+                    image_flags: vk::ImageCreateFlags::empty(),
                     mem_usage: vma::MemoryUsage::AutoPreferDevice,
                     mip_levels,
                     sample_count: vk::SampleCountFlags::TYPE_1,
@@ -952,13 +955,13 @@ impl Renderer {
 impl Renderer {
     pub fn create_render_target(
         &mut self,
-        render_pass: &Handle<RenderPass>,
+        render_pass: Handle<RenderPass>,
         attachments: &[&Handle<Texture>],
     ) -> Result<Handle<RenderTarget>, RenderError> {
         let render_pass = self
             .resources
             .render_passes
-            .get(render_pass)
+            .get(&render_pass)
             .ok_or_else(|| RenderError::InvalidHandle(render_pass.id()))?;
         let attachments: Result<Vec<&Texture>, RenderError> = attachments
             .iter()
@@ -974,5 +977,33 @@ impl Renderer {
         let data = RenderTarget::new(&self.device, &attachments, render_pass, &extent)?;
         let render_target = self.resources.render_targets.add(data);
         Ok(render_target)
+    }
+
+    // TODO: Refactor this. It seems a bit to narrow of a use-case to expose in the API here.
+    pub fn create_cube_render_targets(
+        &mut self,
+        render_pass: Handle<RenderPass>,
+        cube_map: Handle<Texture>,
+    ) -> Result<[Handle<RenderTarget>; 6], RenderError> {
+        let render_pass = self
+            .resources
+            .render_passes
+            .get(&render_pass)
+            .ok_or_else(|| RenderError::InvalidHandle(render_pass.id()))?;
+        let texture = self
+            .resources
+            .textures
+            .get(&cube_map)
+            .ok_or_else(|| RenderError::InvalidHandle(cube_map.id()))?;
+
+        let render_targets = std::array::from_fn(|idx| {
+            let image_view = texture.sub_image_view(idx);
+            let data =
+                RenderTarget::new_raw(&self.device, &[image_view], render_pass, &texture.extent())
+                    .expect("Failed to create render target");
+            self.resources.render_targets.add(data)
+        });
+
+        Ok(render_targets)
     }
 }

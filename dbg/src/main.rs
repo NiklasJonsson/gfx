@@ -21,9 +21,11 @@ struct Args {
     #[clap(long)]
     spawn_cube: bool,
     #[clap(long)]
-    many_cube_lights: bool,
+    spotlight_test: bool,
     #[clap(long)]
     sun_simulation: bool,
+    #[clap(long)]
+    pointlight_test: bool,
 }
 
 struct Spawner {
@@ -177,9 +179,9 @@ impl Module for SunSimulation {
     }
 }
 
-struct ManyCubeLights;
+struct SpotlightTest;
 
-impl Module for ManyCubeLights {
+impl Module for SpotlightTest {
     fn load(&mut self, loader: &mut ModuleLoader) {
         let world = &mut loader.world;
 
@@ -251,6 +253,35 @@ impl Module for ManyCubeLights {
     }
 }
 
+struct PointlightTest;
+
+impl Module for PointlightTest {
+    fn load(&mut self, loader: &mut ModuleLoader) {
+        loader
+            .world
+            .create_entity()
+            .with(Transform {
+                position: Vec3 {
+                    x: 0.0,
+                    y: 5.0,
+                    z: 0.0,
+                },
+                rotation: Quat::identity(),
+                scale: 1.0,
+            })
+            .with(ram::render::Light::Point {
+                color: Rgb {
+                    r: 0.7,
+                    g: 0.7,
+                    b: 0.7,
+                },
+                range: 10.0,
+            })
+            .with(Name::from("Point light"))
+            .build();
+    }
+}
+
 fn main() {
     let args = Args::parse();
     let mut init = ram::Init::new();
@@ -266,8 +297,12 @@ fn main() {
         init.add_module(SunSimulation);
     }
 
-    if args.many_cube_lights {
-        init.add_module(ManyCubeLights);
+    if args.spotlight_test {
+        init.add_module(SpotlightTest);
+    }
+
+    if args.pointlight_test {
+        init.add_module(PointlightTest);
     }
 
     init.run();

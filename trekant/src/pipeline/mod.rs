@@ -476,10 +476,7 @@ impl Debug for ShaderDescriptor {
     debug_name: {} \
     spirv_code: {{ start: {:p}, size: {}, hash: {:#X} }}
 }}",
-            self.debug_name
-                .as_ref()
-                .map(String::as_str)
-                .unwrap_or("N/A"),
+            self.debug_name.as_deref().unwrap_or("N/A"),
             self.spirv_code.as_ptr(),
             self.spirv_code.len(),
             hash(&self.spirv_code)

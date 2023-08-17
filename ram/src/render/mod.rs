@@ -2,9 +2,7 @@ use thiserror::Error;
 
 use crate::ecs::prelude::*;
 
-use trekant::{
-    BufferDescriptor, BufferMutability, BufferType, StorageBufferType, UniformBufferType,
-};
+use trekant::{BufferDescriptor, BufferMutability};
 
 use trekant::pipeline::{
     GraphicsPipeline, GraphicsPipelineDescriptor, PipelineError, ShaderDescriptor,
@@ -585,10 +583,16 @@ pub fn create_frame_resources(
             .expect("Failed to create buffer for shadow matrices")
     };
 
+    // TODO: This is leaking the shadow resources a bit.
     let spotlight_textures = shadow_resources
         .spotlights
         .iter()
         .map(|x| (x.texture, true));
+    let pointlight_textures = shadow_resources
+        .pointlights
+        .iter()
+        .map(|x| (x.cube_map, true));
+
     let engine_shader_resource_group = PipelineResourceSet::builder(renderer)
         .add_buffer(view_data, 0, ShaderStage::VERTEX | ShaderStage::FRAGMENT)
         .add_buffer(world_to_shadow, 1, ShaderStage::FRAGMENT)
@@ -600,7 +604,7 @@ pub fn create_frame_resources(
             true,
         )
         .add_textures(spotlight_textures, 4, ShaderStage::FRAGMENT)
-        // TODO: Add pointlights here
+        .add_textures(pointlight_textures, 5, ShaderStage::FRAGMENT)
         .build();
 
     let pbr_resources = {
@@ -704,7 +708,7 @@ fn map_buffer_handle(h: &mut GpuBuffer, old: AsyncBufferHandle, new: BufferHandl
 impl GpuUpload {
     #[profiling::function]
     fn resolve_pending(world: &mut World, renderer: &mut Renderer) {
-        use trekant::loader::HandleMapping;
+        use trekant::HandleMapping;
         let loader = world.write_resource::<trekant::Loader>();
         let mut pending_materials = world.write_storage::<PendingMaterial>();
         let mut materials = world.write_storage::<GpuMaterial>();

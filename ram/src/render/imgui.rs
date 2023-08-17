@@ -310,6 +310,7 @@ impl UIContext {
                 },
                 format: Format::RGBA_UNORM,
                 mipmaps: MipMaps::None,
+                ty: trekant::TextureType::Tex2D,
             };
             renderer
                 .create_texture(tex_desc)

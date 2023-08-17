@@ -1,5 +1,5 @@
 use trekant::{pipeline::PolygonMode, Texture, TextureDescriptor};
-use trekant::{AsyncBufferHandle, BufferHandle, Handle};
+use trekant::{BufferHandle, Handle};
 
 use crate::math::Rgba;
 use crate::render::Pending;
