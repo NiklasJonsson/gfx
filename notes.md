@@ -201,7 +201,7 @@ not picked up unless there is a rebuild.
 
 To give some context, this was added because using the `ram` lib from a different location would mean the shaders
 weren't found, as the loading was done relative to the CWD of the executable. This was again redone recently to support
-the `check-shaders` executable so that it can load shaders relaive to the CWD of the executable if it is not found.
+the `check-shaders` executable so that it can load shaders relative to the CWD of the executable if it is not found.
 
 So, some goals for reworking this:
 
@@ -221,7 +221,7 @@ mode when wanting to iterate on the core shaders.
 
 Initial design: `ShaderCompiler::compile` now takes a `ShaderLocation` instead of a path, which means we can control
 the lookup dirs from the caller. The idea is that the reload feature is only expected to work when working with the
-ram source code close. That what, we skip using the builtins and use absolute paths.
+ram source code close. With that, we skip using the builtins and use absolute paths.
 
 ### Solution
 
