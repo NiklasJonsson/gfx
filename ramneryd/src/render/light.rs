@@ -541,7 +541,6 @@ pub fn shadow_pass(
     };
     let mut n_shadows = 0;
     let mut n_spotlights = 0;
-    let mut n_pointlights = 0;
     let mut found_directional_light = false;
 
     // Collect rendering info.
@@ -619,12 +618,11 @@ pub fn shadow_pass(
                     },
                 )
             }
-            Light::Point { .. } => {
-                // START HERE:
-                // 1. Create 6 render passes per point light
-                // 2. Make the render pass computation dynamic
-                // 3. Each light has to queue its own render pass, I think
-            }
+            // START HERE:
+            // 1. Create 6 render passes per point light
+            // 2. Make the render pass computation dynamic
+            // 3. Each light has to queue its own render pass, I think
+            Light::Point { .. } => continue,
             Light::Ambient { .. } => continue,
         };
 
