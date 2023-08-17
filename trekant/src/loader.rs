@@ -251,10 +251,6 @@ impl Loader {
     }
 }
 
-pub trait ResourceLoader<D, H> {
-    fn load(&self, descriptor: D) -> Result<H, LoaderError>;
-}
-
 impl Loader {
     pub fn load_buffer(
         &self,

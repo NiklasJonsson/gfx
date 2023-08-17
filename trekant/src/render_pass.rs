@@ -82,9 +82,9 @@ impl<'a> RenderPassEncoder<'a> {
         vertex_buffer: BufferHandle,
         index_buffer: BufferHandle,
     ) -> &mut Self {
-        let vertex_index = vertex_buffer.idx() as i32;
-        let indices_index = index_buffer.idx();
-        let n_indices = index_buffer.n_elems();
+        let vertex_index = vertex_buffer.offset() as i32;
+        let indices_index = index_buffer.offset();
+        let n_indices = index_buffer.len();
 
         let vb = self
             .resources

@@ -1,8 +1,8 @@
 use crate::ecs::prelude::*;
 use crate::render::GpuBuffer;
 
-use trekant::loader::Loader;
-use trekant::{AsyncBufferHandle, BufferDescriptor, BufferHandle, BufferMutability};
+use trekant::Loader;
+use trekant::{BufferDescriptor, BufferMutability};
 use trekant::{HostIndexBuffer, HostVertexBuffer};
 
 use ram_derive::Visitable;

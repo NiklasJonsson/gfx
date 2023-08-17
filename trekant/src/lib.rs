@@ -1,7 +1,7 @@
 pub use ash::vk;
 
 mod buffer;
-pub mod loader;
+mod loader;
 pub mod pipeline;
 pub mod pipeline_resource;
 pub mod resource;
@@ -27,7 +27,7 @@ pub use buffer::{
 pub use descriptor::DescriptorData;
 pub use error::RenderError;
 pub use error::ResizeReason;
-pub use loader::Loader;
+pub use loader::{HandleMapping, Loader, LoaderError};
 pub use pipeline::{GraphicsPipeline, GraphicsPipelineDescriptor, PipelineError, ShaderStage};
 pub use pipeline_resource::PipelineResourceSet;
 pub use render_pass::{RenderPass, RenderPassEncoder};
@@ -36,7 +36,7 @@ pub use resource::{Async, Handle};
 pub use std140::{Std140, Std140Struct};
 pub use texture::{
     BorderColor, Filter, MipMaps, SamplerAddressMode, SamplerDescriptor, Texture,
-    TextureDescriptor, TextureUsage,
+    TextureDescriptor, TextureType, TextureUsage,
 };
 pub use traits::{PushConstant, Uniform};
 pub use trekant_derive::Std140;
@@ -357,6 +357,7 @@ impl Renderer {
                     extent,
                     format,
                     image_usage: usage,
+                    image_flags: vk::ImageCreateFlags::empty(),
                     mem_usage,
                     mip_levels,
                     sample_count: msaa_sample_count,
@@ -370,6 +371,9 @@ impl Renderer {
                 format,
                 vk::ImageAspectFlags::DEPTH,
                 mip_levels,
+                vk::ImageViewType::TYPE_2D,
+                0,
+                1,
             )
             .map_err(RenderError::RenderTargetImageView)?;
             backend::image::ImageAttachment { image, image_view }
@@ -384,6 +388,7 @@ impl Renderer {
                     extent,
                     format,
                     image_usage: usage,
+                    image_flags: vk::ImageCreateFlags::empty(),
                     mem_usage,
                     mip_levels,
                     sample_count: msaa_sample_count,
@@ -398,6 +403,9 @@ impl Renderer {
                 format,
                 vk::ImageAspectFlags::COLOR,
                 mip_levels,
+                vk::ImageViewType::TYPE_2D,
+                0,
+                1,
             )
             .map_err(RenderError::RenderTargetImageView)?;
             backend::image::ImageAttachment { image, image_view }
@@ -414,7 +422,7 @@ impl Renderer {
                 &self.device,
                 &views,
                 &render_pass.0,
-                &self.swapchain_extent(),
+                self.swapchain_extent(),
             )?;
             let handle = self
                 .resources
@@ -700,7 +708,7 @@ impl Renderer {
         start: usize,
         data: &[T],
     ) -> Result<(), RenderError> {
-        assert!(h.n_elems() as usize >= data.len());
+        assert!(h.len() as usize >= data.len());
         assert_eq!(
             h.mutability(),
             BufferMutability::Mutable,
@@ -713,7 +721,7 @@ impl Renderer {
             .get_buffered_mut(h, self.frame_idx as usize)
             .ok_or_else(|| RenderError::InvalidHandle(h.handle().id()))?;
 
-        let dst_offset = (h.idx() as usize + start) * buf.stride() as usize;
+        let dst_offset = (h.offset() as usize + start) * buf.stride() as usize;
         let raw_data = util::as_byte_slice(data);
         buf.write(dst_offset, raw_data);
         Ok(())
@@ -905,6 +913,7 @@ impl Renderer {
                     extent,
                     format,
                     image_usage: usage,
+                    image_flags: vk::ImageCreateFlags::empty(),
                     mem_usage: vma::MemoryUsage::AutoPreferDevice,
                     mip_levels,
                     sample_count: vk::SampleCountFlags::TYPE_1,
@@ -950,29 +959,83 @@ impl Renderer {
 }
 
 impl Renderer {
+    pub fn get_render_pass(&self, h: Handle<RenderPass>) -> Option<&RenderPass> {
+        self.resources.render_passes.get(&h)
+    }
+}
+
+#[derive(Debug, Clone, Copy)]
+pub enum TextureImageRange {
+    Full,
+    Part { start: usize, len: usize },
+}
+
+#[derive(Debug, Clone, Copy)]
+pub struct RenderTargetAttachment {
+    pub texture: Handle<Texture>,
+    pub range: TextureImageRange,
+}
+
+impl Renderer {
+    /// All attachments need to have the same extent.
     pub fn create_render_target(
         &mut self,
-        render_pass: &Handle<RenderPass>,
-        attachments: &[&Handle<Texture>],
+        render_pass: Handle<RenderPass>,
+        attachments: &[RenderTargetAttachment],
     ) -> Result<Handle<RenderTarget>, RenderError> {
         let render_pass = self
             .resources
             .render_passes
-            .get(render_pass)
+            .get(&render_pass)
             .ok_or_else(|| RenderError::InvalidHandle(render_pass.id()))?;
-        let attachments: Result<Vec<&Texture>, RenderError> = attachments
-            .iter()
-            .map(|h| {
-                self.resources
-                    .textures
-                    .get(h)
-                    .ok_or_else(|| RenderError::InvalidHandle(h.id()))
-            })
-            .collect();
-        let attachments = attachments?;
-        let extent = attachments[0].extent();
-        let data = RenderTarget::new(&self.device, &attachments, render_pass, &extent)?;
+        let mut image_views = Vec::with_capacity(attachments.len());
+        let mut extent = None;
+        for attachment in attachments {
+            let tex = self
+                .resources
+                .textures
+                .get(&attachment.texture)
+                .ok_or_else(|| RenderError::InvalidHandle(attachment.texture.id()))?;
+            extent = Some(tex.extent());
+            let views = match attachment.range {
+                TextureImageRange::Full => std::slice::from_ref(tex.full_image_view()),
+                TextureImageRange::Part { start, len } => {
+                    &tex.sub_image_views()[start..start + len]
+                }
+            };
+            image_views.extend(views);
+        }
+        let extent = extent.expect("No attachments");
+        let data = RenderTarget::new_raw(&self.device, &image_views, render_pass, extent)?;
         let render_target = self.resources.render_targets.add(data);
         Ok(render_target)
+    }
+
+    // TODO: Refactor this. It seems a bit to narrow of a use-case to expose in the API here.
+    pub fn create_cube_render_targets(
+        &mut self,
+        render_pass: Handle<RenderPass>,
+        cube_map: Handle<Texture>,
+    ) -> Result<[Handle<RenderTarget>; 6], RenderError> {
+        let render_pass = self
+            .resources
+            .render_passes
+            .get(&render_pass)
+            .ok_or_else(|| RenderError::InvalidHandle(render_pass.id()))?;
+        let texture = self
+            .resources
+            .textures
+            .get(&cube_map)
+            .ok_or_else(|| RenderError::InvalidHandle(cube_map.id()))?;
+
+        let render_targets = std::array::from_fn(|idx| {
+            let image_view = texture.sub_image_view(idx);
+            let data =
+                RenderTarget::new_raw(&self.device, &[image_view], render_pass, texture.extent())
+                    .expect("Failed to create render target");
+            self.resources.render_targets.add(data)
+        });
+
+        Ok(render_targets)
     }
 }

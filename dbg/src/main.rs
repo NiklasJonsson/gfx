@@ -21,9 +21,11 @@ struct Args {
     #[clap(long)]
     spawn_cube: bool,
     #[clap(long)]
-    many_cube_lights: bool,
+    spotlight_test: bool,
     #[clap(long)]
     sun_simulation: bool,
+    #[clap(long)]
+    pointlight_test: bool,
 }
 
 struct Spawner {
@@ -177,9 +179,9 @@ impl Module for SunSimulation {
     }
 }
 
-struct ManyCubeLights;
+struct SpotlightTest;
 
-impl Module for ManyCubeLights {
+impl Module for SpotlightTest {
     fn load(&mut self, loader: &mut ModuleLoader) {
         let world = &mut loader.world;
 
@@ -251,6 +253,93 @@ impl Module for ManyCubeLights {
     }
 }
 
+struct PointlightTest;
+
+impl Module for PointlightTest {
+    fn load(&mut self, loader: &mut ModuleLoader) {
+        let world = &mut loader.world;
+        let spawn_cube = |world: &mut World, i: usize, x: f32, z: f32| {
+            world
+                .create_entity()
+                .with(Name::from(format!("Cube {i}")))
+                .with(Transform::pos(x, 3.0, z))
+                .with(render::Shape::Box {
+                    width: 1.0,
+                    height: 1.0,
+                    depth: 1.0,
+                })
+                .with(render::material::PhysicallyBased {
+                    base_color_factor: Rgba {
+                        r: 0.3,
+                        g: 0.6,
+                        b: 0.3,
+                        a: 1.0,
+                    },
+                    metallic_factor: 0.0,
+                    roughness_factor: 0.7,
+                    ..Default::default()
+                })
+                .build();
+        };
+        const DIST: f32 = 5.0;
+
+        let mut i = 0;
+        let coords = [-1.0, 0.0, 1.0];
+        for x in coords {
+            for z in coords {
+                let x = x * DIST;
+                let z = z * DIST;
+                spawn_cube(world, i, x, z);
+                i += 1;
+            }
+        }
+        world
+            .create_entity()
+            .with(Transform {
+                position: Vec3 {
+                    x: 0.0,
+                    y: 5.0,
+                    z: 0.0,
+                },
+                rotation: Quat::identity(),
+                scale: 1.0,
+            })
+            .with(ram::render::Light::Point {
+                color: Rgb {
+                    r: 0.7,
+                    g: 0.7,
+                    b: 0.7,
+                },
+                range: 10.0,
+            })
+            .with(Name::from("Point light"))
+            .build();
+        let plane_side = 100.0;
+        let plane_height = 1.0;
+        world
+            .create_entity()
+            .with(Name::from("Top Plane"))
+            .with(Transform::pos(0.0, 10.0, 0.0))
+            .with(render::Shape::Box {
+                width: plane_side,
+                height: plane_height,
+                depth: plane_side,
+            })
+            .with(render::material::PhysicallyBased {
+                base_color_factor: Rgba {
+                    r: 0.3,
+                    g: 0.3,
+                    b: 0.3,
+                    a: 1.0,
+                },
+                metallic_factor: 0.0,
+                roughness_factor: 0.7,
+                ..Default::default()
+            })
+            .build();
+    }
+}
+
 fn main() {
     let args = Args::parse();
     let mut init = ram::Init::new();
@@ -266,8 +355,12 @@ fn main() {
         init.add_module(SunSimulation);
     }
 
-    if args.many_cube_lights {
-        init.add_module(ManyCubeLights);
+    if args.spotlight_test {
+        init.add_module(SpotlightTest);
+    }
+
+    if args.pointlight_test {
+        init.add_module(PointlightTest);
     }
 
     init.run();

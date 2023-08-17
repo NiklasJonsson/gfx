@@ -31,12 +31,16 @@ impl std::ops::Drop for ImageView {
 }
 
 impl ImageView {
+    // TODO: Refactor? Lots of parameters...
     pub fn new<D: HasVkDevice>(
         device: &D,
         vk_image: vk::Image,
         format: util::Format,
         aspect_mask: vk::ImageAspectFlags,
         mip_levels: u32,
+        image_view_type: vk::ImageViewType,
+        base_array_layer: u32,
+        layer_count: u32,
     ) -> Result<Self, ImageViewError> {
         let vk_format = format.into();
         let comp_mapping = vk::ComponentMapping {
@@ -50,13 +54,13 @@ impl ImageView {
             aspect_mask,
             base_mip_level: 0,
             level_count: mip_levels,
-            base_array_layer: 0,
-            layer_count: 1,
+            base_array_layer,
+            layer_count,
         };
 
         let info = vk::ImageViewCreateInfo::builder()
             .image(vk_image)
-            .view_type(vk::ImageViewType::TYPE_2D)
+            .view_type(image_view_type)
             .format(vk_format)
             .components(comp_mapping)
             .subresource_range(subresource_range);
@@ -282,6 +286,7 @@ pub struct ImageDescriptor {
     pub extent: Extent2D,
     pub format: util::Format,
     pub image_usage: vk::ImageUsageFlags,
+    pub image_flags: vk::ImageCreateFlags,
     pub mem_usage: MemoryUsage,
     pub mip_levels: u32,
     pub sample_count: vk::SampleCountFlags,
@@ -308,6 +313,7 @@ impl Image {
         let info = vk::ImageCreateInfo::builder()
             .image_type(vk::ImageType::TYPE_2D)
             .extent(extent3d.into())
+            .flags(descriptor.image_flags)
             .mip_levels(descriptor.mip_levels)
             .array_layers(descriptor.array_layers)
             .format(descriptor.format.into())

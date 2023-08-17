@@ -39,8 +39,7 @@ layout(set = 0, binding = 3) uniform sampler2D directional_shadow_map;
 layout(set = 0, binding = 4) uniform sampler2D spotlight_shadow_maps[NUM_SPOTLIGHT_SHADOW_MAPS];
 
 #define NUM_POINTLIGHT_SHADOW_MAPS (16)
-// TODO:
-//layout(set = 0, binding = 5) uniform sampler2D pointlight_shadow_maps[NUM_POINTLIGHT_SHADOW_MAPS];
+layout(set = 0, binding = 5) uniform samplerCube pointlight_shadow_maps[NUM_POINTLIGHT_SHADOW_MAPS];
 
 struct ShadowInfo {
     uint type;
@@ -51,7 +50,9 @@ struct ShadowInfo {
 struct Light {
     vec3 color;
     float attenuation;
+    // TODO: Rename to normalized_direction
     vec3 direction;
+    vec3 position;
     ShadowInfo shadow_info;
 };
 
@@ -87,15 +88,18 @@ Light unpack_light(PackedLight l, vec3 world_pos) {
         // Directional
         r.direction = normalize(-l.dir_cutoff.xyz);
         r.attenuation = 1.0;
+        r.position = vec3(0.0);
     } else if (l.dir_cutoff.w == 0.0) {
         // Point
         vec3 direction_unnormalized = l.pos.xyz - world_pos;
         r.direction = normalize(direction_unnormalized);
         r.attenuation = distance_attenuation(direction_unnormalized, l.color_range.w);
+        r.position = vec3(l.pos.xyz);
     } else {
         // Spot
         vec3 direction_unnormalized = l.pos.xyz - world_pos;
         r.direction = normalize(direction_unnormalized);
+        r.position = vec3(l.pos.xyz);
         r.attenuation = 0.0;
         vec3 spot_dir = normalize(-l.dir_cutoff.xyz);
         float cos_angle = dot(r.direction, spot_dir);
@@ -115,20 +119,9 @@ bool light_has_shadow(Light l) {
     return l.shadow_info.type != SHADOW_TYPE_INVALID;
 }
 
-float sample_shadow_map(vec3 coords, ShadowInfo info, float n_dot_l) {
-    float depth = 1.0;
-    if (info.type == SHADOW_TYPE_DIRECTIONAL) {
-        depth = texture(directional_shadow_map, coords.xy).r;
-    } else if (info.type == SHADOW_TYPE_SPOT) {
-        depth = texture(spotlight_shadow_maps[info.texture_idx], coords.xy).r;
-    } else {
-        // TODO
-        // depth = texture(pointlight_shadow_maps[info.texture_idx], coords.xy).r;
-    }
+float sample_depth_shadow_texture(sampler2D tex, vec3 coords, float n_dot_l) {
+    float sample_depth = texture(tex, coords.xy).r;
 
-    // Texture sample is done before the depth if to remain within uniform ctrl-flow 
-    // This would have been clipped during shadow pass => not in shadow
-    // texture clamp_to_edge sampling mode handles xy clipping
     if (coords.z > 1.0 || coords.z < -1.0) {
         return 1.0;
     }
@@ -136,13 +129,26 @@ float sample_shadow_map(vec3 coords, ShadowInfo info, float n_dot_l) {
     float max_bias = 0.05;
     float min_bias = 0.005;
     float bias = max(max_bias * (1.0 - n_dot_l), min_bias); 
-    return (coords.z - bias) < depth ? 1.0 : 0.0;
+    return (coords.z - bias) < sample_depth ? 1.0 : 0.0;
+}
+
+float sample_shadow_map(vec3 coords, ShadowInfo info, vec3 frag_to_light_ls, float n_dot_l) {
+    if (info.type == SHADOW_TYPE_DIRECTIONAL) {
+        return sample_depth_shadow_texture(directional_shadow_map, coords, n_dot_l);
+    } else if (info.type == SHADOW_TYPE_SPOT) {
+        return sample_depth_shadow_texture(spotlight_shadow_maps[info.texture_idx], coords, n_dot_l);
+    } else {
+        // TODO: Bias here as well
+        vec3 light_to_frag_ls = -frag_to_light_ls;
+        float sample_depth = texture(pointlight_shadow_maps[info.texture_idx], light_to_frag_ls).r;
+        return length(light_to_frag_ls) > sample_depth ? 0.0 : 1.0;
+    }
 }
 
 // Map clip space coords [-w, w] to [0, w] so that perspective divide
 // transforms it into [0, 1] (unit interval) which we can use to sample the shadow map.
 // (Embarassing note to self: Column-major order of arguments, meaning the first 4 args are the first column).
-const mat4 clip_bias = mat4(
+const mat4 CLIP_BIAS = mat4(
     0.5, 0.0, 0.0, 0.0,
     0.0, 0.5, 0.0, 0.0,
     0.0, 0.0, 1.0, 0.0,
@@ -153,9 +159,10 @@ float compute_shadow_factor(vec3 fragment_world_pos, Light light, float n_dot_l)
     float shadow_factor = 1.0;
     if (light_has_shadow(light)) {
         ShadowInfo info = light.shadow_info;
-        vec4 fragment_shadow_pos = clip_bias * world_to_shadow.data[info.coords_idx] * vec4(fragment_world_pos, 1.0);
+        vec4 fragment_shadow_pos = CLIP_BIAS * world_to_shadow.data[info.coords_idx] * vec4(fragment_world_pos, 1.0);
         vec3 coords = fragment_shadow_pos.xyz / fragment_shadow_pos.w;
-        shadow_factor = sample_shadow_map(coords, info, n_dot_l);
+        vec4 frag_to_light_ls = world_to_shadow.data[info.coords_idx] * vec4(light.position - fragment_world_pos, 0.0);
+        shadow_factor = sample_shadow_map(coords, info, frag_to_light_ls.xyz, n_dot_l);
     }
     return shadow_factor;
 }

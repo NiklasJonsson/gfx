@@ -70,24 +70,11 @@ float normal_distribution_function(float cos_angle, float alpha_roughness) {
 
 #define DEBUG_SHADOW_MAP 0
 
-vec3 debug_color(ShadowInfo info) {
+vec3 debug_color(vec3 fragment_world_pos, Light light, float n_dot_l) {
 
 #if DEBUG_SHADOW_MAP
-    uint shadow_idx = info.coords_idx;
-    vec3 coords = vs_out.shadow_coords[shadow_idx].xyz / vs_out.shadow_coords[shadow_idx].w;
-
-    if (coords.z > 1.0 || coords.z < -1.0) {
-        return vec3(0.0);
-    }
-
-    float eps = 0.01;
-    float map_size = 1024.0;
-    vec2 real = map_size * coords.xy;
-    bool x_close = abs(real.x - round(real.x)) < eps;
-    bool y_close = abs(real.y - round(real.y)) < eps;
-    if (x_close || y_close) {
-        return vec3(0.5, 0.0, 0.0);
-    }
+    vec3 frag_to_light_dir_ls = (world_to_shadow.data[light.shadow_info.coords_idx] * vec4(light.direction, 0.0)).xyz;
+    return frag_to_light_dir_ls;
 #endif
 
     return vec3(0.0, 0.0, 0.0);
@@ -185,7 +172,7 @@ void main() {
         float n_dot_h = clamp(n_dot_h_unclamped, 0.0, 1.0);
         float h_dot_l = clamp(dot(bisect_light_view, light_dir), 0.0, 1.0);
 
-        color += debug_color(light.shadow_info);
+        color += debug_color(vs_out.world_pos, light, n_dot_l);
 
         float shadow_factor = compute_shadow_factor(vs_out.world_pos, light, n_dot_l);
         if (shadow_factor == 0.0) {

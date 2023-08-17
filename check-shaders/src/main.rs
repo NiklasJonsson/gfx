@@ -31,8 +31,13 @@ fn main() {
                 .expect("Failed to convert OsStr to str");
             if filename.ends_with("frag.glsl") {
                 shaders.push((path, ShaderType::Fragment));
-            } else if path.ends_with("vert.glsl") {
+            } else if filename.ends_with("vert.glsl") {
                 shaders.push((path, ShaderType::Vertex));
+            } else if filename.ends_with(".glsl") {
+                println!(
+                    "WARNING: {} ends in glsl but can't infer shader type. Skipping.",
+                    path.display()
+                );
             }
         } else if path.is_dir() {
             queue_subdirs(&mut queue, path);

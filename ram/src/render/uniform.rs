@@ -22,6 +22,7 @@ pub const SHADOW_TYPE_POINT: u32 = 3;
 
 pub const SPOTLIGHT_SHADOW_MAP_COUNT: u32 = 16;
 pub const DIRECTIONAL_SHADOW_MAP_COUNT: u32 = 1;
+pub const POINTLIGHT_SHADOW_MAP_COUNT: u32 = 16;
 
 #[derive(Copy, Clone, Debug, Std140, bytemuck::Pod, bytemuck::Zeroable)]
 #[repr(C, packed)]
@@ -78,4 +79,20 @@ pub struct ViewData {
 #[repr(C, packed)]
 pub struct PosOnlyViewData {
     pub view_proj: Mat4,
+}
+
+#[derive(Copy, Clone, Debug, Std140, bytemuck::Zeroable, bytemuck::Pod)]
+#[repr(C)]
+pub struct ShadowLightInfo {
+    pub view_proj: Mat4,
+    pub pos: [f32; 4],
+}
+
+impl Default for ShadowLightInfo {
+    fn default() -> Self {
+        Self {
+            view_proj: mat4_nan(),
+            pos: [f32::NAN; 4],
+        }
+    }
 }

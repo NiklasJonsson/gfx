@@ -125,6 +125,7 @@ pub struct PipelineResourceSetBuilder<'a> {
 
 impl<'a> PipelineResourceSetBuilder<'a> {
     fn new(renderer: &'a mut Renderer) -> Self {
+        log::trace!("Starting to build pipeline resource set");
         Self {
             renderer,
             bindings: Vec::new(),
@@ -164,10 +165,7 @@ impl<'a> PipelineResourceSetBuilder<'a> {
             idx,
         ));
 
-        log::trace!(
-            "Added descriptor binding {:?}",
-            self.bindings.last().unwrap()
-        );
+        log::trace!("Added PRS binding {:?}", self.bindings.last().unwrap());
     }
 
     pub fn add_buffer(mut self, buf_h: BufferHandle, binding: u32, stage: ShaderStage) -> Self {
@@ -202,17 +200,20 @@ impl<'a> PipelineResourceSetBuilder<'a> {
         self.buffer_infos.push([
             vk::DescriptorBufferInfo {
                 buffer: buf0,
-                offset: buf_h.idx() as u64 * stride0 as u64,
-                range: buf_h.n_elems() as u64 * stride0 as u64,
+                offset: buf_h.offset() as u64 * stride0 as u64,
+                range: buf_h.len() as u64 * stride0 as u64,
             },
             vk::DescriptorBufferInfo {
                 buffer: buf1,
-                offset: buf_h.idx() as u64 * stride1 as u64,
-                range: buf_h.n_elems() as u64 * stride1 as u64,
+                offset: buf_h.offset() as u64 * stride1 as u64,
+                range: buf_h.len() as u64 * stride1 as u64,
             },
         ]);
 
-        log::trace!("Added buffer info {:?}", self.buffer_infos.last().unwrap());
+        log::trace!(
+            "Added PRS buffer info {:?}",
+            self.buffer_infos.last().unwrap()
+        );
         self
     }
 
@@ -243,7 +244,7 @@ impl<'a> PipelineResourceSetBuilder<'a> {
                 .get_texture(&tex_handle)
                 .expect("Failed to get texture");
 
-            let image_view = tex.image_view().vk_image_view();
+            let image_view = tex.full_image_view().vk_image_view();
             let sampler = tex.vk_sampler();
 
             let image_layout = if is_depth {
@@ -256,7 +257,7 @@ impl<'a> PipelineResourceSetBuilder<'a> {
                 image_view,
                 sampler,
             };
-            log::trace!("Added texture info {:?}", desc);
+            log::trace!("Added PRS texture info {:?}", desc);
             self.image_infos.push(desc);
         }
 
@@ -299,6 +300,8 @@ impl<'a> PipelineResourceSetBuilder<'a> {
         }
 
         self.renderer.update_descriptor_sets(&writes);
+
+        log::trace!("Built descriptor set with handle: {handle:?}");
 
         handle
     }

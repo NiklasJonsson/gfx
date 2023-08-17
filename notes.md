@@ -41,7 +41,7 @@ light is moving as the pixelated values flicker very cleary.
 
 The process of directional shadow mapping is largely: We build the bounds of what the light space is, by taking the
 camera viewing volume and the scene into account. This results in an AABB in world space that we create an ortographic
-projection for and render the shadow into. The shadow rendering pass is largely a matrix * vertex for the vertex shader
+projection for and render the shadow into. The shadow rendering pass is largely a matrix \* vertex for the vertex shader
 and then only a depth write for the fragment. No fragment shader is run and no pixels are written.
 
 This is then read as a texture attachment in the fragment shader for the PBR to determine if the fragment that we are
@@ -52,25 +52,25 @@ something occluding it in the direction of the light and it should be shadowed. 
 of that fragment by modifying the contribution of that lights color for the final color of the pixel.
 
 * For the plane and cube scene with a stable directional light, the plane is quite large in the shadow map (in RenderDoc)
- and the small cube doesn't really show up. This seems to indicate that the bounds are too large.
+  and the small cube doesn't really show up. This seems to indicate that the bounds are too large.
 * Dumping the bounds in the UI, the bounding volumes seem to be OK? Pixel density for shadow map should be around
-33 p/m^2 which is OK? Maybe this is low?
+  33 p/m^2 which is OK? Maybe this is low?
 
 The shadow map in render doc seems to strongly indicate that the map is too large anyhow and this is why the box shadow
 is pixelated.
 
 > One possible solution might be to exclude "the ground" from the shadow computations. It could be possible to introduce
-a "non shadow caster"/light passthrough tag that we can attach to the "ground" plane to reduce the size of the shadow
-volume. Still though, it seems large and that it should be possible to reduce it.
+> a "non shadow caster"/light passthrough tag that we can attach to the "ground" plane to reduce the size of the shadow
+> volume. Still though, it seems large and that it should be possible to reduce it.
 
 This is how the shadow map volume creation works:
 
 1. Compute the bounds of the view we want to cast shadows in.
 
-    1. Find the camera that is the shadow viewer (the loop exits after the first).
-    2. Compute the view matrix (the conversion from world to camera space).
-    3. Compute the OOBB of the camera (in camera space).
-    4. Invert the view matrix and use it to convert the OOBB to camera space.
+   1. Find the camera that is the shadow viewer (the loop exits after the first).
+   2. Compute the view matrix (the conversion from world to camera space).
+   3. Compute the OOBB of the camera (in camera space).
+   4. Invert the view matrix and use it to convert the OOBB to camera space.
 
 2. For each view, this bounding box (OOBB) is converted to the coordinate system of that light.
 3. Convert the OOBB to an AABB, that is constructed in a way to minimize artifacts from lights and camera movement.
@@ -92,12 +92,12 @@ Conceptually, I think this is the problem space:
 
 1. Find the lights that cast shadows.
 2. For each of these:
-    1. Compute a projection matrix. This is both used in:
-        * The shadow pass vertex shader to transform the vertices and render the depth buffer.
-        * The vertex shader for the main render pass to compute the shadow coords for each vertex.
-    2. Update the uniform buffer for the shadow render passes
-    3. Encode the shadow render pass in the command buffer. This only runs a vertex shader that computes the depths and
-    then writes those to a depth buffer.
+   1. Compute a projection matrix. This is both used in:
+      * The shadow pass vertex shader to transform the vertices and render the depth buffer.
+      * The vertex shader for the main render pass to compute the shadow coords for each vertex.
+   2. Update the uniform buffer for the shadow render passes
+   3. Encode the shadow render pass in the command buffer. This only runs a vertex shader that computes the depths and
+      then writes those to a depth buffer.
 
 The output of the shadow render passes is effectively a list of texture and matrices that should be used in the main
 render pass.
@@ -106,7 +106,7 @@ render pass.
 
 1. Find the list of lights that affect the scene.
 2. Compute PackedLight for all of these. These hold an index into the buffer of shadow matrices and shadow textures
-(NOTE: These are not the same)
+   (NOTE: These are not the same)
 3. Write PackedLight uniform
 4. Bind the textures
 5. Bind the shadow coords
@@ -136,22 +136,22 @@ It now works like:
 
 1. `light::shadow_pass()`
 
-    1. Build a buffer of view projection matrices for shadow lights.
-    2. Write the buffer to the gpu with a blocking call, this is the buffer that each separate shadow pass will bind one
-    instance of for the vertex shader view_proj.
-    3. Encode depth-only render passes, one for each of the shadow lights, for all entities.
-    4. Each of the shadow lights get a `ShadowMap` associated with it that holds indices into the shadow maps and into the
-    matrices for a specific shadow pass. It also holds a `ShadowType` enum,
-    so that the main rendering pass can pass that info on to the fragment shader for texture
-    lookups.
+   1. Build a buffer of view projection matrices for shadow lights.
+   2. Write the buffer to the gpu with a blocking call, this is the buffer that each separate shadow pass will bind one
+      instance of for the vertex shader view_proj.
+   3. Encode depth-only render passes, one for each of the shadow lights, for all entities.
+   4. Each of the shadow lights get a `ShadowMap` associated with it that holds indices into the shadow maps and into the
+      matrices for a specific shadow pass. It also holds a `ShadowType` enum,
+      so that the main rendering pass can pass that info on to the fragment shader for texture
+      lookups.
 
 2. `light::write_lighting_data`
 
-    This function writes the `LightingData` and `ShadowData` uniforms that needs to be written before the main lit
-    render pass.
+   This function writes the `LightingData` and `ShadowData` uniforms that needs to be written before the main lit
+   render pass.
 
 3. Main render pass
-  This uses the LightingData and the ShadowData to run the PBR shaders.
+   This uses the LightingData and the ShadowData to run the PBR shaders.
 
 ## Shader recompilation and failure management
 
@@ -180,11 +180,11 @@ This means we have to be able to recreate shaders easily.
 * We'd need to register all `GraphicsPipelineDescriptors` that are used.
 * We might need to `WaitDeviceIdle` before replacing all the pipelines, to ensure none are in use.
 * We'd go through all the shaders (pipelines descriptors?) that are known, get the matching pipeline idx in the
-resources storage and recreate it. On subsequent uses, all rendering would use the new pipeline.
+  resources storage and recreate it. On subsequent uses, all rendering would use the new pipeline.
 * Currently, the pipeline descriptors only accept raw spirv so we'd need to associate the shader paths with the
-pipeline descriptor.
+  pipeline descriptor.
 * This would not support shaders that are not loaded from file unless we take a function that provides the source? This
-might be nice anyhow to make sure it is agnostic.
+  might be nice anyhow to make sure it is agnostic.
 * The recompilation system could live at the start of `draw_frame` as a manual call.
 
 Even tough the above system would be better, it is less work to get the current reload system working.
@@ -201,7 +201,7 @@ not picked up unless there is a rebuild.
 
 To give some context, this was added because using the `ram` lib from a different location would mean the shaders
 weren't found, as the loading was done relative to the CWD of the executable. This was again redone recently to support
-the `check-shaders` executable so that it can load shaders relaive to the CWD of the executable if it is not found.
+the `check-shaders` executable so that it can load shaders relative to the CWD of the executable if it is not found.
 
 So, some goals for reworking this:
 
@@ -212,24 +212,201 @@ So, some goals for reworking this:
 Some ideas:
 
 * Reloading shaders passes a parameter that forbids the use of the build-dir shaders. Instead, it would look in the CWD
-(or some user-defined path) for the shaders.
+  (or some user-defined path) for the shaders.
 * Remove build-dir shaders. Not sure if it is possible to package this shaders in any other way. With that said, the
-current packaging feature would only work in the context of cargo but not generic packaging of an executable. For
-example, to introduce a new executable, "demo" we'd need to copy the shaders for the ram lib as well. Even if we
-added the shaders into the executable code with `include_bytes` we'd still end up having to have a "don't use builtin"
-mode when wanting to iterate on the core shaders.
+  current packaging feature would only work in the context of cargo but not generic packaging of an executable. For
+  example, to introduce a new executable, "demo" we'd need to copy the shaders for the ram lib as well. Even if we
+  added the shaders into the executable code with `include_bytes` we'd still end up having to have a "don't use builtin"
+  mode when wanting to iterate on the core shaders.
 
 Initial design: `ShaderCompiler::compile` now takes a `ShaderLocation` instead of a path, which means we can control
 the lookup dirs from the caller. The idea is that the reload feature is only expected to work when working with the
-ram source code close. That what, we skip using the builtins and use absolute paths.
+ram source code close. With that, we skip using the builtins and use absolute paths.
 
 ### Solution
 
 Went with the `ShaderLocation` which seems to work fine altough the code that builds the PBR shaders doesn't look that nice.
 
-## Point light shadows
+## Rework trekant image creation API
 
-Implement support for point light shadows. High-level implementation.
+Goals:
+
+1. Support cube maps
+   This is needed for point lights.
+2. Allow synchronous creation of images from borrowed data (for imgui)
+3. Decuple Image creation from image writing and mipmap generation.
+   Remove command buffer usage from backend::Image!
+4. Should texture creation be done via the `ResourceManager` API?
+   The problem is that this means that users have to include the ResourceManager API to actually be able to use the type
+   which is not great. So, no, it should not.
+5. Don't require users to use the `texture` module, all the public API should be available in `trekant`.
+6. Minimize code duplication and share code with the loader.
+7. Get rid of the intermediate enums in the Renderer.
+   Can we reduce them in the loader?
+
+### Current workings
+
+* `trekant` exposes the `Texture` and `TextureDescriptor` types which form the basis of texture creation.
+* Texture creation is not part of the "ResourceManager" API. IIRC, this was due to the ResouceManager API not providing
+  a clear benefit.
+
+The current texture class exposes functions to create a new texture (sampler + image + image view) in 3 ways:
+
+1. empty/uninit
+2. From Image
+3. From data
+
+Ideas:
+
+* Splitting the data and the description is problematic if the data contains a `File` variant, as we only
+  know the extents after loading the file but the description needs the extent upfront. So, we probably
+  want to keep the outermost TextureDescriptor API as-is.
+* We don't want to copy-paste how to load the TextureDescriptor between the loader and the renderer.
+* Move out the loader code for creating a texture into a new function, load_texture.
+
+### Solution
+
+* The `Loader` API now exposes `load_texture` for loading textures rather than supporting
+  `ResourceLoader::load` meaning that users no longer have to import the trait to use it (6).
+  It also means the code is a bit simpler. Buffer are still loaded with `ResourceLoader::load`, changing
+  this is out of scope for now.
+* The job queuing and command buffer in the loader was simplified a bit.
+* `trekant::descriptor` was renamed to `pipeline_resource` as descriptor is used as a suffix for a lot of
+  "parameter struct" that bake several parameters into a struct for e.g. a constructor.
+* Remove the intermediate texture enums in `Renderer` (8).
+* The vk backeng image API was improved to accept a `ImageDescriptor` rather than a lot of params. Also, the usage of
+  command buffers in the API was removed, meaning that only empty vk images can be created (4).
+* Start working towards to taking references to vk handles for e.g. buffers.
+* `TextureDescriptor::Raw` now takes a `DescriptorData` for the bytes (compared to `Arc<ByteBuffer>`)
+  which means both owned and borrowed data is also supported.
+* Make imgui integration use the API for creating textures from borrowed data.
+* The TextureDescriptor is now only part of the public API in `trekant/src/texture`. Internally, a combination of
+  `TextureDesc` and `DescriptorData` is now used (gained via `TextureDescriptor::split_desc_data`) which
+  simplifies the code internally as the files are loaded early and handling empty images (where there is no data) is simpler.
+  `TextureDescriptor` is still kept for the outermost API though as it quite convenient to use the `File` variant in user
+  code.
+
+## Shadow coords in fragment shaders
+
+Currently, the shadow coord computation is all done in the vertex shader for the main lighting pass.
+
+1. For each of the shadow casting lights, a matrix is created and written to an index withing fixed-size uniform.
+2. This uniform is fed to the vertex shader for the main lighting pass, where the world position of that vertex is transformed
+   into the clip-space for a shadow-casting light.
+3. Each clip-space position is output as a separate vertex attribute.
+
+This has a number of negative effects:
+
+1. For every vertex in the scene, we compute the shadow clip coords for all lights. This will not scale if the number of
+   of lights increase and we need to start culling which lights affect which areas.
+2. The number of vertex attributes increase with the limit of lights. Each of these need to be interpolated etc. even if
+   the light is not used.
+3. The maximum amount of shadow-casting lights is hardcoded in several places: vertex shader, fragment shader and host.
+4. The maximum amount of shadow-casting lights is not the same as the maximum amount of shadow maps when point lights
+   are introduced, making this more complex.
+
+Therefore, it makes sense to move the shadow coord computation to the fragment shader.
+
+1. The world to shadow clip-space computation is done in the fragment shader rather than the vertex shader. Note that
+   this means we cannot rely on the interpolation and more matrix multiplies will be done for each fragment and light.
+2. World to shadow/light clip-space are written to a storage buffer that is used in the fragment shader.
+
+While moving the shadow coord computation to the fragment shader and wanting to use storage buffers for the backing
+buffer type, I noticed that there is no support for this.
+
+While adding support for storage buffers, it the templates and macros got in the way more than it
+helped. The amount of code required to just add support for storage buffers does not seems to be
+worthwhile the compared to the amount of bugs it might have stopped. Maybe it is more worthwhile
+in a production environment but it mostly gets in the way here :smiley:. Therefore,
+
+1. Remove the typing of buffers (vertex, index etc.).
+2. Add support for storage buffers.
+3. Move shadow sampling coord computation to the fragment shader.
+
+### Bug: The code is using the buffer offset alignment for the element alignment
+
+Currently, the code uses the `.min_uniform_buffer_offset_alignment` for each element rather than than
+only for the buffer offset itself. This is likely because the main usecase for this was the individually
+bound view matrices for the shadow passes. So:
+
+1. Shadow pass needs 256 alignment for the view matrix.
+2. Main render pass needs 64 byte alignment for the world_to_shadow buffer.
+
+Rework the buffer creation API. BufferDescriptor now exposes:
+
+* `BufferDescriptor::vertex_buffer` and similar to make the API a bit less verbose.
+  * This allows to infer the type of the buffer elemenst and put trait bounds on them, e.g. VertexDefinition.
+  * Unfortunately, it also means we lose the explicitness of from_vec/from_slice etc. and this is instead inferred from
+    the API. Currently, this tradeoff seems worth it but it does make the API signature hard to read and the lifetimes/allocation
+    behaviour a bit harder to understand.
+* `BufferDescriptor::uniform_buffer` exposes an extra parameter, `ElementAlignment::(Std140 | MinBufferOffset)` to allow
+  the user to control the alignment of the elements.
+
+### HostBuffer API
+
+Now that the descriptor API has changed a lot, the host buffer API is harder to integrate with the buffer descriptor.
+
+The original API for host buffers was motivated by:
+
+> Provide both host-only buffers (frontend-only) for convenience of managing buffer data and allow
+> creating buffer descriptors from them easily.
+
+Essentially, with the loader API, we either have to:
+
+1. Clone the buffer data `Vec` that the `BufferDescriptor` can own.
+2. Move out of the `Vec` containing the data.
+3. Use shared ownership with `Arc<BufferData>` so that the loader can hold on to a reference as long as it needs to.
+
+Host buffers exist to serve `2.` and are convenient to put in components that are supposed to contain a buffer. When the
+buffer descriptor is created, either the buffer needs to be cloned, or the component needs to be removed to move the
+vector or the data is shared with Arc. Thus, host buffers contain an Arc.
+
+#### Problems
+
+* The host buffer doesn't fit into the new `vertex_buffer`, `uniform_buffer` etc. APIs as it is not typed on the element.
+  There is no way to create a `BufferData` implementation for `HostBuffer` as the former has an associated type.
+* The host buffer can't be made typed on the element data, then e.g. the `ram::render::Mesh` component wouldn't be able
+  to exist.
+* The hostbuffer type contains the trait for the buffer type. This is also used in the buffer descriptor to
+  have knowledge of the required alignment for the type.
+* To handle the BufferLayout arg that are required for uniform buffer descriptors, any buffer descriptor created
+  from a host buffer needs to accept that. It can be made optional but the API doesn't look great.
+
+One could consider requiring a user to pass the alignment requirement when creating the host buffer but that would mean
+that the CPU buffer creation would need to "know" about how the data is laid out in the gpu buffer, which seems strange.
+Also, this would break the current API with `from_vec` etc. as it would be different for uniform buffers vs. the rest.
+
+Another more subtle problem is that with the HostBuffer API, we discard the type information and we have to store data
+internally. But this is also what the buffer descriptor does. So, we have two APIs that both throw away the type and
+one of them is the input of the other.
+
+#### Solution
+
+`BufferDescriptor::from_host_buffer` now takes an optional `BufferLayout` that is only relevant for uniform buffers.
+There is no code that uses host buffers for uniform buffers though so all this work is a bit wasteful.
+
+Also, always use `256` for the min buffer offset to simplify the code. This means we don't have to query the device
+to know how to allocate. It does have the drawback of not being able to pack the uniforms as tightly but that doesn't
+actually make a difference on my machine anyway.
+
+## Bug: Opening a camera component stops the app
+
+Opening either a Camera component in the debugger or the "Render Camera" header in the render debug
+window makes the math library assert on the fov_y parameter for a function being 0.
+
+### Findings
+
+The code for visiting primitives in the UI would cast floats to ints and then display them as ints.
+The fov_y variable which was 0.7 was truncated to 0 when it was cast to int to be displayed.
+
+### Solution
+
+Rewrite the UI-code to use `input_scalar` rather than `input_int` and skip all casting (thus truncation).
+Also, add support for more primitive types.
+
+## Point light shadows (WIP)
+
+Implement support for point light shadows.
 
 1. Create the backing textures in ShadowResources.
 2. Create render passes for each of the faces.
@@ -239,8 +416,9 @@ Implement support for point light shadows. High-level implementation.
 ### Sources
 
 1. There is a sasha willems example on [omni-directional shadow mapping](https://github.com/SaschaWillems/Vulkan/blob/master/examples/shadowmappingomni/shadowmappingomni.cpp)
-with the shaders located [here](https://github.com/SaschaWillems/Vulkan/tree/master/shaders/glsl/shadowmappingomni).
+   with the shaders located [here](https://github.com/SaschaWillems/Vulkan/tree/master/shaders/glsl/shadowmappingomni).
 2. learn opengl has a section on [point-shadows](https://learnopengl.com/Advanced-Lighting/Shadows/Point-Shadows).
+3. Good blog article on cube maps in vulkan: <https://satellitnorden.wordpress.com/2018/01/23/vulkan-adventures-cube-map-tutorial/>.
 
 ### Reading the examples
 
@@ -284,190 +462,109 @@ vks::tools::setImageLayout(
 ```
 
 So it seems like we should not create 6 images but rather use array layers and expose the `VK_IMAGE_CREATE_CUBE_COMPATIBLE_BIT`.
-The current `Image` type in the vk backend does not expose any of these, so this needs to be implemented!
 
-## Rework trekant image creation API
+A problem seems to be the Texture abstraction in trekant. It bakes the image and the image view into one type. For cube maps,
+we need a single image with array_layers = 6 and then create 6 image views from this.
 
-Goals:
+WIP Solution:
 
-1. Support cube maps
-   This is needed for point lights.
-2. Allow synchronous creation of images from borrowed data (for imgui)
-3. Decuple Image creation from image writing and mipmap generation.
-   Remove command buffer usage from backend::Image!
-4. Should texture creation be done via the `ResourceManager` API?
-   The problem is that this means that users have to include the ResourceManager API to actually be able to use the type
-   which is not great. So, no, it should not.
-5. Don't require users to use the `texture` module, all the public API should be available in `trekant`.
-6. Minimize code duplication and share code with the loader.
-7. Get rid of the intermediate enums in the Renderer.
-   Can we reduce them in the loader?
+1. Introduce TextureType to define if a texture is a 2D texture or a cube texture.
+2. `Texture` exposes the `full_image_view() -> &vk::ImageView` and for cube maps, `sub_image_view(idx: usize) -> &vk::ImageView`
+3. Introduce a new `PointlightShadow` struct to hold rendering resources for pointlight shadows (rather than using the
+   generic `Shadow`)
+4. Split `add_shadow_pass` into two local helper lambdas to compose better.
+5. Some refactoring in how we setup shadows with `build_single_shadow`.
 
-### Current workings
+### Validation layer errors
 
-* `trekant` exposes the `Texture` and `TextureDescriptor` types which form the basis of texture creation.
-* Texture creation is not part of the "ResourceManager" API. IIRC, this was due to the ResouceManager API not providing
-a clear benefit.
-
-The current texture class exposes functions to create a new texture (sampler + image + image view) in 3 ways:
-
-1. empty/uninit
-2. From Image
-3. From data
-
-Ideas:
-
-* Splitting the data and the description is problematic if the data contains a `File` variant, as we only
-  know the extents after loading the file but the description needs the extent upfront. So, we probably
-  want to keep the outermost TextureDescriptor API as-is.
-* We don't want to copy-paste how to load the TextureDescriptor between the loader and the renderer.
-* Move out the loader code for creating a texture into a new function, load_texture.
-
-### Solution
-
-* The `Loader` API now exposes `load_texture` for loading textures rather than supporting
-`ResourceLoader::load` meaning that users no longer have to import the trait to use it (6).
-It also means the code is a bit simpler. Buffer are still loaded with `ResourceLoader::load`, changing
-this is out of scope for now.
-* The job queuing and command buffer in the loader was simplified a bit.
-* `trekant::descriptor` was renamed to `pipeline_resource` as descriptor is used as a suffix for a lot of
-  "parameter struct" that bake several parameters into a struct for e.g. a constructor.
-* Remove the intermediate texture enums in `Renderer` (8).
-* The vk backeng image API was improved to accept a `ImageDescriptor` rather than a lot of params. Also, the usage of
-  command buffers in the API was removed, meaning that only empty vk images can be created (4).
-* Start working towards to taking references to vk handles for e.g. buffers.
-* `TextureDescriptor::Raw` now takes a `DescriptorData` for the bytes (compared to `Arc<ByteBuffer>`)
-  which means both owned and borrowed data is also supported.
-* Make imgui integration use the API for creating textures from borrowed data.
-* The TextureDescriptor is now only part of the public API in `trekant/src/texture`. Internally, a combination of
-`TextureDesc` and `DescriptorData` is now used (gained via `TextureDescriptor::split_desc_data`) which
-simplifies the code internally as the files are loaded early and handling empty images (where there is no data) is simpler.
-  `TextureDescriptor` is still kept for the outermost API though as it quite convenient to use the `File` variant in user
-  code.
-
-## Shadow coords in fragment shaders
-
-Currently, the shadow coord computation is all done in the vertex shader for the main lighting pass.
-
-1. For each of the shadow casting lights, a matrix is created and written to an index withing fixed-size uniform.
-2. This uniform is fed to the vertex shader for the main lighting pass, where the world position of that vertex is transformed
-into the clip-space for a shadow-casting light.
-3. Each clip-space position is output as a separate vertex attribute.
-
-This has a number of negative effects:
-
-1. For every vertex in the scene, we compute the shadow clip coords for all lights. This will not scale if the number of
-of lights increase and we need to start culling which lights affect which areas.
-2. The number of vertex attributes increase with the limit of lights. Each of these need to be interpolated etc. even if
-the light is not used.
-3. The maximum amount of shadow-casting lights is hardcoded in several places: vertex shader, fragment shader and host.
-4. The maximum amount of shadow-casting lights is not the same as the maximum amount of shadow maps when point lights
-are introduced, making this more complex.
-
-Therefore, it makes sense to move the shadow coord computation to the fragment shader.
-
-1. The world to shadow clip-space computation is done in the fragment shader rather than the vertex shader. Note that
-this means we cannot rely on the interpolation and more matrix multiplies will be done for each fragment and light.
-2. World to shadow/light clip-space are written to a storage buffer that is used in the fragment shader.
-
-While moving the shadow coord computation to the fragment shader and wanting to use storage buffers for the backing
-buffer type, I noticed that there is no support for this.
-
-While adding support for storage buffers, it the templates and macros got in the way more than it
-helped. The amount of code required to just add support for storage buffers does not seems to be
-worthwhile the compared to the amount of bugs it might have stopped. Maybe it is more worthwhile
-in a production environment but it mostly gets in the way here :smiley:. Therefore,
-
-1. Remove the typing of buffers (vertex, index etc.).
-2. Add support for storage buffers.
-3. Move shadow sampling coord computation to the fragment shader.
-
-### Bug: The code is using the buffer offset alignment for the element alignment
-
-Currently, the code uses the `.min_uniform_buffer_offset_alignment` for each element rather than than
-only for the buffer offset itself. This is likely because the main usecase for this was the individually
-bound view matrices for the shadow passes. So:
-
-1. Shadow pass needs 256 alignment for the view matrix.
-2. Main render pass needs 64 byte alignment for the world_to_shadow buffer.
-
-Rework the buffer creation API. BufferDescriptor now exposes:
-
-* `BufferDescriptor::vertex_buffer` and similar to make the API a bit less verbose.
-  * This allows to infer the type of the buffer elemenst and put trait bounds on them, e.g. VertexDefinition.
-  * Unfortunately, it also means we lose the explicitness of from_vec/from_slice etc. and this is instead inferred from
-  the API. Currently, this tradeoff seems worth it but it does make the API signature hard to read and the lifetimes/allocation
-  behaviour a bit harder to understand.
-* `BufferDescriptor::uniform_buffer` exposes an extra parameter, `ElementAlignment::(Std140 | MinBufferOffset)` to allow
-the user to control the alignment of the elements.
-
-### HostBuffer API
-
-Now that the descriptor API has changed a lot, the host buffer API is harder to integrate with the buffer descriptor.
-
-The original API for host buffers was motivated by:
-
-> Provide both host-only buffers (frontend-only) for convenience of managing buffer data and allow
-creating buffer descriptors from them easily.
-
-Essentially, with the loader API, we either have to:
-
-1. Clone the buffer data `Vec` that the `BufferDescriptor` can own.
-2. Move out of the `Vec` containing the data.
-3. Use shared ownership with `Arc<BufferData>` so that the loader can hold on to a reference as long as it needs to.
-
-Host buffers exist to serve `2.` and are convenient to put in components that are supposed to contain a buffer. When the
-buffer descriptor is created, either the buffer needs to be cloned, or the component needs to be removed to move the
-vector or the data is shared with Arc. Thus, host buffers contain an Arc.
-
-#### Problems
-
-* The host buffer doesn't fit into the new `vertex_buffer`, `uniform_buffer` etc. APIs as it is not typed on the element.
-There is no way to create a `BufferData` implementation for `HostBuffer` as the former has an associated type.
-* The host buffer can't be made typed on the element data, then e.g. the `ram::render::Mesh` component wouldn't be able
-to exist.
-* The hostbuffer type contains the trait for the buffer type. This is also used in the buffer descriptor to
-have knowledge of the required alignment for the type.
-* To handle the BufferLayout arg that are required for uniform buffer descriptors, any buffer descriptor created
-from a host buffer needs to accept that. It can be made optional but the API doesn't look great.
-
-One could consider requiring a user to pass the alignment requirement when creating the host buffer but that would mean
-that the CPU buffer creation would need to "know" about how the data is laid out in the gpu buffer, which seems strange.
-Also, this would break the current API with `from_vec` etc. as it would be different for uniform buffers vs. the rest.
-
-Another more subtle problem is that with the HostBuffer API, we discard the type information and we have to store data
-internally. But this is also what the buffer descriptor does. So, we have two APIs that both throw away the type and
-one of them is the input of the other.
+`= 0x4dae5635 | Submitted command buffer expects VkImage 0x932ea900000000ac[] (subresource: aspectMask 0x2 array layer 1, mip level 0) to be in layout VK_IMAGE_LAYOUT_DEPTH_STENCIL_READ_ONLY_OPTIMAL--instead, current layout is VK_IMAGE_LAYOUT_UNDEFINED.")`
 
 #### Solution
 
-`BufferDescriptor::from_host_buffer` now takes an optional `BufferLayout` that is only relevant for uniform buffers.
-There is no code that uses host buffers for uniform buffers though so all this work is a bit wasteful.
+Turns out the sub image-views were not created with the proper `base_layer` index so all the render passes for a cubemap
+were writing to the same image.
 
-Also, always use `256` for the min buffer offset to simplify the code. This means we don't have to query the device
-to know how to allocate. It does have the drawback of not being able to pack the uniforms as tightly but that doesn't
-actually make a difference on my machine anyway.
+### Bug: Incorrect matrix for lightspace transformation
 
-## Bug: Opening a camera component stops the app
+Issue: The 6 shadow passes each have their own view-projection matrix as they are individual faces of the cube but all
+six of them are added to the output list, meaning that the main render pass samples from the first matrix.
 
-Opening either a Camera component in the debugger or the "Render Camera" header in the render debug
-window makes the math library assert on the fov_y parameter for a function being 0.
+Instead, the point light cube map sampling in the main render passes should have a matrix for the light space conversion.
+
+### START HERE
+
+Current state: Code is compiling and running but the pointlight shadows are not working.
+
+Repro with:
+
+```bash
+cargo run --bin dbg -- --pointlight-test --rsf-file data\ambient_light.ron.rsf --spawn-plane
+```
 
 ### Findings
 
-The code for visiting primitives in the UI would cast floats to ints and then display them as ints.
-The fov_y variable which was 0.7 was truncated to 0 when it was cast to int to be displayed.
+* In RenderDoc, the cube map viewer shows Y+ containing what I would expect Y- to be.
+  * To test this, add a new plane above the current one and see if the shadow shows up there.
+  * How does vulkan combine the array layers into a cube map? Is the ordering they are rendering incorrect w.r.t. this?
+TODO:
+* Face order seems correct but shadows are still buggy...
+
+I think I am start to understand. Most of the tutorial (laernopengl and sacha) use a color buffer for the cube maps and write a custom linear depth.
+They can sample the cube map in the fragment shader and compare directly with the depth. Using the depth buffers to construct a cube map, we need to recompute a bit more, it seems like.
+
+Each face is a spotlight so we'd need to convert the coords of the fragment not just
+with the to_lightspace matrix but with the specific view-proj matrix for that face of the cubemap. We'd almost be better of with not a cube map at all? If instead, we use 6 regular texture, we'd just need to figure out which of them
+to sample.
+
+Actually, for sampling across seams, it would be a lot more involved to not use a cubemap.
+
+TODO:
+
+1. Figure out sampling the fragment shader
+2. Why are the cube map faces red? Redder is higher? Which means the depth is the highest? Shadow depth texture are the opposite, whiter is the deeper?
 
 ### Solution
 
-Rewrite the UI-code to use `input_scalar` rather than `input_int` and skip all casting (thus truncation).
-Also, add support for more primitive types.
+Pointlight shadows use multiple render passes, one for each face of a cube map to write single-channel color textures.
+These textures are combined into a cubemap that is used in the pbr fragment shader to sample the pointlight shadow.
+The reason for going with color textures rather than depth textures is that it makes the sampling calculations easier.
+
+The 6 point light shadow passes consist of one vertex shader that:
+
+1. Computes the world position of the vertex and writes that to frag input.
+2. Computes the light-space clip position of the vertex and writes that to gl_Position.
+
+and one fragment shader that:
+
+Writes the length of the vector from the fragment world position to the light world position.
+
+* This is the "depth" of the shadow, i.e. how far the light reaches in this direction.
+* The length is not normalized as we are writing to a 32-bit floating point format that can handle the full range.
+
+Each pixel in this texture is the world space depth of that fragment compared to the light source.
+
+When sampling the fragment shader, this is required:
+
+1.
+
+TODO: START HERE and figure this out.
 
 ## Future work
 
+### Multiview rendering for cubemaps
+
+<https://www.reddit.com/r/vulkan/comments/17rhrrc/question_about_rendering_to_cubemaps/>
+
+### ram::render::draw_frame structure
+
+Instead of passing around the World, consider extracting all rendering info from it in one or several passes over the world.
+These structures would then be used in the rest of the rendering rather than storing intermediate data in the world.
+
+(2, 2), (0, 1)
+
 ### Loader API
 
-Maybe we can allow users to create several loader - one per thread/system - and contain the resource flushing to that system.
+Maybe we can allow users to create several loader _one per thread/system_ and contain the resource flushing to that system.
 Should loaders always be used and have blocking functions?
 
 ### Frame API
@@ -483,3 +580,11 @@ this internally in the renderer and panic if it is not done correctly. In additi
 * The host buffer is only used in `ram::render::Mesh`. Consider moving it to `ram`.
 * Consider moving `elem_size` and `elem_align` into BufferDescriptor. This would reduce the contents for most of the enums.
 * Consider moving the `enqueue` functions to free functions.
+
+### Directional lights improvements
+
+* Directional lights improvements: Try to reproduce the scene bounds in the opengl or sascha willems examples for
+  directional light shadows and see if the issues with pixelated examples can be reproduced.
+* Implement cascaded shadow maps for directional lights.
+
+### BUG: Changes in #included files in shaders are not recompiled during runtime

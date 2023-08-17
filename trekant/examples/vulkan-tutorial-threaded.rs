@@ -258,6 +258,7 @@ fn create_texture(
         path: tex_path,
         format: util::Format::RGBA_SRGB,
         mipmaps: trekant::MipMaps::None,
+        ty: trekant::TextureType::Tex2D,
     };
 
     let texture = loader
@@ -395,7 +396,7 @@ fn main() {
                 if let (Some(pending_mesh), Some(pending_tex)) = (pending_mesh, pending_tex) {
                     let mut guard = loader.transfer(&mut renderer);
                     for mapping in guard.iter() {
-                        use trekant::loader::HandleMapping;
+                        use trekant::HandleMapping;
 
                         match mapping {
                             HandleMapping::Buffer { old, new } => {

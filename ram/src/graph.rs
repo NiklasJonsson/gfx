@@ -24,6 +24,14 @@ impl std::ops::Deref for Children {
     }
 }
 
+impl<'a> IntoIterator for &'a Children {
+    type IntoIter = std::slice::Iter<'a, Entity>;
+    type Item = &'a Entity;
+    fn into_iter(self) -> Self::IntoIter {
+        self.children.as_slice().iter()
+    }
+}
+
 pub struct TransformPropagation;
 impl TransformPropagation {
     pub const ID: &'static str = "TransformPropagation";
@@ -118,14 +126,11 @@ pub mod sys {
         let mut queue = VecDeque::new();
         queue.push_back(root);
 
-        while !queue.is_empty() {
-            let ent = queue.pop_front().unwrap();
+        while let Some(ent) = queue.pop_front() {
             visit_node(ent);
 
             if let Some(children) = children_storage.get(ent) {
-                for c in children.iter() {
-                    queue.push_back(*c);
-                }
+                queue.extend(children);
             }
         }
     }
@@ -138,14 +143,11 @@ pub mod sys {
         let mut stack = Vec::new();
         stack.push(root);
 
-        while !stack.is_empty() {
-            let ent = stack.pop().unwrap();
+        while let Some(ent) = stack.pop() {
             visit_node(ent);
 
             if let Some(children) = children_storage.get(ent) {
-                for c in children.iter() {
-                    stack.push(*c);
-                }
+                stack.extend(children);
             }
         }
     }
@@ -474,7 +476,7 @@ mod tests {
             id2ent.push(root);
         }
 
-        let expected = vec![0, 1, 2, 2, 2, 3, 3, 3];
+        let expected = [0, 1, 2, 2, 2, 3, 3, 3];
         for (ent, ID(id)) in joined {
             let e = expected[*id];
             assert_eq!(root_to_node_path(&w, ent).len(), e);

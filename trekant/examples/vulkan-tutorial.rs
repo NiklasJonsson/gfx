@@ -257,6 +257,7 @@ fn create_texture(renderer: &mut Renderer) -> Handle<Texture> {
             path: tex_path,
             format: util::Format::RGBA_SRGB,
             mipmaps: trekant::MipMaps::Generate,
+            ty: trekant::TextureType::Tex2D,
         })
         .expect("Failed to create texture")
 }
