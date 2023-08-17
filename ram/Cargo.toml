@@ -1,0 +1,63 @@
+[package]
+name = "ram"
+version = "0.1.0"
+authors = ["Niklas Jonsson <niklasandersjonsson@gmail.com>"]
+edition = "2021"
+
+[dependencies]
+ram-derive = { path = "../ram-derive" }
+
+# ECS
+specs = { version = "0.19.0", features = ["derive", "serde"] }
+
+# Rendering/Graphics
+winit = "0.28.6"
+trekant = { path = "../trekant" }
+imgui = "0.8.2"
+shaderc = "0.6.2"
+
+# Math/Physics
+vek = { version = "0.15.5", features = ["serde"] }
+num-derive = "0.2.5"
+num-traits = "0.2.8"
+
+# Resources/Assets
+gltf = "0.14.0"
+ron = "0.6.2"
+
+# Util
+log = "0.4.8"
+env_logger = "0.6.2"
+thiserror = "1.0.20"
+resurs = { path = "../resurs" }
+serde = "1.0"
+polymap = "0.3.0"
+
+# Threading
+crossbeam = "0.7.3"
+
+# Perf
+profiling = "1.0.3"
+
+[features]
+profile-with-puffin = [
+    "profiling/profile-with-puffin",
+    "trekant/profile-with-puffin",
+]
+profile-with-optick = [
+    "profiling/profile-with-optick",
+    "trekant/profile-with-optick",
+]
+profile-with-superluminal = [
+    "profiling/profile-with-superluminal",
+    "trekant/profile-with-superluminal",
+]
+profile-with-tracing = [
+    "profiling/profile-with-tracing",
+    "trekant/profile-with-tracing",
+]
+profile-with-tracy = [
+    "profiling/profile-with-tracy",
+    "trekant/profile-with-tracy",
+]
+validation-layers = ["trekant/validation-layers"]

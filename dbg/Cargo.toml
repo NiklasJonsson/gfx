@@ -5,8 +5,8 @@ authors = ["Niklas Jonsson <niklasandersjonsson@gmail.com>"]
 edition = "2021"
 
 [dependencies]
-ramneryd = { path = "../ramneryd", features = ["validation-layers"] }
+ram = { path = "../ram", features = ["validation-layers"] }
 clap = { version = "3.1.0", features = ["derive"] }
 
 [features]
-profile = ["ramneryd/profile-with-tracy"]
+profile = ["ram/profile-with-tracy"]

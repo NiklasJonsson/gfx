@@ -1,4 +1,4 @@
-use ramneryd::render::shader::{Defines, ShaderLocation, ShaderType};
+use ram::render::shader::{Defines, ShaderLocation, ShaderType};
 
 use std::fs::DirEntry;
 use std::path::PathBuf;
@@ -18,7 +18,7 @@ fn main() {
         q.extend(new);
     };
 
-    queue_dirs(&mut queue, PathBuf::from("ramneryd/src/render/shaders/"));
+    queue_dirs(&mut queue, PathBuf::from("ram/src/render/shaders/"));
 
     while let Some(entry) = queue.pop() {
         let path = entry.path();
@@ -39,7 +39,7 @@ fn main() {
     }
 
     let shader_compiler =
-        ramneryd::ShaderCompiler::new().expect("Failed to create shader compiler");
+        ram::ShaderCompiler::new().expect("Failed to create shader compiler");
 
     let count = shaders.len();
     println!("Found {count} shaders");

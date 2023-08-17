@@ -171,15 +171,15 @@ Turns out it is the feature that packages the shaders with the source code appli
 renderer doesn't load the shaders from the source directory but from the build directory, which means the changes are
 not picked up unless there is a rebuild.
 
-To give some context, this was added because using the `ramneryd` lib from a different location would mean the shaders
+To give some context, this was added because using the `ram` lib from a different location would mean the shaders
 weren't found, as the loading was done relative to the CWD of the executable. This was again redone recently to support
 the `check-shaders` executable so that it can load shaders relaive to the CWD of the executable if it is not found.
 
 So, some goals for reworking this:
 
-1. An executable using `ramneryd` should always be able to execute the builtin shaders so they need to be packaged somehow.
+1. An executable using `ram` should always be able to execute the builtin shaders so they need to be packaged somehow.
 2. This packaging should not interfere with the reload feature, i.e. the latter should still work.
-3. Executables using `ramneryd` should be able to (re-)load custom shaders.
+3. Executables using `ram` should be able to (re-)load custom shaders.
 
 Some ideas:
 
@@ -187,13 +187,13 @@ Some ideas:
 (or some user-defined path) for the shaders.
 * Remove build-dir shaders. Not sure if it is possible to package this shaders in any other way. With that said, the
 current packaging feature would only work in the context of cargo but not generic packaging of an executable. For
-example, to introduce a new executable, "demo" we'd need to copy the shaders for the ramneryd lib as well. Even if we
+example, to introduce a new executable, "demo" we'd need to copy the shaders for the ram lib as well. Even if we
 added the shaders into the executable code with `include_bytes` we'd still end up having to have a "don't use builtin"
 mode when wanting to iterate on the core shaders.
 
 Initial design: `ShaderCompiler::compile` now takes a `ShaderLocation` instead of a path, which means we can control
 the lookup dirs from the caller. The idea is that the reload feature is only expected to work when working with the
-ramneryd source code close. That what, we skip using the builtins and use absolute paths.
+ram source code close. That what, we skip using the builtins and use absolute paths.
 
 ### Solution
 

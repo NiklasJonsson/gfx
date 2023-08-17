@@ -4,7 +4,7 @@
 cargo run --release --bin dbg -- --gltf-file ../glTF-Sample-Models/2.0/Sponza/glTF/Sponza.gltf --rsf-file data/ambient_light.ron.rsf --rsf-file data/spot_light.ron.rsf
 ```
 
-Graphics experimentation with vulkan (mostly contained in trekanten/).
+Graphics experimentation with vulkan (mostly contained in trekant/).
 
 Currently supports metallic-roughness PBR as defined by gltf and also shadow mapping for spot & directional lights (WIP).
 
@@ -30,11 +30,11 @@ from <https://github.com/KhronosGroup/glTF-Sample-Models>
 
 ## Notes
 
-Two main libs: ramneryd & trekanten. Binary `dbg` is used to run the "engine".
+Two main libs: ram & trekant. Binary `dbg` is used to run the "engine".
 
-### ramneryd
+### ram
 
-Prototype for integrating specs ECS with trekanten vulkan wrapper.
+Prototype for integrating specs ECS with trekant vulkan wrapper.
 
 * Transforms are uploaded with push constants.
 * Supports two materials: PBR & unlit.
@@ -45,7 +45,7 @@ Prototype for integrating specs ECS with trekanten vulkan wrapper.
 Descriptor set 0 holds the "engine" data: light matrices, shadow matrices, main camera view data etc, shadow maps.
 Descriptor set 1 is material-specific.
 
-### trekanten
+### trekant
 
 Initially, the idea was for this to be (yet another) low-level graphics lib wrapping vulkan but with convenient API. I
 also had the idea that I might support WPGU as a separate backend to run in the browser. As time has passed, I've realized

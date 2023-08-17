@@ -1,10 +1,10 @@
 [workspace]
 members = [
-    "trekanten",
-    "trekanten-derive",
+    "trekant",
+    "trekant-derive",
     "resurs",
-    "ramneryd-derive",
-    "ramneryd",
+    "ram-derive",
+    "ram",
     "dbg",
     "check-shaders",
 ]

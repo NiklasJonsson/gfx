@@ -1,17 +1,16 @@
-use ramneryd::math::{self, Aabb};
-use ramneryd::math::{Quat, Rgb, Rgba, Vec3};
-use ramneryd::render;
+use ram::math::{Quat, Rgb, Rgba, Transform, Vec3};
+use ram::render;
 
-use ramneryd::common::Name;
-use ramneryd::ecs::prelude::*;
-use ramneryd::{Module, ModuleLoader};
+use ram::common::Name;
+use ram::ecs::prelude::*;
+use ram::{Module, ModuleLoader};
 
 use clap::Parser;
 
 use std::path::PathBuf;
 
 #[derive(Debug, Parser)]
-#[clap(author, version, about = "ramneryd debug binary")]
+#[clap(author, version, about = "ram debug binary")]
 struct Args {
     #[clap(parse(from_os_str), name = "gltf-file", long)]
     gltf_files: Vec<PathBuf>,
@@ -38,10 +37,10 @@ impl Module for Spawner {
 
         self.gltf_files
             .iter()
-            .for_each(|f| ramneryd::asset::gltf::load_asset(world, f));
+            .for_each(|f| ram::asset::gltf::load_asset(world, f));
         self.rsf_files
             .iter()
-            .for_each(|f| ramneryd::asset::rsf::load_asset(world, f));
+            .for_each(|f| ram::asset::rsf::load_asset(world, f));
 
         let plane_side = 100.0;
         let plane_height = 1.0;
@@ -49,7 +48,7 @@ impl Module for Spawner {
             world
                 .create_entity()
                 .with(Name::from("Plane"))
-                .with(math::Transform::pos(0.0, -plane_height / 2.0, 0.0))
+                .with(Transform::pos(0.0, -plane_height / 2.0, 0.0))
                 .with(render::Shape::Box {
                     width: plane_side,
                     height: plane_height,
@@ -73,7 +72,7 @@ impl Module for Spawner {
             world
                 .create_entity()
                 .with(Name::from("Cube"))
-                .with(math::Transform::pos(0.0, 3.0, 0.0))
+                .with(Transform::pos(0.0, 3.0, 0.0))
                 .with(render::Shape::Box {
                     width: 1.0,
                     height: 1.0,
@@ -114,8 +113,8 @@ impl SunMovement {
 impl<'a> System<'a> for SunMovement {
     type SystemData = (
         WriteStorage<'a, Sun>,
-        WriteStorage<'a, math::Transform>,
-        ReadExpect<'a, ramneryd::Time>,
+        WriteStorage<'a, Transform>,
+        ReadExpect<'a, ram::Time>,
     );
 
     fn run(&mut self, data: Self::SystemData) {
@@ -135,7 +134,7 @@ impl<'a> System<'a> for SunMovement {
             tfm.position.y = y;
 
             tfm.rotation = Quat::rotation_from_to_3d(
-                ramneryd::render::Light::DEFAULT_FACING,
+                ram::render::Light::DEFAULT_FACING,
                 Vec3::from(0.0) - tfm.position,
             );
         }
@@ -149,14 +148,14 @@ impl Module for SunSimulation {
             .world
             .create_entity()
             .with(Name::from("Sun"))
-            .with(math::Transform {
+            .with(Transform {
                 position: Vec3 {
                     x: 0.0,
                     y: SUN_HEIGHT,
                     z: 0.0,
                 },
                 rotation: Quat::rotation_from_to_3d(
-                    ramneryd::render::Light::DEFAULT_FACING,
+                    ram::render::Light::DEFAULT_FACING,
                     Vec3::new(0.0, -1.0, 0.0),
                 ),
                 scale: 1.0,
@@ -165,7 +164,7 @@ impl Module for SunSimulation {
                 angular_velocity: (3.0_f32).to_radians(),
                 angle: std::f32::consts::FRAC_PI_2,
             })
-            .with(ramneryd::render::Light::Directional {
+            .with(ram::render::Light::Directional {
                 color: Rgb {
                     r: 0.5,
                     g: 0.5,
@@ -178,7 +177,7 @@ impl Module for SunSimulation {
 
 fn main() {
     let args = Args::parse();
-    let mut init = ramneryd::Init::new();
+    let mut init = ram::Init::new();
 
     init.add_module(Spawner {
         spawn_cube: args.spawn_cube,
