@@ -38,7 +38,7 @@ pub const fn round_to_multiple(n: usize, multiple: usize) -> usize {
 /// # Only call this is the type can be represented with all possible byte values
 pub unsafe fn as_byte_slice<T: Copy>(slice: &[T]) -> &[u8] {
     let ptr = slice.as_ptr() as *const u8;
-    let size = std::mem::size_of::<T>() * slice.len();
+    let size = std::mem::size_of_val(slice);
     std::slice::from_raw_parts(ptr, size)
 }
 

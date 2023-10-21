@@ -264,7 +264,6 @@ impl Obb {
     }
 
     pub fn max_diagonal(&self) -> [Vec3; 2] {
-
         let corners = self.corners();
         let mut max = [corners[0], corners[1]];
 

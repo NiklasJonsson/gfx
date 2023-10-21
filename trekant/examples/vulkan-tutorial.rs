@@ -146,7 +146,7 @@ fn get_fname(dir: &str, target: &str) -> std::path::PathBuf {
 fn load_file(fname: &std::path::Path) -> std::io::Cursor<Vec<u8>> {
     use std::io::Read;
     let mut buf = Vec::new();
-    let mut file = std::fs::File::open(&fname).unwrap();
+    let mut file = std::fs::File::open(fname).unwrap();
     file.read_to_end(&mut buf).unwrap();
     std::io::Cursor::new(buf)
 }
@@ -327,8 +327,8 @@ fn main() {
     env_logger::init();
 
     let (mut state, event_loop) = State::new();
-    let mut renderer = trekant::Renderer::new(&state.window, state.extents())
-        .expect("Failed to create renderer");
+    let mut renderer =
+        trekant::Renderer::new(&state.window, state.extents()).expect("Failed to create renderer");
 
     let render_pass = renderer
         .presentation_render_pass(4)

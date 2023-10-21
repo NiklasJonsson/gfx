@@ -36,7 +36,7 @@ fn main() {
     let shader_sources = Path::new("src/");
     for path in find_ext(shader_sources, "glsl").into_iter() {
         let dest = dest_path.join(
-            path.strip_prefix(&shader_sources)
+            path.strip_prefix(shader_sources)
                 .expect("Failed to relative dir"),
         );
         eprintln!("dest: {}", dest.display());
@@ -44,7 +44,7 @@ fn main() {
             .parent()
             .expect("Expected parent dir for destination path");
         if dest_dir.is_file() {
-            std::fs::remove_file(&dest_dir).unwrap_or_else(|e| {
+            std::fs::remove_file(dest_dir).unwrap_or_else(|e| {
                 panic!(
                     "{} is a file and can't be replaced by dir {}",
                     dest_dir.display(),
@@ -57,7 +57,7 @@ fn main() {
             "{} exists but is not a dir",
             dest_dir.display()
         );
-        match std::fs::create_dir_all(&dest_dir) {
+        match std::fs::create_dir_all(dest_dir) {
             Ok(_) => (),
             Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => (),
             Err(e) => panic!("failed to create destination directory for shaders {}", e),

@@ -400,14 +400,14 @@ impl Texture {
             sampler,
         })
     }
-    fn from_raw<'a, D: HasVkDevice>(
+    fn from_raw<D: HasVkDevice>(
         device: &D,
         allocator: &AllocatorHandle,
         command_buffer: &mut CommandBuffer,
         extent: Extent2D,
         format: util::Format,
         mipmaps: MipMaps,
-        data: &'a [u8],
+        data: &[u8],
     ) -> Result<(Self, Buffer), TextureError> {
         let ((image, staging), mip_levels) = if let MipMaps::Generate = mipmaps {
             let mip_levels = mip_levels_for(extent);

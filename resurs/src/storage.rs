@@ -109,7 +109,7 @@ where
             {
                 if (self.pred)(data) {
                     handle = Some(Handle::<T>::new(ID {
-                        index: self.i as u32,
+                        index: self.i,
                         generation: *generation,
                     }));
                 }
@@ -416,7 +416,7 @@ mod tests {
         let mut m = Storage::new();
         let r = add_int_range(&mut m, 0, 102);
 
-        let f = |x| x > 60 || x < 30;
+        let f = |x| !(30..=60).contains(&x);
         remove_with_cond(&mut m, &r, f);
         check_with_cond(&m, &r, f);
     }
@@ -426,7 +426,7 @@ mod tests {
         let mut m = Storage::new();
         let r = add_int_range(&mut m, 0, 102);
 
-        let f = |x| x > 60 || x < 30;
+        let f = |x| !(30..=60).contains(&x);
         remove_with_cond(&mut m, &r, f);
         check_with_cond(&m, &r, f);
 

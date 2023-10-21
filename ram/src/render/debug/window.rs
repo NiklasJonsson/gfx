@@ -277,6 +277,12 @@ pub struct OneShotDebugUI {
     functions: Mutex<Vec<OneShotDebugUIFunction>>,
 }
 
+impl Default for OneShotDebugUI {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl OneShotDebugUI {
     pub fn add<F>(&self, f: F)
     where

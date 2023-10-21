@@ -100,7 +100,7 @@ impl<'a> ImguiVisitor<'a> {
                 self.ui.inner().same_line();
             }
             MetaOrigin::TupleField { idx } => {
-                self.ui.inner().text(&format!("{}", idx));
+                self.ui.inner().text(format!("{}", idx));
                 self.ui.inner().same_line();
             }
             MetaOrigin::Standalone => (),

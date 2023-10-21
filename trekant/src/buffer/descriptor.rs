@@ -10,8 +10,8 @@ use backend::buffer::Buffer;
 use backend::command::CommandBuffer;
 use backend::{AllocatorHandle, MemoryError};
 
-use crate::vk;
 use crate::vertex::VertexDefinition;
+use crate::vk;
 
 use std::sync::Arc;
 

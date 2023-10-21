@@ -38,8 +38,7 @@ fn main() {
         }
     }
 
-    let shader_compiler =
-        ram::ShaderCompiler::new().expect("Failed to create shader compiler");
+    let shader_compiler = ram::ShaderCompiler::new().expect("Failed to create shader compiler");
 
     let count = shaders.len();
     println!("Found {count} shaders");
@@ -49,14 +48,11 @@ fn main() {
         let loc = ShaderLocation::abs(&shader);
         let result = shader_compiler.compile(&loc, &Defines::empty(), ty);
 
-        match result {
-            Err(e) => {
-                println!("");
-                println!("ERROR: Failed to compile shader {display}");
-                println!("{e}");
-                println!("");
-            }
-            Ok(_) => (),
+        if let Err(e) = result {
+            println!();
+            println!("ERROR: Failed to compile shader {display}");
+            println!("{e}");
+            println!();
         }
     }
 }

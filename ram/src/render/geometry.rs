@@ -207,8 +207,7 @@ pub fn cone_mesh(radius: f32, height: f32) -> Mesh {
     let mut indices = Vec::with_capacity(n_triangles * 3);
 
     // No need to worry about oob for i here as we are constructing an angle, which can be > 360
-    let angle_at =
-        |i: u32| (i as f32 / (n_angle_samples - 1) as f32) as f32 * std::f32::consts::PI * 2.0;
+    let angle_at = |i: u32| (i as f32 / (n_angle_samples - 1) as f32) * std::f32::consts::PI * 2.0;
     let pos_at = |i: u32| Vec3 {
         x: radius * angle_at(i).cos(),
         y: 0.0,

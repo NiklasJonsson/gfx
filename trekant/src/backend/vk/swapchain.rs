@@ -157,7 +157,7 @@ impl Swapchain {
 
         log::debug!("Creating swapchain with info: {:#?}", info);
         let vk_device = device.vk_device();
-        let loader = ash::extensions::khr::Swapchain::new(instance.vk_instance(), &*vk_device);
+        let loader = ash::extensions::khr::Swapchain::new(instance.vk_instance(), &vk_device);
 
         let handle = unsafe {
             loader

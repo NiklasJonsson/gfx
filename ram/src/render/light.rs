@@ -392,7 +392,7 @@ pub fn get_shadow_pipeline_for(
         .skip(vertex_format_size - trekant::util::Format::FLOAT3.size())
         .build();
 
-    let descriptor = shadow_pipeline_desc(&*shader_compiler, shadow_vertex_format)?;
+    let descriptor = shadow_pipeline_desc(&shader_compiler, shadow_vertex_format)?;
     Ok(renderer.create_gfx_pipeline(descriptor, &frame_data.shadow.render_pass)?)
 }
 
@@ -462,7 +462,7 @@ pub fn setup_shadow_resources(
 }
 
 pub struct ShadowPassOutput {
-    pub shadow_matrices: [uniform::Mat4; MAX_NUM_LIGHTS],
+    pub shadow_matrices: [uniform::Mat4; MAX_NUM_LIGHTS as usize],
     pub count: usize,
 }
 

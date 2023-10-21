@@ -50,7 +50,7 @@ pub const MAX_NUM_LIGHTS: usize = 16;
 #[derive(Copy, Clone, Debug, Default, Std140Compat)]
 #[repr(C, packed)]
 pub struct ShadowData {
-    pub matrices: [Mat4; MAX_NUM_LIGHTS],
+    pub matrices: [Mat4; MAX_NUM_LIGHTS as usize],
     // v4 is needed for padding at the end. Use only the first value.
     pub count: [u32; 4],
 }
@@ -58,7 +58,7 @@ pub struct ShadowData {
 #[derive(Copy, Clone, Debug, Default, Std140Compat)]
 #[repr(C, packed)]
 pub struct LightingData {
-    pub lights: [PackedLight; MAX_NUM_LIGHTS],
+    pub lights: [PackedLight; MAX_NUM_LIGHTS as usize],
     pub ambient: [f32; 4],
     // v4 is needed for padding at the end. Use only the first value.
     pub num_lights: [u32; 4],

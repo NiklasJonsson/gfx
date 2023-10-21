@@ -175,5 +175,5 @@ impl UIModule for EditorUiModule {
 }
 
 pub fn ui_module() -> Box<dyn UIModule> {
-    Box::new(EditorUiModule::default())
+    Box::<EditorUiModule>::default()
 }

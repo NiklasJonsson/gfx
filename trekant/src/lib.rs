@@ -672,7 +672,7 @@ impl Renderer {
         }
 
         let frame_sync = &mut self.frame_synchronization[self.frame_idx as usize];
-        let _ = std::mem::replace(&mut frame_sync.command_pool, None);
+        let _ = frame_sync.command_pool.take();
         let gfx_command_pool =
             command::CommandPool::new(&self.device, self.device.graphics_queue_family().clone())?;
 

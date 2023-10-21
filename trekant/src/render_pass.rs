@@ -5,9 +5,9 @@ use crate::util;
 use crate::backend;
 use crate::descriptor::DescriptorSet;
 use crate::pipeline::{GraphicsPipeline, ShaderStage};
-use crate::vk;
 use crate::resource::Resources;
 use crate::traits::PushConstant;
+use crate::vk;
 
 use backend::command::{CommandBuffer, CommandError};
 

@@ -65,7 +65,7 @@ fn derive_std140_compat(di: &DeriveInput) -> Result<TokenStream, CompileError> {
     let Acc {
         offset_expr,
         align_of_impls,
-        max_alignment
+        max_alignment,
     } = data.fields.iter().enumerate().fold(start, |acc, (i, f)| {
         let fn_name = mk_field_fn_name(f, i);
         let ty = &f.ty;
@@ -76,9 +76,10 @@ fn derive_std140_compat(di: &DeriveInput) -> Result<TokenStream, CompileError> {
         } = acc;
 
         let offset = if i == 0 {
-            quote! { 0 }} else {
-            quote!{ trekant::util::round_to_multiple(#prev_end, <#ty as #trait_name>::ALIGNMENT) }
-            };
+            quote! { 0 }
+        } else {
+            quote! { trekant::util::round_to_multiple(#prev_end, <#ty as #trait_name>::ALIGNMENT) }
+        };
 
         let align_of_impls = quote! {
                 #align_of_impls

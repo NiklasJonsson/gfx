@@ -70,7 +70,7 @@ pub mod serde {
             names,
         } = serde_data;
         let mut ron_deserializer = ron::Deserializer::from_str(ron)?;
-        let r = specs::saveload::DeserializeComponents::<crate::ecs::serde::Error, _>::deserialize(
+        specs::saveload::DeserializeComponents::<crate::ecs::serde::Error, _>::deserialize(
             &mut (transforms, lights, names),
             entities,
             markers,
@@ -79,7 +79,7 @@ pub mod serde {
         )?;
         markers.clear();
 
-        Ok(r)
+        Ok(())
     }
 
     pub struct DoSerialize;

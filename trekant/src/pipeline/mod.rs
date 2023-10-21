@@ -258,10 +258,10 @@ impl GraphicsPipeline {
         &self.vk_pipeline_layout
     }
 
-    fn shader<'a, D: HasVkDevice>(
+    fn shader<D: HasVkDevice>(
         device: &D,
         refl_data: &mut ReflectionData,
-        desc: &'a ShaderDescriptor,
+        desc: &ShaderDescriptor,
         stage: vk::ShaderStageFlags,
     ) -> Result<PipelineCreationInfo, PipelineError> {
         log::trace!("Creating shader ({desc:?}) for pipeline");
