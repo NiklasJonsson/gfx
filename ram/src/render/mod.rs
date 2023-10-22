@@ -898,13 +898,13 @@ impl<'a> System<'a> for GpuUpload {
 
             let map_tex = |inp: &Option<material::TextureUse2>| -> Option<
                 Pending<
-                    material::TextureUse<resurs::Async<trekant::texture::Texture>>,
-                    material::TextureUse<trekant::texture::Texture>,
+                    material::TextureUse<resurs::Async<trekant::Texture>>,
+                    material::TextureUse<trekant::Texture>,
                 >,
             > {
                 inp.as_ref().map(|tex| {
                     let handle = loader
-                        .load(tex.desc.clone())
+                        .load_texture(tex.desc.clone())
                         .expect("Failed to load texture");
                     Pending::Pending(material::TextureUse {
                         coord_set: tex.coord_set,

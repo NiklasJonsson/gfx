@@ -3,6 +3,7 @@ pub use ash::vk;
 mod backend;
 pub mod buffer;
 mod common;
+mod descriptor;
 mod error;
 mod generics;
 pub mod loader;
@@ -11,7 +12,7 @@ pub mod pipeline_resource;
 mod render_pass;
 mod render_target;
 pub mod resource;
-pub mod texture;
+mod texture;
 pub mod traits;
 pub mod util;
 pub mod vertex;
@@ -21,6 +22,7 @@ pub use buffer::{
     BufferHandle, BufferMutability, DeviceIndexBuffer, DeviceUniformBuffer, DeviceVertexBuffer,
     IndexBufferDescriptor, UniformBufferDescriptor, VertexBufferDescriptor,
 };
+pub use descriptor::DescriptorData;
 pub use error::RenderError;
 pub use error::ResizeReason;
 pub use loader::Loader;
@@ -29,7 +31,10 @@ pub use pipeline_resource::PipelineResourceSet;
 pub use render_pass::{RenderPass, RenderPassEncoder};
 pub use render_target::RenderTarget;
 pub use resource::{Async, Handle, MutResourceManager, ResourceManager};
-pub use texture::{SamplerDescriptor, Texture, TextureDescriptor, TextureUsage};
+pub use texture::{
+    BorderColor, Filter, MipMaps, SamplerAddressMode, SamplerDescriptor, Texture,
+    TextureDescriptor, TextureUsage,
+};
 pub use traits::{PushConstant, Std140, Uniform};
 pub use util::{Extent2D, Format};
 pub use vertex::VertexFormat;
@@ -41,6 +46,7 @@ use backend::{command, device, framebuffer, instance, surface, swapchain, sync};
 use common::MAX_FRAMES_IN_FLIGHT;
 use texture::TextureError;
 
+use crate::backend::image::ImageDescriptor;
 use crate::backend::vk::{buffer::Buffer, image::Image, MemoryError};
 
 // Notes:
@@ -287,9 +293,6 @@ pub enum SyncResourceCommand<'a> {
     CreateUniformBuffer {
         descriptor: buffer::UniformBufferDescriptor<'a>,
     },
-    CreateTexture {
-        descriptor: texture::TextureDescriptor,
-    },
 }
 
 pub enum PendingSyncResourceCommand {
@@ -305,10 +308,6 @@ pub enum PendingSyncResourceCommand {
         handle: buffer::BufferHandle<buffer::DeviceUniformBuffer>,
         transients: [Option<Buffer>; 2],
     },
-    CreateTexture {
-        handle: resurs::Handle<texture::Texture>,
-        transients: Buffer,
-    },
 }
 
 impl PendingSyncResourceCommand {
@@ -323,7 +322,6 @@ impl PendingSyncResourceCommand {
             Self::CreateUniformBuffer { handle, .. } => {
                 FinishedResourceCommand::CreateUniformBuffer { handle }
             }
-            Self::CreateTexture { handle, .. } => FinishedResourceCommand::CreateTexture { handle },
         }
     }
 }
@@ -337,9 +335,6 @@ pub enum FinishedResourceCommand {
     },
     CreateUniformBuffer {
         handle: buffer::BufferHandle<buffer::DeviceUniformBuffer>,
-    },
-    CreateTexture {
-        handle: resurs::Handle<texture::Texture>,
     },
 }
 
@@ -429,6 +424,21 @@ macro_rules! process_buffer_creation {
     }};
 }
 
+// Command-buffer related
+impl Renderer {
+    // TODO: Custom error?
+    fn submit_blocking<F, R>(&self, f: F) -> Result<R, RenderError>
+    where
+        F: FnOnce(&mut command::CommandBuffer) -> R,
+    {
+        let mut command_buffer = self.util_command_pool.begin_single_submit()?;
+        let r = f(&mut command_buffer);
+        let fence = self.submit_command_buffer(command_buffer);
+        fence.blocking_wait()?;
+        Ok(r)
+    }
+}
+
 // Resource-related
 impl Renderer {
     fn schedule_command(
@@ -463,14 +473,6 @@ impl Renderer {
                     cmd_buffer,
                     uniform_buffers
                 )
-            }
-            SyncResourceCommand::CreateTexture { descriptor } => {
-                let (image, transients) = descriptor
-                    .enqueue(&self.device.allocator(), &self.device, cmd_buffer)
-                    .expect("Fail");
-
-                let handle = self.resources.textures.add(image);
-                Some(PendingSyncResourceCommand::CreateTexture { handle, transients })
             }
         }
     }
@@ -517,19 +519,22 @@ impl Renderer {
         let msaa_sample_count = render_pass.0.msaa_sample_count();
         let extent = self.swapchain_extent();
         let mip_levels = 1; // No mip maps
-        let props = vma::MemoryUsage::AutoPreferDevice;
+        let mem_usage = vma::MemoryUsage::AutoPreferDevice;
 
         let depth_buffer = {
             let format = self.device.depth_buffer_format().into();
             let usage = vk::ImageUsageFlags::DEPTH_STENCIL_ATTACHMENT;
             let image = Image::empty_2d(
                 &self.device.allocator(),
-                extent,
-                format,
-                usage,
-                props,
-                mip_levels,
-                msaa_sample_count,
+                ImageDescriptor {
+                    extent,
+                    format,
+                    image_usage: usage,
+                    mem_usage,
+                    mip_levels,
+                    sample_count: msaa_sample_count,
+                    array_layers: 1,
+                },
             )
             .map_err(RenderError::RenderTargetImage)?;
             let image_view = backend::image::ImageView::new(
@@ -548,12 +553,15 @@ impl Renderer {
             let mip_levels = 1; // No mip maps
             let image = Image::empty_2d(
                 &self.device.allocator(),
-                extent,
-                format,
-                usage,
-                props,
-                mip_levels,
-                msaa_sample_count,
+                ImageDescriptor {
+                    extent,
+                    format,
+                    image_usage: usage,
+                    mem_usage,
+                    mip_levels,
+                    sample_count: msaa_sample_count,
+                    array_layers: 1,
+                },
             )
             .map_err(RenderError::RenderTargetImage)?;
 
@@ -946,17 +954,27 @@ impl Renderer {
         &mut self,
         descriptor: TextureDescriptor,
     ) -> Result<Handle<Texture>, TextureError> {
-        if !descriptor.needs_command_buffer() {
-            let t = Texture::create_no_cmds(&self.device, &self.device.allocator(), &descriptor)?;
-            return Ok(self.resources.textures.add(t));
-        }
+        let (desc, mipmaps, data) = descriptor.split_desc_data()?;
+        let t = if let Some(data) = data {
+            let (texture, _buffer) = self
+                .submit_blocking(|command_buffer| {
+                    texture::load_texture_from_data(
+                        &self.device,
+                        &self.device.allocator(),
+                        command_buffer,
+                        desc,
+                        data.data(),
+                        mipmaps,
+                    )
+                })
+                .expect("TODO FAIL")
+                .expect("TODO FAIL");
+            texture
+        } else {
+            Texture::empty(&self.device, &self.device.allocator(), desc)?
+        };
 
-        let cmd = SyncResourceCommand::CreateTexture { descriptor };
-        let finished = self.execute_command(cmd).unwrap();
-        match finished {
-            FinishedResourceCommand::CreateTexture { handle } => Ok(handle),
-            _ => unreachable!(),
-        }
+        Ok(self.resources_mut().textures.add(t))
     }
 
     pub fn generate_mipmaps(
@@ -986,12 +1004,15 @@ impl Renderer {
                 | vk::ImageUsageFlags::SAMPLED;
             let dst_image = Image::empty_2d(
                 &self.device.allocator(),
-                extent,
-                format,
-                usage,
-                vma::MemoryUsage::AutoPreferDevice,
-                mip_levels,
-                vk::SampleCountFlags::TYPE_1,
+                ImageDescriptor {
+                    extent,
+                    format,
+                    image_usage: usage,
+                    mem_usage: vma::MemoryUsage::AutoPreferDevice,
+                    mip_levels,
+                    sample_count: vk::SampleCountFlags::TYPE_1,
+                    array_layers: 1,
+                },
             )
             .expect("Failed to create dst image");
             transition_image_layout(
@@ -1013,12 +1034,15 @@ impl Renderer {
                 vk::ImageLayout::TRANSFER_SRC_OPTIMAL,
                 dst_image.vk_image(),
                 vk::ImageLayout::TRANSFER_DST_OPTIMAL,
-                &extent,
+                extent,
             );
-            generate_mipmaps(&mut cmd_buf, dst_image.vk_image(), &extent, mip_levels);
-            let new =
-                texture::Texture::from_device_image(&self.device, dst_image, format, mip_levels)
-                    .expect("Failed to create mipmapped texture");
+            generate_mipmaps(&mut cmd_buf, &dst_image, extent, mip_levels);
+            let new = texture::Texture::from_image(
+                &self.device,
+                dst_image,
+                texture.sampler().descriptor(),
+            )
+            .expect("Failed to create mipmapped texture");
             old_textures.push(std::mem::replace(texture, new));
         }
 

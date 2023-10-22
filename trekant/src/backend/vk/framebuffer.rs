@@ -39,7 +39,7 @@ impl Framebuffer {
 
         let vk_attachments = attachments
             .iter()
-            .map(|iv| *iv.vk_image_view())
+            .map(|iv| iv.vk_image_view())
             .collect::<Vec<_>>();
 
         let info = vk::FramebufferCreateInfo::builder()

@@ -3,9 +3,9 @@ use crate::ecs::prelude::*;
 use std::path::{Path, PathBuf};
 
 use trekant::buffer::{HostIndexBuffer, HostVertexBuffer, VertexBufferType};
-use trekant::texture::{MipMaps, TextureDescriptor};
 use trekant::util;
 use trekant::vertex::VertexFormat;
+use trekant::{MipMaps, TextureDescriptor};
 
 use ram_derive::Visitable;
 
@@ -48,7 +48,11 @@ fn load_texture(
 
     TextureUse2 {
         coord_set,
-        desc: TextureDescriptor::file(image_path, format, MipMaps::None),
+        desc: TextureDescriptor::File {
+            path: image_path,
+            format,
+            mipmaps: MipMaps::None,
+        },
     }
 }
 

@@ -1,20 +1,19 @@
 use std::path::{Path, PathBuf};
 
-use ash::vk;
+use ash::vk::{self, ImageAspectFlags, ImageUsageFlags};
 
 use thiserror::Error;
 
-use crate::backend;
+use crate::backend::{self};
 
+use crate::descriptor::DescriptorData;
 use crate::resource::{Handle, Storage};
 use crate::util;
 use backend::buffer::Buffer;
 use backend::command::CommandBuffer;
-use backend::image::{Image, ImageView, ImageViewError};
+use backend::image::{Image, ImageDescriptor, ImageView, ImageViewError};
 use backend::{AllocatorHandle, HasVkDevice, MemoryError, VkDeviceHandle};
 use util::Extent2D;
-
-use std::sync::Arc;
 
 #[derive(Debug, Error)]
 pub enum TextureError {
@@ -48,55 +47,54 @@ pub enum MipMaps {
     Generate,
 }
 
-#[derive(Debug, Clone)]
-pub struct DescriptorCommon {}
-
-bitflags::bitflags! {
-    pub struct TextureUsage: u8 {
-        const DEPTH_STENCIL_ATTACHMENT = 0b1;
-        const COLOR_ATTACHMENT = 0b10;
-        const TRANSFER_SRC = 0b100;
-        const TRANSFER_DST = 0b1000;
-    }
-}
-
-macro_rules! impl_flag_mapping {
-    ($result:ident, $input:ident, $flag:ident) => {
-        if !($input & TextureUsage::$flag).is_empty() {
-            $result |= vk::ImageUsageFlags::$flag;
-        }
-    };
-    ($result:ident, $input:ident, $flag:ident, $($rest:ident),*) => {
-        impl_flag_mapping!($result, $input, $flag);
-        impl_flag_mapping!($result, $input, $($rest),*)
-    };
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum TextureUsage {
+    DEPTH,
+    COLOR,
 }
 
 impl From<TextureUsage> for vk::ImageUsageFlags {
     fn from(o: TextureUsage) -> vk::ImageUsageFlags {
-        let mut ret = vk::ImageUsageFlags::empty();
-        impl_flag_mapping!(
-            ret,
-            o,
-            DEPTH_STENCIL_ATTACHMENT,
-            COLOR_ATTACHMENT,
-            TRANSFER_SRC,
-            TRANSFER_DST
-        );
-
-        ret
+        if o == TextureUsage::COLOR {
+            vk::ImageUsageFlags::COLOR_ATTACHMENT
+        } else {
+            vk::ImageUsageFlags::DEPTH_STENCIL_ATTACHMENT
+        }
     }
 }
 
-#[derive(Clone, Debug)]
-pub enum TextureDescriptor {
+#[derive(Debug, Clone, Copy)]
+pub struct TextureDesc {
+    pub extent: Extent2D,
+    pub format: util::Format,
+    pub usage: TextureUsage,
+    pub sampler: SamplerDescriptor,
+}
+
+impl Default for TextureDesc {
+    fn default() -> Self {
+        Self {
+            extent: Extent2D {
+                width: 0,
+                height: 0,
+            },
+            format: util::Format::RGBA_SRGB,
+            usage: TextureUsage::COLOR,
+            sampler: SamplerDescriptor::default(),
+        }
+    }
+}
+
+/// A texture descriptor is used to describe a texture that is to be created.
+#[derive(Debug, Clone)]
+pub enum TextureDescriptor<'a> {
     File {
         path: PathBuf,
         format: util::Format,
         mipmaps: MipMaps,
     },
     Raw {
-        data: Arc<util::ByteBuffer>,
+        data: DescriptorData<'a>,
         extent: Extent2D,
         format: util::Format,
         mipmaps: MipMaps,
@@ -109,19 +107,12 @@ pub enum TextureDescriptor {
     },
 }
 
-impl TextureDescriptor {
+impl<'a> TextureDescriptor<'a> {
     pub fn mipmaps(&self) -> MipMaps {
         match self {
-            Self::File { mipmaps, .. } | Self::Raw { mipmaps, .. } => *mipmaps,
+            Self::File { mipmaps, .. } => *mipmaps,
+            Self::Raw { mipmaps, .. } => *mipmaps,
             Self::Empty { .. } => MipMaps::None,
-        }
-    }
-
-    pub fn file(p: PathBuf, format: util::Format, mipmaps: MipMaps) -> Self {
-        Self::File {
-            path: p,
-            format,
-            mipmaps,
         }
     }
 
@@ -132,23 +123,22 @@ impl TextureDescriptor {
         mipmaps: MipMaps,
     ) -> Self {
         Self::Raw {
-            data: Arc::new(unsafe { util::ByteBuffer::from_vec(data) }),
+            data: DescriptorData::from_vec(data),
             extent,
             format,
             mipmaps,
         }
     }
 
-    pub(crate) fn needs_command_buffer(&self) -> bool {
-        !std::matches!(self, TextureDescriptor::Empty { .. })
+    pub fn is_empty(&self) -> bool {
+        std::matches!(self, TextureDescriptor::Empty { .. })
     }
+}
 
-    pub fn enqueue<D: HasVkDevice>(
-        &self,
-        allocator: &AllocatorHandle,
-        device: &D,
-        command_buffer: &mut CommandBuffer,
-    ) -> Result<(Texture, Buffer), TextureError> {
+impl<'a> TextureDescriptor<'a> {
+    pub(crate) fn split_desc_data(
+        self,
+    ) -> Result<(TextureDesc, MipMaps, Option<DescriptorData<'a>>), image::ImageError> {
         match self {
             TextureDescriptor::File {
                 path,
@@ -161,33 +151,126 @@ impl TextureDescriptor {
                     height: image.height(),
                 };
                 let raw_image_data = image.into_raw();
-                Texture::from_raw(
-                    device,
-                    allocator,
-                    command_buffer,
-                    extent,
-                    *format,
-                    *mipmaps,
-                    &raw_image_data,
-                )
+                Ok((
+                    TextureDesc {
+                        extent,
+                        format,
+                        usage: TextureUsage::COLOR,
+                        sampler: SamplerDescriptor::default(),
+                    },
+                    mipmaps,
+                    Some(DescriptorData::from_vec(raw_image_data)),
+                ))
             }
             TextureDescriptor::Raw {
                 data,
                 extent,
                 format,
                 mipmaps,
-            } => Texture::from_raw(
-                device,
-                allocator,
-                command_buffer,
-                *extent,
-                *format,
-                *mipmaps,
-                data,
-            ),
-            _ => unreachable!("This should not be created with a command buffer"),
+            } => Ok((
+                TextureDesc {
+                    extent,
+                    format,
+                    usage: TextureUsage::COLOR,
+                    sampler: SamplerDescriptor::default(),
+                },
+                mipmaps,
+                Some(data),
+            )),
+            TextureDescriptor::Empty {
+                extent,
+                usage,
+                format,
+                sampler,
+            } => Ok((
+                TextureDesc {
+                    extent,
+                    format,
+                    usage,
+                    sampler,
+                },
+                MipMaps::None,
+                None,
+            )),
         }
     }
+}
+
+/// Load a texture from the provided data.
+///
+/// The format of the data is described in the descriptor.
+///
+/// NOTE: The queue that the command buffer is submitted to needs to support
+/// graphics commands if mipmap generation is set to true.
+///
+pub(crate) fn load_texture_from_data<D: HasVkDevice>(
+    device: &D,
+    allocator: &AllocatorHandle,
+    command_buffer: &mut CommandBuffer,
+    descriptor: TextureDesc,
+    data: &[u8],
+    mipmaps: MipMaps,
+) -> Result<(Texture, Buffer), TextureError> {
+    let TextureDesc {
+        extent,
+        format,
+        usage,
+        sampler,
+    } = descriptor;
+
+    let generate_mipmaps = mipmaps == MipMaps::Generate;
+
+    let mut image_usage = vk::ImageUsageFlags::from(usage)
+        | vk::ImageUsageFlags::SAMPLED
+        | vk::ImageUsageFlags::TRANSFER_DST;
+    let mut mip_levels = 1;
+
+    if generate_mipmaps {
+        image_usage |= vk::ImageUsageFlags::TRANSFER_SRC;
+        mip_levels = mip_levels_for(extent);
+    }
+
+    let image = Image::empty_2d(
+        allocator,
+        ImageDescriptor {
+            extent,
+            format,
+            image_usage,
+            mem_usage: vma::MemoryUsage::AutoPreferDevice,
+            mip_levels,
+            sample_count: vk::SampleCountFlags::TYPE_1,
+            array_layers: 1,
+        },
+    )?;
+
+    // stride & alignment does not matter as long as they are the same.
+    let staging =
+        Buffer::staging_with_data(allocator, data, 1 /*elem_size*/, 1 /*stride*/)?;
+
+    backend::vk::image::transition_image_layout(
+        command_buffer,
+        image.vk_image(),
+        mip_levels,
+        vk::ImageLayout::UNDEFINED,
+        vk::ImageLayout::TRANSFER_DST_OPTIMAL,
+    );
+    command_buffer.copy_buffer_to_image(staging.vk_buffer(), image.vk_image(), extent);
+
+    // Transitioned to SHADER_READ_ONLY_OPTIMAL during mipmap generation
+    if generate_mipmaps {
+        backend::vk::image::generate_mipmaps(command_buffer, &image, extent, mip_levels);
+    } else {
+        backend::vk::image::transition_image_layout(
+            command_buffer,
+            image.vk_image(),
+            mip_levels,
+            vk::ImageLayout::TRANSFER_DST_OPTIMAL,
+            vk::ImageLayout::SHADER_READ_ONLY_OPTIMAL,
+        );
+    }
+
+    let tex = Texture::from_image(device, image, sampler)?;
+    Ok((tex, staging))
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -273,10 +356,11 @@ impl Default for SamplerDescriptor {
 pub struct Sampler {
     vk_device: VkDeviceHandle,
     vk_sampler: vk::Sampler,
+    descriptor: SamplerDescriptor,
 }
 
 impl Sampler {
-    pub fn new<D: HasVkDevice>(device: &D, desc: &SamplerDescriptor) -> Result<Self, TextureError> {
+    pub fn new<D: HasVkDevice>(device: &D, desc: SamplerDescriptor) -> Result<Self, TextureError> {
         let filter = vk::Filter::from(desc.filter);
         let address_mode = vk::SamplerAddressMode::from(desc.address_mode);
         let border_color = vk::BorderColor::from(desc.border_color);
@@ -311,11 +395,16 @@ impl Sampler {
         Ok(Self {
             vk_device,
             vk_sampler,
+            descriptor: desc,
         })
     }
 
-    pub fn vk_sampler(&self) -> &vk::Sampler {
-        &self.vk_sampler
+    pub fn vk_sampler(&self) -> vk::Sampler {
+        self.vk_sampler
+    }
+
+    pub fn descriptor(&self) -> SamplerDescriptor {
+        self.descriptor
     }
 }
 
@@ -331,6 +420,14 @@ pub fn mip_levels_for(e: Extent2D) -> u32 {
     (e.max_dim() as f32).log2().floor() as u32 + 1
 }
 
+fn usage_to_aspect(image_usage: ImageUsageFlags) -> ImageAspectFlags {
+    if image_usage.contains(ImageUsageFlags::COLOR_ATTACHMENT) {
+        ImageAspectFlags::COLOR
+    } else {
+        ImageAspectFlags::DEPTH
+    }
+}
+
 pub struct Texture {
     sampler: Sampler,
     image_view: ImageView,
@@ -338,61 +435,54 @@ pub struct Texture {
 }
 
 impl Texture {
-    pub(crate) fn create_no_cmds<D: HasVkDevice>(
+    /// Create an empty image (with no data)
+    ///
+    /// The created image will be allocated on the gpu.
+    pub(crate) fn empty<D: HasVkDevice>(
         device: &D,
         allocator: &AllocatorHandle,
-        descriptor: &TextureDescriptor,
+        descriptor: TextureDesc,
     ) -> Result<Self, TextureError> {
-        if let TextureDescriptor::Empty {
+        let TextureDesc {
             extent,
             format,
             usage,
-            sampler: sampler_descriptor,
-        } = descriptor
-        {
-            let image_usage = vk::ImageUsageFlags::from(*usage) | vk::ImageUsageFlags::SAMPLED;
-            let mem_usage = vma::MemoryUsage::AutoPreferDevice;
-            let mip_levels = 1;
-            let sample_count = vk::SampleCountFlags::TYPE_1;
-            let aspect_mask = if usage.contains(TextureUsage::DEPTH_STENCIL_ATTACHMENT) {
-                vk::ImageAspectFlags::DEPTH
-            } else {
-                vk::ImageAspectFlags::COLOR
-            };
+            sampler,
+        } = descriptor;
 
-            let image = Image::empty_2d(
-                allocator,
-                *extent,
-                *format,
+        let image_usage = vk::ImageUsageFlags::from(usage) | vk::ImageUsageFlags::SAMPLED;
+        let mip_levels = 1;
+        let image = Image::empty_2d(
+            allocator,
+            ImageDescriptor {
+                extent,
+                format,
                 image_usage,
-                mem_usage,
+                mem_usage: vma::MemoryUsage::AutoPreferDevice,
                 mip_levels,
-                sample_count,
-            )?;
-            let image_view =
-                ImageView::new(device, image.vk_image(), *format, aspect_mask, mip_levels)?;
-            let sampler = Sampler::new(device, sampler_descriptor)?;
-            Ok(Self {
-                image,
-                image_view,
-                sampler,
-            })
-        } else {
-            unreachable!("This needs a command buffer");
-        }
+                sample_count: vk::SampleCountFlags::TYPE_1,
+                array_layers: 1,
+            },
+        )?;
+        Self::from_image(device, image, sampler)
     }
 
-    pub(crate) fn from_device_image<D: HasVkDevice>(
+    pub(crate) fn from_image<D: HasVkDevice>(
         device: &D,
         image: Image,
-        format: util::Format,
-        mip_levels: u32,
+        sampler_descriptor: SamplerDescriptor,
     ) -> Result<Self, TextureError> {
-        let aspect = vk::ImageAspectFlags::COLOR;
+        let desc = image.descriptor();
+        let aspect = usage_to_aspect(desc.image_usage);
+        let image_view = ImageView::new(
+            device,
+            image.vk_image(),
+            desc.format,
+            aspect,
+            desc.mip_levels,
+        )?;
 
-        let image_view = ImageView::new(device, image.vk_image(), format, aspect, mip_levels)?;
-
-        let sampler = Sampler::new(device, &SamplerDescriptor::default())?;
+        let sampler = Sampler::new(device, sampler_descriptor)?;
 
         Ok(Self {
             image,
@@ -400,48 +490,20 @@ impl Texture {
             sampler,
         })
     }
-    fn from_raw<D: HasVkDevice>(
-        device: &D,
-        allocator: &AllocatorHandle,
-        command_buffer: &mut CommandBuffer,
-        extent: Extent2D,
-        format: util::Format,
-        mipmaps: MipMaps,
-        data: &[u8],
-    ) -> Result<(Self, Buffer), TextureError> {
-        let ((image, staging), mip_levels) = if let MipMaps::Generate = mipmaps {
-            let mip_levels = mip_levels_for(extent);
-            (
-                Image::device_local_mipmapped(
-                    allocator,
-                    command_buffer,
-                    extent,
-                    format,
-                    mip_levels,
-                    data,
-                )?,
-                mip_levels,
-            )
-        } else {
-            (
-                Image::device_local(allocator, command_buffer, extent, format, data)?,
-                1,
-            )
-        };
 
-        let ret = Self::from_device_image(device, image, format, mip_levels)?;
-        Ok((ret, staging))
+    pub fn sampler(&self) -> &Sampler {
+        &self.sampler
     }
 
     pub fn image_view(&self) -> &ImageView {
         &self.image_view
     }
 
-    pub fn vk_image(&self) -> &vk::Image {
+    pub fn vk_image(&self) -> vk::Image {
         self.image.vk_image()
     }
 
-    pub fn vk_sampler(&self) -> &vk::Sampler {
+    pub fn vk_sampler(&self) -> vk::Sampler {
         self.sampler.vk_sampler()
     }
 
@@ -484,7 +546,7 @@ impl<T> TextureStorage<T> {
     }
 }
 impl TextureStorage<Async<Texture>> {
-    pub fn allocate(&mut self, _desc: &TextureDescriptor) -> Handle<Async<Texture>> {
+    pub fn allocate(&mut self) -> Handle<Async<Texture>> {
         self.storage.add(Async::Pending)
     }
 

@@ -53,10 +53,6 @@ pub enum AsyncResourceCommand {
         descriptor: UniformBufferDescriptor<'static>,
         handle: BufferHandle<Async<DeviceUniformBuffer>>,
     },
-    CreateTexture {
-        descriptor: TextureDescriptor,
-        handle: Handle<Async<Texture>>,
-    },
 }
 
 #[allow(clippy::enum_variant_names)]
@@ -83,10 +79,9 @@ enum PendingResourceCommand {
         transients: [Option<Buffer>; 2],
     },
     CreateTexture {
-        descriptor: TextureDescriptor,
         handle: Handle<Async<Texture>>,
-        image: Texture,
-        transients: Buffer,
+        texture: Texture,
+        _transients: Buffer,
     },
 }
 
@@ -123,18 +118,13 @@ pub struct Loader {
 }
 
 struct PendingResourceJob {
-    commands: Vec<PendingResourceCommand>,
+    command: PendingResourceCommand,
     done: Fence,
 }
 
 macro_rules! process_buffer_creation {
     ($cmd:ident, $desc:ident, $self:ident, $cmd_buffer:ident, $handle:ident) => {{
-        let (buf0, buf1) = $desc
-            .enqueue(
-                &$self.allocator,
-                $cmd_buffer.expect("This needs a command buffer"),
-            )
-            .expect("Fail");
+        let (buf0, buf1) = $desc.enqueue(&$self.allocator, $cmd_buffer).expect("Fail");
 
         let (buffer1, transient1) = if let Some(buf1) = buf1 {
             (Some(buf1.buffer), buf1.transient)
@@ -144,13 +134,13 @@ macro_rules! process_buffer_creation {
 
         let buffer0 = buf0.buffer;
         let transients = [buf0.transient, transient1];
-        Some(PendingResourceCommand::$cmd {
+        PendingResourceCommand::$cmd {
             descriptor: $desc,
             handle: $handle,
             buffer0,
             buffer1,
             transients,
-        })
+        }
     }};
 }
 
@@ -158,8 +148,8 @@ impl Loader {
     fn process_command(
         &self,
         command: AsyncResourceCommand,
-        cmd_buffer: Option<&mut CommandBuffer>,
-    ) -> Option<PendingResourceCommand> {
+        cmd_buffer: &mut CommandBuffer,
+    ) -> PendingResourceCommand {
         match command {
             AsyncResourceCommand::CreateVertexBuffer { handle, descriptor } => {
                 process_buffer_creation!(CreateVertexBuffer, descriptor, self, cmd_buffer, handle)
@@ -169,21 +159,6 @@ impl Loader {
             }
             AsyncResourceCommand::CreateUniformBuffer { handle, descriptor } => {
                 process_buffer_creation!(CreateUniformBuffer, descriptor, self, cmd_buffer, handle)
-            }
-            AsyncResourceCommand::CreateTexture { handle, descriptor } => {
-                let (image, transients) = descriptor
-                    .enqueue(
-                        &self.allocator,
-                        &self.vk_device,
-                        cmd_buffer.expect("texture creation needs command buffer"),
-                    )
-                    .expect("Fail");
-                Some(PendingResourceCommand::CreateTexture {
-                    descriptor,
-                    handle,
-                    image,
-                    transients,
-                })
             }
         }
     }
@@ -266,8 +241,6 @@ impl AsyncResources {
     }
 }
 
-// TODO: Into iter?
-
 pub struct TransferGuard<'mutex, 'renderer> {
     guard: MutexGuard<'mutex, NonSync>,
     resources: &'renderer mut Resources,
@@ -320,55 +293,50 @@ impl Loader {
                 .expect("Failed to check fence")
             {
                 let PendingResourceJob {
-                    commands,
+                    command,
                     done: _done,
                 } = guard.pending_resource_jobs.remove(i);
 
-                for pending in commands.into_iter() {
-                    match pending {
-                        PendingResourceCommand::CreateVertexBuffer {
-                            handle,
-                            buffer0,
-                            buffer1,
-                            transients: _transients,
-                            descriptor: _descriptor,
-                        } => guard
+                match command {
+                    PendingResourceCommand::CreateVertexBuffer {
+                        handle,
+                        buffer0,
+                        buffer1,
+                        transients: _transients,
+                        descriptor: _descriptor,
+                    } => guard
+                        .resources
+                        .vertex_buffers
+                        .insert(&handle, buffer0, buffer1),
+                    PendingResourceCommand::CreateIndexBuffer {
+                        handle,
+                        buffer0,
+                        buffer1,
+                        transients: _transients,
+                        descriptor: _descriptor,
+                    } => guard
+                        .resources
+                        .index_buffers
+                        .insert(&handle, buffer0, buffer1),
+                    PendingResourceCommand::CreateUniformBuffer {
+                        handle,
+                        buffer0,
+                        buffer1,
+                        transients: _transients,
+                        descriptor: _descriptor,
+                    } => guard
+                        .resources
+                        .uniform_buffers
+                        .insert(&handle, buffer0, buffer1),
+                    PendingResourceCommand::CreateTexture {
+                        handle, texture, ..
+                    } => {
+                        let loc = guard
                             .resources
-                            .vertex_buffers
-                            .insert(&handle, buffer0, buffer1),
-                        PendingResourceCommand::CreateIndexBuffer {
-                            handle,
-                            buffer0,
-                            buffer1,
-                            transients: _transients,
-                            descriptor: _descriptor,
-                        } => guard
-                            .resources
-                            .index_buffers
-                            .insert(&handle, buffer0, buffer1),
-                        PendingResourceCommand::CreateUniformBuffer {
-                            handle,
-                            buffer0,
-                            buffer1,
-                            transients: _transients,
-                            descriptor: _descriptor,
-                        } => guard
-                            .resources
-                            .uniform_buffers
-                            .insert(&handle, buffer0, buffer1),
-                        PendingResourceCommand::CreateTexture {
-                            handle,
-                            image,
-                            transients: _transients,
-                            descriptor: _descriptor,
-                        } => {
-                            let loc = guard
-                                .resources
-                                .textures
-                                .get_mut(&handle)
-                                .expect("This should exist");
-                            *loc = Async::Available(image);
-                        }
+                            .textures
+                            .get_mut(&handle)
+                            .expect("This should exist");
+                        *loc = Async::Available(texture);
                     }
                 }
             } else {
@@ -388,12 +356,28 @@ impl Loader {
     }
 }
 
-pub trait ResourceLoader<D, H> {
-    fn load(&self, descriptor: D) -> Result<H, LoaderError>;
+impl Loader {
+    fn submit_commands<F, R>(
+        vk_device: &VkDeviceHandle,
+        guard: &MutexGuard<'_, NonSync>,
+        f: F,
+    ) -> Result<(R, Fence), LoaderError>
+    where
+        F: FnOnce(&mut command::CommandBuffer) -> R,
+    {
+        let mut command_buffer = guard.command_pool.begin_single_submit()?;
+        let r = f(&mut command_buffer);
+        command_buffer.end()?;
+        let done = Fence::unsignaled(vk_device)?;
+        let buffers = [*command_buffer.vk_command_buffer()];
+        let info = vk::SubmitInfo::builder().command_buffers(&buffers);
+        guard.queue.submit(&info, &done)?;
+        Ok((r, done))
+    }
 }
 
-fn always_ok<T>(_: &T) -> Result<(), LoaderError> {
-    Result::Ok(())
+pub trait ResourceLoader<D, H> {
+    fn load(&self, descriptor: D) -> Result<H, LoaderError>;
 }
 
 fn validate_texture_descriptor(d: &TextureDescriptor) -> Result<(), LoaderError> {
@@ -406,36 +390,20 @@ fn validate_texture_descriptor(d: &TextureDescriptor) -> Result<(), LoaderError>
     Ok(())
 }
 
-macro_rules! impl_loader {
+macro_rules! impl_buffer_loader {
     ($desc:ty, $handle:ty, $storage:ident, $cmd_enum:ident) => {
-        impl_loader!($desc, $handle, $storage, $cmd_enum, always_ok);
-    };
-
-    ($desc:ty, $handle:ty, $storage:ident, $cmd_enum:ident, $validate_fn:ident) => {
         impl ResourceLoader<$desc, $handle> for Loader {
             fn load(&self, descriptor: $desc) -> Result<$handle, LoaderError> {
-                $validate_fn(&descriptor)?;
-
                 let mut guard = self.locked.lock().map_err(|_| LoaderError::Mutex)?;
 
                 let handle = guard.resources.$storage.allocate(&descriptor);
-                let cmd = AsyncResourceCommand::$cmd_enum { descriptor, handle };
-
-                let mut cmd_buffer = guard.command_pool.begin_single_submit()?;
-
-                // TODO(perf): Allocation.
-                let mut commands = Vec::new();
-                if let Some(cmd) = self.process_command(cmd, Some(&mut cmd_buffer)) {
-                    commands.push(cmd);
-                }
-
-                cmd_buffer.end()?;
-                let done = Fence::unsignaled(&self.vk_device)?;
-                let buffers = [*cmd_buffer.vk_command_buffer()];
-                let info = vk::SubmitInfo::builder().command_buffers(&buffers);
-                let job = PendingResourceJob { commands, done };
-
-                guard.queue.submit(&info, &job.done)?;
+                let (command, done) =
+                    Loader::submit_commands(&self.vk_device, &guard, |command_buffer| {
+                        let cmd = AsyncResourceCommand::$cmd_enum { descriptor, handle };
+                        self.process_command(cmd, command_buffer)
+                    })
+                    .expect("Failed to submit command");
+                let job = PendingResourceJob { command, done };
                 guard.pending_resource_jobs.push(job);
 
                 Ok(handle)
@@ -444,28 +412,66 @@ macro_rules! impl_loader {
     };
 }
 
-impl_loader!(
+impl_buffer_loader!(
     IndexBufferDescriptor<'static>,
     BufferHandle<Async<DeviceIndexBuffer>>,
     index_buffers,
     CreateIndexBuffer
 );
-impl_loader!(
+impl_buffer_loader!(
     VertexBufferDescriptor<'static>,
     BufferHandle<Async<DeviceVertexBuffer>>,
     vertex_buffers,
     CreateVertexBuffer
 );
-impl_loader!(
+impl_buffer_loader!(
     UniformBufferDescriptor<'static>,
     BufferHandle<Async<DeviceUniformBuffer>>,
     uniform_buffers,
     CreateUniformBuffer
 );
-impl_loader!(
-    TextureDescriptor,
-    Handle<Async<Texture>>,
-    textures,
-    CreateTexture,
-    validate_texture_descriptor
-);
+
+impl Loader {
+    pub fn load_texture(
+        &self,
+        descriptor: TextureDescriptor<'static>,
+    ) -> Result<Handle<Async<Texture>>, LoaderError> {
+        validate_texture_descriptor(&descriptor)?;
+
+        let (desc, mipmaps, data) = descriptor
+            .split_desc_data()
+            .expect("Failed to load descriptor data");
+        if let Some(data) = data {
+            let mut guard = self.locked.lock().map_err(|_| LoaderError::Mutex)?;
+            let handle = guard.resources.textures.allocate();
+            let (result, done) =
+                Loader::submit_commands(&self.vk_device, &guard, |command_buffer| {
+                    crate::texture::load_texture_from_data(
+                        &self.vk_device,
+                        &self.allocator,
+                        command_buffer,
+                        desc,
+                        data.data(),
+                        mipmaps,
+                    )
+                })
+                .expect("Failed to submit command");
+            let (tex, buf) = result.expect("Failed to load texture from data");
+            let job = PendingResourceJob {
+                command: PendingResourceCommand::CreateTexture {
+                    handle,
+                    texture: tex,
+                    _transients: buf,
+                },
+                done,
+            };
+
+            guard.pending_resource_jobs.push(job);
+            Ok(handle)
+        } else {
+            Err(LoaderError::InvalidDescriptor(String::from(
+                "Can't load empty textures in the loader (for now)",
+            )))
+        }
+    }
+}

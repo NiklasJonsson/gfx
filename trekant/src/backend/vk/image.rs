@@ -2,11 +2,11 @@ use ash::vk;
 
 use thiserror::Error;
 
-use crate::backend;
+use crate::{backend, Extent2D};
 
 use backend::command::{CommandBuffer, CommandBufferType};
 use backend::device::{HasVkDevice, VkDeviceHandle};
-use backend::{buffer::Buffer, AllocatorHandle, MemoryError};
+use backend::{AllocatorHandle, MemoryError};
 use vma::{Alloc as _, Allocation, AllocationCreateInfo, MemoryUsage};
 
 use crate::util;
@@ -33,7 +33,7 @@ impl std::ops::Drop for ImageView {
 impl ImageView {
     pub fn new<D: HasVkDevice>(
         device: &D,
-        vk_image: &vk::Image,
+        vk_image: vk::Image,
         format: util::Format,
         aspect_mask: vk::ImageAspectFlags,
         mip_levels: u32,
@@ -55,7 +55,7 @@ impl ImageView {
         };
 
         let info = vk::ImageViewCreateInfo::builder()
-            .image(*vk_image)
+            .image(vk_image)
             .view_type(vk::ImageViewType::TYPE_2D)
             .format(vk_format)
             .components(comp_mapping)
@@ -74,14 +74,14 @@ impl ImageView {
         })
     }
 
-    pub fn vk_image_view(&self) -> &vk::ImageView {
-        &self.vk_image_view
+    pub fn vk_image_view(&self) -> vk::ImageView {
+        self.vk_image_view
     }
 }
 
 pub fn transition_image_layout(
     cmd_buf: &mut CommandBuffer,
-    vk_image: &vk::Image,
+    vk_image: vk::Image,
     mip_levels: u32,
     old_layout: vk::ImageLayout,
     new_layout: vk::ImageLayout,
@@ -131,7 +131,7 @@ pub fn transition_image_layout(
         new_layout,
         src_queue_family_index: vk::QUEUE_FAMILY_IGNORED,
         dst_queue_family_index: vk::QUEUE_FAMILY_IGNORED,
-        image: *vk_image,
+        image: vk_image,
         subresource_range: vk::ImageSubresourceRange {
             aspect_mask: vk::ImageAspectFlags::COLOR,
             base_mip_level: 0,
@@ -147,19 +147,19 @@ pub fn transition_image_layout(
     cmd_buf.pipeline_barrier(&[barrier], src_stage, dst_stage);
 }
 
-// TODO: This code depends on vk_image being TRANSFER_DST_OPTIMAL. We should track this together
-// with the image.
+/// This requires the incoming image to be TRANSFER_DST_OPTIMAL
 pub fn generate_mipmaps(
     cmd_buf: &mut CommandBuffer,
-    vk_image: &vk::Image,
-    extent: &util::Extent2D,
+    image: &Image,
+    extent: util::Extent2D,
     mip_levels: u32,
 ) {
     assert!(cmd_buf.is_started());
+    let vk_image = image.vk_image();
     let aspect_mask = vk::ImageAspectFlags::COLOR;
 
     let mut barrier = vk::ImageMemoryBarrier {
-        image: *vk_image,
+        image: vk_image,
         src_queue_family_index: vk::QUEUE_FAMILY_IGNORED,
         dst_queue_family_index: vk::QUEUE_FAMILY_IGNORED,
         subresource_range: vk::ImageSubresourceRange {
@@ -233,7 +233,7 @@ pub fn generate_mipmaps(
                 vk::PipelineStageFlags::TRANSFER,
                 vk::PipelineStageFlags::TRANSFER,
             )
-            .blit_image(vk_image, vk_image, &image_blit)
+            .blit_image(vk_image, vk_image, image_blit)
             .pipeline_barrier(
                 &[transistion_src_barrier],
                 vk::PipelineStageFlags::TRANSFER,
@@ -271,48 +271,48 @@ pub fn generate_mipmaps(
     );
 }
 
+#[derive(Debug, Clone, Copy)]
+pub struct ImageDescriptor {
+    pub extent: Extent2D,
+    pub format: util::Format,
+    pub image_usage: vk::ImageUsageFlags,
+    pub mem_usage: MemoryUsage,
+    pub mip_levels: u32,
+    pub sample_count: vk::SampleCountFlags,
+    pub array_layers: u32,
+}
+
 pub struct Image {
     allocator: AllocatorHandle,
     vk_image: vk::Image,
     allocation: Allocation,
-    extent: util::Extent2D,
-    format: util::Format,
+    descriptor: ImageDescriptor,
 }
 
 impl Image {
     pub fn empty_2d(
         allocator: &AllocatorHandle,
-        extent: util::Extent2D,
-        format: util::Format,
-        image_usage: vk::ImageUsageFlags,
-        mem_usage: MemoryUsage,
-        mip_levels: u32,
-        sample_count: vk::SampleCountFlags,
+        descriptor: ImageDescriptor,
     ) -> Result<Self, MemoryError> {
         log::trace!("Creating empty 2D DeviceImage with:");
-        log::trace!("\textent: {}", extent);
-        log::trace!("\tformat: {:?}", format);
-        log::trace!("\tusage: {:?}", image_usage);
-        log::trace!("\tmemory properties: {:?}", mem_usage);
-        log::trace!("\tmip level: {}", mip_levels);
-        log::trace!("\tsample count: {:?}", sample_count);
-        log::trace!("\timage tiling {:?}", vk::ImageTiling::OPTIMAL);
+        log::trace!("{:?}", descriptor);
 
-        let extent3d = util::Extent3D::from_2d(extent, 1);
+        let layout = vk::ImageLayout::UNDEFINED;
+        let extent3d = util::Extent3D::from_2d(descriptor.extent, 1);
         let info = vk::ImageCreateInfo::builder()
             .image_type(vk::ImageType::TYPE_2D)
             .extent(extent3d.into())
-            .mip_levels(mip_levels)
-            .array_layers(1)
-            .format(format.into())
+            .mip_levels(descriptor.mip_levels)
+            .array_layers(descriptor.array_layers)
+            .format(descriptor.format.into())
             .tiling(vk::ImageTiling::OPTIMAL)
-            .initial_layout(vk::ImageLayout::UNDEFINED)
-            .usage(image_usage)
+            .initial_layout(layout)
+            .usage(descriptor.image_usage)
             .sharing_mode(vk::SharingMode::EXCLUSIVE)
-            .samples(sample_count);
+            .samples(descriptor.sample_count);
 
         let allocation_create_info = AllocationCreateInfo {
-            usage: mem_usage,
+            usage: descriptor.mem_usage,
             ..Default::default()
         };
         let (vk_image, allocation) =
@@ -323,108 +323,26 @@ impl Image {
             allocator: AllocatorHandle::clone(allocator),
             vk_image,
             allocation,
-            format,
-            extent,
+            descriptor,
         })
-    }
-
-    pub fn device_local(
-        allocator: &AllocatorHandle,
-        cmd_buf: &mut CommandBuffer,
-        extent: util::Extent2D,
-        format: util::Format,
-        data: &[u8],
-    ) -> Result<(Self, Buffer), MemoryError> {
-        // stride & alignment does not matter as long as they are the same.
-        let staging =
-            Buffer::staging_with_data(allocator, data, 1 /*elem_size*/, 1 /*stride*/)?;
-        // Both src & dst as we use one mip level to create the next
-        let usage = vk::ImageUsageFlags::TRANSFER_DST
-            | vk::ImageUsageFlags::SAMPLED
-            | vk::ImageUsageFlags::TRANSFER_SRC;
-        let dst_image = Self::empty_2d(
-            allocator,
-            extent,
-            format,
-            usage,
-            MemoryUsage::AutoPreferDevice,
-            1,
-            vk::SampleCountFlags::TYPE_1,
-        )?;
-
-        transition_image_layout(
-            cmd_buf,
-            &dst_image.vk_image,
-            1,
-            vk::ImageLayout::UNDEFINED,
-            vk::ImageLayout::TRANSFER_DST_OPTIMAL,
-        );
-        cmd_buf.copy_buffer_to_image(staging.vk_buffer(), dst_image.vk_image(), &extent);
-
-        transition_image_layout(
-            cmd_buf,
-            &dst_image.vk_image,
-            1,
-            vk::ImageLayout::TRANSFER_DST_OPTIMAL,
-            vk::ImageLayout::SHADER_READ_ONLY_OPTIMAL,
-        );
-
-        Ok((dst_image, staging))
-    }
-
-    /// Create a device local image, generating mipmaps in the process
-    pub fn device_local_mipmapped(
-        allocator: &AllocatorHandle,
-        cmd_buf: &mut CommandBuffer,
-        extent: util::Extent2D,
-        format: util::Format,
-        mip_levels: u32,
-        data: &[u8],
-    ) -> Result<(Self, Buffer), MemoryError> {
-        // stride & alignment does not matter as long as they are the same.
-        let staging =
-            Buffer::staging_with_data(allocator, data, 1 /*elem_size*/, 1 /*stride*/)?;
-        // Both src & dst as we use one mip level to create the next
-        let usage = vk::ImageUsageFlags::TRANSFER_SRC
-            | vk::ImageUsageFlags::TRANSFER_DST
-            | vk::ImageUsageFlags::SAMPLED;
-        let dst_image = Self::empty_2d(
-            allocator,
-            extent,
-            format,
-            usage,
-            MemoryUsage::AutoPreferDevice,
-            mip_levels,
-            vk::SampleCountFlags::TYPE_1,
-        )?;
-
-        // Transitioned to SHADER_READ_ONLY_OPTIMAL during mipmap generation
-        transition_image_layout(
-            cmd_buf,
-            &dst_image.vk_image,
-            mip_levels,
-            vk::ImageLayout::UNDEFINED,
-            vk::ImageLayout::TRANSFER_DST_OPTIMAL,
-        );
-        cmd_buf.copy_buffer_to_image(staging.vk_buffer(), dst_image.vk_image(), &extent);
-
-        generate_mipmaps(cmd_buf, dst_image.vk_image(), &extent, mip_levels);
-
-        Ok((dst_image, staging))
     }
 }
 
 impl Image {
-    pub fn vk_image(&self) -> &vk::Image {
-        &self.vk_image
+    pub fn vk_image(&self) -> vk::Image {
+        self.vk_image
     }
 
     pub fn extent(&self) -> util::Extent2D {
-        self.extent
+        self.descriptor.extent
     }
 
     pub fn format(&self) -> util::Format {
-        self.format
+        self.descriptor.format
+    }
+
+    pub fn descriptor(&self) -> ImageDescriptor {
+        self.descriptor
     }
 }
 
@@ -437,6 +355,7 @@ impl std::ops::Drop for Image {
     }
 }
 
+// TODO: Remove
 /// Utility for holding an image and an image view into it. Only for use inside of the trekant crate
 #[allow(dead_code)]
 pub(crate) struct ImageAttachment {

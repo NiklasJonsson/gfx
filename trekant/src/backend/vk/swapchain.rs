@@ -190,7 +190,7 @@ impl Swapchain {
             .map(|img| {
                 ImageView::new(
                     device,
-                    img,
+                    *img,
                     util_format,
                     vk::ImageAspectFlags::COLOR,
                     mip_levels,

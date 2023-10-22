@@ -243,13 +243,13 @@ fn shadow_render_target(
     render_pass: &Handle<trekant::RenderPass>,
     extent: Extent2D,
 ) -> (Handle<trekant::Texture>, Handle<trekant::RenderTarget>) {
-    use trekant::texture::{BorderColor, Filter, SamplerAddressMode};
+    use trekant::{BorderColor, Filter, SamplerAddressMode};
     let format = trekant::Format::D16_UNORM;
 
     let desc = trekant::TextureDescriptor::Empty {
         extent,
         format,
-        usage: trekant::TextureUsage::DEPTH_STENCIL_ATTACHMENT,
+        usage: trekant::TextureUsage::DEPTH,
         sampler: trekant::SamplerDescriptor {
             filter: Filter::Linear,
             address_mode: SamplerAddressMode::ClampToEdge,
@@ -480,7 +480,7 @@ fn transition_unused_map(
         new_layout: vk::ImageLayout::DEPTH_STENCIL_READ_ONLY_OPTIMAL,
         src_queue_family_index: vk::QUEUE_FAMILY_IGNORED,
         dst_queue_family_index: vk::QUEUE_FAMILY_IGNORED,
-        image: *vk_image,
+        image: vk_image,
         subresource_range: vk::ImageSubresourceRange {
             aspect_mask: vk::ImageAspectFlags::DEPTH,
             base_mip_level: 0,

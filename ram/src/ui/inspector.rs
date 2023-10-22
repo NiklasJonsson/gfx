@@ -347,9 +347,8 @@ macro_rules! impl_visit_todo_generic {
 }
 
 use resurs::Async;
-use trekant::texture::{Texture, TextureDescriptor};
+use trekant::Texture;
 impl_visit_todo_generic!(Async);
-impl_visit_todo!(TextureDescriptor);
 impl_visit_todo!(Texture);
 
 impl<'a> Visitor<bool> for ImguiVisitor<'a> {

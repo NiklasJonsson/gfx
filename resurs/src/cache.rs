@@ -4,7 +4,7 @@ use std::marker::PhantomData;
 
 use super::Handle;
 
-/// Cache for descriptor to Handle<T>
+/// Cache for descriptor to Handle\<T\>
 #[derive(Debug)]
 pub struct Cache<D: Hash + Eq, T> {
     ty: PhantomData<T>,

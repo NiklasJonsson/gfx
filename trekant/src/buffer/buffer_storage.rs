@@ -148,10 +148,9 @@ impl<T> AsyncDeviceBufferStorage<T> {
     }
 
     pub fn allocate<BT>(&mut self, desc: &BufferDescriptor<BT>) -> BufferHandle<Async<T>> {
-        let buffer1 = if let BufferMutability::Immutable = desc.mutability() {
-            None
-        } else {
-            Some(Async::<T>::Pending)
+        let buffer1 = match desc.mutability() {
+            BufferMutability::Immutable => None,
+            BufferMutability::Mutable => Some(Async::<T>::Pending),
         };
         let inner_handle = self.inner.add(Async::<T>::Pending, buffer1);
         unsafe { BufferHandle::from_buffer(inner_handle, 0, desc.n_elems(), desc.mutability()) }

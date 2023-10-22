@@ -15,8 +15,6 @@ use trekant::buffer;
 use trekant::pipeline::{
     GraphicsPipeline, GraphicsPipelineDescriptor, ShaderDescriptor, ShaderStage,
 };
-use trekant::pipeline_resource::PipelineResourceSet;
-use trekant::texture;
 use trekant::util;
 use trekant::vertex::{VertexDefinition, VertexFormat};
 use trekant::{RenderPass, Renderer, Texture};
@@ -254,11 +252,11 @@ fn create_texture(renderer: &mut Renderer) -> Handle<Texture> {
     let _ = load_url("textures", TEX_URL);
     let tex_path = get_fname("textures", TEX_URL);
     renderer
-        .create_texture(texture::TextureDescriptor::file(
-            tex_path,
-            util::Format::RGBA_SRGB,
-            texture::MipMaps::Generate,
-        ))
+        .create_texture(trekant::TextureDescriptor::File {
+            path: tex_path,
+            format: util::Format::RGBA_SRGB,
+            mipmaps: trekant::MipMaps::Generate,
+        })
         .expect("Failed to create texture")
 }
 
@@ -338,7 +336,7 @@ fn main() {
     let gfx_pipeline_handle = create_pipeline(&mut renderer, &render_pass);
     let uniform_buffer_handle = create_mvp_ubuf(&mut renderer);
     let texture_handle = create_texture(&mut renderer);
-    let desc_set_handle = PipelineResourceSet::builder(&mut renderer)
+    let desc_set_handle = trekant::PipelineResourceSet::builder(&mut renderer)
         .add_buffer(&uniform_buffer_handle, 0, ShaderStage::VERTEX)
         .add_texture(&texture_handle, 1, ShaderStage::FRAGMENT, false)
         .build();

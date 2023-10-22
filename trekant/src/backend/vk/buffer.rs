@@ -209,8 +209,8 @@ impl Buffer {
         unsafe { self.allocator.unmap_memory(&mut self.allocation) }
     }
 
-    pub fn vk_buffer(&self) -> &vk::Buffer {
-        &self.vk_buffer
+    pub fn vk_buffer(&self) -> vk::Buffer {
+        self.vk_buffer
     }
 
     pub fn update_data_at(&mut self, data: &[u8], offset: usize) {

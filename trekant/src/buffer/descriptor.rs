@@ -10,21 +10,13 @@ use backend::buffer::Buffer;
 use backend::command::CommandBuffer;
 use backend::{AllocatorHandle, MemoryError};
 
+use crate::descriptor::DescriptorData;
 use crate::vertex::VertexDefinition;
 use crate::vk;
-
-use std::sync::Arc;
 
 pub struct BufferResult<B> {
     pub buffer: B,
     pub transient: Option<Buffer>,
-}
-
-#[derive(Debug)]
-enum DescriptorData<'a> {
-    Owned(ByteBuffer),
-    Shared(Arc<ByteBuffer>),
-    Borrowed(&'a [u8]),
 }
 
 pub struct BufferDescriptor<'a, BT> {

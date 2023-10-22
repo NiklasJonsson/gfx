@@ -1,5 +1,4 @@
-use trekant::texture::Texture;
-use trekant::{buffer::DeviceUniformBuffer, pipeline::PolygonMode, texture::TextureDescriptor};
+use trekant::{buffer::DeviceUniformBuffer, pipeline::PolygonMode, Texture, TextureDescriptor};
 use trekant::{BufferHandle, Handle};
 
 use crate::math::Rgba;
@@ -16,9 +15,9 @@ pub struct Unlit {
     pub polygon_mode: PolygonMode,
 }
 
-#[derive(Debug, Clone, Visitable)]
+#[derive(Debug, Visitable)]
 pub struct TextureUse2 {
-    pub desc: TextureDescriptor,
+    pub desc: TextureDescriptor<'static>,
     pub coord_set: u32,
 }
 

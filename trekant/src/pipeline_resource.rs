@@ -178,8 +178,8 @@ impl<'a> PipelineResourceSetBuilder<'a> {
             );
             let buf1 = buf1.unwrap_or(buf0);
             (
-                *buf0.vk_buffer(),
-                *buf1.vk_buffer(),
+                buf0.vk_buffer(),
+                buf1.vk_buffer(),
                 buf0.stride(),
                 buf1.stride(),
             )
@@ -212,40 +212,13 @@ impl<'a> PipelineResourceSetBuilder<'a> {
     }
 
     pub fn add_texture(
-        mut self,
+        self,
         tex_h: &Handle<Texture>,
         binding: u32,
         stage: ShaderStage,
         is_depth: bool,
     ) -> Self {
-        let tex = self
-            .renderer
-            .get_texture(tex_h)
-            .expect("Failed to get texture");
-
-        let image_view = *tex.image_view().vk_image_view();
-        let sampler = *tex.vk_sampler();
-
-        self.add_binding(
-            vk::DescriptorType::COMBINED_IMAGE_SAMPLER,
-            binding,
-            vk::ShaderStageFlags::from(stage),
-            1,
-        );
-
-        let image_layout = if is_depth {
-            vk::ImageLayout::DEPTH_STENCIL_READ_ONLY_OPTIMAL
-        } else {
-            vk::ImageLayout::SHADER_READ_ONLY_OPTIMAL
-        };
-        self.image_infos.push(vk::DescriptorImageInfo {
-            image_layout,
-            image_view,
-            sampler,
-        });
-        log::trace!("Added texture info {:?}", self.image_infos.last().unwrap());
-
-        self
+        self.add_textures([(*tex_h, is_depth)].into_iter(), binding, stage)
     }
 
     pub fn add_textures<I>(mut self, itr: I, binding: u32, stage: ShaderStage) -> Self
@@ -265,19 +238,21 @@ impl<'a> PipelineResourceSetBuilder<'a> {
                 .get_texture(&tex_handle)
                 .expect("Failed to get texture");
 
-            let image_view = *tex.image_view().vk_image_view();
-            let sampler = *tex.vk_sampler();
+            let image_view = tex.image_view().vk_image_view();
+            let sampler = tex.vk_sampler();
 
             let image_layout = if is_depth {
                 vk::ImageLayout::DEPTH_STENCIL_READ_ONLY_OPTIMAL
             } else {
                 vk::ImageLayout::SHADER_READ_ONLY_OPTIMAL
             };
-            self.image_infos.push(vk::DescriptorImageInfo {
+            let desc = vk::DescriptorImageInfo {
                 image_layout,
                 image_view,
                 sampler,
-            });
+            };
+            log::trace!("Added texture info {:?}", desc);
+            self.image_infos.push(desc);
         }
 
         self

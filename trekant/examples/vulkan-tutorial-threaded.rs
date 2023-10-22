@@ -15,8 +15,6 @@ use trekant::buffer;
 use trekant::pipeline::{
     GraphicsPipeline, GraphicsPipelineDescriptor, ShaderDescriptor, ShaderStage,
 };
-use trekant::pipeline_resource::PipelineResourceSet;
-use trekant::texture;
 use trekant::util;
 use trekant::vertex::{VertexDefinition, VertexFormat};
 
@@ -256,9 +254,15 @@ fn create_texture(
 ) {
     let _ = load_url("textures", TEX_URL);
     let tex_path = get_fname("textures", TEX_URL);
-    let descriptor =
-        texture::TextureDescriptor::file(tex_path, util::Format::RGBA_SRGB, texture::MipMaps::None);
-    let texture = loader.load(descriptor).expect("Failed to load texture");
+    let descriptor = trekant::TextureDescriptor::File {
+        path: tex_path,
+        format: util::Format::RGBA_SRGB,
+        mipmaps: trekant::MipMaps::None,
+    };
+
+    let texture = loader
+        .load_texture(descriptor)
+        .expect("Failed to load texture");
     texture_sender.send(texture).expect("Failed to send");
 }
 
@@ -361,7 +365,7 @@ fn main() {
     let mut tex: Option<Handle<Texture>> = None;
 
     // Can only created once the texture is done.
-    let mut desc_set: Option<Handle<PipelineResourceSet>> = None;
+    let mut desc_set: Option<Handle<trekant::PipelineResourceSet>> = None;
 
     event_loop.run(move |event, _, control_flow| {
         *control_flow = ControlFlow::Poll;
@@ -414,7 +418,7 @@ fn main() {
                         .generate_mipmaps(&[tex])
                         .expect("Failed to generate mipmaps");
                     desc_set = Some(
-                        PipelineResourceSet::builder(&mut renderer)
+                        trekant::PipelineResourceSet::builder(&mut renderer)
                             .add_buffer(&ubuf, 0, ShaderStage::VERTEX)
                             .add_texture(&tex, 1, ShaderStage::FRAGMENT, false)
                             .build(),

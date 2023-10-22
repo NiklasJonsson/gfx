@@ -268,7 +268,7 @@ impl CommandBuffer {
             self.vk_device.cmd_bind_vertex_buffers(
                 self.vk_cmd_buffer,
                 0,
-                &[*buffer.vk_buffer()],
+                &[buffer.vk_buffer()],
                 &[offset],
             );
         }
@@ -300,7 +300,7 @@ impl CommandBuffer {
         unsafe {
             self.vk_device.cmd_bind_index_buffer(
                 self.vk_cmd_buffer,
-                *buffer.vk_buffer(),
+                buffer.vk_buffer(),
                 offset,
                 buffer.vk_index_type(),
             );
@@ -365,7 +365,7 @@ impl CommandBuffer {
         self
     }
 
-    pub fn copy_buffer(&mut self, src: &vk::Buffer, dst: &vk::Buffer, size: usize) -> &mut Self {
+    pub fn copy_buffer(&mut self, src: vk::Buffer, dst: vk::Buffer, size: usize) -> &mut Self {
         let info = vk::BufferCopy {
             src_offset: 0,
             dst_offset: 0,
@@ -374,7 +374,7 @@ impl CommandBuffer {
 
         unsafe {
             self.vk_device
-                .cmd_copy_buffer(self.vk_cmd_buffer, *src, *dst, &[info]);
+                .cmd_copy_buffer(self.vk_cmd_buffer, src, dst, &[info]);
         }
 
         self
@@ -382,9 +382,9 @@ impl CommandBuffer {
 
     pub fn copy_buffer_to_image(
         &mut self,
-        src: &vk::Buffer,
-        dst: &vk::Image,
-        extent: &util::Extent2D,
+        src: vk::Buffer,
+        dst: vk::Image,
+        extent: util::Extent2D,
     ) -> &mut Self {
         // TODO: Read this info from dst (by passing not just the vk::Image)
         let info = vk::BufferImageCopy {
@@ -409,8 +409,8 @@ impl CommandBuffer {
         unsafe {
             self.vk_device.cmd_copy_buffer_to_image(
                 self.vk_cmd_buffer,
-                *src,
-                *dst,
+                src,
+                dst,
                 vk::ImageLayout::TRANSFER_DST_OPTIMAL,
                 &[info],
             );
@@ -421,13 +421,13 @@ impl CommandBuffer {
 
     pub fn copy_image(
         &mut self,
-        src: &vk::Image,
+        src: vk::Image,
         src_layout: vk::ImageLayout,
-        dst: &vk::Image,
+        dst: vk::Image,
         dst_layout: vk::ImageLayout,
-        extent: &util::Extent2D,
+        extent: util::Extent2D,
     ) -> &mut Self {
-        let extent = util::Extent3D::from_2d(*extent, 1);
+        let extent = util::Extent3D::from_2d(extent, 1);
         let regions = [vk::ImageCopy {
             src_subresource: vk::ImageSubresourceLayers {
                 aspect_mask: vk::ImageAspectFlags::COLOR,
@@ -448,9 +448,9 @@ impl CommandBuffer {
         unsafe {
             self.vk_device.cmd_copy_image(
                 self.vk_cmd_buffer,
-                *src,
+                src,
                 src_layout,
-                *dst,
+                dst,
                 dst_layout,
                 &regions,
             )
@@ -481,19 +481,19 @@ impl CommandBuffer {
 
     pub fn blit_image(
         &mut self,
-        src: &vk::Image,
-        dst: &vk::Image,
-        vk_image_blit: &vk::ImageBlit,
+        src: vk::Image,
+        dst: vk::Image,
+        vk_image_blit: vk::ImageBlit,
     ) -> &mut Self {
         assert!(self.queue_flags.contains(vk::QueueFlags::GRAPHICS));
         unsafe {
             self.vk_device.cmd_blit_image(
                 self.vk_cmd_buffer,
-                *src,
+                src,
                 vk::ImageLayout::TRANSFER_SRC_OPTIMAL,
-                *dst,
+                dst,
                 vk::ImageLayout::TRANSFER_DST_OPTIMAL,
-                &[*vk_image_blit],
+                &[vk_image_blit],
                 vk::Filter::LINEAR,
             );
         }

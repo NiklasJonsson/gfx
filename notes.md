@@ -227,21 +227,131 @@ ram source code close. That what, we skip using the builtins and use absolute pa
 
 Went with the `ShaderLocation` which seems to work fine altough the code that builds the PBR shaders doesn't look that nice.
 
-### Point light shadows
+## Point light shadows
+
+Implement support for point light shadows. High-level implementation.
+
+1. Create the backing textures in ShadowResources.
+2. Create render passes for each of the faces.
+3. Render the cube maps.
+4. Figure out shadow matrices, one per light?
+
+### Sources
+
+1. There is a sasha willems example on [omni-directional shadow mapping](https://github.com/SaschaWillems/Vulkan/blob/master/examples/shadowmappingomni/shadowmappingomni.cpp)
+with the shaders located [here](https://github.com/SaschaWillems/Vulkan/tree/master/shaders/glsl/shadowmappingomni).
+2. learn opengl has a section on [point-shadows](https://learnopengl.com/Advanced-Lighting/Shadows/Point-Shadows).
+
+### Reading the examples
+
+Sascha Willems example uses this for the image create info:
+
+```cpp
+// 32 bit float format for higher precision
+VkFormat format = VK_FORMAT_R32_SFLOAT;
+// Cube map image description
+VkImageCreateInfo imageCreateInfo = vks::initializers::imageCreateInfo();
+imageCreateInfo.imageType = VK_IMAGE_TYPE_2D;
+imageCreateInfo.format = format;
+imageCreateInfo.extent = { shadowCubeMap.width, shadowCubeMap.height, 1 }; // 1024x1024
+imageCreateInfo.mipLevels = 1;
+imageCreateInfo.arrayLayers = 6;
+imageCreateInfo.samples = VK_SAMPLE_COUNT_1_BIT;
+imageCreateInfo.tiling = VK_IMAGE_TILING_OPTIMAL;
+imageCreateInfo.usage = VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_SAMPLED_BIT;
+imageCreateInfo.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
+imageCreateInfo.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
+imageCreateInfo.flags = VK_IMAGE_CREATE_CUBE_COMPATIBLE_BIT;
+```
+
+from [here](https://github.com/SaschaWillems/Vulkan/blob/94198a7548d0c5b899840c31c67190df919a61a0/examples/shadowmappingomni/shadowmappingomni.cpp#L155C3-L167C63).
+
+Image transition looks like:
+
+```cpp
+// Image barrier for optimal image (target)
+VkImageSubresourceRange subresourceRange = {};
+subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+subresourceRange.baseMipLevel = 0;
+subresourceRange.levelCount = 1;
+subresourceRange.layerCount = 6;
+vks::tools::setImageLayout(
+    layoutCmd,
+    shadowCubeMap.image,
+    VK_IMAGE_LAYOUT_UNDEFINED,
+    VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
+    subresourceRange);
+```
+
+So it seems like we should not create 6 images but rather use array layers and expose the `VK_IMAGE_CREATE_CUBE_COMPATIBLE_BIT`.
+The current `Image` type in the vk backend does not expose any of these, so this needs to be implemented!
+
+## Rework trekant image creation API
 
 Goals:
 
 1. Support cube maps
-2. Simplify/refactor the code
-3. Allow synchronous creation of images from borrowed data (for imgui)
-4. Remove builders?
-5. Decuple Image creation from image writing and mipmap generation. Remove command buffer usage from backend::Image!
-6. Should texture creation be done via the `ResourceManager` API? Yes, probably.
-7. Don't require users to use the `texture` module, all the public API should be available in `trekant`.
+   This is needed for point lights.
+2. Allow synchronous creation of images from borrowed data (for imgui)
+3. Decuple Image creation from image writing and mipmap generation.
+   Remove command buffer usage from backend::Image!
+4. Should texture creation be done via the `ResourceManager` API?
+   The problem is that this means that users have to include the ResourceManager API to actually be able to use the type
+   which is not great. So, no, it should not.
+5. Don't require users to use the `texture` module, all the public API should be available in `trekant`.
+6. Minimize code duplication and share code with the loader.
+7. Get rid of the intermediate enums in the Renderer.
+   Can we reduce them in the loader?
 
-#### Current workings
+### Current workings
 
 * `trekant` exposes the `Texture` and `TextureDescriptor` types which form the basis of texture creation.
 * Texture creation is not part of the "ResourceManager" API. IIRC, this was due to the ResouceManager API not providing
 a clear benefit.
-* The ResourceLoader API for texture is the same as for buffers.
+
+The current texture class exposes functions to create a new texture (sampler + image + image view) in 3 ways:
+
+1. empty/uninit
+2. From Image
+3. From data
+
+Ideas:
+
+* Splitting the data and the description is problematic if the data contains a `File` variant, as we only
+  know the extents after loading the file but the description needs the extent upfront. So, we probably
+  want to keep the outermost TextureDescriptor API as-is.
+* We don't want to copy-paste how to load the TextureDescriptor between the loader and the renderer.
+* Move out the loader code for creating a texture into a new function, load_texture.
+
+### Solution
+
+* The `Loader` API now exposes `load_texture` for loading textures rather than supporting
+`ResourceLoader::load` meaning that users no longer have to import the trait to use it (6).
+It also means the code is a bit simpler. Buffer are still loaded with `ResourceLoader::load`, changing
+this is out of scope for now.
+* The job queuing and command buffer in the loader was simplified a bit.
+* `trekant::descriptor` was renamed to `pipeline_resource` as descriptor is used as a suffix for a lot of
+  "parameter struct" that bake several parameters into a struct for e.g. a constructor.
+* Remove the intermediate texture enums in `Renderer` (8).
+* The vk backeng image API was improved to accept a `ImageDescriptor` rather than a lot of params. Also, the usage of
+  command buffers in the API was removed, meaning that only empty vk images can be created (4).
+* Start working towards to taking references to vk handles for e.g. buffers.
+* `TextureDescriptor::Raw` now takes a `DescriptorData` for the bytes (compared to `Arc<ByteBuffer>`)
+  which means both owned and borrowed data is also supported.
+* Make imgui integration use the API for creating textures from borrowed data.
+* The TextureDescriptor is now only part of the public API in `trekant/src/texture`. Internally, a combination of
+`TextureDesc` and `DescriptorData` is now used (gained via `TextureDescriptor::split_desc_data`) which
+simplifies the code internally as the files are loaded early and handling empty images (where there is no data) is simpler.
+  `TextureDescriptor` is still kept for the outermost API though as it quite convenient to use the `File` variant in user
+  code.
+
+TODO:
+
+* Make ramneryd work
+* Revisit supporting empty textures in the loader
+* Go through all the TODOs in the code
+* Run (buffer) tests with miri?
+
+## Loader API
+
+Maybe we can allow users to create several loader - one per thread/system - and contain the resource flushing to that system.

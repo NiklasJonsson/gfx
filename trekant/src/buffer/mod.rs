@@ -332,7 +332,7 @@ impl<BT: BufferType + Clone> DeviceBuffer<BT> {
         &mut self.buffer
     }
 
-    pub fn vk_buffer(&self) -> &vk::Buffer {
+    pub fn vk_buffer(&self) -> vk::Buffer {
         self.buffer.vk_buffer()
     }
 
@@ -369,7 +369,7 @@ impl DeviceIndexBuffer {
 
 pub type DeviceUniformBuffer = DeviceBuffer<UniformBufferType>;
 impl DeviceUniformBuffer {
-    pub fn update_with<T: Uniform + Copy>(&mut self, data: &T, idx: u64) {
+    pub fn update_with<T: Uniform>(&mut self, data: &T, idx: u64) {
         // SAFETY: The Uniform trait garantues that we can pass this as bytes to the gpu (or will atleast...)
         let raw_data = unsafe { as_bytes(data) };
         let offset = (idx * self.stride() as u64) as usize;

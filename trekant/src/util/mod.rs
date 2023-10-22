@@ -59,7 +59,7 @@ pub unsafe fn cast_transparent_slice<A, B>(a: &[A]) -> &[B] {
 }
 
 // SAFETY: Only call this on the components that come from a call to std::Vec::into_raw_parts
-// Note that len and cap should is expected to be in *bytes*, this function will make the conversion
+// Note that len and cap should be in *bytes*, this function will make the conversion
 // to len/cap in number of *T*.
 unsafe fn drop_as_vec<T>(ptr: *const u8, len: usize, cap: usize) {
     assert!(len % std::mem::size_of::<T>() == 0);
@@ -71,12 +71,42 @@ unsafe fn drop_as_vec<T>(ptr: *const u8, len: usize, cap: usize) {
     ));
 }
 
-/// A buffer containing bytes. Essentially a type-erased Box<[T]>.
+// SAFETY: Only call this on the components that come from a call to std::Vec::into_raw_parts
+// Note that len and cap should be in *bytes*, this function will make the conversion
+// to len/cap in number of *T*.
+unsafe fn clone_impl<T: Copy + 'static>(ptr: *const u8, len: usize, cap: usize) -> ByteBuffer {
+    // This implementation is maybe not ideal conceptually, we should be able to store the layout
+    // and realloc/memcpy manually but this
+    assert!(len % std::mem::size_of::<T>() == 0);
+    assert!(cap % std::mem::size_of::<T>() == 0);
+    let cloned = {
+        let v = Vec::from_raw_parts(
+            ptr as *mut T,
+            len / std::mem::size_of::<T>(),
+            cap / std::mem::size_of::<T>(),
+        );
+
+        let out = v.clone();
+        std::mem::forget(v);
+        out
+    };
+
+    ByteBuffer::from_vec(cloned)
+}
+
+/// A buffer containing bytes. Essentially a type-erased Box<\[T\]>``.
 pub struct ByteBuffer {
-    ptr: *const u8,
+    ptr: *const u8, // TODO: Non-null?
     len: usize,
     cap: usize,
     drop: unsafe fn(*const u8, usize, usize),
+    clone: unsafe fn(*const u8, usize, usize) -> ByteBuffer,
+}
+
+impl Clone for ByteBuffer {
+    fn clone(&self) -> Self {
+        unsafe { (self.clone)(self.ptr, self.len, self.cap) }
+    }
 }
 
 impl std::ops::Deref for ByteBuffer {
@@ -103,6 +133,7 @@ impl ByteBuffer {
         // TODO: use the into_raw_parts here when it is not nightly
         let (ptr, len, cap) = (v.as_mut_ptr(), v.len(), v.capacity());
         let drop = drop_as_vec::<T>;
+        let clone = clone_impl::<T>;
         std::mem::forget(v);
 
         Self {
@@ -110,6 +141,7 @@ impl ByteBuffer {
             len: len * std::mem::size_of::<T>(),
             cap: cap * std::mem::size_of::<T>(),
             drop,
+            clone,
         }
     }
 
@@ -152,5 +184,16 @@ mod tests {
         check(8, 7, 14);
         check(12, 16, 16);
         check(12, 4, 12);
+    }
+
+    #[test]
+    fn test_empty_byte_buffer() {
+        use super::ByteBuffer;
+
+        let v: Vec<i32> = vec![];
+        let b = unsafe { ByteBuffer::from_vec(v) };
+        let slice: &[u8] = &b;
+        assert_eq!(slice.len(), 0);
+        assert!(slice.is_empty());
     }
 }

@@ -9,13 +9,13 @@ use trekant::pipeline::{
 };
 use trekant::pipeline_resource::PipelineResourceSet;
 use trekant::resource::{MutResourceManager as _, ResourceManager as _};
-use trekant::texture::{MipMaps, Texture, TextureDescriptor};
 use trekant::util::{cast_transparent_slice, Extent2D, Format, Offset2D, Rect2D, Viewport};
 use trekant::vertex::{VertexDefinition, VertexFormat};
 use trekant::Frame;
 use trekant::RenderPassEncoder;
 use trekant::Renderer;
 use trekant::{BufferHandle, Handle, Std140Compat};
+use trekant::{MipMaps, Texture, TextureDescriptor};
 
 use crate::common::Name;
 use crate::io::input;
@@ -296,17 +296,15 @@ impl UIContext {
             let mut fonts = imgui_ctx.fonts();
             let atlas_texture = fonts.build_rgba32_texture();
 
-            // We get borrowed data from imgui for the texture so we need a copy here
-            // TODO: This is a use case for supporting borrowed data in a synchronous api
-            let tex_desc = TextureDescriptor::from_vec(
-                atlas_texture.data.to_owned(),
-                Extent2D {
+            let tex_desc = TextureDescriptor::Raw {
+                data: trekant::DescriptorData::Borrowed(atlas_texture.data),
+                extent: Extent2D {
                     width: atlas_texture.width,
                     height: atlas_texture.height,
                 },
-                Format::RGBA_UNORM,
-                MipMaps::None,
-            );
+                format: Format::RGBA_UNORM,
+                mipmaps: MipMaps::None,
+            };
             renderer
                 .create_texture(tex_desc)
                 .expect("Failed to create font texture")
