@@ -1,8 +1,8 @@
 use thiserror::Error;
 
 use crate::backend::*;
-use crate::descriptor;
 use crate::pipeline;
+use crate::pipeline_resource;
 
 use crate::backend::MemoryError;
 
@@ -24,7 +24,7 @@ pub enum RenderError {
     RenderPass(#[from] render_pass::RenderPassError),
     Pipeline(#[from] pipeline::PipelineError),
     Queue(#[from] queue::QueueError),
-    Descriptor(#[from] descriptor::DescriptorError),
+    Descriptor(#[from] pipeline_resource::PipelineResourceError),
     Sync(#[from] sync::SyncError),
     Swapchain(swapchain::SwapchainError),
     RenderTarget(#[from] framebuffer::FramebufferError),

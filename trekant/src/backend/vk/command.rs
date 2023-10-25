@@ -8,10 +8,10 @@ use super::queue::QueueFamily;
 use super::render_pass::RenderPass;
 
 use crate::buffer::{DeviceIndexBuffer, DeviceVertexBuffer};
-use crate::descriptor::DescriptorSet;
 use crate::pipeline::GraphicsPipeline;
 use crate::pipeline::Pipeline;
 use crate::pipeline::ShaderStage;
+use crate::pipeline_resource::PipelineResourceSet;
 use crate::util;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -312,7 +312,7 @@ impl CommandBuffer {
     pub fn bind_descriptor_set(
         &mut self,
         idx: u32,
-        set: &DescriptorSet,
+        set: &PipelineResourceSet,
         pipeline: &GraphicsPipeline,
     ) -> &mut Self {
         assert!(self.queue_flags.contains(vk::QueueFlags::GRAPHICS));

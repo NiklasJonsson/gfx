@@ -3,11 +3,11 @@ pub use ash::vk;
 mod backend;
 pub mod buffer;
 mod common;
-pub mod descriptor;
 mod error;
 mod generics;
 pub mod loader;
 pub mod pipeline;
+pub mod pipeline_resource;
 mod render_pass;
 mod render_target;
 pub mod resource;
@@ -21,11 +21,11 @@ pub use buffer::{
     BufferHandle, BufferMutability, DeviceIndexBuffer, DeviceUniformBuffer, DeviceVertexBuffer,
     IndexBufferDescriptor, UniformBufferDescriptor, VertexBufferDescriptor,
 };
-pub use descriptor::DescriptorSet;
 pub use error::RenderError;
 pub use error::ResizeReason;
 pub use loader::Loader;
 pub use pipeline::{GraphicsPipeline, GraphicsPipelineDescriptor, PipelineError, ShaderStage};
+pub use pipeline_resource::PipelineResourceSet;
 pub use render_pass::{RenderPass, RenderPassEncoder};
 pub use render_target::RenderTarget;
 pub use resource::{Async, Handle, MutResourceManager, ResourceManager};
@@ -619,7 +619,7 @@ impl Renderer {
 
         let util_command_pool =
             command::CommandPool::new(&device, device.graphics_queue_family().clone())?;
-        let descriptor_sets = descriptor::DescriptorSets::new(&device)?;
+        let descriptor_sets = pipeline_resource::PipelineResourceSetStorage::new(&device)?;
         let resources = resource::Resources {
             uniform_buffers: buffer::UniformBuffers::default(),
             vertex_buffers: buffer::VertexBuffers::default(),
@@ -856,8 +856,8 @@ impl Renderer {
         &mut self,
         bindings: &[vk::DescriptorSetLayoutBinding],
     ) -> (
-        Handle<descriptor::DescriptorSet>,
-        &[descriptor::DescriptorSet; 2],
+        Handle<pipeline_resource::PipelineResourceSet>,
+        &[pipeline_resource::PipelineResourceSet; 2],
     ) {
         self.resources
             .descriptor_sets

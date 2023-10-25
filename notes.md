@@ -201,4 +201,48 @@ Went with the `ShaderLocation` which seems to work fine altough the code that bu
 
 ### Point light shadows
 
-TODO
+Goals:
+
+1. Support cube maps
+2. Simplify/refactor the code
+3. Allow synchronous creation of images from borrowed data (for imgui)
+4. Leak vulkan? Probably. It seems like the goal of not leaking vulkan gets in the way more than it helps.
+5. Remove builders?
+6. Decuple Image creation from image writing and mipmap generation. Remove command buffer usage from backend::Image!
+7. Should texture creation be done via the `ResourceManager` API? Yes, probably.
+8. Don't require users to use the `texture` module, all the public API should be available in `trekant`.
+
+#### Current workings
+
+* `trekant` exposes the `Texture` and `TextureDescriptor` types which form the basis of texture creation.
+* Texture creation is not part of the "ResourceManager" API. IIRC, this was due to the ResouceManager API not providing
+a clear benefit.
+* The ResourceLoader API for texture is the same as for buffers.
+
+## Buffer API
+
+There are a few design features we want to acheive with buffers:
+
+### Mutability management
+
+The use be able to specify if the buffer is mutable or immutable. For mutable buffers, the device
+buffer should be accessible from both the gpu and cpu, persistently mapped. Furthermore, it is
+double-buffered to allow modyfing data while still drawing the previous frame. An immutable buffer
+is single-buffered and is uploaded via staging buffer to device-only memory which should be faster
+to access. It is a runtime error to try to modify a immutable buffer. Otherwise the two should be
+interchangeable. Mutable buffers should only be mutated between a next_frame() and submit_frame()
+call, as we won't otherwise know which frame idx to use.
+
+### Handle-based device buffer management
+
+References to gpu-api managed resources are passed around with handles to ensure lifetime are
+proper. E.g. that they are not destroyed before they are used on the gpu.
+
+### Buffers are typed according to their usage
+
+Vertex, index and uniform buffers have different types.
+
+### Provide convenience type and ergonomic api
+
+Provide both host-only buffers (frontend-only) for convenience of managing buffer data and allow
+creating buffer descriptors from them easily.

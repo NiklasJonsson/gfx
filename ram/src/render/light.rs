@@ -6,9 +6,9 @@ use crate::math::{
 use crate::render::debug::LineConfig;
 
 use trekant::{
-    vk, BufferHandle, BufferMutability, CommandBuffer, DescriptorSet, DeviceUniformBuffer,
-    Extent2D, GraphicsPipeline, Handle, RenderPass, RenderTarget, Renderer, ResourceManager,
-    UniformBufferDescriptor, VertexFormat,
+    vk, BufferHandle, BufferMutability, CommandBuffer, DeviceUniformBuffer, Extent2D,
+    GraphicsPipeline, Handle, PipelineResourceSet, RenderPass, RenderTarget, Renderer,
+    ResourceManager, UniformBufferDescriptor, VertexFormat,
 };
 
 use crate::render::uniform::{LightingData, PackedLight, MAX_NUM_LIGHTS};
@@ -91,7 +91,7 @@ struct ShadowRenderPassInfo {
     extent: Extent2D,
     render_target: Handle<RenderTarget>,
     view_data_buf: BufferHandle<DeviceUniformBuffer>,
-    view_data: Handle<DescriptorSet>,
+    view_data: Handle<PipelineResourceSet>,
     shadow_map: ShadowMap,
     light_entity: Entity,
 }
@@ -225,7 +225,7 @@ fn debug_directional_shadow_bounds(world: &World, light_bounds_ls: Obb, shadow_m
 pub struct Shadow {
     pub render_target: Handle<RenderTarget>,
     pub view_data_buffer: BufferHandle<DeviceUniformBuffer>,
-    pub view_data_desc_set: Handle<DescriptorSet>,
+    pub view_data_desc_set: Handle<PipelineResourceSet>,
     pub texture: Handle<trekant::Texture>,
     pub extent: Extent2D,
 }
@@ -364,7 +364,7 @@ fn build_single_shadow(
     extent: Extent2D,
 ) -> Shadow {
     let (texture, render_target) = shadow_render_target(renderer, &shadow_render_pass, extent);
-    let sh_view_data_set = DescriptorSet::builder(renderer)
+    let sh_view_data_set = PipelineResourceSet::builder(renderer)
         .add_buffer(&view_data, 0, trekant::pipeline::ShaderStage::VERTEX)
         .build();
 

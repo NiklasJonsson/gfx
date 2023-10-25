@@ -3,8 +3,8 @@ use crate::resource::Handle;
 use crate::util;
 
 use crate::backend;
-use crate::descriptor::DescriptorSet;
 use crate::pipeline::{GraphicsPipeline, ShaderStage};
+use crate::pipeline_resource::PipelineResourceSet;
 use crate::resource::Resources;
 use crate::traits::PushConstant;
 use crate::vk;
@@ -21,7 +21,7 @@ impl<'a> RenderPassEncoder<'a> {
     pub fn bind_shader_resource_group(
         &mut self,
         idx: u32,
-        dset: &Handle<DescriptorSet>,
+        dset: &Handle<PipelineResourceSet>,
         pipeline: &Handle<GraphicsPipeline>,
     ) -> &mut Self {
         let dset = self

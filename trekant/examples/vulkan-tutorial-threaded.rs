@@ -12,10 +12,10 @@ use buffer::{
     BufferHandle, BufferMutability, DeviceIndexBuffer, DeviceUniformBuffer, DeviceVertexBuffer,
 };
 use trekant::buffer;
-use trekant::descriptor::DescriptorSet;
 use trekant::pipeline::{
     GraphicsPipeline, GraphicsPipelineDescriptor, ShaderDescriptor, ShaderStage,
 };
+use trekant::pipeline_resource::PipelineResourceSet;
 use trekant::texture;
 use trekant::util;
 use trekant::vertex::{VertexDefinition, VertexFormat};
@@ -361,7 +361,7 @@ fn main() {
     let mut tex: Option<Handle<Texture>> = None;
 
     // Can only created once the texture is done.
-    let mut desc_set: Option<Handle<DescriptorSet>> = None;
+    let mut desc_set: Option<Handle<PipelineResourceSet>> = None;
 
     event_loop.run(move |event, _, control_flow| {
         *control_flow = ControlFlow::Poll;
@@ -414,7 +414,7 @@ fn main() {
                         .generate_mipmaps(&[tex])
                         .expect("Failed to generate mipmaps");
                     desc_set = Some(
-                        DescriptorSet::builder(&mut renderer)
+                        PipelineResourceSet::builder(&mut renderer)
                             .add_buffer(&ubuf, 0, ShaderStage::VERTEX)
                             .add_texture(&tex, 1, ShaderStage::FRAGMENT, false)
                             .build(),

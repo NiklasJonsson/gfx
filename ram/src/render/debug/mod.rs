@@ -2,8 +2,8 @@ use super::{geometry, shader};
 use crate::math::{Rgba, Vec3};
 
 use trekant::buffer::{DeviceUniformBuffer, DeviceVertexBuffer};
-use trekant::descriptor::DescriptorSet;
 use trekant::pipeline::GraphicsPipeline;
+use trekant::pipeline_resource::PipelineResourceSet;
 use trekant::resource::{MutResourceManager as _, ResourceManager as _};
 use trekant::vertex::{VertexDefinition, VertexFormat};
 use trekant::{BufferHandle, Handle, PushConstant};
@@ -62,7 +62,7 @@ struct DebugRendererDrawBuffer {
     line_buffer_device: Option<BufferHandle<DeviceVertexBuffer>>,
     queue: Vec<DrawCmd>,
     pipeline: Handle<GraphicsPipeline>,
-    view_data_srg: Handle<DescriptorSet>,
+    view_data_srg: Handle<PipelineResourceSet>,
 }
 
 impl DebugRendererDrawBuffer {
@@ -130,7 +130,7 @@ impl DebugRenderer {
             ShaderStage, TriangleCulling,
         };
 
-        let shader_resource_group = DescriptorSet::builder(renderer)
+        let shader_resource_group = PipelineResourceSet::builder(renderer)
             .add_buffer(view_data_buf, 0, ShaderStage::VERTEX)
             .build();
 

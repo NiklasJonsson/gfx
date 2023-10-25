@@ -15,14 +15,14 @@ use backend::device::{Device, HasVkDevice, VkDeviceHandle};
 use crate::common::MAX_FRAMES_IN_FLIGHT;
 
 #[derive(Debug, Error)]
-pub enum DescriptorError {
-    #[error("Failed to create descriptor pool: {0}")]
+pub enum PipelineResourceError {
+    #[error("Failed to create pipeline resource pool: {0}")]
     PoolCreation(vk::Result),
-    #[error("Failed to allocate descriptor set: {0}")]
+    #[error("Failed to allocate pipeline resource set: {0}")]
     SetAllocation(vk::Result),
 }
 
-struct DescriptorPool {
+struct PipelineResourcePool {
     vk_device: VkDeviceHandle,
     vk_descriptor_pool: vk::DescriptorPool,
     // These only exist here so that we can remove them all in the constructor
@@ -32,7 +32,7 @@ struct DescriptorPool {
     n_allocated_sets: u32,
 }
 
-impl std::ops::Drop for DescriptorPool {
+impl std::ops::Drop for PipelineResourcePool {
     fn drop(&mut self) {
         unsafe {
             self.vk_device
@@ -48,9 +48,9 @@ impl std::ops::Drop for DescriptorPool {
     }
 }
 
-impl DescriptorPool {
+impl PipelineResourcePool {
     // TODO: Accept layout here to compute individual descriptor counts
-    fn new(device: &Device) -> Result<Self, DescriptorError> {
+    fn new(device: &Device) -> Result<Self, PipelineResourceError> {
         let max_allocatable_sets = 128 * MAX_FRAMES_IN_FLIGHT as u32;
         let pool_sizes = [
             vk::DescriptorPoolSize {
@@ -71,7 +71,7 @@ impl DescriptorPool {
             device
                 .vk_device()
                 .create_descriptor_pool(&pool_create_info, None)
-                .map_err(DescriptorError::PoolCreation)?
+                .map_err(PipelineResourceError::PoolCreation)?
         };
 
         Ok(Self {
@@ -87,7 +87,7 @@ impl DescriptorPool {
         &mut self,
         layout: vk::DescriptorSetLayout,
         count: u32,
-    ) -> Result<Vec<DescriptorSet>, DescriptorError> {
+    ) -> Result<Vec<PipelineResourceSet>, PipelineResourceError> {
         assert!(
             self.n_allocated_sets + count < self.max_allocatable_sets,
             "Out of descriptor sets, time to implement dynamic creation of pools!"
@@ -97,12 +97,12 @@ impl DescriptorPool {
             .descriptor_pool(self.vk_descriptor_pool)
             .set_layouts(&layouts);
 
-        let desc_sets: Vec<DescriptorSet> = unsafe {
+        let desc_sets: Vec<PipelineResourceSet> = unsafe {
             self.vk_device
                 .allocate_descriptor_sets(&info)
-                .map_err(DescriptorError::SetAllocation)?
+                .map_err(PipelineResourceError::SetAllocation)?
                 .into_iter()
-                .map(DescriptorSet::new)
+                .map(PipelineResourceSet::new)
                 .collect()
         };
 
@@ -113,14 +113,14 @@ impl DescriptorPool {
     }
 }
 
-pub struct DescriptorSetBuilder<'a> {
+pub struct PipelineResourceSetBuilder<'a> {
     renderer: &'a mut Renderer,
     bindings: Vec<(vk::DescriptorSetLayoutBinding, usize)>,
     buffer_infos: Vec<[vk::DescriptorBufferInfo; MAX_FRAMES_IN_FLIGHT]>,
     image_infos: Vec<vk::DescriptorImageInfo>,
 }
 
-impl<'a> DescriptorSetBuilder<'a> {
+impl<'a> PipelineResourceSetBuilder<'a> {
     fn new(renderer: &'a mut Renderer) -> Self {
         Self {
             renderer,
@@ -131,7 +131,7 @@ impl<'a> DescriptorSetBuilder<'a> {
     }
 }
 
-impl<'a> DescriptorSetBuilder<'a> {
+impl<'a> PipelineResourceSetBuilder<'a> {
     fn add_binding(
         &mut self,
         ty: vk::DescriptorType,
@@ -283,7 +283,7 @@ impl<'a> DescriptorSetBuilder<'a> {
         self
     }
 
-    pub fn build(self) -> Handle<DescriptorSet> {
+    pub fn build(self) -> Handle<PipelineResourceSet> {
         let bindings_only = self.bindings.iter().map(|(x, _)| *x).collect::<Vec<_>>();
         let (handle, sets) = self.renderer.allocate_descriptor_sets(&bindings_only);
         let mut writes = Vec::new();
@@ -318,18 +318,17 @@ impl<'a> DescriptorSetBuilder<'a> {
     }
 }
 
-// TODO: Rename? (to avoid DescriptorSetDescriptor)
-pub struct DescriptorSet {
+pub struct PipelineResourceSet {
     vk_descriptor_set: vk::DescriptorSet,
 }
 
-impl DescriptorSet {
+impl PipelineResourceSet {
     fn new(vk_descriptor_set: vk::DescriptorSet) -> Self {
         Self { vk_descriptor_set }
     }
 
-    pub fn builder(renderer: &mut crate::Renderer) -> DescriptorSetBuilder {
-        DescriptorSetBuilder::new(renderer)
+    pub fn builder(renderer: &mut crate::Renderer) -> PipelineResourceSetBuilder {
+        PipelineResourceSetBuilder::new(renderer)
     }
 
     fn write_buffer(
@@ -353,21 +352,17 @@ impl DescriptorSet {
     }
 }
 
-pub struct DescriptorSetDescriptor {
-    pub layout: vk::DescriptorSetLayout,
-}
-
-pub struct DescriptorSets {
+pub struct PipelineResourceSetStorage {
     vk_device: VkDeviceHandle,
-    descriptor_pool: DescriptorPool,
-    storage: BufferedStorage<DescriptorSet>,
+    descriptor_pool: PipelineResourcePool,
+    storage: BufferedStorage<PipelineResourceSet>,
 }
 
-impl DescriptorSets {
-    pub fn new(device: &Device) -> Result<Self, DescriptorError> {
+impl PipelineResourceSetStorage {
+    pub fn new(device: &Device) -> Result<Self, PipelineResourceError> {
         Ok(Self {
             vk_device: device.vk_device(),
-            descriptor_pool: DescriptorPool::new(device)?,
+            descriptor_pool: PipelineResourcePool::new(device)?,
             storage: Default::default(),
         })
     }
@@ -375,7 +370,8 @@ impl DescriptorSets {
     pub fn alloc(
         &mut self,
         bindings: &[vk::DescriptorSetLayoutBinding],
-    ) -> Result<(Handle<DescriptorSet>, &[DescriptorSet; 2]), DescriptorError> {
+    ) -> Result<(Handle<PipelineResourceSet>, &[PipelineResourceSet; 2]), PipelineResourceError>
+    {
         // TODO: We should not create a descriptor set layout everytime we allocate. Hash bindings instead?
         let info = vk::DescriptorSetLayoutCreateInfo::builder().bindings(bindings);
         let dset_layout = unsafe {
@@ -398,7 +394,11 @@ impl DescriptorSets {
         Ok((handle, sets))
     }
 
-    pub fn get(&self, h: &Handle<DescriptorSet>, frame_idx: usize) -> Option<&DescriptorSet> {
+    pub fn get(
+        &self,
+        h: &Handle<PipelineResourceSet>,
+        frame_idx: usize,
+    ) -> Option<&PipelineResourceSet> {
         self.storage.get(h, frame_idx)
     }
 }

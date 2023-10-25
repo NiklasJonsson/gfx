@@ -12,10 +12,10 @@ use buffer::{
     BufferHandle, BufferMutability, DeviceIndexBuffer, DeviceUniformBuffer, DeviceVertexBuffer,
 };
 use trekant::buffer;
-use trekant::descriptor::DescriptorSet;
 use trekant::pipeline::{
     GraphicsPipeline, GraphicsPipelineDescriptor, ShaderDescriptor, ShaderStage,
 };
+use trekant::pipeline_resource::PipelineResourceSet;
 use trekant::texture;
 use trekant::util;
 use trekant::vertex::{VertexDefinition, VertexFormat};
@@ -338,7 +338,7 @@ fn main() {
     let gfx_pipeline_handle = create_pipeline(&mut renderer, &render_pass);
     let uniform_buffer_handle = create_mvp_ubuf(&mut renderer);
     let texture_handle = create_texture(&mut renderer);
-    let desc_set_handle = DescriptorSet::builder(&mut renderer)
+    let desc_set_handle = PipelineResourceSet::builder(&mut renderer)
         .add_buffer(&uniform_buffer_handle, 0, ShaderStage::VERTEX)
         .add_texture(&texture_handle, 1, ShaderStage::FRAGMENT, false)
         .build();

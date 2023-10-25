@@ -423,7 +423,7 @@ macro_rules! impl_loader {
 
                 let mut cmd_buffer = guard.command_pool.begin_single_submit()?;
 
-                // TODO(perf): Allocation. Switch to small vec
+                // TODO(perf): Allocation.
                 let mut commands = Vec::new();
                 if let Some(cmd) = self.process_command(cmd, Some(&mut cmd_buffer)) {
                     commands.push(cmd);

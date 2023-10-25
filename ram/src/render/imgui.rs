@@ -3,11 +3,11 @@ use trekant::buffer::{
     BufferMutability, DeviceIndexBuffer, DeviceVertexBuffer, IndexBufferDescriptor,
     VertexBufferDescriptor,
 };
-use trekant::descriptor::DescriptorSet;
 use trekant::pipeline::{
     BlendState, DepthTest, GraphicsPipeline, GraphicsPipelineDescriptor, ShaderDescriptor,
     ShaderStage, TriangleCulling,
 };
+use trekant::pipeline_resource::PipelineResourceSet;
 use trekant::resource::{MutResourceManager as _, ResourceManager as _};
 use trekant::texture::{MipMaps, Texture, TextureDescriptor};
 use trekant::util::{cast_transparent_slice, Extent2D, Format, Offset2D, Rect2D, Viewport};
@@ -54,7 +54,7 @@ pub struct UIContext {
     imgui: imgui::Context,
     _font_texture: Handle<Texture>,
     pipeline: Handle<GraphicsPipeline>,
-    desc_set: Handle<DescriptorSet>,
+    desc_set: Handle<PipelineResourceSet>,
     input_entity: specs::Entity,
     per_frame_data: Option<PerFrameData>,
 
@@ -359,7 +359,7 @@ impl UIContext {
                 .expect("Failed to create graphics pipeline")
         };
 
-        let desc_set = DescriptorSet::builder(renderer)
+        let desc_set = PipelineResourceSet::builder(renderer)
             .add_texture(&font_texture, 0, ShaderStage::FRAGMENT, false)
             .build();
 
@@ -651,7 +651,7 @@ struct UIDrawCommand {
 pub struct UIDrawCommands {
     per_frame_data: PerFrameData,
     pipeline: Handle<GraphicsPipeline>,
-    desc_set: Handle<DescriptorSet>,
+    desc_set: Handle<PipelineResourceSet>,
     vertex_shader_data: VertexShaderData,
     commands: Vec<UIDrawCommand>,
 }
