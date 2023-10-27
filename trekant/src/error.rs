@@ -30,9 +30,6 @@ pub enum RenderError {
     RenderTarget(#[from] framebuffer::FramebufferError),
     RenderTargetImage(MemoryError),
     RenderTargetImageView(image::ImageViewError),
-    UniformBuffer(MemoryError),
-    VertexBuffer(MemoryError),
-    IndexBuffer(MemoryError),
     // TODO: Should this be an error?
     NeedsResize(ResizeReason),
     // TODO: Resource typename here as well
