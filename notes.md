@@ -345,13 +345,6 @@ simplifies the code internally as the files are loaded early and handling empty 
   `TextureDescriptor` is still kept for the outermost API though as it quite convenient to use the `File` variant in user
   code.
 
-TODO:
-
-* Make ramneryd work
-* Revisit supporting empty textures in the loader
-* Go through all the TODOs in the code
-* Run (buffer) tests with miri?
-
 ## Loader API
 
 Maybe we can allow users to create several loader - one per thread/system - and contain the resource flushing to that system.

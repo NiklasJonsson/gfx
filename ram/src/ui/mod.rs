@@ -151,7 +151,8 @@ impl UIModule for EditorUiModule {
                 .size(scene_window_size, Condition::Always)
                 .build(frame.inner(), || {
                     for (ent, _root) in (&entities, !&parent_storage).join() {
-                        inspected = inspected.or_else(|| build_tree(world, frame, ent));
+                        let inspect = build_tree(world, frame, ent);
+                        inspected = inspected.or(inspect);
                     }
                 });
 

@@ -143,22 +143,45 @@ fn build_lights_tab(
     {
         let mut lights = world.write_storage::<Light>();
         let mut transforms = world.write_storage::<crate::math::Transform>();
-        for (i, (light, tfm)) in (&mut lights, &mut transforms).join().enumerate() {
-            let mut l = LightInfo {
-                transform: *tfm,
-                light: light.clone(),
+        for (light, tfm) in (&mut lights, &mut transforms).join() {
+            let ty = match light {
+                Light::Ambient { .. } => "Ambient",
+                Light::Directional { .. } => "Directional",
+                Light::Spot { .. } => "Spot",
+                Light::Point { .. } => "Point",
             };
 
-            let idx: u8 = i.try_into().expect("Too many lights");
+            let ui = frame.inner();
 
-            visitor.visit_mut(
-                &mut l,
-                &Meta {
-                    type_name: "Light",
-                    range: None,
-                    origin: MetaOrigin::TupleField { idx },
-                },
-            );
+            let flags: imgui::TreeNodeFlags = imgui::TreeNodeFlags::DEFAULT_OPEN;
+            imgui::TreeNode::new(ty).flags(flags).build(ui, || {
+                ui.indent();
+                ui.text(std::format!("pos: {}", tfm.position));
+                ui.text(std::format!("rot: {}", tfm.rotation.into_vec4()));
+                match light {
+                    Light::Ambient { color, strength } => {
+                        ui.text(std::format!("color: {color}"));
+                        ui.text(std::format!("strength: {strength}"));
+                    }
+                    Light::Directional { color } => {
+                        ui.text(std::format!("color: {color}"));
+                    }
+                    Light::Spot {
+                        color,
+                        angle,
+                        range,
+                    } => {
+                        ui.text(std::format!("color: {color}"));
+                        ui.text(std::format!("angle: {angle}"));
+                        ui.text(std::format!("range: {range:?}"));
+                    }
+                    Light::Point { color, range } => {
+                        ui.text(std::format!("color: {color}"));
+                        ui.text(std::format!("range: {range}"));
+                    }
+                }
+                ui.unindent();
+            });
         }
     }
 
@@ -176,8 +199,7 @@ fn build_lights_tab(
                     .state
                     .add_light_modal
                     .take();
-                // TODO(refactor): Auto-generate some of this
-                let items = [("Point"), ("Directional"), ("Spot"), ("Ambient")];
+                let items = ["Point", "Directional", "Spot", "Ambient"];
                 let mut idx = modal_state.as_ref().map(|x| x.idx).unwrap_or(0);
                 let selected = frame.inner().combo("Selected", &mut idx, &items, |s| {
                     std::borrow::Cow::Borrowed(*s)
