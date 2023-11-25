@@ -11,6 +11,13 @@
 
 pub type World = specs::World;
 pub use ram_derive::Component;
+use specs::WorldExt;
+
+pub trait WorldUtil {
+    fn has_component<C>(&self, e: specs::Entity) -> bool
+    where
+        C: specs::Component;
+}
 
 pub mod prelude {
     pub use specs::prelude::ResourceId;
@@ -20,6 +27,7 @@ pub mod prelude {
     pub use specs::{DenseVecStorage, HashMapStorage, NullStorage, VecStorage};
     pub use specs::{Read, ReadExpect, ReadStorage, Write, WriteExpect, WriteStorage};
 
+    pub use super::WorldUtil as _;
     pub use specs::{Builder as _, Join as _, SystemData as _, WorldExt};
 
     pub use super::Component;
@@ -28,6 +36,15 @@ pub mod prelude {
     pub use specs::storage::StorageEntry;
 
     pub use super::{Executor, ExecutorBuilder, System, World};
+}
+
+impl WorldUtil for specs::World {
+    fn has_component<C>(&self, e: specs::Entity) -> bool
+    where
+        C: specs::Component,
+    {
+        self.read_storage::<C>().get(e).is_some()
+    }
 }
 
 pub mod serde {

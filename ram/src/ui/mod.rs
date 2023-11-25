@@ -1,17 +1,22 @@
-use specs::prelude::*;
+use std::collections::HashSet;
+
+use ecs::prelude::*;
 
 use crate::camera::Camera;
 use crate::common::Name;
-use crate::graph;
 use crate::render::imgui::{UIModule, UiFrame};
-use imgui::{Condition, InputFloat3, TreeNode};
+use crate::{ecs, graph};
+use imgui::{Condition, InputFloat3};
 
 pub mod inspector;
 
 fn name(world: &World, ent: Entity) -> String {
-    let names = world.read_component::<Name>();
-    let name: &str = names.get(ent).map(|n| n.0.as_str()).unwrap_or("");
-    format!("{} ({}, {})", name, ent.id(), ent.gen().id())
+    let ent_id = ent.id();
+    let names = world.read_storage::<Name>();
+    match names.get(ent) {
+        Some(name) => format!("{ent_id} {}", name.0),
+        None => format!("{ent_id}"),
+    }
 }
 
 fn build_tree<'a>(
@@ -20,20 +25,26 @@ fn build_tree<'a>(
     ent: specs::Entity,
 ) -> Option<specs::Entity> {
     let mut inspected = None;
-
-    let name = name(world, ent);
-    TreeNode::new(&name).build(ui.inner(), || {
-        let pressed = ui.inner().small_button("inspect");
-        if pressed {
-            inspected = Some(ent);
-        }
-        if let Some(children) = world.read_component::<graph::Children>().get(ent) {
-            for child in children.iter() {
-                let new = build_tree(world, ui, *child);
-                inspected = inspected.or(new);
+    let has_children = world.has_component::<graph::Children>(ent);
+    ui.inner()
+        .tree_node_config(name(world, ent))
+        .leaf(!has_children)
+        .build(|| {
+            if let Some(children) = world.read_storage::<graph::Children>().get(ent) {
+                for child in children.iter() {
+                    let new = build_tree(world, ui, *child);
+                    inspected = inspected.or(new);
+                }
             }
-        }
-    });
+        });
+
+    ui.inner().same_line();
+    let pressed = ui
+        .inner()
+        .small_button(std::format!("inspect##{}", ent.id()));
+    if pressed {
+        inspected = Some(ent);
+    }
 
     inspected
 }
@@ -44,9 +55,6 @@ fn build_inspector<'a>(
     ent: specs::Entity,
 ) {
     use crate::render::ReloadMaterial;
-
-    ui.inner().text(name(world, ent));
-    ui.inner().separator();
     let pressed = ui.inner().small_button("reload material");
     if pressed {
         world
@@ -75,8 +83,9 @@ fn build_inspector<'a>(
     inspector.inspect_components(&mut visitor, world, ent);
 }
 
+#[derive(Default)]
 struct SelectedEntity {
-    entity: specs::Entity,
+    entities: HashSet<ecs::Entity>,
 }
 
 #[derive(Default)]
@@ -87,16 +96,18 @@ impl UIModule for EditorUiModule {
         let dt = world.read_resource::<crate::time::Time>().delta_sim();
         let size = [400.0, 300.0];
         let pos = [0.0, 0.0];
-        imgui::Window::new("Overview")
+        frame
+            .inner()
+            .window("Overview")
             .size(size, imgui::Condition::FirstUseEver)
             .position(pos, imgui::Condition::FirstUseEver)
-            .build(frame.inner(), || {
+            .build(|| {
                 let ui = frame.inner();
                 ui.text(format!("FPS: {:.3}", dt.as_fps()));
 
                 if ui.collapsing_header("Camera", imgui::TreeNodeFlags::DEFAULT_OPEN) {
                     let camera_entity =
-                        crate::ecs::get_singleton_entity::<crate::render::MainRenderCamera>(world);
+                        ecs::get_singleton_entity::<crate::render::MainRenderCamera>(world);
                     let mut tfm_storage = world.write_storage::<crate::math::Transform>();
                     let tfm = tfm_storage
                         .get_mut(camera_entity)
@@ -146,32 +157,46 @@ impl UIModule for EditorUiModule {
             let parent_storage = world.read_storage::<graph::Parent>();
             let entities = world.read_resource::<specs::world::EntitiesRes>();
 
-            imgui::Window::new("Scene")
+            frame
+                .inner()
+                .window("Entities")
                 .position(scene_window_pos, Condition::Always)
                 .size(scene_window_size, Condition::Always)
-                .build(frame.inner(), || {
+                .build(|| {
                     for (ent, _root) in (&entities, !&parent_storage).join() {
                         let inspect = build_tree(world, frame, ent);
                         inspected = inspected.or(inspect);
                     }
                 });
+        }
 
-            if world.has_value::<SelectedEntity>() && inspected.is_none() {
-                inspected = Some(world.read_resource::<SelectedEntity>().entity);
-            }
+        let mut selected = world.remove::<SelectedEntity>().unwrap_or_default();
+
+        if let Some(ent) = inspected {
+            selected.entities.insert(ent);
         }
 
         let inspected_window_size = [scene_window_size[0], 300.0];
-        let inspected_window_pos = [scene_window_pos[0], scene_window_size[1]];
-        if let Some(ent) = inspected {
-            imgui::Window::new("Inspector")
-                .position(inspected_window_pos, Condition::FirstUseEver)
+        let mut closed: Vec<ecs::Entity> = Vec::new();
+        for ent in &selected.entities {
+            let window_title = { std::format!("Entity {}", name(world, *ent)) };
+            let mut opened = true;
+            frame
+                .inner()
+                .window(window_title)
                 .size(inspected_window_size, Condition::FirstUseEver)
-                .build(frame.inner(), || {
-                    build_inspector(world, frame, ent);
+                .opened(&mut opened)
+                .build(|| {
+                    build_inspector(world, frame, *ent);
                 });
-            world.insert(SelectedEntity { entity: ent });
+            if !opened {
+                closed.push(*ent);
+            }
         }
+        for ent in closed {
+            selected.entities.remove(&ent);
+        }
+        world.insert(selected);
     }
 }
 

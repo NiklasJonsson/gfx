@@ -430,8 +430,8 @@ pub fn draw_frame(world: &mut World, ui: &mut imgui::UIContext, renderer: &mut R
     let frame_data = &*world.write_resource::<FrameResources>();
 
     {
-        let mut cameras = world.write_component::<Camera>();
-        let transforms = world.read_component::<Transform>();
+        let mut cameras = world.write_storage::<Camera>();
+        let transforms = world.read_storage::<Transform>();
         let camera = cameras.get_mut(cam_entity).unwrap();
         camera.aspect_ratio = aspect_ratio;
         let tfm = transforms

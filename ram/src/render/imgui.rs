@@ -65,12 +65,12 @@ pub struct UIContext {
 
 /// The data for one frame of the ui. Ui modules get this and register ui draw calls
 pub struct UiFrame<'a> {
-    imgui: imgui::Ui<'a>,
+    imgui: &'a mut imgui::Ui,
     storage: &'a UiStateStorage,
 }
 
 impl<'a> UiFrame<'a> {
-    pub fn inner(&self) -> &imgui::Ui<'a> {
+    pub fn inner(&self) -> &imgui::Ui {
         &self.imgui
     }
 
@@ -166,7 +166,7 @@ impl UIContext {
         io[imgui::Key::Space] = KeyCode::Space as _;
         io[imgui::Key::Enter] = KeyCode::Return as _;
         io[imgui::Key::Escape] = KeyCode::Escape as _;
-        io[imgui::Key::KeyPadEnter] = KeyCode::NumpadEnter as _;
+        io[imgui::Key::KeypadEnter] = KeyCode::NumpadEnter as _;
         io[imgui::Key::A] = KeyCode::A as _;
         io[imgui::Key::C] = KeyCode::C as _;
         io[imgui::Key::V] = KeyCode::V as _;
@@ -293,7 +293,7 @@ impl UIContext {
         let mut imgui_ctx = Self::init_imgui_ctx();
 
         let font_texture = {
-            let mut fonts = imgui_ctx.fonts();
+            let fonts = imgui_ctx.fonts();
             let atlas_texture = fonts.build_rgba32_texture();
 
             let tex_desc = TextureDescriptor::Raw {
@@ -414,7 +414,7 @@ impl UIContext {
         );
 
         let io = self.imgui.io_mut();
-        io.keys_down = [false; 512];
+        io.keys_down = [false; imgui::sys::ImGuiKey_COUNT as usize];
         io.key_shift = false;
         io.key_ctrl = false;
         io.key_alt = false;
@@ -459,13 +459,15 @@ impl UIContext {
         self.resize(frame.extent());
         self.forward_input(world);
 
-        let ui = UiFrame {
-            imgui: self.imgui.frame(),
-            storage: &self.storage,
-        };
-        self.modules.iter_mut().for_each(|m| m.draw(world, &ui));
+        {
+            let ui = UiFrame {
+                imgui: self.imgui.new_frame(),
+                storage: &self.storage,
+            };
+            self.modules.iter_mut().for_each(|m| m.draw(world, &ui));
+        }
 
-        let draw_data = ui.imgui.render();
+        let draw_data = self.imgui.render();
         let fb_width = draw_data.display_size[0] * draw_data.framebuffer_scale[0];
         let fb_height = draw_data.display_size[1] * draw_data.framebuffer_scale[1];
 

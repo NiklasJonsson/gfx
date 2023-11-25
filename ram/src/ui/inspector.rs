@@ -15,16 +15,16 @@ fn label<T>(m: &Meta<T>) -> Cow<str> {
     }
 }
 
-fn push_id<'a, T>(frame: &UiFrame<'a>, m: &Meta<T>) -> imgui::IdStackToken<'a> {
+fn push_id<'a, T>(frame: &'a UiFrame<'a>, m: &Meta<T>) -> imgui::IdStackToken<'a> {
     match &m.origin {
         MetaOrigin::NamedField { name } => frame.inner().push_id(*name),
         MetaOrigin::TupleField { idx } => {
             let idx: i32 = (*idx)
                 .try_into()
                 .expect("Tuple idx should always fit into i32");
-            frame.inner().push_id(idx)
+            frame.inner().push_id_int(idx)
         }
-        MetaOrigin::Standalone => frame.inner().push_id(0),
+        MetaOrigin::Standalone => frame.inner().push_id_int(0),
     }
 }
 
@@ -194,7 +194,7 @@ where
         if let Some(outer_token) = self.visit_array_begin(m) {
             for (i, e) in t.iter().enumerate() {
                 let id: i32 = i.try_into().unwrap();
-                let token = self.ui.inner().push_id(id);
+                let token = self.ui.inner().push_id_int(id);
                 let idx: u8 = i.try_into().expect("Too many elements");
                 self.visit(
                     e,
@@ -214,7 +214,7 @@ where
         if let Some(outer_token) = self.visit_array_begin(m) {
             for (i, e) in t.iter_mut().enumerate() {
                 let id: i32 = i.try_into().unwrap();
-                let token = self.ui.inner().push_id(id);
+                let token = self.ui.inner().push_id_int(id);
                 let idx: u8 = i.try_into().expect("Too many elements");
                 self.visit_mut(
                     e,
@@ -236,14 +236,20 @@ macro_rules! impl_visit_cast {
         impl<'a> Visitor<$ty> for ImguiVisitor<'a> {
             fn visit(&mut self, t: &$ty, m: &Meta<$ty>) {
                 let mut v = *t as _;
-                imgui::$imgui_ty::new(self.ui.inner(), &label(m), &mut v)
+                self.ui
+                    .inner()
+                    .input_int(&label(m), &mut v)
                     .read_only(true)
                     .build();
             }
 
             fn visit_mut(&mut self, t: &mut $ty, m: &Meta<$ty>) {
                 let mut v = *t as _;
-                imgui::$imgui_ty::new(self.ui.inner(), &label(m), &mut v).build();
+                self.ui
+                    .inner()
+                    .input_int(&label(m), &mut v)
+                    .read_only(true)
+                    .build();
                 *t = v as _;
             }
         }
@@ -401,31 +407,29 @@ impl<'a> Visitor<crate::math::Quat> for ImguiVisitor<'a> {
                 .storage()
                 .insert(storage_id.clone(), QuatEditState::default());
         }
-        self.ui
-            .inner()
-            .popup_modal(&storage_id)
-            .build(self.ui.inner(), || {
-                let mut storage = self.ui.storage();
-                let state: &mut QuatEditState = storage
-                    .get_mut(&storage_id)
-                    .expect("Got quat edit modal but no state resource");
-                imgui::InputFloat3::new(self.ui.inner(), "axis", &mut state.axis).build();
-                imgui::InputFloat::new(
-                    self.ui.inner(),
-                    "angle (radians)",
-                    &mut state.angle_radians,
-                )
+        self.ui.inner().modal_popup(&storage_id, || {
+            let mut storage = self.ui.storage();
+            let state: &mut QuatEditState = storage
+                .get_mut(&storage_id)
+                .expect("Got quat edit modal but no state resource");
+            self.ui
+                .inner()
+                .input_float3("axis", &mut state.axis)
+                .build();
+            self.ui
+                .inner()
+                .input_float("angle (radians)", &mut state.angle_radians)
                 .build();
 
-                if self.ui.inner().button("Apply") {
-                    *t = crate::math::Quat::rotation_3d(state.angle_radians, state.axis);
-                    self.ui.inner().close_current_popup();
-                }
-                self.ui.inner().same_line();
-                if self.ui.inner().button("Close") {
-                    self.ui.inner().close_current_popup();
-                }
-            });
+            if self.ui.inner().button("Apply") {
+                *t = crate::math::Quat::rotation_3d(state.angle_radians, state.axis);
+                self.ui.inner().close_current_popup();
+            }
+            self.ui.inner().same_line();
+            if self.ui.inner().button("Close") {
+                self.ui.inner().close_current_popup();
+            }
+        });
     }
 }
 
