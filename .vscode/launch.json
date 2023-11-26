@@ -189,13 +189,13 @@
                 }
             },
             "args": [
-                // "--gltf-file",
-                // "../glTF-Sample-Models/2.0/Sponza/glTF/Sponza.gltf",
-                "--spawn-plane",
-                "--spawn-cube",
+                "--gltf-file",
+                "../glTF-Sample-Models/2.0/Sponza/glTF/Sponza.gltf",
+                // "--spawn-plane",
+                // "--spawn-cube",
                 "--rsf-file",
                 "data/ambient_light.ron.rsf",
-                "--sun-simulation",
+                // "--sun-simulation",
                 //"data/spot_light.ron.rsf",
             ],
             "cwd": "${workspaceFolder}"

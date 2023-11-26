@@ -318,6 +318,7 @@ impl Image {
         let (vk_image, allocation) =
             unsafe { allocator.create_image(&info, &allocation_create_info) }
                 .map_err(MemoryError::ImageCreation)?;
+        log::trace!("Created image {vk_image:p}");
 
         Ok(Self {
             allocator: AllocatorHandle::clone(allocator),

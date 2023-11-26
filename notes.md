@@ -345,13 +345,12 @@ simplifies the code internally as the files are loaded early and handling empty 
   `TextureDescriptor` is still kept for the outermost API though as it quite convenient to use the `File` variant in user
   code.
 
+## Debugging validation errors
+
+1. Image is created without TRANFER_SRC
+2. We try to use it in a copy command (mipmap generation)
+3. Created by the loader?
+
 ## Loader API
 
 Maybe we can allow users to create several loader - one per thread/system - and contain the resource flushing to that system.
-
-// TODO:
-
-1. Empty textures in the loader
-2. Go through TODOs in image/texture code
-3. Debug incorrect lighting for Sponza
-4. Continue on
