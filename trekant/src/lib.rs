@@ -1002,7 +1002,8 @@ impl Renderer {
             let mip_levels = texture::mip_levels_for(extent);
             let usage = vk::ImageUsageFlags::TRANSFER_SRC
                 | vk::ImageUsageFlags::TRANSFER_DST
-                | vk::ImageUsageFlags::SAMPLED;
+                | vk::ImageUsageFlags::SAMPLED
+                | vk::ImageUsageFlags::COLOR_ATTACHMENT;
             let dst_image = Image::empty_2d(
                 &self.device.allocator(),
                 ImageDescriptor {
