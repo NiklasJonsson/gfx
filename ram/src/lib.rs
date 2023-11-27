@@ -17,6 +17,7 @@ pub mod ecs;
 mod graph;
 mod io;
 pub mod math;
+mod recipe;
 pub mod render;
 mod time;
 mod ui;

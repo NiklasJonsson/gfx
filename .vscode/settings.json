@@ -1,5 +1,8 @@
 {
     "restructuredtext.confPath": "",
     "esbonio.server.enabled": true,
-    "restructuredtext.languageServer.disabled": true
+    "restructuredtext.languageServer.disabled": true,
+    "rust-analyzer.linkedProjects": [
+        ".\\ram\\Cargo.toml"
+    ]
 }
