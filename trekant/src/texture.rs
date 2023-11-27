@@ -220,13 +220,13 @@ pub(crate) fn load_texture_from_data<D: HasVkDevice>(
 
     let generate_mipmaps = mipmaps == MipMaps::Generate;
 
-    let mut image_usage = vk::ImageUsageFlags::from(usage)
+    let image_usage = vk::ImageUsageFlags::from(usage)
         | vk::ImageUsageFlags::SAMPLED
-        | vk::ImageUsageFlags::TRANSFER_DST;
+        | vk::ImageUsageFlags::TRANSFER_DST
+        | vk::ImageUsageFlags::TRANSFER_SRC;
     let mut mip_levels = 1;
 
     if generate_mipmaps {
-        image_usage |= vk::ImageUsageFlags::TRANSFER_SRC;
         mip_levels = mip_levels_for(extent);
     }
 

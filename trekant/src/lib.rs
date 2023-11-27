@@ -996,6 +996,7 @@ impl Renderer {
                 .textures
                 .get_mut(handle)
                 .ok_or_else(|| RenderError::InvalidHandle(handle.id()))?;
+            log::trace!("Generating mipmap for {:p}", texture.vk_image());
             let extent = texture.extent();
             let format = texture.format();
             let mip_levels = texture::mip_levels_for(extent);

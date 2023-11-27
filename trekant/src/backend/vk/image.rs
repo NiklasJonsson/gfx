@@ -154,6 +154,12 @@ pub fn generate_mipmaps(
     extent: util::Extent2D,
     mip_levels: u32,
 ) {
+    log::trace!(
+        "Generating mipmaps for {:p}. extent = {}. mip_levels = {}",
+        image.vk_image(),
+        extent,
+        mip_levels
+    );
     assert!(cmd_buf.is_started());
     let vk_image = image.vk_image();
     let aspect_mask = vk::ImageAspectFlags::COLOR;

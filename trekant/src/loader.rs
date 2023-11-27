@@ -436,6 +436,7 @@ impl Loader {
         &self,
         descriptor: TextureDescriptor<'static>,
     ) -> Result<Handle<Async<Texture>>, LoaderError> {
+        log::trace!("Loading texture with descriptor {descriptor:?}");
         validate_texture_descriptor(&descriptor)?;
 
         let (desc, mipmaps, data) = descriptor
