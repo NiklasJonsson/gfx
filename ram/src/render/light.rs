@@ -250,6 +250,10 @@ fn shadow_render_target(
     use trekant::{BorderColor, Filter, SamplerAddressMode};
     let format = trekant::Format::D16_UNORM;
 
+    // START HERE:
+    // 1. Sketch out code for setting up the cube map in rust
+    // 2. Adapt the trekant::texture API appropriately
+
     let desc = trekant::TextureDescriptor::Empty {
         extent,
         format,
@@ -663,7 +667,7 @@ pub fn shadow_pass(
     // Collect rendering info.
     for (e, light, tfm) in (&entities, &lights, &transforms).join() {
         if render_passes.len() >= MAX_NUM_LIGHTS {
-            log::warn!("Too many punctual lights, skipping remaining");
+            log::warn!("Too many punctual lights, skipping {e:?}");
             break;
         }
 
@@ -673,7 +677,7 @@ pub fn shadow_pass(
         match light {
             Light::Spot { angle, range, .. } => {
                 if n_non_directional_lights > MAX_NUM_NON_DIRECTIONAL_LIGHTS {
-                    log::warn!("Too many spotl lights, skipping shadow generation for {e:?}");
+                    log::warn!("Too many spot lights, skipping shadow generation for {e:?}");
                     break;
                 }
                 // TODO: Aspect ratio here?
@@ -695,7 +699,7 @@ pub fn shadow_pass(
             }
             Light::Directional { .. } => {
                 if n_directional_lights >= MAX_NUM_DIRECTIONAL_LIGHTS {
-                    log::warn!("Found more than {MAX_NUM_DIRECTIONAL_LIGHTS} directional light, skipping all but first");
+                    log::warn!("Found more than {MAX_NUM_DIRECTIONAL_LIGHTS} directional lights, skipping {e:?}");
                     continue;
                 }
 

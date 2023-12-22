@@ -227,65 +227,6 @@ ram source code close. With that, we skip using the builtins and use absolute pa
 
 Went with the `ShaderLocation` which seems to work fine altough the code that builds the PBR shaders doesn't look that nice.
 
-## Point light shadows
-
-Implement support for point light shadows. High-level implementation.
-
-1. Create the backing textures in ShadowResources.
-2. Create render passes for each of the faces.
-3. Render the cube maps.
-4. Figure out shadow matrices, one per light?
-
-### Sources
-
-1. There is a sasha willems example on [omni-directional shadow mapping](https://github.com/SaschaWillems/Vulkan/blob/master/examples/shadowmappingomni/shadowmappingomni.cpp)
-with the shaders located [here](https://github.com/SaschaWillems/Vulkan/tree/master/shaders/glsl/shadowmappingomni).
-2. learn opengl has a section on [point-shadows](https://learnopengl.com/Advanced-Lighting/Shadows/Point-Shadows).
-
-### Reading the examples
-
-Sascha Willems example uses this for the image create info:
-
-```cpp
-// 32 bit float format for higher precision
-VkFormat format = VK_FORMAT_R32_SFLOAT;
-// Cube map image description
-VkImageCreateInfo imageCreateInfo = vks::initializers::imageCreateInfo();
-imageCreateInfo.imageType = VK_IMAGE_TYPE_2D;
-imageCreateInfo.format = format;
-imageCreateInfo.extent = { shadowCubeMap.width, shadowCubeMap.height, 1 }; // 1024x1024
-imageCreateInfo.mipLevels = 1;
-imageCreateInfo.arrayLayers = 6;
-imageCreateInfo.samples = VK_SAMPLE_COUNT_1_BIT;
-imageCreateInfo.tiling = VK_IMAGE_TILING_OPTIMAL;
-imageCreateInfo.usage = VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_SAMPLED_BIT;
-imageCreateInfo.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
-imageCreateInfo.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
-imageCreateInfo.flags = VK_IMAGE_CREATE_CUBE_COMPATIBLE_BIT;
-```
-
-from [here](https://github.com/SaschaWillems/Vulkan/blob/94198a7548d0c5b899840c31c67190df919a61a0/examples/shadowmappingomni/shadowmappingomni.cpp#L155C3-L167C63).
-
-Image transition looks like:
-
-```cpp
-// Image barrier for optimal image (target)
-VkImageSubresourceRange subresourceRange = {};
-subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
-subresourceRange.baseMipLevel = 0;
-subresourceRange.levelCount = 1;
-subresourceRange.layerCount = 6;
-vks::tools::setImageLayout(
-    layoutCmd,
-    shadowCubeMap.image,
-    VK_IMAGE_LAYOUT_UNDEFINED,
-    VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
-    subresourceRange);
-```
-
-So it seems like we should not create 6 images but rather use array layers and expose the `VK_IMAGE_CREATE_CUBE_COMPATIBLE_BIT`.
-The current `Image` type in the vk backend does not expose any of these, so this needs to be implemented!
-
 ## Rework trekant image creation API
 
 Goals:
@@ -347,4 +288,76 @@ simplifies the code internally as the files are loaded early and handling empty 
 
 ## Loader API
 
-Maybe we can allow users to create several loader - one per thread/system - and contain the resource flushing to that system.
+## Point light shadows (WIP)
+
+Implement support for point light shadows.
+
+1. Create the backing textures in ShadowResources.
+2. Create render passes for each of the faces.
+3. Render the cube maps.
+4. Figure out shadow matrices, one per light?
+
+### Sources
+
+1. There is a sasha willems example on [omni-directional shadow mapping](https://github.com/SaschaWillems/Vulkan/blob/master/examples/shadowmappingomni/shadowmappingomni.cpp)
+with the shaders located [here](https://github.com/SaschaWillems/Vulkan/tree/master/shaders/glsl/shadowmappingomni).
+2. learn opengl has a section on [point-shadows](https://learnopengl.com/Advanced-Lighting/Shadows/Point-Shadows).
+
+### Reading the examples
+
+Sascha Willems example uses this for the image create info:
+
+```cpp
+// 32 bit float format for higher precision
+VkFormat format = VK_FORMAT_R32_SFLOAT;
+// Cube map image description
+VkImageCreateInfo imageCreateInfo = vks::initializers::imageCreateInfo();
+imageCreateInfo.imageType = VK_IMAGE_TYPE_2D;
+imageCreateInfo.format = format;
+imageCreateInfo.extent = { shadowCubeMap.width, shadowCubeMap.height, 1 }; // 1024x1024
+imageCreateInfo.mipLevels = 1;
+imageCreateInfo.arrayLayers = 6;
+imageCreateInfo.samples = VK_SAMPLE_COUNT_1_BIT;
+imageCreateInfo.tiling = VK_IMAGE_TILING_OPTIMAL;
+imageCreateInfo.usage = VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_SAMPLED_BIT;
+imageCreateInfo.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
+imageCreateInfo.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
+imageCreateInfo.flags = VK_IMAGE_CREATE_CUBE_COMPATIBLE_BIT;
+```
+
+from [here](https://github.com/SaschaWillems/Vulkan/blob/94198a7548d0c5b899840c31c67190df919a61a0/examples/shadowmappingomni/shadowmappingomni.cpp#L155C3-L167C63).
+
+Image transition looks like:
+
+```cpp
+// Image barrier for optimal image (target)
+VkImageSubresourceRange subresourceRange = {};
+subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+subresourceRange.baseMipLevel = 0;
+subresourceRange.levelCount = 1;
+subresourceRange.layerCount = 6;
+vks::tools::setImageLayout(
+    layoutCmd,
+    shadowCubeMap.image,
+    VK_IMAGE_LAYOUT_UNDEFINED,
+    VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
+    subresourceRange);
+```
+
+So it seems like we should not create 6 images but rather use array layers and expose the `VK_IMAGE_CREATE_CUBE_COMPATIBLE_BIT`.
+
+A problem seems to be the Texture abstraction in trekant. It bakes the image and the image view into one type. For cube maps,
+we need a single image with array_layers = 6 and then create 6 image views from this.
+
+Options:
+
+* Introduce Image class, define Texture as image and sampler and add imageview.
+* Add TextureView. Unclear if this should contain a sampler as well?
+
+## Future
+
+* Loader api: Maybe we can allow users to create several loader - one per thread/system - and contain the resource
+  flushing to that system.
+* Directional lights improvements: Try to reproduce the scene bounds in the opengl or sascha willems examples for
+  directional light shadows and see if the issues with pixelated examples can be reproduced.
+* Implement cascaded shadow maps for directional lights.
