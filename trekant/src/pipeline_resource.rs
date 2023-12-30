@@ -238,7 +238,7 @@ impl<'a> PipelineResourceSetBuilder<'a> {
                 .get_texture(&tex_handle)
                 .expect("Failed to get texture");
 
-            let image_view = tex.image_view().vk_image_view();
+            let image_view = tex.full_image_view().vk_image_view();
             let sampler = tex.vk_sampler();
 
             let image_layout = if is_depth {

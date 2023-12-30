@@ -69,6 +69,7 @@ pub struct TextureDesc {
     pub format: util::Format,
     pub usage: TextureUsage,
     pub sampler: SamplerDescriptor,
+    pub array_layers: u32,
 }
 
 impl Default for TextureDesc {
@@ -81,6 +82,7 @@ impl Default for TextureDesc {
             format: util::Format::RGBA_SRGB,
             usage: TextureUsage::COLOR,
             sampler: SamplerDescriptor::default(),
+            array_layers: 1,
         }
     }
 }
@@ -92,18 +94,21 @@ pub enum TextureDescriptor<'a> {
         path: PathBuf,
         format: util::Format,
         mipmaps: MipMaps,
+        array_layers: u32,
     },
     Raw {
         data: DescriptorData<'a>,
         extent: Extent2D,
         format: util::Format,
         mipmaps: MipMaps,
+        array_layers: u32,
     },
     Empty {
         extent: Extent2D,
         usage: TextureUsage,
         format: util::Format,
         sampler: SamplerDescriptor,
+        array_layers: u32,
     },
 }
 
@@ -127,6 +132,7 @@ impl<'a> TextureDescriptor<'a> {
             extent,
             format,
             mipmaps,
+            array_layers: 1,
         }
     }
 
@@ -144,6 +150,7 @@ impl<'a> TextureDescriptor<'a> {
                 path,
                 format,
                 mipmaps,
+                array_layers,
             } => {
                 let image = load_image(&path)?;
                 let extent = Extent2D {
@@ -157,6 +164,7 @@ impl<'a> TextureDescriptor<'a> {
                         format,
                         usage: TextureUsage::COLOR,
                         sampler: SamplerDescriptor::default(),
+                        array_layers,
                     },
                     mipmaps,
                     Some(DescriptorData::from_vec(raw_image_data)),
@@ -167,12 +175,14 @@ impl<'a> TextureDescriptor<'a> {
                 extent,
                 format,
                 mipmaps,
+                array_layers,
             } => Ok((
                 TextureDesc {
                     extent,
                     format,
                     usage: TextureUsage::COLOR,
                     sampler: SamplerDescriptor::default(),
+                    array_layers,
                 },
                 mipmaps,
                 Some(data),
@@ -182,12 +192,14 @@ impl<'a> TextureDescriptor<'a> {
                 usage,
                 format,
                 sampler,
+                array_layers,
             } => Ok((
                 TextureDesc {
                     extent,
                     format,
                     usage,
                     sampler,
+                    array_layers,
                 },
                 MipMaps::None,
                 None,
@@ -216,7 +228,12 @@ pub(crate) fn load_texture_from_data<D: HasVkDevice>(
         format,
         usage,
         sampler,
+        array_layers,
     } = descriptor;
+
+    if array_layers != 1 {
+        unimplemented!("More than 1 array layer is not supported");
+    }
 
     let generate_mipmaps = mipmaps == MipMaps::Generate;
 
@@ -239,7 +256,7 @@ pub(crate) fn load_texture_from_data<D: HasVkDevice>(
             mem_usage: vma::MemoryUsage::AutoPreferDevice,
             mip_levels,
             sample_count: vk::SampleCountFlags::TYPE_1,
-            array_layers: 1,
+            array_layers,
         },
     )?;
 
@@ -430,8 +447,10 @@ fn usage_to_aspect(image_usage: ImageUsageFlags) -> ImageAspectFlags {
 
 pub struct Texture {
     sampler: Sampler,
-    image_view: ImageView,
     image: Image,
+    full_image_view: ImageView,
+    // If this texture has array_layers, e.g. for a cube map, these point into each layer.
+    sub_image_views: Vec<ImageView>,
 }
 
 impl Texture {
@@ -448,6 +467,7 @@ impl Texture {
             format,
             usage,
             sampler,
+            array_layers,
         } = descriptor;
 
         let image_usage = vk::ImageUsageFlags::from(usage) | vk::ImageUsageFlags::SAMPLED;
@@ -461,7 +481,7 @@ impl Texture {
                 mem_usage: vma::MemoryUsage::AutoPreferDevice,
                 mip_levels,
                 sample_count: vk::SampleCountFlags::TYPE_1,
-                array_layers: 1,
+                array_layers,
             },
         )?;
         Self::from_image(device, image, sampler)
@@ -474,7 +494,7 @@ impl Texture {
     ) -> Result<Self, TextureError> {
         let desc = image.descriptor();
         let aspect = usage_to_aspect(desc.image_usage);
-        let image_view = ImageView::new(
+        let full_image_view = ImageView::new(
             device,
             image.vk_image(),
             desc.format,
@@ -482,12 +502,30 @@ impl Texture {
             desc.mip_levels,
         )?;
 
+        let sub_image_views = (0..desc.array_layers)
+            .map(|_| {
+                ImageView::new(
+                    device,
+                    image.vk_image(),
+                    desc.format,
+                    aspect,
+                    desc.mip_levels,
+                )
+            })
+            .collect::<Result<Vec<_>, _>>()?;
+
         let sampler = Sampler::new(device, sampler_descriptor)?;
+
+        // TODO: Start here
+        // 1. Pass the array layers as a parameter to this function
+        // 2. Create N images views av put them in sub_image_views
+        // 3. Provide accessor for it
 
         Ok(Self {
             image,
-            image_view,
             sampler,
+            full_image_view,
+            sub_image_views,
         })
     }
 
@@ -495,8 +533,12 @@ impl Texture {
         &self.sampler
     }
 
-    pub fn image_view(&self) -> &ImageView {
-        &self.image_view
+    pub fn full_image_view(&self) -> &ImageView {
+        &self.full_image_view
+    }
+
+    pub fn sub_image_view(&self, idx: usize) -> &ImageView {
+        &self.sub_image_views[idx]
     }
 
     pub fn vk_image(&self) -> vk::Image {

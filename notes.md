@@ -349,10 +349,15 @@ So it seems like we should not create 6 images but rather use array layers and e
 A problem seems to be the Texture abstraction in trekant. It bakes the image and the image view into one type. For cube maps,
 we need a single image with array_layers = 6 and then create 6 image views from this.
 
-Options:
+WIP Solution:
 
-* Introduce Image class, define Texture as image and sampler and add imageview.
-* Add TextureView. Unclear if this should contain a sampler as well?
+1. Each texture tracks N extra image views, 1 for each of the image views.
+
+TODO:
+
+1. Rework the Shadow class for point lights, we need 6 render targets, one for each image view.
+2. The RenderTarget class only takes a texture not a image view so it needs to be extended.
+3. Rework add_shadow_pass to handle cube maps as well.
 
 ## Future
 
