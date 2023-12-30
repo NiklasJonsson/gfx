@@ -355,8 +355,9 @@ WIP Solution:
 
 TODO:
 
-1. Rework the Shadow class for point lights, we need 6 render targets, one for each image view.
-2. The RenderTarget class only takes a texture not a image view so it needs to be extended.
+1. Add 6 instances of the Shadow struct for the pointlights. NOTE: These should share the texture (share the handle to
+  the texture) but have different render targets. Each render target should should be a separate view of the cube map.
+2. The RenderTarget class only takes a texture not a image view so it needs to be extended. How does render targer related to frame buffer?
 3. Rework add_shadow_pass to handle cube maps as well.
 
 ## Future

@@ -239,7 +239,41 @@ pub struct ShadowResources {
     pub shadow_matrices_buf: BufferHandle<DeviceUniformBuffer>,
     pub directional: Shadow,
     pub spotlights: Vec<Shadow>,
-    pub pointlights: Vec<Shadow>,
+    pub pointlights: Vec<[Shadow; N_SHADOW_PASSES_POINTLIGHT]>,
+}
+
+fn shadow_render_target(
+    renderer: &mut Renderer,
+    render_pass: &Handle<trekant::RenderPass>,
+    extent: Extent2D,
+) -> (Handle<trekant::Texture>, Handle<trekant::RenderTarget>) {
+    use trekant::{BorderColor, Filter, SamplerAddressMode};
+    let format = trekant::Format::D16_UNORM;
+
+    // START HERE:
+    // 1. Sketch out code for setting up the cube map in rust
+    // 2. Adapt the trekant::texture API appropriately
+
+    let desc = trekant::TextureDescriptor::Empty {
+        extent,
+        format,
+        usage: trekant::TextureUsage::DEPTH,
+        sampler: trekant::SamplerDescriptor {
+            filter: Filter::Linear,
+            address_mode: SamplerAddressMode::ClampToEdge,
+            max_anisotropy: None,
+            border_color: BorderColor::FloatOpaqueWhite,
+        },
+        array_layers: 1,
+    };
+    let tex = renderer
+        .create_texture(desc)
+        .expect("Failed to create texture for shadow map");
+    let attachments = [&tex];
+    let render_target = renderer
+        .create_render_target(render_pass, &attachments)
+        .expect("Failed to create render target for shadow map");
+    (tex, render_target)
 }
 
 fn create_shadow_render_pass(renderer: &mut Renderer) -> Handle<trekant::RenderPass> {
@@ -267,7 +301,6 @@ fn create_shadow_render_pass(renderer: &mut Renderer) -> Handle<trekant::RenderP
     // These subpass dependencies handle layout transistions, execution & memory dependencies
     // When there are multiple shadow passes, it might be valuable to use one pipeline barrier
     // for all of them instead of several subpass deps.
-    // TODO: Revisit ^
     let deps = [
         vk::SubpassDependency {
             // The source pass deps here refer to the previous frame (I think :))
@@ -338,39 +371,8 @@ fn build_single_shadow(
     view_data: BufferHandle<DeviceUniformBuffer>,
     shadow_render_pass: Handle<RenderPass>,
     extent: Extent2D,
-    shadow_type: ShadowType,
 ) -> Shadow {
-    let (texture, render_target) = {
-        use trekant::{BorderColor, Filter, SamplerAddressMode};
-        let format = trekant::Format::D16_UNORM;
-
-        let array_layers = if shadow_type == ShadowType::Point {
-            N_SHADOW_PASSES_POINTLIGHT as u32
-        } else {
-            1
-        };
-
-        let desc = trekant::TextureDescriptor::Empty {
-            extent,
-            format,
-            usage: trekant::TextureUsage::DEPTH,
-            sampler: trekant::SamplerDescriptor {
-                filter: Filter::Linear,
-                address_mode: SamplerAddressMode::ClampToEdge,
-                max_anisotropy: None,
-                border_color: BorderColor::FloatOpaqueWhite,
-            },
-            array_layers,
-        };
-        let tex = renderer
-            .create_texture(desc)
-            .expect("Failed to create texture for shadow map");
-        let attachments = [&tex];
-        let render_target = renderer
-            .create_render_target(&shadow_render_pass, &attachments)
-            .expect("Failed to create render target for shadow map");
-        (tex, render_target)
-    };
+    let (texture, render_target) = shadow_render_target(renderer, &shadow_render_pass, extent);
     let sh_view_data_set = PipelineResourceSet::builder(renderer)
         .add_buffer(&view_data, 0, trekant::pipeline::ShaderStage::VERTEX)
         .build();
@@ -436,9 +438,7 @@ impl Default for ShadowConfig {
 
 impl ShadowConfig {
     fn num_views(&self) -> u32 {
-        self.num_directional_lights
-            + self.num_spotlights
-            + self.num_pointlights * N_SHADOW_PASSES_POINTLIGHT as u32
+        self.num_directional_lights + self.num_spotlights + self.num_pointlights * 6
     }
 }
 
@@ -476,7 +476,6 @@ pub fn setup_shadow_resources(
         take_buffer(),
         shadow_render_pass,
         config.directional_light_shadow_map_extent,
-        ShadowType::Directional,
     );
 
     let mut spotlights = Vec::with_capacity(config.num_spotlights as usize);
@@ -486,20 +485,21 @@ pub fn setup_shadow_resources(
             take_buffer(),
             shadow_render_pass,
             config.spotlight_shadow_map_extent,
-            ShadowType::Spot,
         ));
     }
 
     let mut pointlights = Vec::with_capacity(config.num_pointlights as usize);
     for _ in 0..config.num_pointlights {
         let extent = config.point_light_shadow_map_extent;
-        pointlights.push(build_single_shadow(
-            renderer,
-            take_buffer(),
-            shadow_render_pass,
-            extent,
-            ShadowType::Point,
-        ));
+        let texture = 
+        pointlights.push([
+            build_single_shadow(renderer, take_buffer(), shadow_render_pass, extent),
+            build_single_shadow(renderer, take_buffer(), shadow_render_pass, extent),
+            build_single_shadow(renderer, take_buffer(), shadow_render_pass, extent),
+            build_single_shadow(renderer, take_buffer(), shadow_render_pass, extent),
+            build_single_shadow(renderer, take_buffer(), shadow_render_pass, extent),
+            build_single_shadow(renderer, take_buffer(), shadow_render_pass, extent),
+        ])
     }
 
     let shadow_dummy_pipeline = {
@@ -621,7 +621,6 @@ pub fn shadow_pass(
     // 2. The buffer in the output of this pass: This is the shadow passes that were actually run and that may be used later by the light pass.
     // Each ShadowMap component has an index into 2.
     // TODO: Can we simplify the above? E.g. by late creation and binding of desc set
-    // We could potentially use a copy buffer command to copy the buffers to a linear buffer
     let mut shadow_matrices = [super::uniform::Mat4::default(); MAX_NUM_LIGHTS as usize];
     // TODO(perf): Reuse alloc from prev frame
     let mut render_passes: Vec<ShadowRenderPassInfo> = Vec::new();
@@ -747,8 +746,8 @@ pub fn shadow_pass(
                 let idx = n_pointlights;
                 n_pointlights += 1;
 
-                let resources = &shadow_resources.pointlights[idx];
                 for i in 0..N_SHADOW_PASSES_POINTLIGHT {
+                    let res = &shadow_resources.pointlights[idx][i];
                     let near = 1.0;
                     let far = *range;
                     let aspect_ratio = 1.0;
@@ -829,7 +828,6 @@ pub fn shadow_pass(
 
     for pointlight in shadow_resources.pointlights.iter().skip(n_pointlights) {
         for pass in pointlight.iter() {
-            // TODO: Revisit
             transition_unused_map(&mut cmd_buffer, frame, pass.texture);
         }
     }
