@@ -46,7 +46,7 @@ impl Default for PackedLight {
 
 pub type Mat4 = [f32; 16];
 
-pub const MAX_NUM_LIGHTS: usize = 16;
+pub const MAX_NUM_LIGHTS: u32 = 16;
 
 #[derive(Copy, Clone, Debug, Default, Std140Compat)]
 #[repr(C, packed)]

@@ -561,7 +561,7 @@ pub fn create_frame_resources(
 
     let lighting_data = {
         let light_data = uniform::LightingData {
-            lights: [uniform::PackedLight::default(); uniform::MAX_NUM_LIGHTS],
+            lights: [uniform::PackedLight::default(); uniform::MAX_NUM_LIGHTS as usize],
             ambient: [0.0; 4],
             num_lights: [0; 4],
         };

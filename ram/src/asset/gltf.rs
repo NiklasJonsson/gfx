@@ -52,7 +52,7 @@ fn load_texture(
             path: image_path,
             format,
             mipmaps: MipMaps::None,
-            array_layers: 1,
+            ty: trekant::TextureType::Tex2D,
         },
     }
 }

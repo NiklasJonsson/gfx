@@ -351,14 +351,16 @@ we need a single image with array_layers = 6 and then create 6 image views from 
 
 WIP Solution:
 
-1. Each texture tracks N extra image views, 1 for each of the image views.
+1. Introduce TextureType to define if a texture is a 2D texture or a cube texture.
+2. `Texture` exposes the `full_image_view() -> &vk::ImageView` and for cube maps, `sub_image_view(idx: usize) -> &vk::ImageView`
+3. Introduce a new `PointlightShadow` struct to hold rendering resources for pointlight shadows (rather than using the
+  generic `Shadow`)
+4. Split `add_shadow_pass` into two local helper lambdas to compose better.
+5. Some refactoring in how we setup shadows with `build_single_shadow`.
 
 TODO:
 
-1. Add 6 instances of the Shadow struct for the pointlights. NOTE: These should share the texture (share the handle to
-  the texture) but have different render targets. Each render target should should be a separate view of the cube map.
-2. The RenderTarget class only takes a texture not a image view so it needs to be extended. How does render targer related to frame buffer?
-3. Rework add_shadow_pass to handle cube maps as well.
+1. The RenderTarget class only takes a texture not a image view so it needs to be extended. How does render targer related to frame buffer?
 
 ## Future
 

@@ -282,6 +282,7 @@ pub struct ImageDescriptor {
     pub extent: Extent2D,
     pub format: util::Format,
     pub image_usage: vk::ImageUsageFlags,
+    pub image_flags: vk::ImageCreateFlags,
     pub mem_usage: MemoryUsage,
     pub mip_levels: u32,
     pub sample_count: vk::SampleCountFlags,
@@ -308,6 +309,7 @@ impl Image {
         let info = vk::ImageCreateInfo::builder()
             .image_type(vk::ImageType::TYPE_2D)
             .extent(extent3d.into())
+            .flags(descriptor.image_flags)
             .mip_levels(descriptor.mip_levels)
             .array_layers(descriptor.array_layers)
             .format(descriptor.format.into())

@@ -49,13 +49,13 @@ pub enum MipMaps {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum TextureUsage {
-    DEPTH,
-    COLOR,
+    Depth,
+    Color,
 }
 
 impl From<TextureUsage> for vk::ImageUsageFlags {
     fn from(o: TextureUsage) -> vk::ImageUsageFlags {
-        if o == TextureUsage::COLOR {
+        if o == TextureUsage::Color {
             vk::ImageUsageFlags::COLOR_ATTACHMENT
         } else {
             vk::ImageUsageFlags::DEPTH_STENCIL_ATTACHMENT
@@ -63,16 +63,23 @@ impl From<TextureUsage> for vk::ImageUsageFlags {
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
+pub enum TextureType {
+    Tex2D,
+    // Tex3D,
+    TexCube,
+}
+
 #[derive(Debug, Clone, Copy)]
-pub struct TextureDesc {
+pub struct TextureInfo {
     pub extent: Extent2D,
     pub format: util::Format,
     pub usage: TextureUsage,
     pub sampler: SamplerDescriptor,
-    pub array_layers: u32,
+    pub ty: TextureType,
 }
 
-impl Default for TextureDesc {
+impl Default for TextureInfo {
     fn default() -> Self {
         Self {
             extent: Extent2D {
@@ -80,9 +87,9 @@ impl Default for TextureDesc {
                 height: 0,
             },
             format: util::Format::RGBA_SRGB,
-            usage: TextureUsage::COLOR,
+            usage: TextureUsage::Color,
             sampler: SamplerDescriptor::default(),
-            array_layers: 1,
+            ty: TextureType::Tex2D,
         }
     }
 }
@@ -94,21 +101,21 @@ pub enum TextureDescriptor<'a> {
         path: PathBuf,
         format: util::Format,
         mipmaps: MipMaps,
-        array_layers: u32,
+        ty: TextureType,
     },
     Raw {
         data: DescriptorData<'a>,
         extent: Extent2D,
         format: util::Format,
         mipmaps: MipMaps,
-        array_layers: u32,
+        ty: TextureType,
     },
     Empty {
         extent: Extent2D,
         usage: TextureUsage,
         format: util::Format,
         sampler: SamplerDescriptor,
-        array_layers: u32,
+        ty: TextureType,
     },
 }
 
@@ -132,7 +139,7 @@ impl<'a> TextureDescriptor<'a> {
             extent,
             format,
             mipmaps,
-            array_layers: 1,
+            ty: TextureType::Tex2D,
         }
     }
 
@@ -144,13 +151,13 @@ impl<'a> TextureDescriptor<'a> {
 impl<'a> TextureDescriptor<'a> {
     pub(crate) fn split_desc_data(
         self,
-    ) -> Result<(TextureDesc, MipMaps, Option<DescriptorData<'a>>), image::ImageError> {
+    ) -> Result<(TextureInfo, MipMaps, Option<DescriptorData<'a>>), image::ImageError> {
         match self {
             TextureDescriptor::File {
                 path,
                 format,
                 mipmaps,
-                array_layers,
+                ty,
             } => {
                 let image = load_image(&path)?;
                 let extent = Extent2D {
@@ -159,12 +166,12 @@ impl<'a> TextureDescriptor<'a> {
                 };
                 let raw_image_data = image.into_raw();
                 Ok((
-                    TextureDesc {
+                    TextureInfo {
                         extent,
                         format,
-                        usage: TextureUsage::COLOR,
+                        usage: TextureUsage::Color,
                         sampler: SamplerDescriptor::default(),
-                        array_layers,
+                        ty,
                     },
                     mipmaps,
                     Some(DescriptorData::from_vec(raw_image_data)),
@@ -175,14 +182,14 @@ impl<'a> TextureDescriptor<'a> {
                 extent,
                 format,
                 mipmaps,
-                array_layers,
+                ty,
             } => Ok((
-                TextureDesc {
+                TextureInfo {
                     extent,
                     format,
-                    usage: TextureUsage::COLOR,
+                    usage: TextureUsage::Color,
                     sampler: SamplerDescriptor::default(),
-                    array_layers,
+                    ty,
                 },
                 mipmaps,
                 Some(data),
@@ -192,14 +199,14 @@ impl<'a> TextureDescriptor<'a> {
                 usage,
                 format,
                 sampler,
-                array_layers,
+                ty,
             } => Ok((
-                TextureDesc {
+                TextureInfo {
                     extent,
                     format,
                     usage,
                     sampler,
-                    array_layers,
+                    ty,
                 },
                 MipMaps::None,
                 None,
@@ -219,20 +226,20 @@ pub(crate) fn load_texture_from_data<D: HasVkDevice>(
     device: &D,
     allocator: &AllocatorHandle,
     command_buffer: &mut CommandBuffer,
-    descriptor: TextureDesc,
+    descriptor: TextureInfo,
     data: &[u8],
     mipmaps: MipMaps,
 ) -> Result<(Texture, Buffer), TextureError> {
-    let TextureDesc {
+    let TextureInfo {
         extent,
         format,
         usage,
         sampler,
-        array_layers,
+        ty,
     } = descriptor;
 
-    if array_layers != 1 {
-        unimplemented!("More than 1 array layer is not supported");
+    if ty != TextureType::Tex2D {
+        unimplemented!("Non 2D textures are not supported");
     }
 
     let generate_mipmaps = mipmaps == MipMaps::Generate;
@@ -247,12 +254,23 @@ pub(crate) fn load_texture_from_data<D: HasVkDevice>(
         mip_levels = mip_levels_for(extent);
     }
 
+    let array_layers: u32;
+    let image_flags: vk::ImageCreateFlags;
+    if ty == TextureType::TexCube {
+        array_layers = 6;
+        image_flags = vk::ImageCreateFlags::CUBE_COMPATIBLE;
+    } else {
+        array_layers = 1;
+        image_flags = vk::ImageCreateFlags::empty();
+    };
+
     let image = Image::empty_2d(
         allocator,
         ImageDescriptor {
             extent,
             format,
             image_usage,
+            image_flags,
             mem_usage: vma::MemoryUsage::AutoPreferDevice,
             mip_levels,
             sample_count: vk::SampleCountFlags::TYPE_1,
@@ -460,15 +478,25 @@ impl Texture {
     pub(crate) fn empty<D: HasVkDevice>(
         device: &D,
         allocator: &AllocatorHandle,
-        descriptor: TextureDesc,
+        descriptor: TextureInfo,
     ) -> Result<Self, TextureError> {
-        let TextureDesc {
+        let TextureInfo {
             extent,
             format,
             usage,
             sampler,
-            array_layers,
+            ty,
         } = descriptor;
+
+        let array_layers: u32;
+        let image_flags: vk::ImageCreateFlags;
+        if ty == TextureType::TexCube {
+            array_layers = 6;
+            image_flags = vk::ImageCreateFlags::CUBE_COMPATIBLE;
+        } else {
+            array_layers = 1;
+            image_flags = vk::ImageCreateFlags::empty();
+        };
 
         let image_usage = vk::ImageUsageFlags::from(usage) | vk::ImageUsageFlags::SAMPLED;
         let mip_levels = 1;
@@ -478,6 +506,7 @@ impl Texture {
                 extent,
                 format,
                 image_usage,
+                image_flags,
                 mem_usage: vma::MemoryUsage::AutoPreferDevice,
                 mip_levels,
                 sample_count: vk::SampleCountFlags::TYPE_1,

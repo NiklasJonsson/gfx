@@ -33,7 +33,7 @@ pub use render_target::RenderTarget;
 pub use resource::{Async, Handle, MutResourceManager, ResourceManager};
 pub use texture::{
     BorderColor, Filter, MipMaps, SamplerAddressMode, SamplerDescriptor, Texture,
-    TextureDescriptor, TextureUsage,
+    TextureDescriptor, TextureType, TextureUsage,
 };
 pub use traits::{PushConstant, Std140, Uniform};
 pub use util::{Extent2D, Format};
@@ -530,6 +530,7 @@ impl Renderer {
                     extent,
                     format,
                     image_usage: usage,
+                    image_flags: vk::ImageCreateFlags::empty(),
                     mem_usage,
                     mip_levels,
                     sample_count: msaa_sample_count,
@@ -557,6 +558,7 @@ impl Renderer {
                     extent,
                     format,
                     image_usage: usage,
+                    image_flags: vk::ImageCreateFlags::empty(),
                     mem_usage,
                     mip_levels,
                     sample_count: msaa_sample_count,
@@ -1010,6 +1012,7 @@ impl Renderer {
                     extent,
                     format,
                     image_usage: usage,
+                    image_flags: vk::ImageCreateFlags::empty(),
                     mem_usage: vma::MemoryUsage::AutoPreferDevice,
                     mip_levels,
                     sample_count: vk::SampleCountFlags::TYPE_1,
@@ -1057,13 +1060,13 @@ impl Renderer {
 impl Renderer {
     pub fn create_render_target(
         &mut self,
-        render_pass: &Handle<RenderPass>,
+        render_pass: Handle<RenderPass>,
         attachments: &[&Handle<Texture>],
     ) -> Result<Handle<RenderTarget>, RenderError> {
         let render_pass = self
             .resources
             .render_passes
-            .get(render_pass)
+            .get(&render_pass)
             .ok_or_else(|| RenderError::InvalidHandle(render_pass.id()))?;
         let attachments: Result<Vec<&Texture>, RenderError> = attachments
             .iter()

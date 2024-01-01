@@ -258,7 +258,7 @@ fn create_texture(
         path: tex_path,
         format: util::Format::RGBA_SRGB,
         mipmaps: trekant::MipMaps::None,
-        array_layers: 1,
+        ty: trekant::TextureType::Tex2D,
     };
 
     let texture = loader
