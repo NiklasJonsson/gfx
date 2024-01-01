@@ -360,7 +360,8 @@ WIP Solution:
 
 TODO:
 
-1. The RenderTarget class only takes a texture not a image view so it needs to be extended. How does render targer related to frame buffer?
+1. The RenderTarget class only takes a texture not a image view so it needs to be extended.
+  How does render target relate to frame buffer?
 
 ## Future
 

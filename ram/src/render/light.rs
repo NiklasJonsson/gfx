@@ -516,22 +516,9 @@ pub fn setup_shadow_resources(
             .create_texture(desc)
             .expect("Failed to create texture for shadow map");
 
-        for i in 0..N_SHADOW_PASSES_POINTLIGHT {
-            // START HERE:
-            // 1. Create render target for each cube face
-            // 2. Each render target needs its own buffer as well
-
-            /*     let attachments = [&tex];
-            let render_target = renderer
-                .create_render_target(shadow_render_pass, &attachments)
-                .expect("Failed to create render target for shadow map");
-
-            let sh_view_data_set = PipelineResourceSet::builder(renderer)
-                .add_buffer(&view_data, 0, trekant::pipeline::ShaderStage::VERTEX)
-                .build();
-
-            */
-        }
+        let render_targets = renderer.create_cube_render_targets(shadow_render_pass, cube_map)?;
+        // START HERE:
+        // 1. Create the view data buffer but take six elements
     }
 
     let shadow_dummy_pipeline = {
