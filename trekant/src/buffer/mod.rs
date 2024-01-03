@@ -71,9 +71,17 @@ impl<T> std::hash::Hash for BufferHandle<T> {
 }
 
 impl<T> BufferHandle<T> {
-    pub fn sub_buffer(h: Self, idx: u32, n_elems: u32) -> Self {
-        assert!((idx + n_elems) <= (h.idx + h.n_elems));
-        Self { idx, n_elems, ..h }
+    pub fn sub_buffer(&self, idx: u32, n_elems: u32) -> Self {
+        assert!((idx + n_elems) <= (self.idx + self.n_elems));
+        Self {
+            idx,
+            n_elems,
+            ..*self
+        }
+    }
+
+    pub fn single_elem_buffer(&self, idx: u32) -> Self {
+        Self::sub_buffer(self, idx, 1)
     }
 
     /// # Safety

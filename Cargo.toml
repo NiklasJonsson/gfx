@@ -9,5 +9,7 @@ members = [
     "check-shaders",
 ]
 
+resolver = "2"
+
 [profile.release]
 debug = true

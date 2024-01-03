@@ -236,12 +236,10 @@ pub struct Shadow {
 #[derive(Clone, Copy)]
 pub struct PointlightShadow {
     pub render_targets: [Handle<RenderTarget>; 6],
-    // START HERE:
-    // 1. Collapse this into a single BufferHandle but with length 6
-    pub view_data_buffers: [BufferHandle<DeviceUniformBuffer>; 6],
+    pub view_data_buffer: BufferHandle<DeviceUniformBuffer>,
     pub view_data_pr_sets: [Handle<PipelineResourceSet>; 6],
     // Cube
-    pub texture: Handle<trekant::Texture>,
+    pub cube_map: Handle<trekant::Texture>,
     pub extent: Extent2D,
 }
 
@@ -472,15 +470,15 @@ pub fn setup_shadow_resources(
     };
 
     let mut cur_buf = shadow_matrices_buf;
-    let mut take_buffer = || {
-        let out = BufferHandle::sub_buffer(cur_buf, 0, 1);
-        cur_buf = BufferHandle::sub_buffer(cur_buf, 1, cur_buf.n_elems() - 1);
+    let mut take_buffer = |size: u32| {
+        let out = cur_buf.sub_buffer(0, size);
+        cur_buf = cur_buf.sub_buffer(size, cur_buf.n_elems() - size);
         out
     };
 
     let directional = build_single_shadow(
         renderer,
-        take_buffer(),
+        take_buffer(1),
         shadow_render_pass,
         config.directional_light_shadow_map_extent,
         config.texture_format,
@@ -490,7 +488,7 @@ pub fn setup_shadow_resources(
     for _ in 0..config.num_spotlights {
         spotlights.push(build_single_shadow(
             renderer,
-            take_buffer(),
+            take_buffer(1),
             shadow_render_pass,
             config.spotlight_shadow_map_extent,
             config.texture_format,
@@ -499,8 +497,9 @@ pub fn setup_shadow_resources(
 
     let mut pointlights = Vec::with_capacity(config.num_pointlights as usize);
     for _ in 0..config.num_pointlights {
+        let extent = config.point_light_shadow_map_extent;
         let desc = trekant::TextureDescriptor::Empty {
-            extent: config.point_light_shadow_map_extent,
+            extent,
             format: config.texture_format,
             usage: trekant::TextureUsage::Depth,
             sampler: trekant::SamplerDescriptor {
@@ -516,9 +515,26 @@ pub fn setup_shadow_resources(
             .create_texture(desc)
             .expect("Failed to create texture for shadow map");
 
-        let render_targets = renderer.create_cube_render_targets(shadow_render_pass, cube_map)?;
-        // START HERE:
-        // 1. Create the view data buffer but take six elements
+        let render_targets = renderer
+            .create_cube_render_targets(shadow_render_pass, cube_map)
+            .expect("Failed to create render targets for cube map");
+        let view_data_buffer = take_buffer(6);
+        let view_data_pr_sets = std::array::from_fn(|idx| {
+            PipelineResourceSet::builder(renderer)
+                .add_buffer(
+                    &view_data_buffer.sub_buffer(idx as u32, 1),
+                    0,
+                    trekant::pipeline::ShaderStage::VERTEX,
+                )
+                .build()
+        });
+        pointlights.push(PointlightShadow {
+            render_targets,
+            view_data_buffer,
+            view_data_pr_sets,
+            cube_map,
+            extent,
+        })
     }
 
     let shadow_dummy_pipeline = {
@@ -796,16 +812,15 @@ pub fn shadow_pass(
                     let mtx = perspective_vk(std::f32::consts::FRAC_PI_2, aspect_ratio, near, far)
                         * shadow_view;
 
-                    write_view_matrix(
-                        &mut shadow_matrices,
-                        pointlight_shadow.view_data_buffers[pass_idx],
-                        mtx,
-                    );
+                    let matrix_buffer_elem: BufferHandle<DeviceUniformBuffer> = pointlight_shadow
+                        .view_data_buffer
+                        .single_elem_buffer(pass_idx as u32);
+                    write_view_matrix(&mut shadow_matrices, matrix_buffer_elem, mtx);
 
                     add_render_pass(
                         &mut render_passes,
                         pointlight_shadow.render_targets[pass_idx],
-                        pointlight_shadow.view_data_buffers[pass_idx],
+                        matrix_buffer_elem,
                         pointlight_shadow.view_data_pr_sets[pass_idx],
                         pointlight_shadow.extent,
                         ShadowType::Point,
@@ -875,7 +890,7 @@ pub fn shadow_pass(
         .iter()
         .skip(n_pointlights as usize)
     {
-        transition_unused_map(&mut cmd_buffer, frame, pointlight.texture);
+        transition_unused_map(&mut cmd_buffer, frame, pointlight.cube_map);
     }
 
     // This will always be one until cascaded directional lights

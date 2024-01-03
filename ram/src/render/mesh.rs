@@ -34,7 +34,7 @@ fn map_buffer_handle<BT>(
 ) -> bool {
     match h {
         GpuBuffer::InFlight(cur) if cur.handle() == old.handle() => {
-            *h = GpuBuffer::Available(BufferHandle::sub_buffer(new, cur.idx(), cur.n_elems()));
+            *h = GpuBuffer::Available(new.sub_buffer(cur.idx(), cur.n_elems()));
             true
         }
         _ => false,
