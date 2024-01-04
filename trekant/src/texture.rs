@@ -545,11 +545,6 @@ impl Texture {
 
         let sampler = Sampler::new(device, sampler_descriptor)?;
 
-        // TODO: Start here
-        // 1. Pass the array layers as a parameter to this function
-        // 2. Create N images views av put them in sub_image_views
-        // 3. Provide accessor for it
-
         Ok(Self {
             image,
             sampler,
