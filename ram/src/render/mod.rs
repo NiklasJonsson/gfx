@@ -582,10 +582,16 @@ pub fn create_frame_resources(
             .expect("FAIL")
     };
 
+    // TODO: This is leaking the shadow resources a bit.
     let spotlight_textures = shadow_resources
         .spotlights
         .iter()
         .map(|x| (x.texture, true));
+    let pointlight_textures = shadow_resources
+        .pointlights
+        .iter()
+        .map(|x| (x.cube_map, true));
+
     let engine_shader_resource_group = PipelineResourceSet::builder(renderer)
         .add_buffer(&view_data, 0, ShaderStage::VERTEX | ShaderStage::FRAGMENT)
         .add_buffer(&shadow_data, 1, ShaderStage::VERTEX)
@@ -597,7 +603,7 @@ pub fn create_frame_resources(
             true,
         )
         .add_textures(spotlight_textures, 4, ShaderStage::FRAGMENT)
-        // TODO: Add pointlights here
+        .add_textures(pointlight_textures, 5, ShaderStage::FRAGMENT)
         .build();
 
     let pbr_resources = {

@@ -22,6 +22,8 @@ struct Args {
     spawn_cube: bool,
     #[clap(long)]
     sun_simulation: bool,
+    #[clap(long)]
+    pointlight: bool,
 }
 
 struct Spawner {
@@ -175,6 +177,35 @@ impl Module for SunSimulation {
     }
 }
 
+struct Pointlights;
+
+impl Module for Pointlights {
+    fn load(&mut self, loader: &mut ModuleLoader) {
+        loader
+            .world
+            .create_entity()
+            .with(Transform {
+                position: Vec3 {
+                    x: 0.0,
+                    y: 5.0,
+                    z: 0.0,
+                },
+                rotation: Quat::identity(),
+                scale: 1.0,
+            })
+            .with(ram::render::Light::Point {
+                color: Rgb {
+                    r: 0.2,
+                    g: 0.2,
+                    b: 0.3,
+                },
+                range: 10.0,
+            })
+            .with(Name::from("Point light"))
+            .build();
+    }
+}
+
 fn main() {
     let args = Args::parse();
     let mut init = ram::Init::new();
@@ -188,6 +219,10 @@ fn main() {
 
     if args.sun_simulation {
         init.add_module(SunSimulation);
+    }
+
+    if args.pointlight {
+        init.add_module(Pointlights);
     }
 
     init.run();
