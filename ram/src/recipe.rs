@@ -1,3 +1,5 @@
+use nom::sequence::Tuple;
+
 use crate::ecs::prelude::*;
 
 use std::{marker::PhantomData, path::Path};
@@ -49,41 +51,6 @@ mod types {
 
 type Deserializer<'de> = ron::Deserializer<'de>;
 
-trait DeserializeRecipe {
-    fn try_deserialize(&self, d: &mut Deserializer<'_>) -> Box<dyn Recipe>;
-}
-
-impl<T> DeserializeRecipe for T
-where
-    T: Recipe + for<'de> serde::de::Deserialize<'de> + 'static,
-{
-    fn try_deserialize(&self, d: &mut Deserializer<'_>) -> Box<dyn Recipe> {
-        let v = T::deserialize(d).expect("Fail");
-        Box::new(v)
-    }
-}
-
-struct RecipeInit<D> {
-    try_deserialize: fn(D) -> (D, Option<Box<dyn Recipe>>),
-}
-
-impl<'de, D> RecipeInit<D>
-where
-    D: serde::Deserializer<'de>,
-{
-    fn new<T>() -> Self
-    where
-        T: Recipe + serde::de::Deserialize<'de> + 'static,
-    {
-        Self {
-            try_deserialize: |deserializer| match T::deserialize(deserializer) {
-                Ok(v) => (deserializer, Some(Box::new(v))),
-                Err(_) => (deserializer, None),
-            },
-        }
-    }
-}
-
 struct RecipeLookup;
 
 impl<'de> serde::de::DeserializeSeed<'de> for RecipeLookup {
@@ -104,74 +71,14 @@ impl<'de> serde::de::DeserializeSeed<'de> for RecipeLookup {
     }
 }
 
-struct RecipeEntityVisitor<'w> {
-    world: &'w mut World,
-}
+pub fn from_str(world: &mut World, input: &str) -> Vec<Entity> {
+    let (
+        nom::character::complete::char('['),
+        nom::character::complete::char(']'),
+    )
+        .parse(input);
 
-impl<'w, 'de> serde::de::Visitor<'de> for RecipeEntityVisitor<'w> {
-    type Value = Entity;
-    fn expecting(&self, formatter: &mut std::fmt::Formatter) -> std::fmt::Result {
-        write!(formatter, "A list of recipes")
-    }
-    fn visit_seq<A>(self, mut seq: A) -> Result<Self::Value, A::Error>
-    where
-        A: serde::de::SeqAccess<'de>,
-    {
-        let entity = self.world.create_entity().build();
-        while let Some(mut recipe) = seq.next_element_seed(RecipeLookup)? {
-            recipe.apply(self.world, entity);
-        }
-        Ok(entity)
-    }
-}
-
-struct RecipeEntityLoader<'a> {
-    world: &'a mut World,
-}
-
-impl<'a, 'de> serde::de::DeserializeSeed<'de> for RecipeEntityLoader<'a> {
-    type Value = Entity;
-    fn deserialize<D>(self, deserializer: D) -> Result<Self::Value, D::Error>
-    where
-        D: serde::Deserializer<'de>,
-    {
-        let visitor = RecipeEntityVisitor { world: self.world };
-        deserializer.deserialize_seq(visitor)
-    }
-}
-
-struct RecipeLoader<'a> {
-    world: &'a mut World,
-    entities: Vec<Entity>,
-}
-
-impl<'a, 'de> serde::de::Visitor<'de> for RecipeLoader<'a> {
-    type Value = Vec<Entity>;
-    fn expecting(&self, formatter: &mut std::fmt::Formatter) -> std::fmt::Result {
-        write!(formatter, "A list of lists of recipes")
-    }
-
-    fn visit_seq<A>(mut self, mut seq: A) -> Result<Self::Value, A::Error>
-    where
-        A: serde::de::SeqAccess<'de>,
-    {
-        while let Ok(Some(entity)) = seq.next_element_seed(RecipeEntityLoader { world: self.world })
-        {
-            self.entities.push(entity);
-        }
-        Ok(self.entities)
-    }
-}
-
-pub fn from_str(world: &mut World, ron: &str) -> Vec<Entity> {
-    use serde::Deserializer;
-
-    let mut de = ron::Deserializer::from_str(ron).expect("Failed to parse ron");
-    let visitor = RecipeLoader {
-        world,
-        entities: vec![],
-    };
-    de.deserialize_seq(visitor).expect("Failed to deserialize")
+    todo!()
 }
 
 pub fn load_file<P>(world: &mut World, path: P) -> std::io::Result<()>
