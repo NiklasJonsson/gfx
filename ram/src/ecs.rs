@@ -34,6 +34,7 @@ pub mod prelude {
     pub use specs::world::Component;
 
     pub use specs::storage::StorageEntry;
+    pub use specs::storage::{GenericReadStorage, GenericWriteStorage};
 
     pub use super::{Executor, ExecutorBuilder, System, World};
 }
