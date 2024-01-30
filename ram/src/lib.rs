@@ -273,7 +273,8 @@ fn run(mut spec: Init) -> ! {
             ecs::serde::setup_resources(&mut world);
             render::setup_resources(&mut world, &mut renderer);
 
-            let ui_modules = vec![ui::ui_module()];
+            let mut ui_modules = vec![ui::ui_module()];
+            render::debug::register_ui_modules(&mut ui_modules);
             let ui = render::imgui::UIContext::new(&mut renderer, &mut world, ui_modules);
 
             Engine {
