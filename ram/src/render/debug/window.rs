@@ -3,6 +3,7 @@ use crate::common::Name;
 use crate::ecs::prelude::*;
 use crate::io::input::{ActionId, InputContext, InputContextError, KeyCode, MappedInput};
 use crate::math::{Rgb, Transform, Vec3};
+use crate::render::imgui::UIModule;
 use crate::render::{self};
 use crate::visit::{Meta, MetaOrigin, Visitor};
 use render::Light;
@@ -506,23 +507,16 @@ fn build_cameras_tab(world: &mut World, visitor: &mut ImguiVisitor, frame: &UiFr
     }
 }
 
-pub(crate) fn build_ui<'a>(
-    world: &mut World,
-    ui: &crate::render::imgui::UiFrame<'a>,
-    pos: [f32; 2],
-) -> [f32; 2] {
-    type TabItemFn = fn(&mut World, &mut ImguiVisitor, &UiFrame);
+struct RenderDebug;
 
-    let size = [300.0, 85.0];
+impl UIModule for RenderDebug {
+    fn draw(&mut self, world: &mut specs::prelude::World, frame: &UiFrame) {
+        type TabItemFn = fn(&mut World, &mut ImguiVisitor, &UiFrame);
 
-    let mut visitor = crate::ui::inspector::ImguiVisitor::new(ui);
-    ui.inner()
-        .window("Render debug")
-        .position(pos, imgui::Condition::FirstUseEver)
-        .size(size, imgui::Condition::FirstUseEver)
-        .build(|| {
-            let inner = ui.inner();
-            if let Some(token) = imgui::TabBar::new("RenderDebugTabBar)").begin(inner) {
+        let ui = frame.inner();
+        let mut visitor = crate::ui::inspector::ImguiVisitor::new(frame);
+        ui.window("Render debug").build(|| {
+            if let Some(token) = imgui::TabBar::new("RenderDebugTabBar)").begin(ui) {
                 let items = [
                     ("Overview", build_overview_tab as TabItemFn),
                     ("Lights", build_lights_tab as TabItemFn),
@@ -530,13 +524,16 @@ pub(crate) fn build_ui<'a>(
                 ];
 
                 for (id, func) in items {
-                    imgui::TabItem::new(id).build(inner, || func(world, &mut visitor, ui));
+                    imgui::TabItem::new(id).build(ui, || func(world, &mut visitor, frame));
                 }
                 token.end();
             }
         });
+    }
+}
 
-    size
+pub fn ui_module() -> Box<dyn UIModule> {
+    Box::new(RenderDebug)
 }
 
 pub struct ApplySettings;

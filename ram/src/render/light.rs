@@ -1,4 +1,5 @@
 use crate::ecs::prelude::*;
+use crate::imdbg;
 use crate::math::{
     orthographic_vk, perspective_vk, Aabb, FrustrumPlanes, Mat4, Obb, Quat, Rgb, Rgba, Transform,
     Vec2, Vec3,
@@ -235,9 +236,9 @@ pub struct Shadow {
 
 #[derive(Clone, Copy)]
 pub struct PointlightShadow {
-    pub render_targets: [Handle<RenderTarget>; 6],
+    pub render_targets: [Handle<RenderTarget>; N_SHADOW_PASSES_POINTLIGHT],
     pub view_data_buffer: BufferHandle<DeviceUniformBuffer>,
-    pub view_data_pr_sets: [Handle<PipelineResourceSet>; 6],
+    pub view_data_pr_sets: [Handle<PipelineResourceSet>; N_SHADOW_PASSES_POINTLIGHT],
     // Cube
     pub cube_map: Handle<trekant::Texture>,
     pub extent: Extent2D,
@@ -808,6 +809,8 @@ pub fn shadow_pass(
                         scale: 1.0,
                     })
                     .inverted();
+
+                    imdbg!(shadow_view);
 
                     let mtx = perspective_vk(std::f32::consts::FRAC_PI_2, aspect_ratio, near, far)
                         * shadow_view;

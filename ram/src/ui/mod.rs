@@ -138,15 +138,6 @@ impl UIModule for EditorUiModule {
                 frame.inner().text("Right handed coordinate system");
             });
 
-        {
-            let mut y_offset = 0.0;
-            let funcs = [crate::render::debug::window::build_ui];
-            for func in funcs.iter() {
-                let size = func(world, frame, [0.0, y_offset]);
-                y_offset += size[1];
-            }
-        }
-
         let [width, _height] = frame.inner().io().display_size;
         let scene_window_size = [300.0, 500.0];
         let scene_window_pos = [width - scene_window_size[0], 0.0];

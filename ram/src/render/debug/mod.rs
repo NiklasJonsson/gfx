@@ -1,3 +1,4 @@
+use super::imgui::UIModules;
 use super::{geometry, shader};
 use crate::math::{Rgba, Vec3};
 
@@ -13,6 +14,7 @@ use std::sync::Mutex;
 
 pub mod bounding_box;
 pub mod camera;
+pub mod imdbg;
 pub mod light;
 pub mod window;
 
@@ -260,4 +262,9 @@ impl DebugRenderer {
 
 pub fn register_systems(builder: crate::ecs::ExecutorBuilder) -> crate::ecs::ExecutorBuilder {
     register_module_systems!(builder, window, camera, light, bounding_box)
+}
+
+pub fn register_ui_modules(mods: &mut UIModules) {
+    mods.push(window::ui_module());
+    mods.push(imdbg::ui_module());
 }

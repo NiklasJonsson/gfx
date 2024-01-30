@@ -358,10 +358,24 @@ WIP Solution:
 4. Split `add_shadow_pass` into two local helper lambdas to compose better.
 5. Some refactoring in how we setup shadows with `build_single_shadow`.
 
+### START HERE
+
+Current state: Code is compiling and running but the pointlight shadows are not working - the shadows maps are all 1.0.
+
+Repro with:
+
+```bash
+cargo run --bin dbg -- --rsf-file data\spot_light.ron.rsf --spawn-plane --spawn-cube --rsf-file data\ambient_light.ron.rsf
+```
+
+* That they are completely white is due to all depth values being 1.0. This means the rasterization never hits the geometry.
+* In renderdoc, the VS in looks correct but the VS out shows just a white rectangle.
+
 TODO:
 
-1. The RenderTarget class only takes a texture not a image view so it needs to be extended.
-  How does render target relate to frame buffer?
+1. Read up on the renderdoc VS in and VS Out views and what the current output means.
+2. Refresh projection matrix knowledge and investigate the renderdoc values after the rasterizer.
+3. Find which cube face is "downwards" and look at that texture in renderdoc.
 
 ## Future
 
