@@ -810,15 +810,18 @@ pub fn shadow_pass(
                     })
                     .inverted();
 
-                    imdbg!(shadow_view);
+                    imdbg!((shadow_view, pass_idx));
 
-                    let mtx = perspective_vk(std::f32::consts::FRAC_PI_2, aspect_ratio, near, far)
-                        * shadow_view;
+                    let perspective =
+                        perspective_vk(std::f32::consts::FRAC_PI_2, aspect_ratio, near, far);
+                    imdbg!(perspective);
+                    let viewproj = perspective * shadow_view;
+                    imdbg!(viewproj);
 
                     let matrix_buffer_elem: BufferHandle<DeviceUniformBuffer> = pointlight_shadow
                         .view_data_buffer
                         .single_elem_buffer(pass_idx as u32);
-                    write_view_matrix(&mut shadow_matrices, matrix_buffer_elem, mtx);
+                    write_view_matrix(&mut shadow_matrices, matrix_buffer_elem, viewproj);
 
                     add_render_pass(
                         &mut render_passes,
