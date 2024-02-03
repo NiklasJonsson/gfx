@@ -703,7 +703,7 @@ fn map_pending_buffer_handle<BT>(
 ) {
     match h {
         Pending::Pending(cur) if cur.handle() == old.handle() => {
-            *h = Pending::Available(new.sub_buffer(cur.idx(), cur.n_elems()));
+            *h = Pending::Available(BufferHandle::sub_buffer(new, cur.offset(), cur.len()));
         }
         _ => (),
     }
@@ -858,7 +858,7 @@ impl<'a> System<'a> for GpuUpload {
             }
 
             if !ubuf.is_empty() {
-                let async_handle = loader
+                let mut async_handle = loader
                     .load(UniformBufferDescriptor::from_vec(
                         ubuf,
                         BufferMutability::Immutable,
@@ -870,7 +870,7 @@ impl<'a> System<'a> for GpuUpload {
                 {
                     if let StorageEntry::Vacant(entry) = pending_mats.entry(ent).unwrap() {
                         entry.insert(PendingMaterial::Unlit {
-                            color_uniform: Pending::Pending(async_handle.sub_buffer(i as u32, 1)),
+                            color_uniform: Pending::Pending(async_handle.take_first(1)),
                             polygon_mode: unlit.polygon_mode,
                         });
                     }
@@ -916,7 +916,7 @@ impl<'a> System<'a> for GpuUpload {
             };
 
             if !ubuf_pbr.is_empty() {
-                let async_handle = loader
+                let mut async_handle = loader
                     .load(UniformBufferDescriptor::from_vec(
                         ubuf_pbr,
                         BufferMutability::Immutable,
@@ -929,9 +929,7 @@ impl<'a> System<'a> for GpuUpload {
                 {
                     if let StorageEntry::Vacant(entry) = pending_mats.entry(ent).unwrap() {
                         entry.insert(PendingMaterial::PBR {
-                            material_uniforms: Pending::Pending(
-                                async_handle.sub_buffer(i as u32, 1),
-                            ),
+                            material_uniforms: Pending::Pending(async_handle.take_first(1)),
                             normal_map: map_tex(&pb_mat.normal_map),
                             base_color_texture: map_tex(&pb_mat.base_color_texture),
                             metallic_roughness_texture: map_tex(&pb_mat.metallic_roughness_texture),

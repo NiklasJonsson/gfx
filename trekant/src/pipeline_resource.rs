@@ -197,13 +197,13 @@ impl<'a> PipelineResourceSetBuilder<'a> {
         self.buffer_infos.push([
             vk::DescriptorBufferInfo {
                 buffer: buf0,
-                offset: buf_h.idx() as u64 * stride0 as u64,
-                range: buf_h.n_elems() as u64 * stride0 as u64,
+                offset: buf_h.offset() as u64 * stride0 as u64,
+                range: buf_h.len() as u64 * stride0 as u64,
             },
             vk::DescriptorBufferInfo {
                 buffer: buf1,
-                offset: buf_h.idx() as u64 * stride1 as u64,
-                range: buf_h.n_elems() as u64 * stride1 as u64,
+                offset: buf_h.offset() as u64 * stride1 as u64,
+                range: buf_h.len() as u64 * stride1 as u64,
             },
         ]);
 

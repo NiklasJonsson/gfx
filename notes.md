@@ -376,9 +376,10 @@ Findings:
 * In renderdoc, the viewproj matrix is just 0,0,0 but it is not on the CPU so it might be that the gpu memory is not
   written correctly.
 
-TODO:
-
-* Look at the buffer addresses and try to figure out which we are writing to (and not writing to).
+There seems to have been issues with the buffer management code in that it is incorrectly allocating the viewproj
+buffer for the point lights. Also, writing the uniform buffer data during the shadow pass uses a fixed size stack
+array for the matrices but the underlying buffer is dynamic. The uniform management needs to be revisited from
+the ground up!
 
 ## Future
 

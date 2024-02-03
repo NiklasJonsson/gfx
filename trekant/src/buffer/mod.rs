@@ -39,8 +39,9 @@ pub enum BufferMutability {
 pub struct BufferHandle<T> {
     h: Handle<T>,
     mutability: BufferMutability,
-    idx: u32,
-    n_elems: u32,
+    // The offset and length are effectively a slice into the buffer.
+    offset: u32,
+    len: u32,
 }
 
 // TODO: try to derive these instead (tricky because of generic T)
@@ -55,8 +56,8 @@ impl<T> PartialEq for BufferHandle<T> {
     fn eq(&self, o: &Self) -> bool {
         self.h == o.h
             && self.mutability == o.mutability
-            && self.idx == o.idx
-            && self.n_elems == o.n_elems
+            && self.offset == o.offset
+            && self.len == o.len
     }
 }
 impl<T> Eq for BufferHandle<T> {}
@@ -65,23 +66,57 @@ impl<T> std::hash::Hash for BufferHandle<T> {
     fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
         self.h.hash(state);
         self.mutability.hash(state);
-        self.idx.hash(state);
-        self.n_elems.hash(state);
+        self.offset.hash(state);
+        self.len.hash(state);
     }
 }
 
+// TODO: Tests here
 impl<T> BufferHandle<T> {
-    pub fn sub_buffer(&self, idx: u32, n_elems: u32) -> Self {
-        assert!((idx + n_elems) <= (self.idx + self.n_elems));
+    /// Create a sub-buffer from `outer`.
+    /// The sub-buffer starts at `abs_offset` and is `len` long.
+    pub fn sub_buffer(outer: Self, abs_offset: u32, len: u32) -> Self {
+        assert!(
+            outer.offset == 0,
+            "Only valid with outer buffers that themselves are not sub-buffers. Use slice() instead."
+        );
+        assert!(
+            len <= outer.len,
+            "Sub-buffer is too large. {len} vs {}",
+            outer.len
+        );
+        assert!(
+            (abs_offset + len) <= (outer.offset + outer.len),
+            "Sub-buffer ends outside buffer end."
+        );
         Self {
-            idx,
-            n_elems,
+            offset: abs_offset,
+            len,
+            ..outer
+        }
+    }
+
+    pub fn slice(&self, rel_offset: u32, len: u32) -> Self {
+        assert!(len <= self.len, "Sub-buffer is too large. {len}");
+        assert!(rel_offset < self.len, "Sub-buffer starts outside buffer");
+        Self {
+            offset: self.offset + rel_offset,
+            len,
             ..*self
         }
     }
 
+    /// Take the first `len` elements in this buffer and create a new buffer handle from them.
+    pub fn take_first(&mut self, len: u32) -> Self {
+        assert!(len <= self.len, "Sub-buffer is too large");
+        let out = Self { len, ..*self };
+        self.offset += len;
+        self.len -= len;
+        out
+    }
+
     pub fn single_elem_buffer(&self, idx: u32) -> Self {
-        Self::sub_buffer(self, idx, 1)
+        todo!();
     }
 
     /// # Safety
@@ -95,8 +130,8 @@ impl<T> BufferHandle<T> {
         Self {
             h: handle,
             mutability,
-            idx,
-            n_elems,
+            offset: idx,
+            len: n_elems,
         }
     }
 
@@ -109,25 +144,33 @@ impl<T> BufferHandle<T> {
     }
 
     pub fn split(&self) -> Vec<Self> {
-        (0..self.n_elems)
+        (0..self.len)
             .map(|i| Self {
-                idx: self.idx + i,
-                n_elems: 1,
+                offset: self.offset + i,
+                len: 1,
                 ..*self
             })
             .collect::<Vec<_>>()
     }
 
     pub fn is_empty(&self) -> bool {
-        self.n_elems == 0
+        self.len == 0
     }
 
-    pub fn idx(&self) -> u32 {
-        self.idx
+    pub fn start(&self) -> u32 {
+        self.offset
     }
 
-    pub fn n_elems(&self) -> u32 {
-        self.n_elems
+    pub fn end(&self) -> u32 {
+        self.offset + self.len
+    }
+
+    pub fn offset(&self) -> u32 {
+        self.offset
+    }
+
+    pub fn len(&self) -> u32 {
+        self.len
     }
 }
 

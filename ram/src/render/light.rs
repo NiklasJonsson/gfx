@@ -251,6 +251,7 @@ pub struct ShadowResources {
     pub directional: Shadow,
     pub spotlights: Vec<Shadow>,
     pub pointlights: Vec<PointlightShadow>,
+    pub config: ShadowConfig,
 }
 
 fn create_shadow_render_pass(
@@ -414,9 +415,9 @@ struct ShadowConfig {
     spotlight_shadow_map_extent: Extent2D,
     directional_light_shadow_map_extent: Extent2D,
     point_light_shadow_map_extent: Extent2D,
-    num_pointlights: u32,
-    num_directional_lights: u32,
-    num_spotlights: u32,
+    max_pointlights: u32,
+    max_directional_lights: u32,
+    max_spotlights: u32,
     texture_format: trekant::Format,
 }
 
@@ -435,17 +436,17 @@ impl Default for ShadowConfig {
                 width: 512,
                 height: 512,
             },
-            num_pointlights: uniform::POINTLIGHT_SHADOW_MAP_COUNT,
-            num_directional_lights: uniform::DIRECTIONAL_SHADOW_MAP_COUNT,
-            num_spotlights: uniform::SPOTLIGHT_SHADOW_MAP_COUNT,
+            max_pointlights: uniform::POINTLIGHT_SHADOW_MAP_COUNT,
+            max_directional_lights: uniform::DIRECTIONAL_SHADOW_MAP_COUNT,
+            max_spotlights: uniform::SPOTLIGHT_SHADOW_MAP_COUNT,
             texture_format: trekant::Format::D16_UNORM,
         }
     }
 }
 
 impl ShadowConfig {
-    fn num_views(&self) -> u32 {
-        self.num_directional_lights + self.num_spotlights + self.num_pointlights * 6
+    fn max_num_views(&self) -> u32 {
+        self.max_directional_lights + self.max_spotlights + self.max_pointlights * 6
     }
 }
 
@@ -461,7 +462,7 @@ pub fn setup_shadow_resources(
             uniform::PosOnlyViewData {
                 view_proj: uniform::Mat4::default(),
             };
-            config.num_views() as usize
+            config.max_num_views() as usize
         ];
         let view_data = UniformBufferDescriptor::from_vec(view_data, BufferMutability::Mutable);
 
@@ -471,33 +472,27 @@ pub fn setup_shadow_resources(
     };
 
     let mut cur_buf = shadow_matrices_buf;
-    let mut take_buffer = |size: u32| {
-        let out = cur_buf.sub_buffer(0, size);
-        cur_buf = cur_buf.sub_buffer(size, cur_buf.n_elems() - size);
-        out
-    };
-
     let directional = build_single_shadow(
         renderer,
-        take_buffer(1),
+        cur_buf.take_first(1),
         shadow_render_pass,
         config.directional_light_shadow_map_extent,
         config.texture_format,
     );
 
-    let mut spotlights = Vec::with_capacity(config.num_spotlights as usize);
-    for _ in 0..config.num_spotlights {
+    let mut spotlights = Vec::with_capacity(config.max_spotlights as usize);
+    for _ in 0..config.max_spotlights {
         spotlights.push(build_single_shadow(
             renderer,
-            take_buffer(1),
+            cur_buf.take_first(1),
             shadow_render_pass,
             config.spotlight_shadow_map_extent,
             config.texture_format,
         ));
     }
 
-    let mut pointlights = Vec::with_capacity(config.num_pointlights as usize);
-    for _ in 0..config.num_pointlights {
+    let mut pointlights = Vec::with_capacity(config.max_pointlights as usize);
+    for _ in 0..config.max_pointlights {
         let extent = config.point_light_shadow_map_extent;
         let desc = trekant::TextureDescriptor::Empty {
             extent,
@@ -519,11 +514,11 @@ pub fn setup_shadow_resources(
         let render_targets = renderer
             .create_cube_render_targets(shadow_render_pass, cube_map)
             .expect("Failed to create render targets for cube map");
-        let view_data_buffer = take_buffer(6);
-        let view_data_pr_sets = std::array::from_fn(|idx| {
+        let mut view_data_buffer = cur_buf.take_first(6);
+        let view_data_pr_sets = std::array::from_fn(|i| {
             PipelineResourceSet::builder(renderer)
                 .add_buffer(
-                    &view_data_buffer.sub_buffer(idx as u32, 1),
+                    &view_data_buffer.slice(i as u32, 1),
                     0,
                     trekant::pipeline::ShaderStage::VERTEX,
                 )
@@ -554,6 +549,7 @@ pub fn setup_shadow_resources(
         shadow_matrices_buf,
         directional,
         pointlights,
+        config,
     }
 }
 
@@ -657,7 +653,9 @@ pub fn shadow_pass(
     // 2. The buffer in the output of this pass: This is the shadow passes that were actually run and that may be used later by the light pass.
     // Each ShadowMap component has an index into 2.
     // TODO: Use copy buffer command to copy the buffers to the linear data
-    let mut shadow_matrices = [super::uniform::Mat4::default(); MAX_NUM_LIGHTS as usize];
+    // TODO(perf): Reuse alloc
+    let mut shadow_matrices =
+        vec![super::uniform::Mat4::default(); shadow_resources.config.max_num_views() as usize];
     // TODO(perf): Reuse alloc from prev frame
     let mut render_passes: Vec<ShadowRenderPassInfo> = Vec::new();
 
@@ -694,7 +692,7 @@ pub fn shadow_pass(
     let write_view_matrix = |matrices: &mut [super::uniform::Mat4],
                              handle: BufferHandle<DeviceUniformBuffer>,
                              matrix: Mat4| {
-        let matrix_buf_idx = handle.idx() as usize;
+        let matrix_buf_idx = handle.offset() as usize;
         matrices[matrix_buf_idx] = matrix.into_col_array();
     };
 
@@ -797,10 +795,15 @@ pub fn shadow_pass(
 
                 let pointlight_shadow = shadow_resources.pointlights[pointlight_idx as usize];
 
+                const NEAR: f32 = 1.0;
+                let aspect_ratio: f32 =
+                    pointlight_shadow.extent.width as f32 / pointlight_shadow.extent.height as f32;
+                let far = *range;
+                let perspective =
+                    perspective_vk(std::f32::consts::FRAC_PI_2, aspect_ratio, NEAR, far);
+                imdbg!(perspective);
+
                 for pass_idx in 0..N_SHADOW_PASSES_POINTLIGHT {
-                    let near = 1.0;
-                    let far = *range;
-                    let aspect_ratio = 1.0;
                     let cube_face_dir = POINTLIGHT_DIRECTIONS[pass_idx];
                     // TODO: Create the matrix directly
                     let shadow_view = Mat4::from(Transform {
@@ -810,17 +813,11 @@ pub fn shadow_pass(
                     })
                     .inverted();
 
-                    imdbg!((shadow_view, pass_idx));
-
-                    let perspective =
-                        perspective_vk(std::f32::consts::FRAC_PI_2, aspect_ratio, near, far);
-                    imdbg!(perspective);
                     let viewproj = perspective * shadow_view;
-                    imdbg!(viewproj);
+                    imdbg!((pass_idx, shadow_view, viewproj));
 
-                    let matrix_buffer_elem: BufferHandle<DeviceUniformBuffer> = pointlight_shadow
-                        .view_data_buffer
-                        .single_elem_buffer(pass_idx as u32);
+                    let matrix_buffer_elem: BufferHandle<DeviceUniformBuffer> =
+                        pointlight_shadow.view_data_buffer.slice(pass_idx as u32, 1);
                     write_view_matrix(&mut shadow_matrices, matrix_buffer_elem, viewproj);
 
                     add_render_pass(
@@ -877,7 +874,7 @@ pub fn shadow_pass(
         super::draw_entities(world, &mut shadow_rp, super::DrawMode::ShadowsOnly);
         cmd_buffer = shadow_rp.end().expect("Failed to end shadow render pass");
 
-        output.shadow_matrices[idx] = shadow_matrices[view_data_buf.idx() as usize];
+        output.shadow_matrices[idx] = shadow_matrices[view_data_buf.offset() as usize];
         shadow_maps
             .insert(light_entity, shadow_map)
             .expect("Failed to add shadow map for light entity");

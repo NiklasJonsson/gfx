@@ -837,7 +837,7 @@ impl Renderer {
             .get_buffered_mut(h, self.frame_idx as usize)
             .ok_or_else(|| RenderError::InvalidHandle(h.handle().id()))?;
 
-        ubuf.update_with(data, h.idx() as u64);
+        ubuf.update_with(data, h.offset() as u64);
         Ok(())
     }
 
