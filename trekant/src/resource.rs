@@ -19,6 +19,7 @@ pub struct Resources {
     pub uniform_buffers: buffer::UniformBuffers,
     pub vertex_buffers: buffer::VertexBuffers,
     pub index_buffers: buffer::IndexBuffers,
+    pub storage_buffers: buffer::StorageBuffers,
     pub textures: texture::Textures,
     pub graphics_pipelines: pipeline::GraphicsPipelines,
     pub descriptor_sets: pipeline_resource::PipelineResourceSetStorage,

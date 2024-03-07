@@ -2,7 +2,10 @@ use thiserror::Error;
 
 use crate::ecs::prelude::*;
 
-use trekant::buffer::{BufferMutability, DeviceUniformBuffer, UniformBufferDescriptor};
+use trekant::buffer::{
+    BufferMutability, DeviceStorageBuffer, DeviceUniformBuffer, StorageBufferDescriptor,
+    UniformBufferDescriptor,
+};
 use trekant::pipeline::{
     GraphicsPipeline, GraphicsPipelineDescriptor, PipelineError, ShaderDescriptor,
 };
@@ -64,7 +67,7 @@ struct PBRPassResources {
 struct EngineShaderResources {
     view_data: BufferHandle<DeviceUniformBuffer>,
     lighting_data: BufferHandle<DeviceUniformBuffer>,
-    shadow_data: BufferHandle<DeviceUniformBuffer>,
+    world_to_shadow: BufferHandle<DeviceStorageBuffer>,
     desc_set: Handle<PipelineResourceSet>,
 }
 
@@ -106,7 +109,7 @@ fn create_material_descriptor_set(
         } => {
             let mut desc_set_builder = PipelineResourceSet::builder(renderer);
 
-            desc_set_builder = desc_set_builder.add_buffer(
+            desc_set_builder = desc_set_builder.add_uniform_buffer(
                 material_uniforms,
                 0,
                 trekant::pipeline::ShaderStage::FRAGMENT,
@@ -143,7 +146,7 @@ fn create_material_descriptor_set(
         }
         material::GpuMaterial::Unlit { color_uniform, .. } => {
             PipelineResourceSet::builder(renderer)
-                .add_buffer(color_uniform, 0, trekant::pipeline::ShaderStage::FRAGMENT)
+                .add_uniform_buffer(color_uniform, 0, trekant::pipeline::ShaderStage::FRAGMENT)
                 .build()
         }
     }
@@ -570,15 +573,13 @@ pub fn create_frame_resources(
         renderer.create_resource_blocking(light_data).expect("FAIL")
     };
 
-    let shadow_data = {
-        let shadow_data = uniform::ShadowData {
-            matrices: Default::default(),
-            count: [u32::MAX; 4],
-        };
-        let shadow_data =
-            UniformBufferDescriptor::from_single(shadow_data, BufferMutability::Mutable);
+    let world_to_shadow = {
+        let data: Vec<uniform::Mat4> =
+            vec![uniform::mat4_nan(); light::NUM_SHADOW_MATRICES as usize];
+
+        let world_to_shadow = StorageBufferDescriptor::from_vec(data, BufferMutability::Mutable);
         renderer
-            .create_resource_blocking(shadow_data)
+            .create_resource_blocking(world_to_shadow)
             .expect("FAIL")
     };
 
@@ -587,9 +588,9 @@ pub fn create_frame_resources(
         .iter()
         .map(|x| (x.texture, true));
     let engine_shader_resource_group = PipelineResourceSet::builder(renderer)
-        .add_buffer(&view_data, 0, ShaderStage::VERTEX | ShaderStage::FRAGMENT)
-        .add_buffer(&shadow_data, 1, ShaderStage::VERTEX)
-        .add_buffer(&lighting_data, 2, ShaderStage::FRAGMENT)
+        .add_uniform_buffer(&view_data, 0, ShaderStage::VERTEX | ShaderStage::FRAGMENT)
+        .add_storage_buffer(&world_to_shadow, 1, ShaderStage::FRAGMENT)
+        .add_uniform_buffer(&lighting_data, 2, ShaderStage::FRAGMENT)
         .add_texture(
             &shadow_resources.directional.texture,
             3,
@@ -647,7 +648,7 @@ pub fn create_frame_resources(
         engine_shader_resources: EngineShaderResources {
             view_data,
             lighting_data,
-            shadow_data,
+            world_to_shadow,
             desc_set: engine_shader_resource_group,
         },
         pbr_resources,

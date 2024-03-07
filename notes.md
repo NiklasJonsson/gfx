@@ -348,3 +348,15 @@ simplifies the code internally as the files are loaded early and handling empty 
 ## Loader API
 
 Maybe we can allow users to create several loader - one per thread/system - and contain the resource flushing to that system.
+
+## WIP: Shadow coords in frag and storage buffers
+
+While moving the shadow coord computation to the fragment shader and wanting to use storage buffers for the backing
+buffer type, I noticed that there is no support for this. Also, there is a lot of macro code to handle the generic buffer
+type implementations which causes problems.
+
+START HERE
+
+1. Finish supporting storage buffers
+2. light::write_lighting_data needs to write the shadow matrices from the shadow pass
+3. Test!

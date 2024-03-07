@@ -419,7 +419,7 @@ fn main() {
                         .expect("Failed to generate mipmaps");
                     desc_set = Some(
                         trekant::PipelineResourceSet::builder(&mut renderer)
-                            .add_buffer(&ubuf, 0, ShaderStage::VERTEX)
+                            .add_uniform_buffer(&ubuf, 0, ShaderStage::VERTEX)
                             .add_texture(&tex, 1, ShaderStage::FRAGMENT, false)
                             .build(),
                     );

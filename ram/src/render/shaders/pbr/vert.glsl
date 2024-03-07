@@ -25,7 +25,6 @@ layout(location = TAN_LOC) in vec4 tangent;
 layout(location = 0) out VsOut {
     vec3 world_normal;
     vec3 world_pos;
-    vec4 shadow_coords[MAX_NUM_SHADOWS];
 
 #if HAS_TEX_COORDS
     vec2 tex_coords_0;
@@ -57,6 +56,5 @@ void main() {
     vs_out.world_bitangent = normalize(cross(vs_out.world_normal, vs_out.world_tangent) * tangent.w);
 #endif
 
-    write_shadow_coords(vs_out.world_pos, vs_out.shadow_coords);
     gl_Position = world_to_clip(vs_out.world_pos);
 }

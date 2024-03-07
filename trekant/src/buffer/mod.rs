@@ -1,9 +1,9 @@
 mod buffer_storage;
 mod descriptor;
 
-use crate::backend;
 use crate::resource::Handle;
 use crate::vertex::VertexFormat;
+use crate::{backend, Std140};
 use backend::command::CommandBuffer;
 use backend::{buffer::Buffer, util::stride, AllocatorHandle, MemoryError};
 
@@ -17,7 +17,8 @@ use std::convert::TryInto;
 use std::sync::Arc;
 
 pub use descriptor::{
-    BufferDescriptor, IndexBufferDescriptor, UniformBufferDescriptor, VertexBufferDescriptor,
+    BufferDescriptor, IndexBufferDescriptor, StorageBufferDescriptor, UniformBufferDescriptor,
+    VertexBufferDescriptor,
 };
 
 pub use buffer_storage::DrainIterator;
@@ -27,6 +28,7 @@ pub type AsyncUniformBuffers = AsyncDeviceBufferStorage<DeviceUniformBuffer>;
 pub type VertexBuffers = DeviceBufferStorage<DeviceVertexBuffer>;
 pub type AsyncVertexBuffers = AsyncDeviceBufferStorage<DeviceVertexBuffer>;
 pub type IndexBuffers = DeviceBufferStorage<DeviceIndexBuffer>;
+pub type StorageBuffers = DeviceBufferStorage<DeviceStorageBuffer>;
 pub type AsyncIndexBuffers = AsyncDeviceBufferStorage<DeviceIndexBuffer>;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -138,12 +140,17 @@ pub struct UniformBufferType {
 impl BufferType for UniformBufferType {
     const USAGE: vk::BufferUsageFlags = vk::BufferUsageFlags::UNIFORM_BUFFER;
     fn elem_align(&self, allocator: &AllocatorHandle) -> Option<u16> {
+        const REQUIRED_ALIGNMENT_SUPPORT: u16 = 256;
         let props = unsafe { allocator.get_physical_device_properties() }.expect("Bad allocator");
         let alignment = props.limits.min_uniform_buffer_offset_alignment;
         if alignment == 0 {
-            Some(256)
+            Some(REQUIRED_ALIGNMENT_SUPPORT)
         } else {
-            Some(0)
+            Some(
+                alignment
+                    .try_into()
+                    .expect("Alignment requirement is too big"),
+            )
         }
     }
     fn elem_size(&self) -> u16 {
@@ -241,6 +248,42 @@ impl IndexInt for u32 {
     }
 }
 
+#[derive(Debug, Clone, Copy)]
+pub struct StorageBufferType {
+    size: u16,
+}
+
+impl BufferType for StorageBufferType {
+    const USAGE: vk::BufferUsageFlags = vk::BufferUsageFlags::STORAGE_BUFFER;
+    fn elem_align(&self, allocator: &AllocatorHandle) -> Option<u16> {
+        const REQUIRED_ALIGNMENT_SUPPORT: u16 = 256;
+        let props = unsafe { allocator.get_physical_device_properties() }.expect("Bad allocator");
+        let alignment = props.limits.min_storage_buffer_offset_alignment;
+        if alignment == 0 {
+            Some(REQUIRED_ALIGNMENT_SUPPORT)
+        } else {
+            Some(
+                alignment
+                    .try_into()
+                    .expect("Alignment requirement is too big"),
+            )
+        }
+    }
+    fn elem_size(&self) -> u16 {
+        self.size
+    }
+}
+
+impl StorageBufferType {
+    fn from_trait<T: Std140>() -> Self {
+        Self {
+            size: <T as Std140>::SIZE
+                .try_into()
+                .expect("Failed to narrow size"),
+        }
+    }
+}
+
 #[derive(Debug)]
 pub struct DeviceBuffer<BT> {
     buffer: Buffer,
@@ -322,7 +365,13 @@ impl<BT: BufferType + Clone> DeviceBuffer<BT> {
                 stride,
             )?;
         } else {
-            self.buffer.update_data_at(descriptor.data(), 0);
+            if elem_size == elem_align {
+                unsafe {
+                    self.buffer.update_data_at(descriptor.data(), 0);
+                }
+            } else {
+                unimplemented!("Can't use update_data_at under these conitions");
+            }
         }
         self.stride = stride;
         Ok(())
@@ -370,10 +419,15 @@ impl DeviceIndexBuffer {
 pub type DeviceUniformBuffer = DeviceBuffer<UniformBufferType>;
 impl DeviceUniformBuffer {
     pub fn update_with<T: Uniform>(&mut self, data: &T, idx: u64) {
-        // SAFETY: The Uniform trait garantues that we can pass this as bytes to the gpu (or will atleast...)
-        let raw_data = unsafe { as_bytes(data) };
         let offset = (idx * self.stride() as u64) as usize;
-        self.buffer_mut().update_data_at(raw_data, offset)
+        let buf = self.buffer_mut();
+        unsafe {
+            // SAFETY: The Uniform trait guarantees that we can pass this as bytes to the gpu.
+            let raw_data = as_bytes(data);
+            // SAFETY: We are only copying a single element so no need to worry about alignment/size as we
+            // have already computed the stride
+            buf.update_data_at(raw_data, offset);
+        }
     }
 
     pub fn size(&self) -> u64 {
@@ -381,6 +435,8 @@ impl DeviceUniformBuffer {
         self.stride() as u64 * self.n_elems() as u64
     }
 }
+
+pub type DeviceStorageBuffer = DeviceBuffer<StorageBufferType>;
 
 #[derive(Debug, Clone)]
 pub struct HostBuffer<BT> {
@@ -392,6 +448,7 @@ pub struct HostBuffer<BT> {
 pub type HostVertexBuffer = HostBuffer<VertexBufferType>;
 pub type HostIndexBuffer = HostBuffer<IndexBufferType>;
 pub type HostUniformBuffer = HostBuffer<UniformBufferType>;
+pub type HostStorageBuffer = HostBuffer<StorageBufferType>;
 
 macro_rules! impl_host_buffer_from {
     ($name:ty, $trait:ident, $buffer_type:ident) => {

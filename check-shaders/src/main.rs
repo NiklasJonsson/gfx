@@ -1,7 +1,6 @@
 use ram::render::shader::{Defines, ShaderLocation, ShaderType};
 
 use std::fs::DirEntry;
-use std::path::PathBuf;
 
 fn main() {
     let mut shaders = Vec::new();
@@ -11,14 +10,16 @@ fn main() {
 
     println!("WORKING DIR: {d}", d = cwd.display());
 
-    let queue_dirs = |q: &mut Vec<DirEntry>, path| {
+    let queue_subdirs = |q: &mut Vec<DirEntry>, path| {
         let new = std::fs::read_dir(path)
             .expect("Failed to read shader dir")
             .map(|e| e.expect("Failed to read entry"));
         q.extend(new);
     };
 
-    queue_dirs(&mut queue, PathBuf::from("ram/src/render/shaders/"));
+    let mut start = cwd.clone();
+    start.push("ram/src/render/shaders/");
+    queue_subdirs(&mut queue, start);
 
     while let Some(entry) = queue.pop() {
         let path = entry.path();
@@ -34,7 +35,7 @@ fn main() {
                 shaders.push((path, ShaderType::Vertex));
             }
         } else if path.is_dir() {
-            queue_dirs(&mut queue, path);
+            queue_subdirs(&mut queue, path);
         }
     }
 

@@ -8,7 +8,6 @@
 layout(location = 0) in VsOut {
     vec3 world_normal;
     vec3 world_pos;
-    vec4 shadow_coords[MAX_NUM_LIGHTS];
 
 #if HAS_TEX_COORDS
     vec2 tex_coords_0;
@@ -188,7 +187,7 @@ void main() {
 
         color += debug_color(light.shadow_info);
 
-        float shadow_factor = compute_shadow_factor(vs_out.shadow_coords, light, n_dot_l);
+        float shadow_factor = compute_shadow_factor(vs_out.world_pos, light, n_dot_l);
         if (shadow_factor == 0.0) {
             continue;
         }

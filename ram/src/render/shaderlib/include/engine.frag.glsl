@@ -18,7 +18,11 @@ struct PackedLight {
     uvec4 shadow_info; // x is the shadow type, y is the shadow index in that array
 };
 
-layout(set = 0, binding = 2) uniform LightingData {
+layout(std140, set = 0, binding = 1) readonly buffer WorldToShadow {
+    mat4 data[];
+} world_to_shadow;
+
+layout(set = 0, binding = 1) uniform LightingData {
     PackedLight lights[MAX_NUM_LIGHTS];
     vec4 ambient; // vec3 color + float strength
     uvec4 num_lights; // The number of lights in the array
@@ -36,7 +40,7 @@ layout(set = 0, binding = 4) uniform sampler2D spotlight_shadow_maps[NUM_SPOTLIG
 
 #define NUM_POINTLIGHT_SHADOW_MAPS (16)
 // TODO:
-//layout(set = 0, binding = 6) uniform sampler2D pointlight_shadow_maps[NUM_POINTLIGHT_SHADOW_MAPS];
+//layout(set = 0, binding = 5) uniform sampler2D pointlight_shadow_maps[NUM_POINTLIGHT_SHADOW_MAPS];
 
 struct ShadowInfo {
     uint type;
@@ -111,8 +115,7 @@ bool light_has_shadow(Light l) {
     return l.shadow_info.type != SHADOW_TYPE_INVALID;
 }
 
-float sample_shadow_map(vec4 shadow_coords[MAX_NUM_LIGHTS], ShadowInfo info, float n_dot_l) {
-    vec3 coords = shadow_coords[info.coords_idx].xyz / shadow_coords[info.coords_idx].w;
+float sample_shadow_map(vec3 coords, ShadowInfo info, float n_dot_l) {
     float depth = 1.0;
     if (info.type == SHADOW_TYPE_DIRECTIONAL) {
         depth = texture(directional_shadow_map, coords.xy).r;
@@ -136,10 +139,14 @@ float sample_shadow_map(vec4 shadow_coords[MAX_NUM_LIGHTS], ShadowInfo info, flo
     return (coords.z - bias) < depth ? 1.0 : 0.0;
 }
 
-float compute_shadow_factor(vec4 shadow_coords[MAX_NUM_LIGHTS], Light light, float n_dot_l) {
+float compute_shadow_factor(vec3 fragment_world_pos, Light light, float n_dot_l) {
     float shadow_factor = 1.0;
     if (light_has_shadow(light)) {
-        shadow_factor = sample_shadow_map(shadow_coords, light.shadow_info, n_dot_l);
+        ShadowInfo info = light.shadow_info;
+        vec4 fragment_shadow_pos = world_to_shadow.data[info.coords_idx] * vec4(fragment_world_pos, 1.0);
+        vec3 coords = fragment_shadow_pos.xyz / fragment_shadow_pos.w;
+        coords = coords * 0.5 + 0.5;
+        shadow_factor = sample_shadow_map(coords, info, n_dot_l);
     }
     return shadow_factor;
 }

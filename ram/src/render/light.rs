@@ -365,7 +365,7 @@ fn build_single_shadow(
 ) -> Shadow {
     let (texture, render_target) = shadow_render_target(renderer, &shadow_render_pass, extent);
     let sh_view_data_set = PipelineResourceSet::builder(renderer)
-        .add_buffer(&view_data, 0, trekant::pipeline::ShaderStage::VERTEX)
+        .add_uniform_buffer(&view_data, 0, trekant::pipeline::ShaderStage::VERTEX)
         .build();
 
     Shadow {
@@ -396,7 +396,7 @@ pub fn get_shadow_pipeline_for(
     Ok(renderer.create_gfx_pipeline(descriptor, &frame_data.shadow.render_pass)?)
 }
 
-const NUM_SHADOW_MATRICES: u32 =
+pub const NUM_SHADOW_MATRICES: u32 =
     uniform::SPOTLIGHT_SHADOW_MAP_COUNT + uniform::DIRECTIONAL_SHADOW_MAP_COUNT;
 
 pub fn setup_shadow_resources(
@@ -528,6 +528,7 @@ pub fn shadow_pass(
     // 2. The buffer in the output of this pass: This is the shadow passes that were actually run and that may be used later by the light pass.
     // Each ShadowMap component has an index into 2.
     // TODO: Can we simplify the above? E.g. by late creation and binding of desc set
+    // Maybe it is possible to write directly to view_data_buf and then copy from that buffer to the output on the gpu?
     let mut shadow_matrices = [super::uniform::Mat4::default(); MAX_NUM_LIGHTS as usize];
     let mut shadow_render_info: [Option<ShadowRenderPassInfo>; MAX_NUM_LIGHTS as usize] =
         [None; MAX_NUM_LIGHTS];
@@ -777,22 +778,28 @@ pub fn write_lighting_data(
         .expect("Failed to update uniform for lighting data");
 
     {
-        let shadow_data = uniform::ShadowData {
-            matrices: shadow_pass_output.shadow_matrices,
-            count: [
-                shadow_pass_output.count as u32,
-                u32::MAX,
-                u32::MAX,
-                u32::MAX,
-            ],
-        };
+        todo!("Write the world_to_shadow matrices once trekant supports storage buffers");
+        /*         let shadow_data = uniform::ShadowData {
+                  matrices: shadow_pass_output.shadow_matrices,
+                  count: [
+                      shadow_pass_output.count as u32,
+                      u32::MAX,
+                      u32::MAX,
+                      u32::MAX,
+                  ],
+              };
 
-        // TODO: Merge into LightingData?
-        frame
-            .update_uniform_blocking(
-                &frame_resources.engine_shader_resources.shadow_data,
-                &shadow_data,
-            )
-            .expect("Failed to write the ShadowData uniform during the lighting pass");
+              let buffer = frame
+                  .get_resource(&frame_resources.engine_shader_resources.world_to_shadow)
+                  .unwrap();
+
+              // TODO: Merge into LightingData?
+              frame
+                  .update_uniform_blocking(
+                      &frame_resources.engine_shader_resources.world_to_shadow,
+                      &shadow_data,
+                  )
+                  .expect("Failed to write the ShadowData uniform during the lighting pass");
+        */
     }
 }

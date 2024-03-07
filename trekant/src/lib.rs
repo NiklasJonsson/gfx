@@ -283,6 +283,14 @@ impl_buffer_manager_frame!(
     index_buffers
 );
 
+impl_buffer_manager_frame!(
+    buffer::StorageBufferDescriptor<'b>,
+    buffer::DeviceStorageBuffer,
+    BufferHandle<buffer::DeviceStorageBuffer>,
+    CreateStorageBuffer,
+    storage_buffers
+);
+
 pub enum SyncResourceCommand<'a> {
     CreateVertexBuffer {
         descriptor: buffer::VertexBufferDescriptor<'a>,
@@ -292,6 +300,9 @@ pub enum SyncResourceCommand<'a> {
     },
     CreateUniformBuffer {
         descriptor: buffer::UniformBufferDescriptor<'a>,
+    },
+    CreateStorageBuffer {
+        descriptor: buffer::StorageBufferDescriptor<'a>,
     },
 }
 
@@ -308,6 +319,10 @@ pub enum PendingSyncResourceCommand {
         handle: buffer::BufferHandle<buffer::DeviceUniformBuffer>,
         transients: [Option<Buffer>; 2],
     },
+    CreateStorageBuffer {
+        handle: buffer::BufferHandle<buffer::DeviceStorageBuffer>,
+        transients: [Option<Buffer>; 2],
+    },
 }
 
 impl PendingSyncResourceCommand {
@@ -322,6 +337,9 @@ impl PendingSyncResourceCommand {
             Self::CreateUniformBuffer { handle, .. } => {
                 FinishedResourceCommand::CreateUniformBuffer { handle }
             }
+            Self::CreateStorageBuffer { handle, .. } => {
+                FinishedResourceCommand::CreateStorageBuffer { handle }
+            }
         }
     }
 }
@@ -335,6 +353,9 @@ pub enum FinishedResourceCommand {
     },
     CreateUniformBuffer {
         handle: buffer::BufferHandle<buffer::DeviceUniformBuffer>,
+    },
+    CreateStorageBuffer {
+        handle: buffer::BufferHandle<buffer::DeviceStorageBuffer>,
     },
 }
 
@@ -472,6 +493,15 @@ impl Renderer {
                     self,
                     cmd_buffer,
                     uniform_buffers
+                )
+            }
+            SyncResourceCommand::CreateStorageBuffer { descriptor } => {
+                process_buffer_creation!(
+                    CreateStorageBuffer,
+                    descriptor,
+                    self,
+                    cmd_buffer,
+                    storage_buffers
                 )
             }
         }
@@ -632,6 +662,7 @@ impl Renderer {
             uniform_buffers: buffer::UniformBuffers::default(),
             vertex_buffers: buffer::VertexBuffers::default(),
             index_buffers: buffer::IndexBuffers::default(),
+            storage_buffers: buffer::StorageBuffers::default(),
             textures: texture::Textures::default(),
             graphics_pipelines: pipeline::GraphicsPipelines::default(),
             descriptor_sets,
@@ -918,6 +949,13 @@ impl_buffer_manager!(
     BufferHandle<buffer::DeviceUniformBuffer>,
     CreateUniformBuffer,
     uniform_buffers
+);
+impl_buffer_manager!(
+    buffer::StorageBufferDescriptor<'a>,
+    buffer::DeviceStorageBuffer,
+    BufferHandle<buffer::DeviceStorageBuffer>,
+    CreateStorageBuffer,
+    storage_buffers
 );
 
 impl Renderer {

@@ -30,6 +30,31 @@ enum Mappability {
     NonMappable,
 }
 
+/// Copy the elements in src to dst, assmuming:
+/// * Elements in src are laid out linearly, with no padding.
+/// * Elements in dst are aligned to dst_elem_align, with possible padding in-between. This padding is not touched.
+unsafe fn element_copy(src: &[u8], dst: *mut u8, elem_size: u16, dst_elem_align: u16) {
+    let size = src.len();
+    let src = src.as_ptr() as *const u8;
+    if elem_size == dst_elem_align {
+        log::trace!("Straight copy from {:?} to {:?}, size: {}", src, dst, size);
+        unsafe {
+            std::ptr::copy_nonoverlapping::<u8>(src, dst, size);
+        }
+    } else {
+        log::trace!("Strided copy from {:?} to {:?}, size: {}", src, dst, size);
+        let n_elems = size / elem_size as usize;
+        let stride = stride(elem_size, dst_elem_align);
+        for i in 0..n_elems {
+            unsafe {
+                let src = src.add(i * (elem_size as usize));
+                let dst = dst.add(i * (stride as usize));
+                std::ptr::copy_nonoverlapping::<u8>(src, dst, elem_size as usize);
+            }
+        }
+    }
+}
+
 impl Buffer {
     fn empty(
         allocator: &AllocatorHandle,
@@ -110,21 +135,8 @@ impl Buffer {
             mem_usage,
         )?;
         let dst = buffer.map()?;
-        let src = data.as_ptr() as *const u8;
-        if elem_size == elem_align {
-            log::trace!("Straight copy from {:?} to {:?}, size: {}", src, dst, size);
-            unsafe {
-                std::ptr::copy_nonoverlapping::<u8>(src, dst, size);
-            }
-        } else {
-            log::trace!("Strided copy from {:?} to {:?}, size: {}", src, dst, size);
-            for i in 0..n_elems {
-                unsafe {
-                    let src = src.add(i * (elem_size as usize));
-                    let dst = dst.add(i * (stride as usize));
-                    std::ptr::copy_nonoverlapping::<u8>(src, dst, elem_size as usize);
-                }
-            }
+        unsafe {
+            element_copy(data, dst, elem_size, elem_align);
         }
 
         if do_unmap {
@@ -213,7 +225,11 @@ impl Buffer {
         self.vk_buffer
     }
 
-    pub fn update_data_at(&mut self, data: &[u8], offset: usize) {
+    /// Update the data at `offset` in the buffer from the slice.
+    /// SAFETY: The buffer needs to be writable for (offset, offset+size],
+    /// e.g. there can be no padding/alignment requirements on the elements
+    /// of the buffer.
+    pub unsafe fn update_data_at(&mut self, data: &[u8], offset: usize) {
         assert!(self.is_mapped);
         let size = data.len();
         let dst_base = self
@@ -222,11 +238,9 @@ impl Buffer {
             .mapped_data as *mut u8;
 
         let src = data.as_ptr() as *const u8;
-        unsafe {
-            assert!(offset + size <= self.size());
-            let dst = dst_base.add(offset);
-            std::ptr::copy_nonoverlapping::<u8>(src, dst, size);
-        }
+        assert!(offset + size <= self.size());
+        let dst = dst_base.add(offset);
+        std::ptr::copy_nonoverlapping::<u8>(src, dst, size);
     }
 
     pub fn size(&self) -> usize {

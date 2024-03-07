@@ -131,7 +131,7 @@ impl DebugRenderer {
         };
 
         let shader_resource_group = PipelineResourceSet::builder(renderer)
-            .add_buffer(view_data_buf, 0, ShaderStage::VERTEX)
+            .add_uniform_buffer(view_data_buf, 0, ShaderStage::VERTEX)
             .build();
 
         let vertex_format = Vertex::format();

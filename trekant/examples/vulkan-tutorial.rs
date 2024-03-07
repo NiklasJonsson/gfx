@@ -337,7 +337,7 @@ fn main() {
     let uniform_buffer_handle = create_mvp_ubuf(&mut renderer);
     let texture_handle = create_texture(&mut renderer);
     let desc_set_handle = trekant::PipelineResourceSet::builder(&mut renderer)
-        .add_buffer(&uniform_buffer_handle, 0, ShaderStage::VERTEX)
+        .add_uniform_buffer(&uniform_buffer_handle, 0, ShaderStage::VERTEX)
         .add_texture(&texture_handle, 1, ShaderStage::FRAGMENT, false)
         .build();
 

@@ -1,8 +1,8 @@
 use super::{
     BufferMutability, BufferType, DeviceBuffer, HostBuffer, IndexBufferType, IndexInt,
-    UniformBufferType, VertexBufferType,
+    StorageBufferType, UniformBufferType, VertexBufferType,
 };
-use crate::backend;
+use crate::{backend, Std140};
 
 use crate::traits::Uniform;
 use crate::util::{as_byte_slice, ByteBuffer};
@@ -36,10 +36,6 @@ impl<BT: Clone + BufferType> BufferDescriptor<'static, BT> {
         }
     }
 }
-
-pub type UniformBufferDescriptor<'a> = BufferDescriptor<'a, UniformBufferType>;
-pub type VertexBufferDescriptor<'a> = BufferDescriptor<'a, VertexBufferType>;
-pub type IndexBufferDescriptor<'a> = BufferDescriptor<'a, IndexBufferType>;
 
 macro_rules! impl_descriptor_from {
     ($name:ident, $trait:ident, $buffer_type:ident) => {
@@ -105,9 +101,15 @@ macro_rules! impl_descriptor_from {
     };
 }
 
+pub type UniformBufferDescriptor<'a> = BufferDescriptor<'a, UniformBufferType>;
+pub type VertexBufferDescriptor<'a> = BufferDescriptor<'a, VertexBufferType>;
+pub type IndexBufferDescriptor<'a> = BufferDescriptor<'a, IndexBufferType>;
+pub type StorageBufferDescriptor<'a> = BufferDescriptor<'a, StorageBufferType>;
+
 impl_descriptor_from!(UniformBufferDescriptor, Uniform, UniformBufferType);
 impl_descriptor_from!(VertexBufferDescriptor, VertexDefinition, VertexBufferType);
 impl_descriptor_from!(IndexBufferDescriptor, IndexInt, IndexBufferType);
+impl_descriptor_from!(StorageBufferDescriptor, Std140, StorageBufferType);
 
 impl<'a, BT> BufferDescriptor<'a, BT> {
     pub fn mutability(&self) -> BufferMutability {

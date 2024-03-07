@@ -29,7 +29,7 @@ pub struct PackedLight {
     pub pos: [f32; 4],         // position for point/spot light
     pub dir_cutoff: [f32; 4], // direction for spot/directional light. .w is the cos(cutoff_angle) of the spotlight
     pub color_range: [f32; 4], // color for all light types. .w is the range of point/spot lights
-    pub shadow_info: [u32; 4], // x is shadow type, y is index
+    pub shadow_info: [u32; 4], // x is shadow type, y is matrix index, z is texture index
 }
 
 impl Default for PackedLight {
@@ -45,15 +45,11 @@ impl Default for PackedLight {
 
 pub type Mat4 = [f32; 16];
 
-pub const MAX_NUM_LIGHTS: usize = 16;
-
-#[derive(Copy, Clone, Debug, Default, Std140Compat)]
-#[repr(C, packed)]
-pub struct ShadowData {
-    pub matrices: [Mat4; MAX_NUM_LIGHTS as usize],
-    // v4 is needed for padding at the end. Use only the first value.
-    pub count: [u32; 4],
+pub const fn mat4_nan() -> Mat4 {
+    [f32::NAN; 16]
 }
+
+pub const MAX_NUM_LIGHTS: usize = 16;
 
 #[derive(Copy, Clone, Debug, Default, Std140Compat)]
 #[repr(C, packed)]
