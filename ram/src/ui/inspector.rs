@@ -19,9 +19,7 @@ fn push_id<'a, T>(frame: &'a UiFrame<'a>, m: &Meta<T>) -> imgui::IdStackToken<'a
     match &m.origin {
         MetaOrigin::NamedField { name } => frame.inner().push_id(*name),
         MetaOrigin::TupleField { idx } => {
-            let idx: i32 = (*idx)
-                .try_into()
-                .expect("Tuple idx should always fit into i32");
+            let idx: i32 = (*idx) as i32;
             frame.inner().push_id_int(idx)
         }
         MetaOrigin::Standalone => frame.inner().push_id_int(0),
@@ -231,36 +229,41 @@ where
     }
 }
 
-macro_rules! impl_visit_cast {
-    ($ty:ty, $imgui_ty:ident) => {
+macro_rules! impl_visit_scalar {
+    ($ty:ty) => {
         impl<'a> Visitor<$ty> for ImguiVisitor<'a> {
             fn visit(&mut self, t: &$ty, m: &Meta<$ty>) {
-                let mut v = *t as _;
+                let mut copy: $ty = *t as _;
                 self.ui
                     .inner()
-                    .input_int(&label(m), &mut v)
+                    .input_scalar(&label(m), &mut copy)
                     .read_only(true)
                     .build();
             }
 
             fn visit_mut(&mut self, t: &mut $ty, m: &Meta<$ty>) {
-                let mut v = *t as _;
-                self.ui
-                    .inner()
-                    .input_int(&label(m), &mut v)
-                    .read_only(true)
-                    .build();
-                *t = v as _;
+                let mut copy: $ty = *t;
+                let changed = self.ui.inner().input_scalar(&label(m), &mut copy).build();
+                if changed {
+                    *t = copy;
+                }
             }
         }
     };
 }
 
-impl_visit_cast!(f32, InputFloat);
-impl_visit_cast!(i32, InputInt);
-impl_visit_cast!(u32, InputInt);
-impl_visit_cast!(u16, InputInt);
-impl_visit_cast!(u8, InputInt);
+impl_visit_scalar!(f64);
+impl_visit_scalar!(f32);
+
+impl_visit_scalar!(i64);
+impl_visit_scalar!(i32);
+impl_visit_scalar!(i16);
+impl_visit_scalar!(i8);
+
+impl_visit_scalar!(u64);
+impl_visit_scalar!(u32);
+impl_visit_scalar!(u16);
+impl_visit_scalar!(u8);
 
 macro_rules! impl_visit_array {
     ($ty:ty, $imgui_ty:ident) => {

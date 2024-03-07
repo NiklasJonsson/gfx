@@ -1,5 +1,5 @@
-use trekant::{buffer::DeviceUniformBuffer, pipeline::PolygonMode, Texture, TextureDescriptor};
-use trekant::{BufferHandle, Handle};
+use trekant::{pipeline::PolygonMode, Texture, TextureDescriptor};
+use trekant::{AsyncBufferHandle, BufferHandle, Handle};
 
 use crate::math::Rgba;
 use crate::render::Pending;
@@ -8,6 +8,8 @@ use crate::ecs::prelude::*;
 
 use ram_derive::Visitable;
 use trekant::resource::Async;
+
+use super::GpuBuffer;
 
 #[derive(Debug, Clone, Component, Visitable)]
 pub struct Unlit {
@@ -42,11 +44,11 @@ pub struct TextureUse<T> {
 #[derive(Debug, Component, Visitable)]
 pub enum GpuMaterial {
     Unlit {
-        color_uniform: BufferHandle<DeviceUniformBuffer>,
+        color_uniform: BufferHandle,
         polygon_mode: PolygonMode,
     },
     PBR {
-        material_uniforms: BufferHandle<DeviceUniformBuffer>,
+        material_uniforms: BufferHandle,
         normal_map: Option<TextureUse<Texture>>,
         base_color_texture: Option<TextureUse<Texture>>,
         metallic_roughness_texture: Option<TextureUse<Texture>>,
@@ -57,13 +59,11 @@ pub enum GpuMaterial {
 #[derive(Debug, Component, Visitable)]
 pub enum PendingMaterial {
     Unlit {
-        color_uniform:
-            Pending<BufferHandle<Async<DeviceUniformBuffer>>, BufferHandle<DeviceUniformBuffer>>,
+        color_uniform: GpuBuffer,
         polygon_mode: PolygonMode,
     },
     PBR {
-        material_uniforms:
-            Pending<BufferHandle<Async<DeviceUniformBuffer>>, BufferHandle<DeviceUniformBuffer>>,
+        material_uniforms: GpuBuffer,
         normal_map: Option<Pending<TextureUse<Async<Texture>>, TextureUse<Texture>>>,
         base_color_texture: Option<Pending<TextureUse<Async<Texture>>, TextureUse<Texture>>>,
         metallic_roughness_texture:
@@ -76,11 +76,11 @@ impl PendingMaterial {
     pub fn is_done(&self) -> bool {
         match self {
             PendingMaterial::Unlit {
-                color_uniform: Pending::Available(_),
+                color_uniform: GpuBuffer::Available(_),
                 ..
             } => true,
             PendingMaterial::PBR {
-                material_uniforms: Pending::Available(_),
+                material_uniforms: GpuBuffer::Available(_),
                 normal_map,
                 base_color_texture,
                 metallic_roughness_texture,
@@ -107,14 +107,14 @@ impl PendingMaterial {
     pub fn finish(self) -> GpuMaterial {
         match self {
             PendingMaterial::Unlit {
-                color_uniform: Pending::Available(color_uniform),
+                color_uniform: GpuBuffer::Available(color_uniform),
                 polygon_mode,
             } => GpuMaterial::Unlit {
                 color_uniform,
                 polygon_mode,
             },
             PendingMaterial::PBR {
-                material_uniforms: Pending::Available(material_uniforms),
+                material_uniforms: GpuBuffer::Available(material_uniforms),
                 normal_map,
                 base_color_texture,
                 metallic_roughness_texture,

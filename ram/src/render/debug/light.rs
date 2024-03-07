@@ -6,7 +6,7 @@ use crate::render::light::Light;
 use crate::render::material::Unlit;
 use crate::render::mesh::Mesh;
 
-use crate::math::{Quat, Rgba, Transform, Vec3};
+use crate::math::{Quat, Rgb, Rgba, Transform, Vec3};
 
 #[derive(Default, Component)]
 #[component(storage = "NullStorage")]
@@ -53,15 +53,12 @@ impl<'a> System<'a> for RenderLightVolumes {
                 continue;
             }
 
-            let (mesh, color, tfm) = match light {
-                Light::Point { range, color } => {
-                    (geometry::sphere_mesh(*range), color, Transform::identity())
+            let color = Rgb::from_slice(&[1.0, 0.0, 0.0]);
+            let (mesh, tfm) = match light {
+                Light::Point { range, .. } => {
+                    (geometry::sphere_mesh(*range), Transform::identity())
                 }
-                Light::Spot {
-                    color,
-                    angle,
-                    range,
-                } => {
+                Light::Spot { angle, range, .. } => {
                     let radius = angle.tan() * range.end;
                     let mesh = geometry::cone_mesh(radius, range.end);
                     // Cone mesh has base at origin, apex at (0, range, 0). We want to have apex at origin (translation) and then
@@ -75,13 +72,13 @@ impl<'a> System<'a> for RenderLightVolumes {
                         ..Default::default()
                     };
                     let tfm = rotation * translation;
-                    (mesh, color, tfm)
+                    (mesh, tfm)
                 }
                 _ => continue,
             };
 
             let material = Unlit {
-                color: Rgba::from_opaque(*color),
+                color: Rgba::from_opaque(color),
                 polygon_mode: trekant::pipeline::PolygonMode::Line,
             };
 

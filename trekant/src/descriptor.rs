@@ -2,7 +2,10 @@ use crate::util::ByteBuffer;
 
 use std::sync::Arc;
 
+// TODO: DescriptorByteData?
 /// A utility type for descriptors to hold untyped data
+///
+/// This is similar to Cow except that it also has a variant for shared data.
 #[derive(Debug)]
 pub enum DescriptorData<'a> {
     Owned(ByteBuffer),
@@ -19,9 +22,9 @@ impl<'a> DescriptorData<'a> {
 impl<'a> DescriptorData<'a> {
     pub fn data(&self) -> &[u8] {
         match self {
-            Self::Owned(buf) => &buf,
+            Self::Owned(buf) => buf,
             Self::Borrowed(buf) => buf,
-            Self::Shared(buf) => *&buf,
+            Self::Shared(buf) => buf,
         }
     }
 }

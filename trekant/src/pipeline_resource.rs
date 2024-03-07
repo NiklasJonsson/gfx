@@ -4,8 +4,7 @@ use thiserror::Error;
 
 use crate::backend;
 
-use crate::buffer::BufferHandle;
-use crate::buffer::DeviceUniformBuffer;
+use crate::buffer::{BufferHandle, BufferType};
 use crate::pipeline::ShaderStage;
 use crate::resource::{BufferedStorage, Handle};
 use crate::texture::Texture;
@@ -55,6 +54,10 @@ impl PipelineResourcePool {
         let pool_sizes = [
             vk::DescriptorPoolSize {
                 ty: vk::DescriptorType::UNIFORM_BUFFER,
+                descriptor_count: max_allocatable_sets * 2,
+            },
+            vk::DescriptorPoolSize {
+                ty: vk::DescriptorType::STORAGE_BUFFER,
                 descriptor_count: max_allocatable_sets * 2,
             },
             vk::DescriptorPoolSize {
@@ -139,10 +142,15 @@ impl<'a> PipelineResourceSetBuilder<'a> {
         stage_flags: vk::ShaderStageFlags,
         count: u32,
     ) {
-        let idx = if let vk::DescriptorType::UNIFORM_BUFFER = ty {
-            self.buffer_infos.len()
-        } else {
+        let idx = if ty == vk::DescriptorType::COMBINED_IMAGE_SAMPLER {
             self.image_infos.len()
+        } else {
+            assert!([
+                vk::DescriptorType::UNIFORM_BUFFER,
+                vk::DescriptorType::STORAGE_BUFFER
+            ]
+            .contains(&ty));
+            self.buffer_infos.len()
         };
 
         self.bindings.push((
@@ -162,14 +170,9 @@ impl<'a> PipelineResourceSetBuilder<'a> {
         );
     }
 
-    pub fn add_buffer(
-        mut self,
-        buf_h: &BufferHandle<DeviceUniformBuffer>,
-        binding: u32,
-        stage: ShaderStage,
-    ) -> Self {
-        let (buf0, buf1, stride0, stride1) = {
-            let ubufs = &self.renderer.resources.uniform_buffers;
+    pub fn add_buffer(mut self, buf_h: BufferHandle, binding: u32, stage: ShaderStage) -> Self {
+        let (buffer_type, buf0, buf1, stride0, stride1) = {
+            let ubufs = &self.renderer.resources.buffers;
 
             let (buf0, buf1) = ubufs.get_all(buf_h).expect("Failed to get buffer");
 
@@ -178,6 +181,7 @@ impl<'a> PipelineResourceSetBuilder<'a> {
             );
             let buf1 = buf1.unwrap_or(buf0);
             (
+                buf0.buffer_type(),
                 buf0.vk_buffer(),
                 buf1.vk_buffer(),
                 buf0.stride(),
@@ -185,12 +189,13 @@ impl<'a> PipelineResourceSetBuilder<'a> {
             )
         };
 
-        self.add_binding(
-            vk::DescriptorType::UNIFORM_BUFFER,
-            binding,
-            vk::ShaderStageFlags::from(stage),
-            1,
-        );
+        let vk_desc_ty = match buffer_type {
+            BufferType::Uniform(_) => vk::DescriptorType::UNIFORM_BUFFER,
+            BufferType::Storage(_) => vk::DescriptorType::STORAGE_BUFFER,
+            _ => panic!("Invalid buffer type, needs to be either uniform or storage."),
+        };
+
+        self.add_binding(vk_desc_ty, binding, vk::ShaderStageFlags::from(stage), 1);
 
         // TODO: This should check mutability of buffer
         // VMA allocator creates vk::Buffer from the device memory + offset so the offset from the buffer handle is enough here
@@ -213,12 +218,12 @@ impl<'a> PipelineResourceSetBuilder<'a> {
 
     pub fn add_texture(
         self,
-        tex_h: &Handle<Texture>,
+        tex_h: Handle<Texture>,
         binding: u32,
         stage: ShaderStage,
         is_depth: bool,
     ) -> Self {
-        self.add_textures([(*tex_h, is_depth)].into_iter(), binding, stage)
+        self.add_textures([(tex_h, is_depth)].into_iter(), binding, stage)
     }
 
     pub fn add_textures<I>(mut self, itr: I, binding: u32, stage: ShaderStage) -> Self
@@ -265,24 +270,30 @@ impl<'a> PipelineResourceSetBuilder<'a> {
 
         for (bind_idx, (bind, info_idx)) in self.bindings.into_iter().enumerate() {
             for (set_idx, set) in sets.iter().enumerate() {
-                if bind.descriptor_type == vk::DescriptorType::UNIFORM_BUFFER {
-                    writes.push(set.write_buffer(
-                        &self.buffer_infos[info_idx][set_idx],
-                        bind_idx as u32,
-                        1,
-                    ));
-                } else {
-                    assert!(bind.descriptor_type == vk::DescriptorType::COMBINED_IMAGE_SAMPLER);
+                let write = vk::WriteDescriptorSet {
+                    dst_set: set.vk_descriptor_set,
+                    dst_binding: bind_idx as u32,
+                    descriptor_count: bind.descriptor_count,
+                    descriptor_type: bind.descriptor_type,
+                    ..Default::default()
+                };
+                if bind.descriptor_type == vk::DescriptorType::COMBINED_IMAGE_SAMPLER {
                     assert!(self.image_infos.len() >= (info_idx + bind.descriptor_count as usize));
-                    let write = vk::WriteDescriptorSet {
-                        dst_set: set.vk_descriptor_set,
-                        dst_binding: bind_idx as u32,
-                        descriptor_count: bind.descriptor_count,
-                        descriptor_type: vk::DescriptorType::COMBINED_IMAGE_SAMPLER,
+                    writes.push(vk::WriteDescriptorSet {
                         p_image_info: &self.image_infos[info_idx] as *const vk::DescriptorImageInfo,
-                        ..Default::default()
-                    };
-                    writes.push(write);
+                        ..write
+                    });
+                } else {
+                    assert!([
+                        vk::DescriptorType::STORAGE_BUFFER,
+                        vk::DescriptorType::UNIFORM_BUFFER
+                    ]
+                    .contains(&bind.descriptor_type));
+                    writes.push(vk::WriteDescriptorSet {
+                        p_buffer_info: &self.buffer_infos[info_idx][set_idx]
+                            as *const vk::DescriptorBufferInfo,
+                        ..write
+                    });
                 }
             }
         }
@@ -304,22 +315,6 @@ impl PipelineResourceSet {
 
     pub fn builder(renderer: &mut crate::Renderer) -> PipelineResourceSetBuilder {
         PipelineResourceSetBuilder::new(renderer)
-    }
-
-    fn write_buffer(
-        &self,
-        buffer: &vk::DescriptorBufferInfo,
-        dst_binding: u32,
-        count: u32,
-    ) -> vk::WriteDescriptorSet {
-        vk::WriteDescriptorSet {
-            dst_set: self.vk_descriptor_set,
-            dst_binding,
-            descriptor_count: count,
-            descriptor_type: vk::DescriptorType::UNIFORM_BUFFER,
-            p_buffer_info: buffer as *const vk::DescriptorBufferInfo,
-            ..Default::default()
-        }
     }
 
     pub fn vk_descriptor_set(&self) -> &vk::DescriptorSet {

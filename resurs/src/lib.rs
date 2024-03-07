@@ -57,7 +57,7 @@ impl<T> Handle<T> {
 
 impl<T> Clone for Handle<T> {
     fn clone(&self) -> Self {
-        Handle::<T>::new(self.id)
+        *self
     }
 }
 impl<T> Copy for Handle<T> {}

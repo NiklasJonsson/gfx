@@ -1,14 +1,14 @@
-mod buffer_storage;
 mod descriptor;
 
-use crate::backend;
-use crate::resource::Handle;
+use crate::resource::{BufferedStorage, Handle, Storage};
+
 use crate::vertex::VertexFormat;
+use crate::{backend, util, Std140};
 use backend::command::CommandBuffer;
-use backend::{buffer::Buffer, util::stride, AllocatorHandle, MemoryError};
+use backend::{buffer::Buffer, util::compute_stride, AllocatorHandle, MemoryError};
 
 use crate::traits::Uniform;
-use crate::util::{as_bytes, ByteBuffer};
+use crate::util::ByteBuffer;
 use crate::vertex::VertexDefinition;
 
 use ash::vk;
@@ -16,18 +16,14 @@ use ash::vk;
 use std::convert::TryInto;
 use std::sync::Arc;
 
-pub use descriptor::{
-    BufferDescriptor, IndexBufferDescriptor, UniformBufferDescriptor, VertexBufferDescriptor,
-};
+pub use descriptor::BufferDescriptor;
+pub use descriptor::BufferLayout;
 
-pub use buffer_storage::DrainIterator;
-use buffer_storage::{AsyncDeviceBufferStorage, DeviceBufferStorage};
-pub type UniformBuffers = DeviceBufferStorage<DeviceUniformBuffer>;
-pub type AsyncUniformBuffers = AsyncDeviceBufferStorage<DeviceUniformBuffer>;
-pub type VertexBuffers = DeviceBufferStorage<DeviceVertexBuffer>;
-pub type AsyncVertexBuffers = AsyncDeviceBufferStorage<DeviceVertexBuffer>;
-pub type IndexBuffers = DeviceBufferStorage<DeviceIndexBuffer>;
-pub type AsyncIndexBuffers = AsyncDeviceBufferStorage<DeviceIndexBuffer>;
+pub type Buffers = DeviceBufferStorage;
+pub type AsyncBuffers = AsyncDeviceBufferStorage;
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub struct BufferTypeId(pub std::mem::Discriminant<BufferType>);
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum BufferMutability {
@@ -35,42 +31,24 @@ pub enum BufferMutability {
     Mutable,
 }
 
-#[derive(Debug)]
-pub struct BufferHandle<T> {
-    h: Handle<T>,
+// TODO: Revisit this!
+pub trait BufferTypeTrait {
+    const USAGE: vk::BufferUsageFlags;
+    fn elem_align(&self) -> u16;
+    fn elem_size(&self) -> u16;
+    fn buffer_type(&self) -> BufferType;
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub struct BufferHandle {
+    h: Handle<DeviceBuffer>,
     mutability: BufferMutability,
     idx: u32,
     n_elems: u32,
+    ty: BufferTypeId,
 }
 
-// TODO: try to derive these instead (tricky because of generic T)
-impl<T> Clone for BufferHandle<T> {
-    fn clone(&self) -> Self {
-        Self { ..*self }
-    }
-}
-impl<T> Copy for BufferHandle<T> {}
-
-impl<T> PartialEq for BufferHandle<T> {
-    fn eq(&self, o: &Self) -> bool {
-        self.h == o.h
-            && self.mutability == o.mutability
-            && self.idx == o.idx
-            && self.n_elems == o.n_elems
-    }
-}
-impl<T> Eq for BufferHandle<T> {}
-
-impl<T> std::hash::Hash for BufferHandle<T> {
-    fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
-        self.h.hash(state);
-        self.mutability.hash(state);
-        self.idx.hash(state);
-        self.n_elems.hash(state);
-    }
-}
-
-impl<T> BufferHandle<T> {
+impl BufferHandle {
     pub fn sub_buffer(h: Self, idx: u32, n_elems: u32) -> Self {
         assert!((idx + n_elems) <= (h.idx + h.n_elems));
         Self { idx, n_elems, ..h }
@@ -79,20 +57,22 @@ impl<T> BufferHandle<T> {
     /// # Safety
     /// The handle must refer to a valid buffer resource. idx + n_elems must be less than or equal to the number of elements the buffer that the handle refers to was created with.
     pub unsafe fn from_buffer(
-        handle: Handle<T>,
+        handle: Handle<DeviceBuffer>,
         idx: u32,
         n_elems: u32,
         mutability: BufferMutability,
+        ty: BufferTypeId,
     ) -> Self {
         Self {
             h: handle,
             mutability,
             idx,
             n_elems,
+            ty,
         }
     }
 
-    pub fn handle(&self) -> &Handle<T> {
+    pub fn handle(&self) -> &Handle<DeviceBuffer> {
         &self.h
     }
 
@@ -121,39 +101,88 @@ impl<T> BufferHandle<T> {
     pub fn n_elems(&self) -> u32 {
         self.n_elems
     }
-}
 
-pub trait BufferType {
-    const USAGE: vk::BufferUsageFlags;
-    fn elem_align(&self, _allocator: &AllocatorHandle) -> Option<u16> {
-        None
+    pub fn buffer_type_id(&self) -> BufferTypeId {
+        self.ty
     }
-    fn elem_size(&self) -> u16;
 }
 
-#[derive(Debug, Clone)]
-pub struct UniformBufferType {
-    size: u16,
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub struct AsyncBufferHandle {
+    h: Handle<resurs::Async<DeviceBuffer>>,
+    mutability: BufferMutability,
+    idx: u32,
+    n_elems: u32,
+    ty: BufferTypeId,
 }
-impl BufferType for UniformBufferType {
-    const USAGE: vk::BufferUsageFlags = vk::BufferUsageFlags::UNIFORM_BUFFER;
-    fn elem_align(&self, allocator: &AllocatorHandle) -> Option<u16> {
-        let props = unsafe { allocator.get_physical_device_properties() }.expect("Bad allocator");
-        let alignment = props.limits.min_uniform_buffer_offset_alignment;
-        if alignment == 0 {
-            Some(256)
-        } else {
-            Some(0)
+
+impl AsyncBufferHandle {
+    pub fn sub_buffer(h: Self, idx: u32, n_elems: u32) -> Self {
+        assert!((idx + n_elems) <= (h.idx + h.n_elems));
+        Self { idx, n_elems, ..h }
+    }
+
+    /// # Safety
+    /// The handle must refer to a valid buffer resource. idx + n_elems must be less than or equal to the number of elements the buffer that the handle refers to was created with.
+    pub unsafe fn from_buffer(
+        handle: Handle<resurs::Async<DeviceBuffer>>,
+        idx: u32,
+        n_elems: u32,
+        mutability: BufferMutability,
+        ty: BufferTypeId,
+    ) -> Self {
+        Self {
+            h: handle,
+            mutability,
+            idx,
+            n_elems,
+            ty,
         }
     }
+
+    pub fn base_buffer(&self) -> Handle<resurs::Async<DeviceBuffer>> {
+        self.h
+    }
+
+    pub fn idx(&self) -> u32 {
+        self.idx
+    }
+
+    pub fn n_elems(&self) -> u32 {
+        self.n_elems
+    }
+}
+
+#[derive(Debug, Clone, Copy)]
+pub struct UniformBufferType {
+    elem_size: u16,
+    elem_align: u16,
+}
+
+impl BufferTypeTrait for UniformBufferType {
+    const USAGE: vk::BufferUsageFlags = vk::BufferUsageFlags::UNIFORM_BUFFER;
+    fn elem_align(&self) -> u16 {
+        self.elem_align
+    }
     fn elem_size(&self) -> u16 {
-        self.size
+        self.elem_size
+    }
+
+    fn buffer_type(&self) -> BufferType {
+        BufferType::Uniform(*self)
     }
 }
 
 impl UniformBufferType {
-    fn from_trait<U: Uniform>() -> Self {
-        Self { size: U::size() }
+    pub fn as_enum<U: Uniform>() -> BufferType {
+        BufferType::Uniform(Self::from_type::<U>())
+    }
+
+    pub fn from_type<U: Uniform>() -> Self {
+        Self {
+            elem_size: U::size(),
+            elem_align: U::align(),
+        }
     }
 }
 
@@ -161,21 +190,30 @@ impl UniformBufferType {
 pub struct VertexBufferType {
     format: VertexFormat,
 }
-impl BufferType for VertexBufferType {
+impl BufferTypeTrait for VertexBufferType {
     const USAGE: vk::BufferUsageFlags = vk::BufferUsageFlags::VERTEX_BUFFER;
+    fn elem_align(&self) -> u16 {
+        self.elem_size()
+    }
     fn elem_size(&self) -> u16 {
         self.format
             .size()
             .try_into()
             .expect("Vertex format is too big")
     }
+
+    fn buffer_type(&self) -> BufferType {
+        BufferType::Vertex(self.clone())
+    }
 }
 
 impl VertexBufferType {
-    fn from_trait<V: VertexDefinition>() -> Self {
-        Self {
-            format: V::format(),
-        }
+    pub fn as_enum<V: VertexDefinition>() -> BufferType {
+        BufferType::Vertex(Self::from_type::<V>())
+    }
+
+    pub fn from_type<V: VertexDefinition>() -> Self {
+        Self::new(V::format())
     }
 
     pub fn new(format: VertexFormat) -> Self {
@@ -207,20 +245,31 @@ impl IndexSize {
     }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Copy)]
 pub struct IndexBufferType {
     size: IndexSize,
 }
 
-impl BufferType for IndexBufferType {
+impl BufferTypeTrait for IndexBufferType {
     const USAGE: vk::BufferUsageFlags = vk::BufferUsageFlags::INDEX_BUFFER;
+    fn elem_align(&self) -> u16 {
+        self.elem_size()
+    }
     fn elem_size(&self) -> u16 {
         self.size.size() as u16
+    }
+
+    fn buffer_type(&self) -> BufferType {
+        BufferType::Index(*self)
     }
 }
 
 impl IndexBufferType {
-    fn from_trait<I: IndexInt>() -> Self {
+    pub fn as_enum<I: IndexInt>() -> BufferType {
+        BufferType::Index(Self::from_type::<I>())
+    }
+
+    pub fn from_type<I: IndexInt>() -> Self {
         Self { size: I::size() }
     }
 }
@@ -241,27 +290,100 @@ impl IndexInt for u32 {
     }
 }
 
-#[derive(Debug)]
-pub struct DeviceBuffer<BT> {
-    buffer: Buffer,
-    n_elems: u32,
-    buffer_type: BT,
-    stride: u16,
+#[derive(Debug, Clone, Copy)]
+pub struct StorageBufferType {
+    elem_size: u16,
+    elem_align: u16,
 }
 
-impl<BT: BufferType + Clone> DeviceBuffer<BT> {
+impl BufferTypeTrait for StorageBufferType {
+    const USAGE: vk::BufferUsageFlags = vk::BufferUsageFlags::STORAGE_BUFFER;
+    fn elem_align(&self) -> u16 {
+        self.elem_align
+    }
+    fn elem_size(&self) -> u16 {
+        self.elem_size
+    }
+
+    fn buffer_type(&self) -> BufferType {
+        BufferType::Storage(*self)
+    }
+}
+
+impl StorageBufferType {
+    pub fn as_enum<T: Std140>() -> BufferType {
+        BufferType::Storage(Self::from_type::<T>())
+    }
+
+    pub fn from_type<T: Std140>() -> Self {
+        Self {
+            elem_size: <T as Std140>::SIZE
+                .try_into()
+                .expect("Failed to narrow size"),
+            elem_align: <T as Std140>::ALIGNMENT
+                .try_into()
+                .expect("Alignment is too big, doesn't fit in u16"),
+        }
+    }
+}
+
+#[derive(Debug, Clone)]
+pub enum BufferType {
+    Vertex(VertexBufferType),
+    Index(IndexBufferType),
+    Uniform(UniformBufferType),
+    Storage(StorageBufferType),
+}
+
+impl BufferType {
+    pub fn ty(&self) -> BufferTypeId {
+        BufferTypeId(std::mem::discriminant(self))
+    }
+
+    pub fn elem_size(&self) -> u16 {
+        match self {
+            Self::Index(idx) => idx.elem_size(),
+            Self::Vertex(vertex) => vertex.elem_size(),
+            Self::Uniform(uni) => uni.elem_size(),
+            Self::Storage(s) => s.elem_size(),
+        }
+    }
+
+    pub fn elem_align(&self) -> u16 {
+        match self {
+            Self::Index(ty) => ty.elem_align(),
+            Self::Vertex(ty) => ty.elem_align(),
+            Self::Uniform(ty) => ty.elem_align(),
+            Self::Storage(s) => s.elem_align(),
+        }
+    }
+}
+
+#[derive(Debug)]
+pub struct DeviceBuffer {
+    buffer: Buffer,
+    n_elems: u32,
+    elem_size: u16,
+    elem_align: u16,
+    mutability: BufferMutability,
+    buffer_type: BufferType,
+}
+
+impl DeviceBuffer {
+    /// NOTE: The returned staging buffer needs to outlive the command buffer!
+    /// TODO: This should probably be unsafe or handled by the API...
     pub fn create(
         allocator: &AllocatorHandle,
         command_buffer: &mut CommandBuffer,
-        descriptor: &BufferDescriptor<BT>,
-        buffer_type: BT,
+        descriptor: &BufferDescriptor,
     ) -> Result<(Self, Option<Buffer>), MemoryError> {
         log::trace!("Creating buffer");
         let elem_size = descriptor.elem_size();
-        let elem_align = descriptor.elem_align(allocator);
+        let elem_align = descriptor.elem_align();
         let vk_buffer_usage_flags = descriptor.vk_usage_flags();
         let data = descriptor.data();
         let n_elems = descriptor.n_elems();
+        let buffer_type = descriptor.buffer_type().clone();
 
         let (buffer, staging) = match descriptor.mutability() {
             BufferMutability::Immutable => {
@@ -287,14 +409,14 @@ impl<BT: BufferType + Clone> DeviceBuffer<BT> {
             ),
         };
 
-        let stride = stride(elem_size, elem_align);
-
         Ok((
             Self {
                 buffer,
-                stride,
                 n_elems,
                 buffer_type,
+                elem_align,
+                elem_size,
+                mutability: descriptor.mutability(),
             },
             staging,
         ))
@@ -303,16 +425,22 @@ impl<BT: BufferType + Clone> DeviceBuffer<BT> {
     pub fn recreate(
         &mut self,
         allocator: &AllocatorHandle,
-        descriptor: &BufferDescriptor<BT>,
+        descriptor: &BufferDescriptor,
     ) -> Result<(), MemoryError> {
         assert!(descriptor.mutability() == BufferMutability::Mutable);
+        assert!(self.mutability == BufferMutability::Mutable);
+        assert_eq!(self.buffer_type().ty(), descriptor.buffer_type().ty());
         let elem_size = descriptor.elem_size();
         let n_elems = descriptor.n_elems();
-        let elem_align = descriptor.elem_align(allocator);
+        let elem_align = descriptor.elem_align();
         let vk_buffer_usage_flags = descriptor.vk_usage_flags();
         let data = descriptor.data();
-        let stride = stride(elem_size, elem_align);
+        let stride = compute_stride(elem_size, elem_align);
         let size = stride as usize * n_elems as usize;
+
+        // NOTE: The below seems a bit incorrect, what about the capacity that is lost when we overwrite the n_elems?
+        // It seems like it would lead to unaccessiable memory if we keep succesively using less and less of the buffer?
+        // TODO: Revisit this! We might want some kind of a resize/reserve/realloc API instead.
         if size > self.buffer.size() {
             self.buffer = Buffer::persistent_mapped(
                 allocator,
@@ -320,12 +448,44 @@ impl<BT: BufferType + Clone> DeviceBuffer<BT> {
                 data,
                 elem_size,
                 stride,
-            )?;
+            )?
         } else {
-            self.buffer.update_data_at(descriptor.data(), 0);
-        }
-        self.stride = stride;
+            self.write(0, descriptor.data());
+        };
+
+        self.n_elems = n_elems;
+        self.elem_align = elem_align;
+        self.elem_size = elem_size;
         Ok(())
+    }
+
+    /// Write the 'data' at 'offset' in this buffer.
+    /// # Panic:
+    /// * If the buffer is not mutable.
+    /// * If the data does not fit.
+    pub fn write(&mut self, offset: usize, data: &[u8]) {
+        if self.mutability != BufferMutability::Mutable {
+            panic!(
+                "Buffer at {:p} is not mutable, can't write to it",
+                self.buffer.ptr()
+            );
+        }
+
+        if (offset + data.len()) > self.buffer.size() {
+            panic!(
+                "Data of {} bytes does not fit into buffer ({:p}) at {} sized {}",
+                data.len(),
+                self.buffer.ptr(),
+                offset,
+                self.buffer.size(),
+            );
+        }
+
+        let dst_start = self.buffer.mut_ptr();
+        unsafe {
+            let dst = dst_start.add(offset);
+            util::copy_nonoverlapping_aligned(data, dst, self.elem_size, self.elem_align);
+        }
     }
 
     pub fn buffer_mut(&mut self) -> &mut Buffer {
@@ -344,41 +504,21 @@ impl<BT: BufferType + Clone> DeviceBuffer<BT> {
         self.n_elems
     }
 
-    pub fn buffer_type(&self) -> &BT {
+    pub fn buffer_type(&self) -> &BufferType {
         &self.buffer_type
     }
 
     pub fn stride(&self) -> u16 {
-        self.stride
+        compute_stride(self.elem_size, self.elem_align)
     }
 }
 
-pub type DeviceVertexBuffer = DeviceBuffer<VertexBufferType>;
-impl DeviceVertexBuffer {
-    pub fn format(&self) -> &VertexFormat {
-        &self.buffer_type().format
-    }
-}
-
-pub type DeviceIndexBuffer = DeviceBuffer<IndexBufferType>;
-impl DeviceIndexBuffer {
-    pub fn vk_index_type(&self) -> vk::IndexType {
-        vk::IndexType::from(self.buffer_type().size)
-    }
-}
-
-pub type DeviceUniformBuffer = DeviceBuffer<UniformBufferType>;
-impl DeviceUniformBuffer {
-    pub fn update_with<T: Uniform>(&mut self, data: &T, idx: u64) {
-        // SAFETY: The Uniform trait garantues that we can pass this as bytes to the gpu (or will atleast...)
-        let raw_data = unsafe { as_bytes(data) };
-        let offset = (idx * self.stride() as u64) as usize;
-        self.buffer_mut().update_data_at(raw_data, offset)
-    }
-
-    pub fn size(&self) -> u64 {
-        assert!(self.elem_size() <= self.stride());
-        self.stride() as u64 * self.n_elems() as u64
+impl DeviceBuffer {
+    pub fn vk_index_type(&self) -> Option<vk::IndexType> {
+        match &self.buffer_type {
+            BufferType::Index(idx) => Some(vk::IndexType::from(idx.size)),
+            _ => None,
+        }
     }
 }
 
@@ -392,6 +532,7 @@ pub struct HostBuffer<BT> {
 pub type HostVertexBuffer = HostBuffer<VertexBufferType>;
 pub type HostIndexBuffer = HostBuffer<IndexBufferType>;
 pub type HostUniformBuffer = HostBuffer<UniformBufferType>;
+pub type HostStorageBuffer = HostBuffer<StorageBufferType>;
 
 macro_rules! impl_host_buffer_from {
     ($name:ty, $trait:ident, $buffer_type:ident) => {
@@ -399,7 +540,7 @@ macro_rules! impl_host_buffer_from {
             pub fn from_vec<T: Copy + $trait + 'static>(data: Vec<T>) -> Self {
                 let n_elems = data.len() as u32;
                 let data = Arc::new(unsafe { ByteBuffer::from_vec(data) });
-                let buffer_type = $buffer_type::from_trait::<T>();
+                let buffer_type = $buffer_type::from_type::<T>();
                 Self {
                     data,
                     n_elems,
@@ -437,3 +578,181 @@ impl HostVertexBuffer {
         &self.buffer_type.format
     }
 }
+
+#[derive(Default)]
+pub struct DeviceBufferStorage {
+    buffered: BufferedStorage<DeviceBuffer>,
+    unbuffered: Storage<DeviceBuffer>,
+}
+
+impl DeviceBufferStorage {
+    pub fn get_all(&self, h: BufferHandle) -> Option<(&DeviceBuffer, Option<&DeviceBuffer>)> {
+        match h.mutability() {
+            BufferMutability::Immutable => self.unbuffered.get(h.handle()).map(|x| (x, None)),
+            BufferMutability::Mutable => {
+                self.buffered.get_all(h.handle()).map(|[x, y]| (x, Some(y)))
+            }
+        }
+    }
+
+    pub fn get_all_mut(
+        &mut self,
+        h: BufferHandle,
+    ) -> Option<(&mut DeviceBuffer, Option<&mut DeviceBuffer>)> {
+        match h.mutability() {
+            BufferMutability::Immutable => self.unbuffered.get_mut(h.handle()).map(|x| (x, None)),
+            BufferMutability::Mutable => self
+                .buffered
+                .get_all_mut(h.handle())
+                .map(|[x, y]| (x, Some(y))),
+        }
+    }
+
+    pub fn get_buffered(&self, h: BufferHandle, idx: usize) -> Option<&DeviceBuffer> {
+        assert_eq!(h.mutability(), BufferMutability::Mutable);
+        self.buffered.get(h.handle(), idx)
+    }
+
+    pub fn get_buffered_mut(&mut self, h: BufferHandle, idx: usize) -> Option<&mut DeviceBuffer> {
+        assert_eq!(h.mutability(), BufferMutability::Mutable);
+        self.buffered.get_mut(h.handle(), idx)
+    }
+
+    pub fn get_unbuffered(&self, h: BufferHandle) -> Option<&DeviceBuffer> {
+        assert_eq!(h.mutability(), BufferMutability::Immutable);
+        self.unbuffered.get(h.handle())
+    }
+
+    // TODO: BufferHandle here. Needs buffer type which exposes sizes etc.
+    pub fn add(
+        &mut self,
+        data0: DeviceBuffer,
+        data1: Option<DeviceBuffer>,
+    ) -> resurs::Handle<DeviceBuffer> {
+        match data1 {
+            Some(data1) => self.buffered.add([data0, data1]),
+            None => self.unbuffered.add(data0),
+        }
+    }
+
+    pub fn get(&self, h: BufferHandle, idx: usize) -> Option<&DeviceBuffer> {
+        match h.mutability() {
+            BufferMutability::Immutable => self.unbuffered.get(h.handle()),
+            BufferMutability::Mutable => self.buffered.get(h.handle(), idx),
+        }
+    }
+
+    pub fn get_mut(&mut self, h: BufferHandle, idx: usize) -> Option<&mut DeviceBuffer> {
+        match h.mutability() {
+            BufferMutability::Immutable => self.unbuffered.get_mut(h.handle()),
+            BufferMutability::Mutable => self.buffered.get_mut(h.handle(), idx),
+        }
+    }
+
+    pub fn has(&self, h: BufferHandle) -> bool {
+        match h.mutability() {
+            BufferMutability::Immutable => self.unbuffered.has(h.handle()),
+            BufferMutability::Mutable => self.buffered.has(h.handle()),
+        }
+    }
+
+    pub fn drain_filter<F1, F2>(&mut self, f1: F1, f2: F2) -> DrainFilter<'_, F1, F2, DeviceBuffer>
+    where
+        F1: FnMut(&mut DeviceBuffer) -> bool,
+        F2: FnMut(&mut [DeviceBuffer; 2]) -> bool,
+    {
+        DrainFilter {
+            unbuffered_iter: self.unbuffered.drain_filter(f1),
+            buffered_iter: self.buffered.drain_filter(f2),
+        }
+    }
+}
+
+pub struct DrainFilter<'a, F1, F2, DeviceBuffer>
+where
+    F1: FnMut(&mut DeviceBuffer) -> bool,
+    F2: FnMut(&mut [DeviceBuffer; 2]) -> bool,
+{
+    unbuffered_iter: resurs::storage::DrainFilter<'a, F1, DeviceBuffer>,
+    buffered_iter: resurs::storage::DrainFilter<'a, F2, [DeviceBuffer; 2]>,
+}
+
+impl<'a, F1, F2, DeviceBuffer> Iterator for DrainFilter<'a, F1, F2, DeviceBuffer>
+where
+    F1: FnMut(&mut DeviceBuffer) -> bool,
+    F2: FnMut(&mut [DeviceBuffer; 2]) -> bool,
+{
+    type Item = (Handle<DeviceBuffer>, DeviceBuffer, Option<DeviceBuffer>);
+    fn next(&mut self) -> Option<<Self as Iterator>::Item> {
+        if let Some((handle, item)) = self.unbuffered_iter.next() {
+            return Some((handle, item, None));
+        }
+
+        if let Some((handle, [item0, item1])) = self.buffered_iter.next() {
+            return Some((handle.as_unbuffered(), item0, Some(item1)));
+        }
+
+        None
+    }
+}
+
+use crate::resource::Async;
+
+#[derive(Default)]
+pub struct AsyncDeviceBufferStorage {
+    buffered: BufferedStorage<Async<DeviceBuffer>>,
+    unbuffered: Storage<Async<DeviceBuffer>>,
+}
+
+impl AsyncDeviceBufferStorage {
+    pub fn allocate(&mut self, desc: &BufferDescriptor<'_>) -> AsyncBufferHandle {
+        let raw_handle = match desc.mutability() {
+            BufferMutability::Immutable => self.unbuffered.add(Async::<DeviceBuffer>::Pending),
+            BufferMutability::Mutable => self.buffered.add([
+                Async::<DeviceBuffer>::Pending,
+                Async::<DeviceBuffer>::Pending,
+            ]),
+        };
+        unsafe {
+            AsyncBufferHandle::from_buffer(
+                raw_handle,
+                0,
+                desc.n_elems(),
+                desc.mutability(),
+                desc.buffer_type().ty(),
+            )
+        }
+    }
+
+    pub fn insert(&mut self, h: AsyncBufferHandle, buf0: DeviceBuffer, buf1: Option<DeviceBuffer>) {
+        match h.mutability {
+            BufferMutability::Immutable => {
+                let loc: &mut Async<DeviceBuffer> = self
+                    .unbuffered
+                    .get_mut(&h.h)
+                    .expect("Expected handle to be allocated");
+                *loc = Async::Available(buf0);
+            }
+            BufferMutability::Mutable => {
+                let loc = self
+                    .buffered
+                    .get_all_mut(&h.h)
+                    .expect("Expected handle to be allocated");
+                loc[0] = Async::Available(buf0);
+                loc[1] = Async::Available(buf1.expect("Mutable buffers require two buffers"));
+            }
+        }
+    }
+
+    pub fn drain_available(&mut self) -> DrainIterator<'_, DeviceBuffer> {
+        let f1 = |x: &mut Async<DeviceBuffer>| std::matches!(x, Async::Available(_));
+        let f2 = |x: &mut [Async<DeviceBuffer>; 2]| std::matches!(x[0], Async::Available(_));
+        DrainFilter {
+            unbuffered_iter: self.unbuffered.drain_filter(f1),
+            buffered_iter: self.buffered.drain_filter(f2),
+        }
+    }
+}
+
+pub type DrainIterator<'a, T> =
+    DrainFilter<'a, fn(&mut Async<T>) -> bool, fn(&mut [Async<T>; 2]) -> bool, Async<T>>;

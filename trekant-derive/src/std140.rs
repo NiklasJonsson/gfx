@@ -14,7 +14,7 @@ impl std::fmt::Display for CompileError {
 }
 
 fn derive_std140_compat(di: &DeriveInput) -> Result<TokenStream, CompileError> {
-    let trait_name = quote! { trekant::traits::Std140 };
+    let trait_name = quote! { trekant::Std140 };
     let name = &di.ident;
 
     let data = match &di.data {
@@ -115,6 +115,8 @@ fn derive_std140_compat(di: &DeriveInput) -> Result<TokenStream, CompileError> {
         impl #impl_generics #name #ty_generics #where_clause {
             #align_of_impls
         }
+
+        impl #impl_generics trekant::std140::Std140Struct for #name #ty_generics #where_clause {}
     })
 }
 

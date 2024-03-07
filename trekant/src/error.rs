@@ -14,6 +14,7 @@ pub enum ResizeReason {
     SubOptimal,
 }
 
+// TODO: These are way too many and too detailed
 #[derive(Debug, Error)]
 pub enum RenderError {
     Command(#[from] command::CommandError),

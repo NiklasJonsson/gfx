@@ -7,16 +7,16 @@
         {
             "type": "lldb",
             "request": "launch",
-            "name": "Debug unit tests in library 'trekanten'",
+            "name": "Debug unit tests in library 'trekant'",
             "cargo": {
                 "args": [
                     "test",
                     "--no-run",
                     "--lib",
-                    "--package=trekanten"
+                    "--package=trekant"
                 ],
                 "filter": {
-                    "name": "trekanten",
+                    "name": "trekant",
                     "kind": "lib"
                 }
             },
@@ -31,7 +31,7 @@
                 "args": [
                     "build",
                     "--example=vulkan-tutorial-threaded",
-                    "--package=trekanten"
+                    "--package=trekant"
                 ],
                 "filter": {
                     "name": "vulkan-tutorial-threaded",
@@ -50,7 +50,7 @@
                     "test",
                     "--no-run",
                     "--example=vulkan-tutorial-threaded",
-                    "--package=trekanten"
+                    "--package=trekant"
                 ],
                 "filter": {
                     "name": "vulkan-tutorial-threaded",
@@ -68,7 +68,7 @@
                 "args": [
                     "build",
                     "--example=vulkan-tutorial",
-                    "--package=trekanten"
+                    "--package=trekant"
                 ],
                 "filter": {
                     "name": "vulkan-tutorial",
@@ -87,7 +87,7 @@
                     "test",
                     "--no-run",
                     "--example=vulkan-tutorial",
-                    "--package=trekanten"
+                    "--package=trekant"
                 ],
                 "filter": {
                     "name": "vulkan-tutorial",
@@ -106,7 +106,7 @@
                     "test",
                     "--no-run",
                     "--test=test-derive-macro",
-                    "--package=trekanten"
+                    "--package=trekant"
                 ],
                 "filter": {
                     "name": "test-derive-macro",
@@ -157,16 +157,16 @@
         {
             "type": "lldb",
             "request": "launch",
-            "name": "Debug unit tests in library 'ramneryd'",
+            "name": "Debug unit tests in library 'ram'",
             "cargo": {
                 "args": [
                     "test",
                     "--no-run",
                     "--lib",
-                    "--package=ramneryd"
+                    "--package=ram"
                 ],
                 "filter": {
-                    "name": "ramneryd",
+                    "name": "ram",
                     "kind": "lib"
                 }
             },
@@ -189,13 +189,14 @@
                 }
             },
             "args": [
-                "--gltf-file",
-                "../glTF-Sample-Models/2.0/Sponza/glTF/Sponza.gltf",
-                // "--spawn-plane",
-                // "--spawn-cube",
+                // "--gltf-file",
+                // "../glTF-Sample-Models/2.0/Sponza/glTF/Sponza.gltf",
+                "--spawn-plane",
+                "--many-cube-lights",
                 "--rsf-file",
                 "data/ambient_light.ron.rsf",
                 // "--sun-simulation",
+                // "--rsf-file",
                 //"data/spot_light.ron.rsf",
             ],
             "cwd": "${workspaceFolder}"

@@ -8,25 +8,21 @@ use winit::{
 use nalgebra_glm as glm;
 use resurs::Handle;
 
-use buffer::{
-    BufferHandle, BufferMutability, DeviceIndexBuffer, DeviceUniformBuffer, DeviceVertexBuffer,
-};
-use trekant::buffer;
 use trekant::pipeline::{
     GraphicsPipeline, GraphicsPipelineDescriptor, ShaderDescriptor, ShaderStage,
 };
 use trekant::util;
 use trekant::vertex::{VertexDefinition, VertexFormat};
+use trekant::{BufferDescriptor, BufferHandle, BufferMutability};
 use trekant::{RenderPass, Renderer, Texture};
 
-use trekant::ResourceManager as _;
-use trekant::Std140Compat;
+use trekant::Std140;
 
 use std::time::{Duration, Instant};
 
 const WINDOW_HEIGHT: u32 = 300;
 const WINDOW_WIDTH: u32 = 300;
-const WINDOW_TITLE: &str = "Trekanten Vulkan Tutoria";
+const WINDOW_TITLE: &str = "Trekanten Vulkan Tutorial";
 
 struct State {
     pub window: winit::window::Window,
@@ -48,7 +44,6 @@ impl State {
         (
             Self {
                 window,
-
                 frame_times: [std::time::Duration::default(); 10],
                 frame_time_idx: 0,
                 start: Instant::now(),
@@ -94,15 +89,15 @@ impl State {
     }
 }
 
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, bytemuck::Zeroable, bytemuck::Pod)]
 #[repr(C, packed)]
 struct Vertex {
-    pos: glm::Vec3,
-    col: glm::Vec3,
-    tex_coord: glm::Vec2,
+    pos: [f32; 3],
+    col: [f32; 3],
+    tex_coord: [f32; 2],
 }
 
-impl VertexDefinition for Vertex {
+unsafe impl VertexDefinition for Vertex {
     fn format() -> VertexFormat {
         VertexFormat::from([
             util::Format::FLOAT3,
@@ -112,21 +107,21 @@ impl VertexDefinition for Vertex {
     }
 }
 
-#[derive(Clone, Copy, Default)]
+#[derive(Clone, Copy, Default, bytemuck::Zeroable, bytemuck::Pod)]
 #[repr(transparent)]
-struct Mat4(glm::Mat4);
+struct Mat4([[f32; 4]; 4]);
 
-#[derive(Clone, Copy, Std140Compat)]
+unsafe impl trekant::Std140 for Mat4 {
+    const SIZE: usize = 64;
+    const ALIGNMENT: usize = 16;
+}
+
+#[derive(Clone, Copy, Std140, bytemuck::Zeroable, bytemuck::Pod)]
 #[repr(C)]
 struct UniformBufferObject {
     model: Mat4,
     view: Mat4,
     proj: Mat4,
-}
-
-unsafe impl trekant::Std140 for Mat4 {
-    const SIZE: usize = 64;
-    const ALIGNMENT: usize = 16;
 }
 
 fn get_fname(dir: &str, target: &str) -> std::path::PathBuf {
@@ -169,19 +164,21 @@ const OBJ_URL: &str = "https://vulkan-tutorial.com/resources/viking_room.obj";
 const TEX_URL: &str = "https://vulkan-tutorial.com/resources/viking_room.png";
 
 static RAW_VERT_SPV: &[u32] = inline_spirv::include_spirv!(
-    "examples/shaders/shader.vert.glsl",
+    "examples/shaders/vulkan-tutorial.vert.glsl",
     vert,
     glsl,
     entry = "main"
 );
 static RAW_FRAG_SPV: &[u32] = inline_spirv::include_spirv!(
-    "examples/shaders/shader.frag.glsl",
+    "examples/shaders/vulkan-tutorial.frag.glsl",
     frag,
     glsl,
     entry = "main"
 );
 
-fn load_viking_house() -> (Vec<Vertex>, Vec<u32>) {
+type VertexIndexTy = u32;
+
+fn load_viking_house() -> (Vec<Vertex>, Vec<VertexIndexTy>) {
     let mut cursor = load_url("models", OBJ_URL);
 
     let (mut models, _) = tobj::load_obj_buf(&mut cursor, true, |_| {
@@ -205,11 +202,12 @@ fn load_viking_house() -> (Vec<Vertex>, Vec<u32>) {
         ..
     } = model;
 
+    vertices.reserve(positions.len() / 3);
     for (pos, tc) in positions.chunks(3).zip(texcoords.chunks(2)) {
         let vertex = Vertex {
-            pos: glm::vec3(pos[0], pos[1], pos[2]),
-            col: glm::vec3(1.0, 1.0, 1.0),
-            tex_coord: glm::vec2(tc[0], 1.0 - tc[1]),
+            pos: [pos[0], pos[1], pos[2]],
+            col: [1.0, 1.0, 1.0],
+            tex_coord: [tc[0], 1.0 - tc[1]],
         };
         vertices.push(vertex);
     }
@@ -225,25 +223,28 @@ fn get_next_mvp(start: &std::time::Instant, aspect_ratio: f32) -> UniformBufferO
     let time = time.as_secs_f32();
 
     let mut ubo = UniformBufferObject {
-        model: Mat4(glm::rotate(
-            &glm::identity(),
-            time * std::f32::consts::FRAC_PI_2,
-            &glm::vec3(0.0, 0.0, 1.0),
-        )),
-        view: Mat4(glm::look_at(
-            &glm::vec3(2.0, 2.0, 2.0),
-            &glm::vec3(0.0, 0.0, 0.0),
-            &glm::vec3(0.0, 0.0, 1.0),
-        )),
-        proj: Mat4(glm::perspective_zo(
-            aspect_ratio,
-            std::f32::consts::FRAC_PI_4,
-            0.1,
-            10.0,
-        )),
+        model: Mat4(
+            glm::rotate(
+                &glm::identity(),
+                time * std::f32::consts::FRAC_PI_2,
+                &glm::vec3(0.0, 0.0, 1.0),
+            )
+            .into(),
+        ),
+        view: Mat4(
+            glm::look_at(
+                &glm::vec3(2.0, 2.0, 2.0),
+                &glm::vec3(0.0, 0.0, 0.0),
+                &glm::vec3(0.0, 0.0, 1.0),
+            )
+            .into(),
+        ),
+        proj: Mat4(
+            glm::perspective_zo(aspect_ratio, std::f32::consts::FRAC_PI_4, 0.1, 10.0).into(),
+        ),
     };
 
-    ubo.proj.0[(1, 1)] *= -1.0;
+    ubo.proj.0[1][1] *= -1.0;
 
     ubo
 }
@@ -260,40 +261,41 @@ fn create_texture(renderer: &mut Renderer) -> Handle<Texture> {
         .expect("Failed to create texture")
 }
 
-type Mesh = (
-    BufferHandle<DeviceVertexBuffer>,
-    BufferHandle<DeviceIndexBuffer>,
-);
+type Mesh = (BufferHandle, BufferHandle);
 
 fn create_mesh(renderer: &mut Renderer) -> Mesh {
     let (vertices, indices) = load_viking_house();
 
     let vertex_buffer_descriptor =
-        buffer::VertexBufferDescriptor::from_slice(&vertices, BufferMutability::Immutable);
+        BufferDescriptor::vertex_buffer(&vertices, BufferMutability::Immutable);
+
     let vertex_buffer = renderer
-        .create_resource_blocking(vertex_buffer_descriptor)
+        .create_buffer(vertex_buffer_descriptor)
         .expect("Failed to create vertex buffer");
 
     let index_buffer_descriptor =
-        buffer::IndexBufferDescriptor::from_slice(&indices, BufferMutability::Immutable);
+        BufferDescriptor::index_buffer(&indices, BufferMutability::Immutable);
     let index_buffer = renderer
-        .create_resource_blocking(index_buffer_descriptor)
+        .create_buffer(index_buffer_descriptor)
         .expect("Failed to create index buffer");
     (vertex_buffer, index_buffer)
 }
 
-fn create_mvp_ubuf(renderer: &mut Renderer) -> BufferHandle<DeviceUniformBuffer> {
-    let data = vec![UniformBufferObject {
+fn create_mvp_ubuf(renderer: &mut Renderer) -> BufferHandle {
+    let data = UniformBufferObject {
         model: Mat4::default(),
         view: Mat4::default(),
         proj: Mat4::default(),
-    }];
+    };
 
-    let uniform_buffer_desc =
-        buffer::UniformBufferDescriptor::from_slice(&data, BufferMutability::Mutable);
+    let uniform_buffer_desc = BufferDescriptor::uniform_buffer(
+        std::slice::from_ref(&data),
+        BufferMutability::Mutable,
+        trekant::BufferLayout::Std140,
+    );
 
     renderer
-        .create_resource_blocking(uniform_buffer_desc)
+        .create_buffer(uniform_buffer_desc)
         .expect("Failed to create uniform buffer")
 }
 
@@ -337,8 +339,8 @@ fn main() {
     let uniform_buffer_handle = create_mvp_ubuf(&mut renderer);
     let texture_handle = create_texture(&mut renderer);
     let desc_set_handle = trekant::PipelineResourceSet::builder(&mut renderer)
-        .add_buffer(&uniform_buffer_handle, 0, ShaderStage::VERTEX)
-        .add_texture(&texture_handle, 1, ShaderStage::FRAGMENT, false)
+        .add_buffer(uniform_buffer_handle, 0, ShaderStage::VERTEX)
+        .add_texture(texture_handle, 1, ShaderStage::FRAGMENT, false)
         .build();
 
     event_loop.run(move |event, _, control_flow| {
@@ -363,9 +365,11 @@ fn main() {
                 .expect("Failed to start frame");
 
                 let next_mvp = get_next_mvp(&state.start, aspect_ratio);
+
                 frame
-                    .update_uniform_blocking(&uniform_buffer_handle, &next_mvp)
-                    .expect("Failed to update uniform buffer!");
+                    .write_buffer_element(uniform_buffer_handle, &next_mvp, 0)
+                    .expect("Failed to update uniform buffer");
+
                 let cmd_buf = frame
                     .new_command_buffer()
                     .expect("Failed to build render command buffer");
@@ -377,7 +381,7 @@ fn main() {
                 builder
                     .bind_graphics_pipeline(&gfx_pipeline_handle)
                     .bind_shader_resource_group(0, &desc_set_handle, &gfx_pipeline_handle)
-                    .draw_mesh(&vertex_buffer, &index_buffer);
+                    .draw_mesh(vertex_buffer, index_buffer);
 
                 let cmd_buf = builder.end().expect("Failed to end render command buffer");
 

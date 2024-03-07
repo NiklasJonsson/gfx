@@ -21,6 +21,8 @@ struct Args {
     #[clap(long)]
     spawn_cube: bool,
     #[clap(long)]
+    many_cube_lights: bool,
+    #[clap(long)]
     sun_simulation: bool,
 }
 
@@ -175,6 +177,80 @@ impl Module for SunSimulation {
     }
 }
 
+struct ManyCubeLights;
+
+impl Module for ManyCubeLights {
+    fn load(&mut self, loader: &mut ModuleLoader) {
+        let world = &mut loader.world;
+
+        let spawn_cube = |world: &mut World, i: usize, x: f32, z: f32| {
+            world
+                .create_entity()
+                .with(Name::from(format!("Cube {i}")))
+                .with(Transform::pos(x, 3.0, z))
+                .with(render::Shape::Box {
+                    width: 1.0,
+                    height: 1.0,
+                    depth: 1.0,
+                })
+                .with(render::material::PhysicallyBased {
+                    base_color_factor: Rgba {
+                        r: 0.3,
+                        g: 0.6,
+                        b: 0.3,
+                        a: 1.0,
+                    },
+                    metallic_factor: 0.0,
+                    roughness_factor: 0.7,
+                    ..Default::default()
+                })
+                .build();
+        };
+        let spawn_light = |world: &mut World, i: usize, x: f32, z: f32| {
+            world
+                .create_entity()
+                .with(Name::from(format!("Spot light {i}")))
+                .with(Transform {
+                    position: Vec3 { x, y: 7.0, z },
+                    // Pointing towards -y
+                    rotation: Quat {
+                        x: -0.70710677,
+                        y: 0.0,
+                        z: 0.0,
+                        w: 0.70710677,
+                    },
+                    scale: 1.0,
+                })
+                .with(render::Light::Spot {
+                    color: Rgb {
+                        r: 1.0,
+                        g: 1.0,
+                        b: 1.0,
+                    },
+                    angle: std::f32::consts::FRAC_PI_8,
+                    range: std::ops::Range {
+                        start: 0.1,
+                        end: 10.0,
+                    },
+                })
+                .build();
+        };
+        const DIST: f32 = 5.0;
+
+        let mut i = 0;
+        let coords = [-1.0, 0.0, 1.0];
+        for x in coords {
+            for z in coords {
+                let x = x * DIST;
+                let z = z * DIST;
+                spawn_cube(world, i, x, z);
+                spawn_light(world, i, x, z);
+                i += 1;
+            }
+        }
+    }
+}
+
 fn main() {
     let args = Args::parse();
     let mut init = ram::Init::new();
@@ -188,6 +264,10 @@ fn main() {
 
     if args.sun_simulation {
         init.add_module(SunSimulation);
+    }
+
+    if args.many_cube_lights {
+        init.add_module(ManyCubeLights);
     }
 
     init.run();

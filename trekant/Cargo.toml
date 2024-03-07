@@ -6,10 +6,8 @@ edition = "2021"
 
 [dependencies]
 ash = "0.37.3"
-spirv-reflect = "0.2.3"
+rspirv-reflect = "0.8.0"
 vma = "0.3.0"
-# vk-mem = "0.2.2"
-# vk-mem = { git = "https://github.com/NiklasJonsson/vk-mem-rs", branch = "master" }
 
 # Windowing
 ash-window = "0.12.0"
@@ -23,11 +21,12 @@ thiserror = "1.0.20"
 derive_builder = "0.10.2"
 num-traits = "0.2.14"
 resurs = { path = "../resurs" }
-parking_lot = "0.11.1"
 bitflags = "1.2"
 trekant-derive = { path = "../trekant-derive" }
 
 profiling = "1.0.3"
+bytemuck = { version = "1.15", features = ["derive"] }
+
 
 [features]
 profile-with-puffin = ["profiling/profile-with-puffin"]

@@ -286,7 +286,7 @@ impl crate::Module for DefaultCamera {
 }
 
 #[cfg(test)]
-mod test {
+mod tests {
     use super::*;
 
     fn check_obb_points<P: Into<Vec3> + Copy>(obb: &Obb, points: &[P], should_contain: bool) {

@@ -2,9 +2,9 @@ use crate::ecs;
 use crate::ecs::prelude::*;
 use std::path::{Path, PathBuf};
 
-use trekant::buffer::{HostIndexBuffer, HostVertexBuffer, VertexBufferType};
 use trekant::util;
 use trekant::vertex::VertexFormat;
+use trekant::{HostIndexBuffer, HostVertexBuffer, VertexBufferType};
 use trekant::{MipMaps, TextureDescriptor};
 
 use ram_derive::Visitable;
@@ -71,9 +71,9 @@ fn check_supported(primitive: &gltf::Primitive<'_>) {
 }
 
 // TODO: Find a way to handle binding mapping here and in shader in one place.
-fn interleave_vertex_buffer<'a>(
+fn interleave_vertex_buffer(
     ctx: &RecGltfCtx,
-    primitive: &gltf::Primitive<'a>,
+    primitive: &gltf::Primitive<'_>,
 ) -> (HostVertexBuffer, bool) {
     check_supported(primitive);
     let reader = primitive.reader(|buffer| Some(&ctx.buffers[buffer.index()]));
@@ -112,40 +112,32 @@ fn interleave_vertex_buffer<'a>(
     match (colors, tex_coords, tangents) {
         (None, Some(tex_coords), Some(tangents)) => {
             for ((uv, tan), (pos, nor)) in tex_coords.into_f32().zip(tangents).zip(it) {
-                unsafe {
-                    data.extend_from_slice(util::as_bytes(&pos));
-                    data.extend_from_slice(util::as_bytes(&nor));
-                    data.extend_from_slice(util::as_bytes(&uv));
-                    data.extend_from_slice(util::as_bytes(&tan));
-                }
+                data.extend_from_slice(util::as_bytes(&pos));
+                data.extend_from_slice(util::as_bytes(&nor));
+                data.extend_from_slice(util::as_bytes(&uv));
+                data.extend_from_slice(util::as_bytes(&tan));
             }
         }
         (Some(colors), Some(tex_coords), None) => {
             for ((uv, col), (pos, nor)) in tex_coords.into_f32().zip(colors.into_rgba_f32()).zip(it)
             {
-                unsafe {
-                    data.extend_from_slice(util::as_bytes(&pos));
-                    data.extend_from_slice(util::as_bytes(&nor));
-                    data.extend_from_slice(util::as_bytes(&uv));
-                    data.extend_from_slice(util::as_bytes(&col));
-                }
+                data.extend_from_slice(util::as_bytes(&pos));
+                data.extend_from_slice(util::as_bytes(&nor));
+                data.extend_from_slice(util::as_bytes(&uv));
+                data.extend_from_slice(util::as_bytes(&col));
             }
         }
         (None, Some(tex_coords), None) => {
             for (uv, (pos, nor)) in tex_coords.into_f32().zip(it) {
-                unsafe {
-                    data.extend_from_slice(util::as_bytes(&pos));
-                    data.extend_from_slice(util::as_bytes(&nor));
-                    data.extend_from_slice(util::as_bytes(&uv));
-                }
+                data.extend_from_slice(util::as_bytes(&pos));
+                data.extend_from_slice(util::as_bytes(&nor));
+                data.extend_from_slice(util::as_bytes(&uv));
             }
         }
         (None, None, None) => {
             for (pos, nor) in it {
-                unsafe {
-                    data.extend_from_slice(util::as_bytes(&pos));
-                    data.extend_from_slice(util::as_bytes(&nor));
-                }
+                data.extend_from_slice(util::as_bytes(&pos));
+                data.extend_from_slice(util::as_bytes(&nor));
             }
         }
         _ => unimplemented!("Unsupported vertex format"),

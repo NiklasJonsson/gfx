@@ -1,10 +1,6 @@
-use ash::vk;
+use ash::vk::{self, ShaderStageFlags};
 
 use thiserror::Error;
-
-use spirv_reflect::types::descriptor::ReflectDescriptorType;
-use spirv_reflect::types::variable::ReflectShaderStageFlags;
-use spirv_reflect::ShaderModule;
 
 #[derive(Debug, Default)]
 pub struct ReflectionData {
@@ -32,7 +28,11 @@ impl ReflectionData {
                         for binding in set.bindings.iter_mut() {
                             if binding.binding == other_binding.binding {
                                 found_binding = true;
-                                assert_eq!(binding.descriptor_type, other_binding.descriptor_type);
+                                assert_eq!(
+                                    binding.descriptor_type, other_binding.descriptor_type,
+                                    "Descriptor set mismatch in binding {} in set {}",
+                                    binding.binding, set.set_idx
+                                );
                                 assert_eq!(
                                     binding.descriptor_count,
                                     other_binding.descriptor_count
@@ -60,7 +60,7 @@ impl ReflectionData {
 
     fn merge_push_constants(&mut self, mut constants: Vec<vk::PushConstantRange>) {
         for pc_range in self.push_constants.iter() {
-            for incoming in constants.iter() {
+            for incoming in constants.iter_mut() {
                 if pc_range.offset + pc_range.size > incoming.offset {
                     log::warn!("Found overlapping push constant range");
                     log::warn!("{:?} ends after {:?} begins", pc_range, incoming);
@@ -89,107 +89,67 @@ pub struct DescriptorSetLayoutData {
 
 #[derive(Debug, Error)]
 pub enum SpirvError {
-    #[error("Couldn't load spirv: {0}")]
-    Loading(&'static str),
     #[error("Couldn't parse spirv: {0}")]
-    Parsing(&'static str),
+    Parsing(#[from] rspirv_reflect::ReflectError),
 }
 
-fn map_shader_stage_flags(refl_stage: ReflectShaderStageFlags) -> vk::ShaderStageFlags {
-    let mut out = vk::ShaderStageFlags::empty();
-
-    if refl_stage.contains(ReflectShaderStageFlags::VERTEX) {
-        out |= vk::ShaderStageFlags::VERTEX;
-    }
-
-    if refl_stage.contains(ReflectShaderStageFlags::FRAGMENT) {
-        out |= vk::ShaderStageFlags::FRAGMENT;
-    }
-
-    if refl_stage & (!(ReflectShaderStageFlags::VERTEX | ReflectShaderStageFlags::FRAGMENT))
-        != ReflectShaderStageFlags::empty()
-    {
-        unimplemented!("Unsupported shader stage: {:?}", refl_stage);
-    }
-
-    out
+fn to_vk_descriptor_type(refl_desc_ty: rspirv_reflect::DescriptorType) -> vk::DescriptorType {
+    // rspriv-reflect guarantees bit-exact repr with ash/vk
+    vk::DescriptorType::from_raw(refl_desc_ty.0.try_into().unwrap())
 }
 
-fn map_descriptor_type(refl_desc_ty: &ReflectDescriptorType) -> vk::DescriptorType {
-    match *refl_desc_ty {
-        ReflectDescriptorType::UniformBuffer => vk::DescriptorType::UNIFORM_BUFFER,
-        ReflectDescriptorType::CombinedImageSampler => vk::DescriptorType::COMBINED_IMAGE_SAMPLER,
-        _ => unimplemented!("Unsupported descriptor type: {:?}", refl_desc_ty),
+fn to_descriptor_count(count: rspirv_reflect::BindingCount) -> u32 {
+    use rspirv_reflect::BindingCount as Count;
+
+    match count {
+        Count::One => 1,
+        Count::StaticSized(v) => v.try_into().unwrap(),
+        Count::Unbounded => unimplemented!(),
     }
 }
 
-pub fn log_bindings(bindings: &[spirv_reflect::types::descriptor::ReflectDescriptorBinding]) {
-    log::trace!("With {} bindings", bindings.len());
-    for b in bindings.iter() {
-        log::trace!("\tname: {}", b.name);
-        log::trace!("\tbinding: {}", b.binding);
-        log::trace!("\tset: {}", b.set);
-        log::trace!("\tdescriptor type: {:?}", b.descriptor_type);
-        log::trace!("\tresource type: {:?}", b.resource_type);
-        log::trace!(
-            "\ttype name: {:?}",
-            b.type_description.as_ref().map(|x| &x.type_name)
-        );
-    }
-}
-
-pub fn parse_spirv(spv_data: &[u32]) -> Result<ReflectionData, SpirvError> {
-    let module = ShaderModule::load_u32_data(spv_data).map_err(SpirvError::Loading)?;
-    let desc_sets = module
-        .enumerate_descriptor_sets(None)
-        .map_err(SpirvError::Parsing)?;
-    let stage_flags = map_shader_stage_flags(module.get_shader_stage());
+pub fn parse_spirv(
+    spv_data: &[u32],
+    stage: ShaderStageFlags,
+) -> Result<ReflectionData, SpirvError> {
+    let spv_data: &[u8] = bytemuck::cast_slice(spv_data);
+    let module = rspirv_reflect::Reflection::new_from_spirv(spv_data)?;
+    let desc_sets = module.get_descriptor_sets()?;
     let mut desc_layouts = Vec::with_capacity(desc_sets.len());
-    for refl_desc_set in desc_sets.iter() {
-        let set_idx = refl_desc_set.set;
-        log::trace!("Found descriptor set: {}", set_idx);
-        log_bindings(&refl_desc_set.bindings);
+    for (set_idx, desc_set) in desc_sets.into_iter() {
+        log::trace!("Found descriptor set: {set_idx}");
+        let mut bindings = Vec::with_capacity(desc_set.len());
+        for (bind_idx, descriptor_info) in desc_set.into_iter() {
+            let binding = vk::DescriptorSetLayoutBinding {
+                binding: bind_idx,
+                descriptor_type: to_vk_descriptor_type(descriptor_info.ty),
+                descriptor_count: to_descriptor_count(descriptor_info.binding_count),
+                stage_flags: stage,
+                p_immutable_samplers: std::ptr::null(),
+            };
 
-        let bindings: Vec<vk::DescriptorSetLayoutBinding> = refl_desc_set
-            .bindings
-            .iter()
-            .map(|refl_binding| vk::DescriptorSetLayoutBinding {
-                binding: refl_binding.binding,
-                descriptor_type: map_descriptor_type(&refl_binding.descriptor_type),
-                descriptor_count: refl_binding.count,
-                stage_flags,
-                ..Default::default()
-            })
-            .collect();
+            log::trace!("\tdesc set {set_idx}: {binding:?}",);
+            bindings.push(binding);
+        }
 
         log::trace!("Created bindings:");
         for b in &bindings {
-            log::trace!("\t{:?}", b);
+            log::trace!("\t{b:?}");
         }
 
         desc_layouts.push(DescriptorSetLayoutData {
             set_idx: set_idx as usize,
             bindings,
-        })
+        });
     }
 
-    let pc_blocks = module
-        .enumerate_push_constant_blocks(None)
-        .map_err(SpirvError::Parsing)?;
-
-    let mut push_constants = Vec::with_capacity(pc_blocks.len());
-    for pc_block in pc_blocks.iter() {
-        log::trace!("Found push constant block:");
-        log::trace!("\tname: {}", pc_block.name);
-        log::trace!("\toffset: {}", pc_block.offset);
-        log::trace!("\tsize: {}", pc_block.size);
-        assert_eq!(pc_block.size, pc_block.padded_size);
-        assert_eq!(pc_block.offset, pc_block.absolute_offset);
-
+    let pc = module.get_push_constant_range()?;
+    let mut push_constants = Vec::new();
+    if let Some(pc) = pc {
         push_constants.push(vk::PushConstantRange {
-            stage_flags,
-            offset: pc_block.offset,
-            size: pc_block.size,
+            stage_flags: stage,
+            offset: pc.offset,
+            size: pc.size,
         });
     }
 
@@ -275,11 +235,33 @@ mod tests {
         frag
     );
 
+    static STORAGE_BUFFER_SPV_FRAG: &[u32] = inline_spirv::inline_spirv!(
+        r"
+        #version 450
+        #extension GL_ARB_separate_shader_objects : enable
+
+        layout(std140, set = 0, binding = 0) readonly buffer WorldToShadow {
+            mat4 data[];
+        } world_to_shadow;
+
+        // layout(location = 0) in vec3 fragColor;
+        // layout(location = 1) in vec2 fragTexCoord;
+
+        // layout(location = 0) out vec4 outColor;
+
+        void main() {
+            // outColor = texture(texs[0], fragTexCoord).xxyy * vec4(fragColor, 1.0) + vec4(fragTexCoord, 1.0, 0.0);
+        }
+    ",
+        frag
+    );
+
     use super::*;
 
     #[test]
     fn parse_vert_descriptor_set_layout() {
-        let refl_data = parse_spirv(UBO_SPV_VERT).expect("Failed to parse!");
+        let refl_data =
+            parse_spirv(UBO_SPV_VERT, vk::ShaderStageFlags::VERTEX).expect("Failed to parse!");
 
         assert_eq!(refl_data.push_constants.len(), 0);
         let res = refl_data.desc_layouts;
@@ -297,7 +279,8 @@ mod tests {
 
     #[test]
     fn parse_frag_descriptor_set_layout() {
-        let refl_data = parse_spirv(UBO_SPV_FRAG).expect("Failed to parse!");
+        let refl_data =
+            parse_spirv(UBO_SPV_FRAG, vk::ShaderStageFlags::FRAGMENT).expect("Failed to parse!");
 
         assert_eq!(refl_data.push_constants.len(), 0);
         let res = refl_data.desc_layouts;
@@ -318,7 +301,8 @@ mod tests {
 
     #[test]
     fn parse_frag_push_constant() {
-        let res = parse_spirv(PUSH_CONSTANT_SPV_FRAG).expect("Failed to parse!");
+        let res = parse_spirv(PUSH_CONSTANT_SPV_FRAG, vk::ShaderStageFlags::FRAGMENT)
+            .expect("Failed to parse!");
         assert_eq!(res.desc_layouts.len(), 0);
         assert_eq!(res.push_constants.len(), 1);
 
@@ -330,7 +314,8 @@ mod tests {
 
     #[test]
     fn parse_array_of_textures() {
-        let res = parse_spirv(ARRAY_TEX_SPV_FRAG).expect("Failed to parse!");
+        let res = parse_spirv(ARRAY_TEX_SPV_FRAG, vk::ShaderStageFlags::FRAGMENT)
+            .expect("Failed to parse!");
         assert_eq!(res.desc_layouts.len(), 1);
         assert_eq!(res.push_constants.len(), 0);
 
@@ -349,10 +334,32 @@ mod tests {
     }
 
     #[test]
+    fn parse_storage_buffer() {
+        let res = parse_spirv(STORAGE_BUFFER_SPV_FRAG, vk::ShaderStageFlags::FRAGMENT)
+            .expect("Failed to parse!");
+        assert_eq!(res.desc_layouts.len(), 1);
+        assert_eq!(res.push_constants.len(), 0);
+
+        assert_eq!(res.desc_layouts[0].bindings.len(), 1);
+        assert_eq!(res.desc_layouts[0].set_idx, 0);
+
+        let binding: vk::DescriptorSetLayoutBinding = res.desc_layouts[0].bindings[0];
+
+        assert_eq!(binding.descriptor_type, vk::DescriptorType::STORAGE_BUFFER);
+        assert_eq!(binding.binding, 0);
+        assert_eq!(binding.descriptor_count, 1);
+        assert_eq!(binding.stage_flags, vk::ShaderStageFlags::FRAGMENT);
+    }
+
+    #[test]
     fn merge_descriptor_set_layout() {
         let mut res = ReflectionData::new();
-        res.merge(parse_spirv(UBO_SPV_VERT).expect("Failed to parse!"));
-        res.merge(parse_spirv(UBO_SPV_FRAG).expect("Failed to parse!"));
+        res.merge(
+            parse_spirv(UBO_SPV_VERT, vk::ShaderStageFlags::VERTEX).expect("Failed to parse!"),
+        );
+        res.merge(
+            parse_spirv(UBO_SPV_FRAG, vk::ShaderStageFlags::FRAGMENT).expect("Failed to parse!"),
+        );
         let layouts = res.desc_layouts;
         assert_eq!(layouts.len(), 1);
         let l = &layouts[0];

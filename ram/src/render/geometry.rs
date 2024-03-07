@@ -1,8 +1,8 @@
 use crate::ecs::prelude::*;
 use crate::math::Vec3;
-use trekant::buffer::{HostIndexBuffer, HostVertexBuffer};
 use trekant::util::Format;
 use trekant::vertex::{VertexDefinition, VertexFormat};
+use trekant::{HostIndexBuffer, HostVertexBuffer};
 
 use super::mesh::Mesh;
 
@@ -14,9 +14,9 @@ struct Vertex {
     _nor: [f32; 3],
 }
 
-impl VertexDefinition for Vertex {
+unsafe impl VertexDefinition for Vertex {
     fn format() -> VertexFormat {
-        VertexFormat::from([Format::FLOAT3; 2])
+        VertexFormat::from([Format::FLOAT3, Format::FLOAT3])
     }
 }
 

@@ -1,20 +1,16 @@
 use polymap::polymap;
-use trekant::buffer::{
-    BufferMutability, DeviceIndexBuffer, DeviceVertexBuffer, IndexBufferDescriptor,
-    VertexBufferDescriptor,
-};
 use trekant::pipeline::{
     BlendState, DepthTest, GraphicsPipeline, GraphicsPipelineDescriptor, ShaderDescriptor,
     ShaderStage, TriangleCulling,
 };
 use trekant::pipeline_resource::PipelineResourceSet;
-use trekant::resource::{MutResourceManager as _, ResourceManager as _};
 use trekant::util::{cast_transparent_slice, Extent2D, Format, Offset2D, Rect2D, Viewport};
 use trekant::vertex::{VertexDefinition, VertexFormat};
-use trekant::Frame;
 use trekant::RenderPassEncoder;
 use trekant::Renderer;
-use trekant::{BufferHandle, Handle, Std140Compat};
+use trekant::{BufferDescriptor, BufferHandle, Handle, Std140};
+use trekant::{BufferMutability, BufferType, VertexBufferType};
+use trekant::{Frame, IndexBufferType};
 use trekant::{MipMaps, Texture, TextureDescriptor};
 
 use crate::common::Name;
@@ -31,16 +27,19 @@ use specs::World;
 #[repr(transparent)]
 struct ImGuiVertex(imgui::DrawVert);
 
-impl VertexDefinition for ImGuiVertex {
+unsafe impl VertexDefinition for ImGuiVertex {
     fn format() -> VertexFormat {
         VertexFormat::from([Format::FLOAT2, Format::FLOAT2, Format::RGBA_UNORM])
     }
 }
 
+unsafe impl bytemuck::Zeroable for ImGuiVertex {}
+unsafe impl bytemuck::Pod for ImGuiVertex {}
+
 #[derive(Clone, Copy, Debug)]
 struct PerFrameData {
-    vertex_buffer: BufferHandle<DeviceVertexBuffer>,
-    index_buffer: BufferHandle<DeviceIndexBuffer>,
+    vertex_buffer: BufferHandle,
+    index_buffer: BufferHandle,
     fb_width: f32,
     fb_height: f32,
 }
@@ -48,6 +47,12 @@ struct PerFrameData {
 pub type UIModules = Vec<Box<dyn UIModule>>;
 
 type UiStateStorage = std::cell::RefCell<polymap::PolyMap<String>>;
+
+#[derive(Default)]
+struct Scratch {
+    vertices: Vec<ImGuiVertex>,
+    indices: Vec<u16>,
+}
 
 /// The main ui context. Holds gpu resource pointers and imgui context. Should live as long as application
 pub struct UIContext {
@@ -61,6 +66,7 @@ pub struct UIContext {
     /// Borrowed by the UiFrame each frame for permanent storage
     storage: UiStateStorage,
     modules: UIModules,
+    scratch: Scratch,
 }
 
 /// The data for one frame of the ui. Ui modules get this and register ui draw calls
@@ -358,7 +364,7 @@ impl UIContext {
         };
 
         let desc_set = PipelineResourceSet::builder(renderer)
-            .add_texture(&font_texture, 0, ShaderStage::FRAGMENT, false)
+            .add_texture(font_texture, 0, ShaderStage::FRAGMENT, false)
             .build();
 
         let input_entity = Self::init_entity(world);
@@ -372,6 +378,7 @@ impl UIContext {
             per_frame_data: None,
             modules,
             storage: std::cell::RefCell::new(polymap::PolyMap::default()),
+            scratch: Scratch::default(),
         };
 
         ui_ctx.resize(renderer.swapchain_extent());
@@ -450,11 +457,7 @@ impl UIContext {
         }
     }
 
-    pub fn build_ui<'a>(
-        &mut self,
-        world: &mut World,
-        frame: &mut Frame<'a>,
-    ) -> Option<UIDrawCommands> {
+    pub fn build_ui(&mut self, world: &mut World, frame: &mut Frame<'_>) -> Option<UIDrawCommands> {
         log::trace!("Building ui");
         self.resize(frame.extent());
         self.forward_input(world);
@@ -494,10 +497,13 @@ impl UIContext {
             return None;
         }
 
-        // TODO(perf): Reuse these allocation between frames
-        let mut vertices: Vec<ImGuiVertex> = Vec::with_capacity(draw_data.total_vtx_count as usize);
-        let mut indices = Vec::with_capacity(draw_data.total_idx_count as usize);
+        let vertices = &mut self.scratch.vertices;
+        vertices.clear();
+        let indices = &mut self.scratch.indices;
+        indices.clear();
 
+        // TODO(perf): Allocation reuse.
+        // This is not as simple as the scratch buffers. Arena?
         let mut commands = Vec::new();
 
         // Will project scissor/clipping rectangles into framebuffer space
@@ -591,30 +597,26 @@ impl UIContext {
             global_indices_idx += draw_list.idx_buffer().len();
         }
 
-        assert_eq!(
-            std::mem::size_of::<imgui::DrawVert>(),
-            std::mem::size_of::<ImGuiVertex>(),
-            "Mismatch in imgui vertex type"
-        );
+        const _: () =
+            assert!(std::mem::size_of::<imgui::DrawVert>() == std::mem::size_of::<ImGuiVertex>());
 
-        // TODO: This could be a borrow when reusing the allocation
-        let vbuf_desc = VertexBufferDescriptor::from_vec(vertices, BufferMutability::Mutable);
-        let ibuf_desc = IndexBufferDescriptor::from_vec(indices, BufferMutability::Mutable);
+        let vbuf_desc = BufferDescriptor::vertex_buffer(vertices, BufferMutability::Mutable);
+        let ibuf_desc = BufferDescriptor::index_buffer(indices, BufferMutability::Mutable);
 
         let (vertex_buffer, index_buffer) = if let Some(per_frame_data) = self.per_frame_data {
             frame
-                .recreate_resource_blocking(per_frame_data.vertex_buffer, vbuf_desc)
+                .create_buffer_with(vbuf_desc, per_frame_data.vertex_buffer)
                 .expect("Bad vbuf handle");
             frame
-                .recreate_resource_blocking(per_frame_data.index_buffer, ibuf_desc)
+                .create_buffer_with(ibuf_desc, per_frame_data.index_buffer)
                 .expect("Bad ibuf handle");
             (per_frame_data.vertex_buffer, per_frame_data.index_buffer)
         } else {
             let vh = frame
-                .create_resource_blocking(vbuf_desc)
+                .create_buffer(vbuf_desc)
                 .expect("Failed to create vertex buffer");
             let ih = frame
-                .create_resource_blocking(ibuf_desc)
+                .create_buffer(ibuf_desc)
                 .expect("Failed to create index buffer");
 
             (vh, ih)
@@ -656,7 +658,7 @@ pub struct UIDrawCommands {
     commands: Vec<UIDrawCommand>,
 }
 
-#[derive(Debug, Clone, Copy, Std140Compat)]
+#[derive(Debug, Clone, Copy, Std140, bytemuck::Zeroable, bytemuck::Pod)]
 #[repr(C, packed)]
 pub struct VertexShaderData {
     scale_translate: [f32; 4],
@@ -691,8 +693,8 @@ impl UIDrawCommands {
         cmd_buf
             .set_viewport(viewport)
             .bind_graphics_pipeline(&pipeline)
-            .bind_index_buffer(&index_buffer)
-            .bind_vertex_buffer(&vertex_buffer)
+            .bind_index_buffer(index_buffer)
+            .bind_vertex_buffer(vertex_buffer)
             .bind_shader_resource_group(0, &desc_set, &pipeline)
             .bind_push_constant(&pipeline, ShaderStage::VERTEX, &vertex_shader_data);
 

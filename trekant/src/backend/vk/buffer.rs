@@ -1,9 +1,11 @@
 use ash::vk;
 
 use crate::backend::vk::{
-    command::CommandBuffer, device::AllocatorHandle, util::stride, MemoryError,
+    command::CommandBuffer, device::AllocatorHandle, util::compute_stride, MemoryError,
 };
 use vma::{Alloc as _, Allocation, AllocationCreateInfo, MemoryUsage};
+
+pub const MIN_BUFFER_OFFSET: u16 = 256;
 
 pub struct Buffer {
     allocator: AllocatorHandle,
@@ -98,7 +100,7 @@ impl Buffer {
             elem_size,
             elem_align,
         );
-        let stride = stride(elem_size, elem_align);
+        let stride = compute_stride(elem_size, elem_align);
         let size = stride as usize * n_elems;
         log::trace!("Total buffer size: {}", size);
 
@@ -110,21 +112,8 @@ impl Buffer {
             mem_usage,
         )?;
         let dst = buffer.map()?;
-        let src = data.as_ptr() as *const u8;
-        if elem_size == elem_align {
-            log::trace!("Straight copy from {:?} to {:?}, size: {}", src, dst, size);
-            unsafe {
-                std::ptr::copy_nonoverlapping::<u8>(src, dst, size);
-            }
-        } else {
-            log::trace!("Strided copy from {:?} to {:?}, size: {}", src, dst, size);
-            for i in 0..n_elems {
-                unsafe {
-                    let src = src.add(i * (elem_size as usize));
-                    let dst = dst.add(i * (stride as usize));
-                    std::ptr::copy_nonoverlapping::<u8>(src, dst, elem_size as usize);
-                }
-            }
+        unsafe {
+            crate::util::copy_nonoverlapping_aligned(data, dst, elem_size, elem_align);
         }
 
         if do_unmap {
@@ -198,35 +187,35 @@ impl Buffer {
 
 impl Buffer {
     pub fn map(&mut self) -> Result<*mut u8, MemoryError> {
+        let ptr = unsafe { self.allocator.map_memory(&mut self.allocation) }
+            .map_err(MemoryError::MemoryMapping)?;
         self.is_mapped = true;
-        unsafe { self.allocator.map_memory(&mut self.allocation) }
-            .map_err(MemoryError::MemoryMapping)
+        Ok(ptr)
     }
 
     pub fn unmap(&mut self) {
         assert!(self.is_mapped);
-        self.is_mapped = false;
         unsafe { self.allocator.unmap_memory(&mut self.allocation) }
+        self.is_mapped = false;
     }
 
     pub fn vk_buffer(&self) -> vk::Buffer {
         self.vk_buffer
     }
 
-    pub fn update_data_at(&mut self, data: &[u8], offset: usize) {
+    fn mapped_data(&self) -> *mut std::ffi::c_void {
         assert!(self.is_mapped);
-        let size = data.len();
-        let dst_base = self
-            .allocator
+        self.allocator
             .get_allocation_info(&self.allocation)
-            .mapped_data as *mut u8;
+            .mapped_data
+    }
 
-        let src = data.as_ptr() as *const u8;
-        unsafe {
-            assert!(offset + size <= self.size());
-            let dst = dst_base.add(offset);
-            std::ptr::copy_nonoverlapping::<u8>(src, dst, size);
-        }
+    pub fn mut_ptr(&mut self) -> *mut u8 {
+        self.mapped_data() as *mut u8
+    }
+
+    pub fn ptr(&mut self) -> *const u8 {
+        self.mapped_data() as *const u8
     }
 
     pub fn size(&self) -> usize {

@@ -51,7 +51,7 @@ to lookup the depth in the texture for that light. If its z value is larger than
 something occluding it in the direction of the light and it should be shadowed. This is used to affect the shading
 of that fragment by modifying the contribution of that lights color for the final color of the pixel.
 
-* For the plane and cube scene with a stable directional light, the plane is quite large in the shadow map (in render do)
+* For the plane and cube scene with a stable directional light, the plane is quite large in the shadow map (in RenderDoc)
  and the small cube doesn't really show up. This seems to indicate that the bounds are too large.
 * Dumping the bounds in the UI, the bounding volumes seem to be OK? Pixel density for shadow map should be around
 33 p/m^2 which is OK? Maybe this is low?
@@ -90,11 +90,11 @@ Conceptually, I think this is the problem space:
 
 ### The shadow render passes
 
-1. Find the lights that cast shadows
+1. Find the lights that cast shadows.
 2. For each of these:
-    1. compute a projection matrix:
-        * This is both used in the shadow pass rendering vertex shader to transform the vertices
-        * And in the vertex shader for the main render pass to compute the shadow coords for each vertex.
+    1. Compute a projection matrix. This is both used in:
+        * The shadow pass vertex shader to transform the vertices and render the depth buffer.
+        * The vertex shader for the main render pass to compute the shadow coords for each vertex.
     2. Update the uniform buffer for the shadow render passes
     3. Encode the shadow render pass in the command buffer. This only runs a vertex shader that computes the depths and
     then writes those to a depth buffer.
@@ -108,7 +108,7 @@ render pass.
 2. Compute PackedLight for all of these. These hold an index into the buffer of shadow matrices and shadow textures
 (NOTE: These are not the same)
 3. Write PackedLight uniform
-4. bind the textures
+4. Bind the textures
 5. Bind the shadow coords
 6. Draw all entities
 
@@ -345,6 +345,141 @@ simplifies the code internally as the files are loaded early and handling empty 
   `TextureDescriptor` is still kept for the outermost API though as it quite convenient to use the `File` variant in user
   code.
 
-## Loader API
+## Shadow coords in fragment shaders
+
+Currently, the shadow coord computation is all done in the vertex shader for the main lighting pass.
+
+1. For each of the shadow casting lights, a matrix is created and written to an index withing fixed-size uniform.
+2. This uniform is fed to the vertex shader for the main lighting pass, where the world position of that vertex is transformed
+into the clip-space for a shadow-casting light.
+3. Each clip-space position is output as a separate vertex attribute.
+
+This has a number of negative effects:
+
+1. For every vertex in the scene, we compute the shadow clip coords for all lights. This will not scale if the number of
+of lights increase and we need to start culling which lights affect which areas.
+2. The number of vertex attributes increase with the limit of lights. Each of these need to be interpolated etc. even if
+the light is not used.
+3. The maximum amount of shadow-casting lights is hardcoded in several places: vertex shader, fragment shader and host.
+4. The maximum amount of shadow-casting lights is not the same as the maximum amount of shadow maps when point lights
+are introduced, making this more complex.
+
+Therefore, it makes sense to move the shadow coord computation to the fragment shader.
+
+1. The world to shadow clip-space computation is done in the fragment shader rather than the vertex shader. Note that
+this means we cannot rely on the interpolation and more matrix multiplies will be done for each fragment and light.
+2. World to shadow/light clip-space are written to a storage buffer that is used in the fragment shader.
+
+While moving the shadow coord computation to the fragment shader and wanting to use storage buffers for the backing
+buffer type, I noticed that there is no support for this.
+
+While adding support for storage buffers, it the templates and macros got in the way more than it
+helped. The amount of code required to just add support for storage buffers does not seems to be
+worthwhile the compared to the amount of bugs it might have stopped. Maybe it is more worthwhile
+in a production environment but it mostly gets in the way here :smiley:. Therefore,
+
+1. Remove the typing of buffers (vertex, index etc.).
+2. Add support for storage buffers.
+3. Move shadow sampling coord computation to the fragment shader.
+
+### Bug: The code is using the buffer offset alignment for the element alignment
+
+Currently, the code uses the `.min_uniform_buffer_offset_alignment` for each element rather than than
+only for the buffer offset itself. This is likely because the main usecase for this was the individually
+bound view matrices for the shadow passes. So:
+
+1. Shadow pass needs 256 alignment for the view matrix.
+2. Main render pass needs 64 byte alignment for the world_to_shadow buffer.
+
+Rework the buffer creation API. BufferDescriptor now exposes:
+
+* `BufferDescriptor::vertex_buffer` and similar to make the API a bit less verbose.
+  * This allows to infer the type of the buffer elemenst and put trait bounds on them, e.g. VertexDefinition.
+  * Unfortunately, it also means we lose the explicitness of from_vec/from_slice etc. and this is instead inferred from
+  the API. Currently, this tradeoff seems worth it but it does make the API signature hard to read and the lifetimes/allocation
+  behaviour a bit harder to understand.
+* `BufferDescriptor::uniform_buffer` exposes an extra parameter, `ElementAlignment::(Std140 | MinBufferOffset)` to allow
+the user to control the alignment of the elements.
+
+### HostBuffer API
+
+Now that the descriptor API has changed a lot, the host buffer API is harder to integrate with the buffer descriptor.
+
+The original API for host buffers was motivated by:
+
+> Provide both host-only buffers (frontend-only) for convenience of managing buffer data and allow
+creating buffer descriptors from them easily.
+
+Essentially, with the loader API, we either have to:
+
+1. Clone the buffer data `Vec` that the `BufferDescriptor` can own.
+2. Move out of the `Vec` containing the data.
+3. Use shared ownership with `Arc<BufferData>` so that the loader can hold on to a reference as long as it needs to.
+
+Host buffers exist to serve `2.` and are convenient to put in components that are supposed to contain a buffer. When the
+buffer descriptor is created, either the buffer needs to be cloned, or the component needs to be removed to move the
+vector or the data is shared with Arc. Thus, host buffers contain an Arc.
+
+#### Problems
+
+* The host buffer doesn't fit into the new `vertex_buffer`, `uniform_buffer` etc. APIs as it is not typed on the element.
+There is no way to create a `BufferData` implementation for `HostBuffer` as the former has an associated type.
+* The host buffer can't be made typed on the element data, then e.g. the `ram::render::Mesh` component wouldn't be able
+to exist.
+* The hostbuffer type contains the trait for the buffer type. This is also used in the buffer descriptor to
+have knowledge of the required alignment for the type.
+* To handle the BufferLayout arg that are required for uniform buffer descriptors, any buffer descriptor created
+from a host buffer needs to accept that. It can be made optional but the API doesn't look great.
+
+One could consider requiring a user to pass the alignment requirement when creating the host buffer but that would mean
+that the CPU buffer creation would need to "know" about how the data is laid out in the gpu buffer, which seems strange.
+Also, this would break the current API with `from_vec` etc. as it would be different for uniform buffers vs. the rest.
+
+Another more subtle problem is that with the HostBuffer API, we discard the type information and we have to store data
+internally. But this is also what the buffer descriptor does. So, we have two APIs that both throw away the type and
+one of them is the input of the other.
+
+#### Solution
+
+`BufferDescriptor::from_host_buffer` now takes an optional `BufferLayout` that is only relevant for uniform buffers.
+There is no code that uses host buffers for uniform buffers though so all this work is a bit wasteful.
+
+Also, always use `256` for the min buffer offset to simplify the code. This means we don't have to query the device
+to know how to allocate. It does have the drawback of not being able to pack the uniforms as tightly but that doesn't
+actually make a difference on my machine anyway.
+
+## Bug: Opening a camera component stops the app
+
+Opening either a Camera component in the debugger or the "Render Camera" header in the render debug
+window makes the math library assert on the fov_y parameter for a function being 0.
+
+### Findings
+
+The code for visiting primitives in the UI would cast floats to ints and then display them as ints.
+The fov_y variable which was 0.7 was truncated to 0 when it was cast to int to be displayed.
+
+### Solution
+
+Rewrite the UI-code to use `input_scalar` rather than `input_int` and skip all casting (thus truncation).
+Also, add support for more primitive types.
+
+## Future work
+
+### Loader API
 
 Maybe we can allow users to create several loader - one per thread/system - and contain the resource flushing to that system.
+Should loaders always be used and have blocking functions?
+
+### Frame API
+
+As far as I remember, this API was designed to ensure that frames are started and finished properly before accessing resources.
+But looking at it now, it is a lot of API surface just for maintaining the frame idx. It might be more wortwhile to track
+this internally in the renderer and panic if it is not done correctly. In addition, it duplicates the renderer API.
+
+* Add assert in Renderer that mutability functions are not using if a frame is in-flight
+
+### Buffer API
+
+* The host buffer is only used in `ram::render::Mesh`. Consider moving it to `ram`.
+* Consider moving `elem_size` and `elem_align` into BufferDescriptor. This would reduce the contents for most of the enums.
+* Consider moving the `enqueue` functions to free functions.

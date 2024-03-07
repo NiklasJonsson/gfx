@@ -7,7 +7,7 @@ use super::framebuffer::Framebuffer;
 use super::queue::QueueFamily;
 use super::render_pass::RenderPass;
 
-use crate::buffer::{DeviceIndexBuffer, DeviceVertexBuffer};
+use crate::buffer::DeviceBuffer;
 use crate::pipeline::GraphicsPipeline;
 use crate::pipeline::Pipeline;
 use crate::pipeline::ShaderStage;
@@ -261,7 +261,7 @@ impl CommandBuffer {
         self
     }
 
-    pub fn bind_vertex_buffer(&mut self, buffer: &DeviceVertexBuffer, offset: u64) -> &mut Self {
+    pub fn bind_vertex_buffer(&mut self, buffer: &DeviceBuffer, offset: u64) -> &mut Self {
         assert!(self.queue_flags.contains(vk::QueueFlags::GRAPHICS));
 
         unsafe {
@@ -294,7 +294,7 @@ impl CommandBuffer {
         self
     }
 
-    pub fn bind_index_buffer(&mut self, buffer: &DeviceIndexBuffer, offset: u64) -> &mut Self {
+    pub fn bind_index_buffer(&mut self, buffer: &DeviceBuffer, offset: u64) -> &mut Self {
         assert!(self.queue_flags.contains(vk::QueueFlags::GRAPHICS));
 
         unsafe {
@@ -302,7 +302,7 @@ impl CommandBuffer {
                 self.vk_cmd_buffer,
                 buffer.vk_buffer(),
                 offset,
-                buffer.vk_index_type(),
+                buffer.vk_index_type().expect("Not an index buffer"),
             );
         }
 
@@ -501,14 +501,13 @@ impl CommandBuffer {
         self
     }
 
-    pub fn bind_push_constant<V: Copy>(
+    pub fn bind_push_constant<V: bytemuck::Pod>(
         &mut self,
         pipeline: &GraphicsPipeline,
         stage: ShaderStage,
         v: &V,
     ) -> &mut Self {
-        // TODO: Use bytemuck::Pod here?
-        let bytes = unsafe { util::as_bytes(v) };
+        let bytes = util::as_bytes(v);
         assert!(bytes.len() <= 128);
         unsafe {
             self.vk_device.cmd_push_constants(

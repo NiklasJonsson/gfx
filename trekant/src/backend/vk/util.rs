@@ -6,7 +6,7 @@
 ///
 /// In other words, the stride is the closest multiple of the alignment that is larger than the size.
 ///
-pub fn stride(elem_size: u16, elem_align: u16) -> u16 {
+pub fn compute_stride(elem_size: u16, elem_align: u16) -> u16 {
     assert!(elem_size != 0 && elem_align != 0);
 
     let padding = if elem_size % elem_align == 0 { 0 } else { 1 };
@@ -15,16 +15,16 @@ pub fn stride(elem_size: u16, elem_align: u16) -> u16 {
 
 #[cfg(test)]
 mod tests {
-    use super::stride;
+    use super::compute_stride;
 
     #[test]
     fn test_stride() {
-        assert_eq!(4, stride(4, 4));
-        assert_eq!(16, stride(15, 8));
-        assert_eq!(16, stride(9, 8));
-        assert_eq!(8, stride(3, 8));
-        assert_eq!(32, stride(3, 32));
-        assert_eq!(32, stride(32, 8));
-        assert_eq!(16, stride(16, 8));
+        assert_eq!(4, compute_stride(4, 4));
+        assert_eq!(16, compute_stride(15, 8));
+        assert_eq!(16, compute_stride(9, 8));
+        assert_eq!(8, compute_stride(3, 8));
+        assert_eq!(32, compute_stride(3, 32));
+        assert_eq!(32, compute_stride(32, 8));
+        assert_eq!(16, compute_stride(16, 8));
     }
 }

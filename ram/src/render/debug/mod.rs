@@ -2,12 +2,10 @@ use super::imgui::UIModules;
 use super::{geometry, shader};
 use crate::math::{Rgba, Vec3};
 
-use trekant::buffer::{DeviceUniformBuffer, DeviceVertexBuffer};
 use trekant::pipeline::GraphicsPipeline;
 use trekant::pipeline_resource::PipelineResourceSet;
-use trekant::resource::{MutResourceManager as _, ResourceManager as _};
 use trekant::vertex::{VertexDefinition, VertexFormat};
-use trekant::{BufferHandle, Handle, PushConstant};
+use trekant::{BufferDescriptor, BufferHandle, BufferMutability, Handle, PushConstant};
 use trekant::{RenderPass, RenderPassEncoder};
 
 use std::sync::Mutex;
@@ -22,19 +20,19 @@ pub use camera::DrawFrustum;
 pub use window::{OneShotDebugUI, OneShotDebugUIFunction};
 
 #[allow(dead_code)]
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, bytemuck::Zeroable, bytemuck::Pod)]
 #[repr(transparent)]
 struct Vertex {
-    pos: Vec3,
+    pos: [f32; 3],
 }
 
-impl VertexDefinition for Vertex {
+unsafe impl VertexDefinition for Vertex {
     fn format() -> VertexFormat {
         VertexFormat::from(trekant::util::Format::FLOAT3)
     }
 }
 
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, bytemuck::Zeroable, bytemuck::Pod)]
 #[repr(C)]
 struct Color {
     v: [f32; 4],
@@ -61,7 +59,7 @@ enum DrawCmd {
 /// Queue simple one-off rendering commands
 struct DebugRendererDrawBuffer {
     line_buffer: Vec<Vertex>,
-    line_buffer_device: Option<BufferHandle<DeviceVertexBuffer>>,
+    line_buffer_gpu: Option<BufferHandle>,
     queue: Vec<DrawCmd>,
     pipeline: Handle<GraphicsPipeline>,
     view_data_srg: Handle<PipelineResourceSet>,
@@ -74,8 +72,9 @@ impl DebugRendererDrawBuffer {
 
         let start: u32 = self.line_buffer.len().try_into().expect("Too big!");
         self.line_buffer.reserve(points.len());
-        self.line_buffer
-            .extend(points.iter().map(|&pos| Vertex { pos }));
+        self.line_buffer.extend(points.iter().map(|&pos| Vertex {
+            pos: pos.into_array(),
+        }));
         self.queue.push(DrawCmd::Lines {
             start,
             count,
@@ -124,7 +123,7 @@ impl DebugRenderer {
     pub fn new(
         shader_compiler: &shader::ShaderCompiler,
         render_pass: &Handle<RenderPass>,
-        view_data_buf: &BufferHandle<DeviceUniformBuffer>,
+        view_data_buf: BufferHandle,
         renderer: &mut trekant::Renderer,
     ) -> Self {
         use trekant::pipeline::{
@@ -180,7 +179,7 @@ impl DebugRenderer {
         Self {
             draw_buffer: Mutex::new(DebugRendererDrawBuffer {
                 line_buffer: Vec::new(),
-                line_buffer_device: None,
+                line_buffer_gpu: None,
                 queue: Vec::new(),
                 pipeline,
                 view_data_srg: shader_resource_group,
@@ -188,9 +187,7 @@ impl DebugRenderer {
         }
     }
 
-    pub fn upload<'a>(&self, frame: &mut trekant::Frame<'a>) {
-        use trekant::buffer::{BufferMutability, VertexBufferDescriptor};
-
+    pub fn upload(&self, frame: &mut trekant::Frame<'_>) {
         let mut db = self.draw_buffer.lock().unwrap();
 
         if db.line_buffer.is_empty() {
@@ -199,19 +196,14 @@ impl DebugRenderer {
         }
         assert!(!db.queue.is_empty());
 
-        let desc = VertexBufferDescriptor::from_slice(&db.line_buffer, BufferMutability::Mutable);
-        let vertex_buffer = if let Some(buf) = db.line_buffer_device {
-            frame
-                .recreate_resource_blocking(buf, desc)
-                .expect("Bad vbuf handle")
-        } else {
-            frame
-                .create_resource_blocking(desc)
-                .expect("Failed to create vertex buffer for debug renderer")
-        };
+        let desc =
+            BufferDescriptor::vertex_buffer(&db.line_buffer as &[_], BufferMutability::Mutable);
+        let vertex_buffer = frame
+            .create_buffer_ext(desc, db.line_buffer_gpu)
+            .expect("Failed to create vertex buffer for debug renderer");
 
         db.line_buffer.clear();
-        db.line_buffer_device = Some(vertex_buffer);
+        db.line_buffer_gpu = Some(vertex_buffer);
     }
 
     /// Note that the scene view data needs to have been bound to set 0, idx 0 already.
@@ -228,7 +220,7 @@ impl DebugRenderer {
             return;
         }
 
-        let vbuf = if let Some(vbuf) = db.line_buffer_device {
+        let vbuf = if let Some(vbuf) = db.line_buffer_gpu {
             vbuf
         } else {
             log::debug!("No vertex buffer for debug renderer to draw!");
@@ -240,7 +232,7 @@ impl DebugRenderer {
         let pipeline = db.pipeline;
         renderpass.bind_graphics_pipeline(&pipeline);
         renderpass.bind_shader_resource_group(0, &db.view_data_srg, &db.pipeline);
-        renderpass.bind_vertex_buffer(&vbuf);
+        renderpass.bind_vertex_buffer(vbuf);
         for cmd in db.queue.drain(..) {
             match cmd {
                 DrawCmd::Lines {

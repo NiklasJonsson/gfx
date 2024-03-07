@@ -2,18 +2,20 @@ use thiserror::Error;
 
 use crate::ecs::prelude::*;
 
-use trekant::buffer::{BufferMutability, DeviceUniformBuffer, UniformBufferDescriptor};
+use trekant::{
+    BufferDescriptor, BufferMutability, BufferType, StorageBufferType, UniformBufferType,
+};
+
 use trekant::pipeline::{
     GraphicsPipeline, GraphicsPipelineDescriptor, PipelineError, ShaderDescriptor,
 };
 use trekant::pipeline_resource::PipelineResourceSet;
 use trekant::resource::Handle;
-use trekant::resource::ResourceManager;
-use trekant::util;
 use trekant::vertex::VertexFormat;
 use trekant::BufferHandle;
 use trekant::RenderPassEncoder;
 use trekant::Renderer;
+use trekant::{util, AsyncBufferHandle};
 
 pub mod debug;
 pub mod geometry;
@@ -42,7 +44,7 @@ pub enum GpuResource<InFlightT, AvailT> {
     InFlight(InFlightT),
     Available(AvailT),
 }
-type GpuBuffer<BT> = GpuResource<BufferHandle<Async<BT>>, BufferHandle<BT>>;
+type GpuBuffer = GpuResource<AsyncBufferHandle, BufferHandle>;
 
 pub fn camera_pos(world: &World) -> Vec3 {
     let camera_entity = ecs::get_singleton_entity::<MainRenderCamera>(world);
@@ -62,9 +64,9 @@ struct PBRPassResources {
 }
 
 struct EngineShaderResources {
-    view_data: BufferHandle<DeviceUniformBuffer>,
-    lighting_data: BufferHandle<DeviceUniformBuffer>,
-    shadow_data: BufferHandle<DeviceUniformBuffer>,
+    view_data: BufferHandle,
+    lighting_data: BufferHandle,
+    world_to_shadow: BufferHandle,
     desc_set: Handle<PipelineResourceSet>,
 }
 
@@ -96,7 +98,7 @@ fn create_material_descriptor_set(
     renderer: &mut Renderer,
     material: &GpuMaterial,
 ) -> Handle<PipelineResourceSet> {
-    match &material {
+    match material {
         material::GpuMaterial::PBR {
             material_uniforms,
             normal_map,
@@ -107,14 +109,14 @@ fn create_material_descriptor_set(
             let mut desc_set_builder = PipelineResourceSet::builder(renderer);
 
             desc_set_builder = desc_set_builder.add_buffer(
-                material_uniforms,
+                *material_uniforms,
                 0,
                 trekant::pipeline::ShaderStage::FRAGMENT,
             );
 
             if let Some(bct) = &base_color_texture {
                 desc_set_builder = desc_set_builder.add_texture(
-                    &bct.handle,
+                    bct.handle,
                     1,
                     trekant::pipeline::ShaderStage::FRAGMENT,
                     false,
@@ -123,7 +125,7 @@ fn create_material_descriptor_set(
 
             if let Some(mrt) = &metallic_roughness_texture {
                 desc_set_builder = desc_set_builder.add_texture(
-                    &mrt.handle,
+                    mrt.handle,
                     2,
                     trekant::pipeline::ShaderStage::FRAGMENT,
                     false,
@@ -132,7 +134,7 @@ fn create_material_descriptor_set(
 
             if let Some(nm) = &normal_map {
                 desc_set_builder = desc_set_builder.add_texture(
-                    &nm.handle,
+                    nm.handle,
                     3,
                     trekant::pipeline::ShaderStage::FRAGMENT,
                     false,
@@ -143,7 +145,7 @@ fn create_material_descriptor_set(
         }
         material::GpuMaterial::Unlit { color_uniform, .. } => {
             PipelineResourceSet::builder(renderer)
-                .add_buffer(color_uniform, 0, trekant::pipeline::ShaderStage::FRAGMENT)
+                .add_buffer(*color_uniform, 0, trekant::pipeline::ShaderStage::FRAGMENT)
                 .build()
         }
     }
@@ -223,7 +225,7 @@ fn get_pipeline_for(
                 has_normal_map: has_nm,
             };
 
-            let (vert, frag) = shader::pbr_gltf::compile(&*shader_compiler, &def, use_builtin)?;
+            let (vert, frag) = shader::pbr_gltf::compile(&shader_compiler, &def, use_builtin)?;
 
             let vert = ShaderDescriptor {
                 debug_name: Some("pbr-vert".to_owned()),
@@ -243,7 +245,7 @@ fn get_pipeline_for(
             renderer.create_gfx_pipeline(desc, &frame_data.main_render_pass)?
         }
         material::GpuMaterial::Unlit { polygon_mode, .. } => {
-            let desc = unlit_pipeline_desc(&*shader_compiler, vertex_format, *polygon_mode)?;
+            let desc = unlit_pipeline_desc(&shader_compiler, vertex_format, *polygon_mode)?;
             renderer.create_gfx_pipeline(desc, &frame_data.main_render_pass)?
         }
     };
@@ -366,7 +368,7 @@ fn draw_entities<'a>(world: &World, cmd_buf: &mut RenderPassEncoder<'a>, mode: D
                 bind_pipeline(cmd_buf, shadow_pipeline);
                 cmd_buf
                     .bind_push_constant(shadow_pipeline, ShaderStage::VERTEX, &tfm)
-                    .draw_mesh(vertex_buffer, index_buffer);
+                    .draw_mesh(*vertex_buffer, *index_buffer);
             }
             (
                 RenderableMaterial {
@@ -380,7 +382,7 @@ fn draw_entities<'a>(world: &World, cmd_buf: &mut RenderPassEncoder<'a>, mode: D
                 cmd_buf
                     .bind_shader_resource_group(1, material_descriptor_set, gfx_pipeline)
                     .bind_push_constant(gfx_pipeline, ShaderStage::VERTEX, &tfm)
-                    .draw_mesh(vertex_buffer, index_buffer);
+                    .draw_mesh(*vertex_buffer, *index_buffer);
             }
             _ => (),
         }
@@ -397,15 +399,12 @@ pub fn draw_frame(world: &mut World, ui: &mut imgui::UIContext, renderer: &mut R
         Some(e) => e,
     };
 
-    // TODO: Refactor! It would be nice to split the frame in:
-    // 1. Data send
-    // 2. Draw calls
-
     GpuUpload::resolve_pending(world, renderer);
     create_renderables(renderer, world);
 
     let main_window_extents = world.read_resource::<crate::io::MainWindow>().extents();
 
+    // TODO: Isn't the aspect ratio old if we resize after...?
     let aspect_ratio = renderer.aspect_ratio();
     let mut frame = match renderer.next_frame() {
         frame @ Ok(_) => frame,
@@ -446,7 +445,7 @@ pub fn draw_frame(world: &mut World, ui: &mut imgui::UIContext, renderer: &mut R
         };
 
         frame
-            .update_uniform_blocking(&frame_data.engine_shader_resources.view_data, &view_data)
+            .write_buffer_element(frame_data.engine_shader_resources.view_data, &view_data, 0)
             .expect("Failed to update uniform");
     };
 
@@ -457,7 +456,7 @@ pub fn draw_frame(world: &mut World, ui: &mut imgui::UIContext, renderer: &mut R
     let (mut cmd_buffer, shadow_pass_output) =
         light::shadow_pass(world, &mut frame, &frame_data.shadow, cmd_buffer);
 
-    light::write_lighting_data(world, &mut frame, &frame_data, &shadow_pass_output);
+    light::write_lighting_data(world, &mut frame, frame_data, &shadow_pass_output);
 
     {
         let debug_renderer = world.read_resource::<debug::DebugRenderer>();
@@ -544,42 +543,46 @@ pub fn create_frame_resources(
         .presentation_render_pass(8)
         .expect("main render pass creation failed");
 
-    // TODO: There is a lot of duplication here when we want to upload constant data
-    // to a buffer with a blocking call. Can we do something like:
-    // BufferManager.create_uniform_buffer_from<T>(T t, BufferMutability)?
-
     let view_data = {
         let view_data = uniform::ViewData {
             view_proj: [0.0; 16],
             view_pos: [0.0; 4],
         };
-        let view_data = UniformBufferDescriptor::from_single(view_data, BufferMutability::Mutable);
-        renderer.create_resource_blocking(view_data).expect("FAIL")
+        let view_data = BufferDescriptor::uniform_buffer(
+            std::slice::from_ref(&view_data),
+            BufferMutability::Mutable,
+            trekant::BufferLayout::Std140,
+        );
+        renderer
+            .create_buffer(view_data)
+            .expect("Failed to create view data uniform buffer")
     };
 
     let shadow_resources = light::setup_shadow_resources(shader_compiler, renderer);
 
     let lighting_data = {
-        let light_data = uniform::LightingData {
+        let lighting_data = uniform::LightingData {
             lights: [uniform::PackedLight::default(); uniform::MAX_NUM_LIGHTS],
             ambient: [0.0; 4],
             num_lights: [0; 4],
         };
-        let light_data =
-            UniformBufferDescriptor::from_single(light_data, BufferMutability::Mutable);
-        renderer.create_resource_blocking(light_data).expect("FAIL")
+        let lighting_data = BufferDescriptor::uniform_buffer(
+            std::slice::from_ref(&lighting_data),
+            BufferMutability::Mutable,
+            trekant::BufferLayout::Std140,
+        );
+        renderer
+            .create_buffer(lighting_data)
+            .expect("Failed to create lighting data uniform")
     };
 
-    let shadow_data = {
-        let shadow_data = uniform::ShadowData {
-            matrices: Default::default(),
-            count: [u32::MAX; 4],
-        };
-        let shadow_data =
-            UniformBufferDescriptor::from_single(shadow_data, BufferMutability::Mutable);
+    let world_to_shadow = {
+        let data: Vec<uniform::Mat4> = vec![uniform::mat4_nan(); 256];
+
+        let world_to_shadow = BufferDescriptor::storage_buffer(data, BufferMutability::Mutable);
         renderer
-            .create_resource_blocking(shadow_data)
-            .expect("FAIL")
+            .create_buffer(world_to_shadow)
+            .expect("Failed to create buffer for shadow matrices")
     };
 
     let spotlight_textures = shadow_resources
@@ -587,11 +590,11 @@ pub fn create_frame_resources(
         .iter()
         .map(|x| (x.texture, true));
     let engine_shader_resource_group = PipelineResourceSet::builder(renderer)
-        .add_buffer(&view_data, 0, ShaderStage::VERTEX | ShaderStage::FRAGMENT)
-        .add_buffer(&shadow_data, 1, ShaderStage::VERTEX)
-        .add_buffer(&lighting_data, 2, ShaderStage::FRAGMENT)
+        .add_buffer(view_data, 0, ShaderStage::VERTEX | ShaderStage::FRAGMENT)
+        .add_buffer(world_to_shadow, 1, ShaderStage::FRAGMENT)
+        .add_buffer(lighting_data, 2, ShaderStage::FRAGMENT)
         .add_texture(
-            &shadow_resources.directional.texture,
+            shadow_resources.directional.texture,
             3,
             ShaderStage::FRAGMENT,
             true,
@@ -603,7 +606,7 @@ pub fn create_frame_resources(
     let pbr_resources = {
         // TODO: Share this code with get_pipeline_for?
         let vertex_format = VertexFormat::from([util::Format::FLOAT3; 2]);
-        let (vert, frag) = shader::pbr_gltf::compile_default(&shader_compiler)
+        let (vert, frag) = shader::pbr_gltf::compile_default(shader_compiler)
             .expect("Failed to compile default PBR shaders");
         let vert = ShaderDescriptor {
             debug_name: Some("dummy-pbr-vert".to_owned()),
@@ -630,7 +633,7 @@ pub fn create_frame_resources(
     let unlit_resources = {
         let vertex_format = VertexFormat::from(util::Format::FLOAT3);
         let desc = unlit_pipeline_desc(
-            &shader_compiler,
+            shader_compiler,
             vertex_format,
             trekant::pipeline::PolygonMode::Line,
         )
@@ -647,7 +650,7 @@ pub fn create_frame_resources(
         engine_shader_resources: EngineShaderResources {
             view_data,
             lighting_data,
-            shadow_data,
+            world_to_shadow,
             desc_set: engine_shader_resource_group,
         },
         pbr_resources,
@@ -664,7 +667,7 @@ pub fn setup_resources(world: &mut World, renderer: &mut Renderer) {
     let debug_renderer = debug::DebugRenderer::new(
         &shader_compiler,
         &frame_resources.main_render_pass,
-        &frame_resources.engine_shader_resources.view_data,
+        frame_resources.engine_shader_resources.view_data,
         renderer,
     );
 
@@ -687,19 +690,14 @@ impl GpuUpload {
     pub const ID: &'static str = "GpuUpload";
 }
 
-use resurs::Async;
-
 use self::shader::ShaderCompiler;
-fn map_pending_buffer_handle<BT>(
-    h: &mut Pending<BufferHandle<Async<BT>>, BufferHandle<BT>>,
-    old: BufferHandle<Async<BT>>,
-    new: BufferHandle<BT>,
-) {
+fn map_buffer_handle(h: &mut GpuBuffer, old: AsyncBufferHandle, new: BufferHandle) -> bool {
     match h {
-        Pending::Pending(cur) if cur.handle() == old.handle() => {
-            *h = Pending::Available(BufferHandle::sub_buffer(new, cur.idx(), cur.n_elems()));
+        GpuBuffer::InFlight(cur) if cur.base_buffer() == old.base_buffer() => {
+            *h = GpuBuffer::Available(BufferHandle::sub_buffer(new, cur.idx(), cur.n_elems()));
+            true
         }
-        _ => (),
+        _ => false,
     }
 }
 
@@ -715,8 +713,7 @@ impl GpuUpload {
         let mut generate_mipmaps = Vec::new();
         for mapping in transfer_guard.iter() {
             match mapping {
-                // TODO: drain_filter()
-                HandleMapping::UniformBuffer { old, new } => {
+                HandleMapping::Buffer { old, new } => {
                     for (ent, _) in (&world.entities(), &pending_materials.mask().clone()).join() {
                         if let Some(pending) = pending_materials.get_mut(ent) {
                             let handle = match pending {
@@ -725,7 +722,7 @@ impl GpuUpload {
                                     material_uniforms, ..
                                 } => material_uniforms,
                             };
-                            map_pending_buffer_handle(handle, old, new);
+                            map_buffer_handle(handle, old, new);
 
                             if !pending.is_done() {
                                 continue;
@@ -739,23 +736,14 @@ impl GpuUpload {
                             materials.insert(ent, material).expect("This is alive");
                         }
                     }
-                }
-                HandleMapping::VertexBuffer { old, new } => {
+
                     for mesh in (&mut meshes).join() {
                         if !mesh.is_pending_gpu() {
                             continue;
                         }
 
-                        mesh.try_consume_vertex_buffer(old, new);
-                    }
-                }
-                HandleMapping::IndexBuffer { old, new } => {
-                    for mesh in (&mut meshes).join() {
-                        if !mesh.is_pending_gpu() {
-                            continue;
-                        }
-
-                        mesh.try_consume_index_buffer(old, new);
+                        map_buffer_handle(&mut mesh.gpu_vertex_buffer, old, new);
+                        map_buffer_handle(&mut mesh.gpu_index_buffer, old, new);
                     }
                 }
                 HandleMapping::Texture { old, new } => {
@@ -828,8 +816,6 @@ impl<'a> System<'a> for GpuUpload {
     );
 
     fn run(&mut self, data: Self::SystemData) {
-        use trekant::loader::ResourceLoader;
-
         let (
             loader,
             unlit_materials,
@@ -853,9 +839,10 @@ impl<'a> System<'a> for GpuUpload {
 
             if !ubuf.is_empty() {
                 let async_handle = loader
-                    .load(UniformBufferDescriptor::from_vec(
+                    .load_buffer(BufferDescriptor::uniform_buffer(
                         ubuf,
                         BufferMutability::Immutable,
+                        trekant::BufferLayout::MinBufferOffset,
                     ))
                     .expect("Failed to load uniform buffer");
                 for (i, (ent, unlit, _)) in (&entities, &unlit_materials, !&gpu_materials)
@@ -864,7 +851,7 @@ impl<'a> System<'a> for GpuUpload {
                 {
                     if let StorageEntry::Vacant(entry) = pending_mats.entry(ent).unwrap() {
                         entry.insert(PendingMaterial::Unlit {
-                            color_uniform: Pending::Pending(BufferHandle::sub_buffer(
+                            color_uniform: GpuBuffer::InFlight(AsyncBufferHandle::sub_buffer(
                                 async_handle,
                                 i as u32,
                                 1,
@@ -915,9 +902,10 @@ impl<'a> System<'a> for GpuUpload {
 
             if !ubuf_pbr.is_empty() {
                 let async_handle = loader
-                    .load(UniformBufferDescriptor::from_vec(
+                    .load_buffer(BufferDescriptor::uniform_buffer(
                         ubuf_pbr,
                         BufferMutability::Immutable,
+                        trekant::BufferLayout::MinBufferOffset,
                     ))
                     .expect("Failed to load uniform buffer");
                 for (i, (ent, pb_mat, _)) in
@@ -927,7 +915,7 @@ impl<'a> System<'a> for GpuUpload {
                 {
                     if let StorageEntry::Vacant(entry) = pending_mats.entry(ent).unwrap() {
                         entry.insert(PendingMaterial::PBR {
-                            material_uniforms: Pending::Pending(BufferHandle::sub_buffer(
+                            material_uniforms: GpuBuffer::InFlight(AsyncBufferHandle::sub_buffer(
                                 async_handle,
                                 i as u32,
                                 1,

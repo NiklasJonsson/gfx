@@ -1,26 +1,28 @@
 pub use ash::vk;
 
-mod backend;
-pub mod buffer;
-mod common;
-mod descriptor;
-mod error;
-mod generics;
+mod buffer;
 pub mod loader;
 pub mod pipeline;
 pub mod pipeline_resource;
-mod render_pass;
-mod render_target;
 pub mod resource;
-mod texture;
+pub mod std140;
 pub mod traits;
 pub mod util;
 pub mod vertex;
 
+mod backend;
+mod common;
+mod descriptor;
+mod error;
+mod render_pass;
+mod render_target;
+mod texture;
+
 pub use backend::command::CommandBuffer;
 pub use buffer::{
-    BufferHandle, BufferMutability, DeviceIndexBuffer, DeviceUniformBuffer, DeviceVertexBuffer,
-    IndexBufferDescriptor, UniformBufferDescriptor, VertexBufferDescriptor,
+    AsyncBufferHandle, BufferDescriptor, BufferHandle, BufferLayout, BufferMutability, BufferType,
+    DeviceBuffer, HostBuffer, HostIndexBuffer, HostStorageBuffer, HostUniformBuffer,
+    HostVertexBuffer, IndexBufferType, StorageBufferType, UniformBufferType, VertexBufferType,
 };
 pub use descriptor::DescriptorData;
 pub use error::RenderError;
@@ -30,24 +32,23 @@ pub use pipeline::{GraphicsPipeline, GraphicsPipelineDescriptor, PipelineError, 
 pub use pipeline_resource::PipelineResourceSet;
 pub use render_pass::{RenderPass, RenderPassEncoder};
 pub use render_target::RenderTarget;
-pub use resource::{Async, Handle, MutResourceManager, ResourceManager};
+pub use resource::{Async, Handle};
+pub use std140::{Std140, Std140Struct};
 pub use texture::{
     BorderColor, Filter, MipMaps, SamplerAddressMode, SamplerDescriptor, Texture,
     TextureDescriptor, TextureUsage,
 };
-pub use traits::{PushConstant, Std140, Uniform};
+pub use traits::{PushConstant, Uniform};
+pub use trekant_derive::Std140;
 pub use util::{Extent2D, Format};
 pub use vertex::VertexFormat;
 
-pub use trekant_derive::Std140Compat;
-
+use crate::backend::image::ImageDescriptor;
+use crate::backend::vk::{image::Image, MemoryError};
 use backend::device::HasVkDevice as _;
 use backend::{command, device, framebuffer, instance, surface, swapchain, sync};
 use common::MAX_FRAMES_IN_FLIGHT;
 use texture::TextureError;
-
-use crate::backend::image::ImageDescriptor;
-use crate::backend::vk::{buffer::Buffer, image::Image, MemoryError};
 
 // Notes:
 // We can have N number of swapchain images, it depends on the backing presentation implementation.
@@ -101,16 +102,69 @@ impl<'a> Frame<'a> {
         self.recorded_command_buffers
             .push(*cmd_buffer.vk_command_buffer());
     }
+}
 
-    // TODO: Could we use vkCmdUpdateBuffer instead? Note that it can't be inside a render pass
-    pub fn update_uniform_blocking<T: Copy + traits::Uniform>(
-        &mut self,
-        h: &BufferHandle<buffer::DeviceUniformBuffer>,
-        data: &T,
-    ) -> Result<(), RenderError> {
-        self.renderer.update_uniform(h, data)
+impl<'a> Frame<'a> {
+    pub fn get_buffer(&self, handle: BufferHandle) -> Option<&DeviceBuffer> {
+        self.renderer.get_buffer(handle)
     }
 
+    pub fn write_buffer_at<T: bytemuck::Pod>(
+        &mut self,
+        h: BufferHandle,
+        start: usize,
+        data: &[T],
+    ) -> Result<(), RenderError> {
+        self.renderer.write_buffer_at(h, start, data)
+    }
+
+    pub fn write_buffer<T: bytemuck::Pod>(
+        &mut self,
+        h: BufferHandle,
+        data: &[T],
+    ) -> Result<(), RenderError> {
+        self.renderer.write_buffer(h, data)
+    }
+
+    // idx is in terms of T
+    pub fn write_buffer_element<T: bytemuck::Pod>(
+        &mut self,
+        h: BufferHandle,
+        data: &T,
+        idx: usize,
+    ) -> Result<(), RenderError> {
+        self.renderer.write_buffer_element(h, data, idx)
+    }
+
+    pub fn get_texture(&self, handle: &Handle<Texture>) -> Option<&Texture> {
+        self.renderer.get_texture(handle)
+    }
+
+    pub fn create_buffer(
+        &mut self,
+        descriptor: BufferDescriptor<'_>,
+    ) -> Result<BufferHandle, MemoryError> {
+        self.renderer.create_buffer(descriptor)
+    }
+
+    pub fn create_buffer_with(
+        &mut self,
+        descriptor: BufferDescriptor<'_>,
+        prev: BufferHandle,
+    ) -> Result<BufferHandle, MemoryError> {
+        self.renderer.create_buffer_with(descriptor, prev)
+    }
+
+    pub fn create_buffer_ext(
+        &mut self,
+        descriptor: BufferDescriptor<'_>,
+        prev: Option<BufferHandle>,
+    ) -> Result<BufferHandle, MemoryError> {
+        self.renderer.create_buffer_ext(descriptor, prev)
+    }
+}
+
+impl<'a> Frame<'a> {
     pub fn begin_render_pass(
         &'a self,
         mut buf: command::CommandBuffer,
@@ -186,158 +240,6 @@ impl<'a> Frame<'a> {
     }
 }
 
-// TODO: Refactor?
-impl<'a> Frame<'a> {
-    pub fn get_texture(&self, handle: &Handle<Texture>) -> Option<&Texture> {
-        self.renderer.get_texture(handle)
-    }
-}
-
-macro_rules! impl_mut_buffer_manager_frame {
-    ($desc:ty, $resource:ty, $storage:ident) => {
-        impl<'a, 'b> resource::MutResourceManager<$desc, $resource, BufferHandle<$resource>>
-            for Frame<'a>
-        {
-            type Error = MemoryError;
-
-            /// Recreates a whole buffer, regardless if the buffer handle is only a subslice
-            /// Any handles pointing to this are invalidated and only the returned value should be
-            /// used. If the buffer is not "Mutable" & Available, then this will panic.
-            fn recreate_resource_blocking(
-                &mut self,
-                handle: BufferHandle<$resource>,
-                descriptor: $desc,
-            ) -> Result<BufferHandle<$resource>, Self::Error> {
-                assert_eq!(handle.mutability(), BufferMutability::Mutable);
-                if let Some(ref mut buf) = self
-                    .renderer
-                    .resources
-                    .$storage
-                    .get_buffered_mut(&handle, self.renderer.frame_idx as usize)
-                {
-                    // TODO: Increment generation of backing storage
-                    buf.recreate(&self.renderer.device.allocator(), &descriptor)?;
-                    let handle = unsafe {
-                        BufferHandle::from_buffer(
-                            *handle.handle(),
-                            0,
-                            descriptor.n_elems(),
-                            BufferMutability::Mutable,
-                        )
-                    };
-
-                    Ok(handle)
-                } else {
-                    panic!("Can't recreate a pending resource!");
-                }
-            }
-        }
-    };
-}
-
-// TODO: How to avoid having to give <'b> here?
-impl_mut_buffer_manager_frame!(
-    buffer::VertexBufferDescriptor<'b>,
-    buffer::DeviceVertexBuffer,
-    vertex_buffers
-);
-
-impl_mut_buffer_manager_frame!(
-    buffer::IndexBufferDescriptor<'b>,
-    buffer::DeviceIndexBuffer,
-    index_buffers
-);
-
-macro_rules! impl_buffer_manager_frame {
-    ($desc:ty, $resource:ty, $handle:ty, $cmd_enum:ident, $storage:ident) => {
-        impl<'a, 'b> resource::ResourceManager<$desc, $resource, $handle> for Frame<'a> {
-            type Error = MemoryError;
-
-            fn get_resource(&self, handle: &$handle) -> Option<&$resource> {
-                self.renderer.get_resource(handle)
-            }
-
-            fn create_resource_blocking(
-                &mut self,
-                descriptor: $desc,
-            ) -> Result<$handle, Self::Error> {
-                self.renderer.create_resource_blocking(descriptor)
-            }
-        }
-    };
-}
-
-impl_buffer_manager_frame!(
-    buffer::VertexBufferDescriptor<'b>,
-    buffer::DeviceVertexBuffer,
-    BufferHandle<buffer::DeviceVertexBuffer>,
-    CreateVertexBuffer,
-    vertex_buffers
-);
-
-impl_buffer_manager_frame!(
-    buffer::IndexBufferDescriptor<'b>,
-    buffer::DeviceIndexBuffer,
-    BufferHandle<buffer::DeviceIndexBuffer>,
-    CreateIndexBuffer,
-    index_buffers
-);
-
-pub enum SyncResourceCommand<'a> {
-    CreateVertexBuffer {
-        descriptor: buffer::VertexBufferDescriptor<'a>,
-    },
-    CreateIndexBuffer {
-        descriptor: buffer::IndexBufferDescriptor<'a>,
-    },
-    CreateUniformBuffer {
-        descriptor: buffer::UniformBufferDescriptor<'a>,
-    },
-}
-
-pub enum PendingSyncResourceCommand {
-    CreateVertexBuffer {
-        handle: buffer::BufferHandle<buffer::DeviceVertexBuffer>,
-        transients: [Option<Buffer>; 2],
-    },
-    CreateIndexBuffer {
-        handle: buffer::BufferHandle<buffer::DeviceIndexBuffer>,
-        transients: [Option<Buffer>; 2],
-    },
-    CreateUniformBuffer {
-        handle: buffer::BufferHandle<buffer::DeviceUniformBuffer>,
-        transients: [Option<Buffer>; 2],
-    },
-}
-
-impl PendingSyncResourceCommand {
-    fn done(self) -> FinishedResourceCommand {
-        match self {
-            Self::CreateVertexBuffer { handle, .. } => {
-                FinishedResourceCommand::CreateVertexBuffer { handle }
-            }
-            Self::CreateIndexBuffer { handle, .. } => {
-                FinishedResourceCommand::CreateIndexBuffer { handle }
-            }
-            Self::CreateUniformBuffer { handle, .. } => {
-                FinishedResourceCommand::CreateUniformBuffer { handle }
-            }
-        }
-    }
-}
-
-pub enum FinishedResourceCommand {
-    CreateVertexBuffer {
-        handle: buffer::BufferHandle<buffer::DeviceVertexBuffer>,
-    },
-    CreateIndexBuffer {
-        handle: buffer::BufferHandle<buffer::DeviceIndexBuffer>,
-    },
-    CreateUniformBuffer {
-        handle: buffer::BufferHandle<buffer::DeviceUniformBuffer>,
-    },
-}
-
 struct PresentationRenderTarget {
     render_pass: Handle<RenderPass>,
     swapchain_render_targets: Vec<Handle<render_target::RenderTarget>>,
@@ -400,30 +302,6 @@ fn create_swapchain_and_co(
     })
 }
 
-macro_rules! process_buffer_creation {
-    ($cmd:ident, $desc:ident, $self:ident, $cmd_buffer:ident, $storage:ident) => {{
-        let (buf0, buf1) = $desc
-            .enqueue(&$self.device.allocator(), $cmd_buffer)
-            .expect("Fail");
-
-        let (buffer1, transient1) = if let Some(buf1) = buf1 {
-            (Some(buf1.buffer), buf1.transient)
-        } else {
-            (None, None)
-        };
-
-        let handle = {
-            let inner_handle = $self.resources.$storage.add(buf0.buffer, buffer1);
-            unsafe {
-                BufferHandle::from_buffer(inner_handle, 0, $desc.n_elems(), $desc.mutability())
-            }
-        };
-
-        let transients = [buf0.transient, transient1];
-        Some(PendingSyncResourceCommand::$cmd { handle, transients })
-    }};
-}
-
 // Command-buffer related
 impl Renderer {
     // TODO: Custom error?
@@ -436,45 +314,6 @@ impl Renderer {
         let fence = self.submit_command_buffer(command_buffer);
         fence.blocking_wait()?;
         Ok(r)
-    }
-}
-
-// Resource-related
-impl Renderer {
-    fn schedule_command(
-        &mut self,
-        command: SyncResourceCommand,
-        cmd_buffer: &mut command::CommandBuffer,
-    ) -> Option<PendingSyncResourceCommand> {
-        match command {
-            SyncResourceCommand::CreateVertexBuffer { descriptor } => {
-                process_buffer_creation!(
-                    CreateVertexBuffer,
-                    descriptor,
-                    self,
-                    cmd_buffer,
-                    vertex_buffers
-                )
-            }
-            SyncResourceCommand::CreateIndexBuffer { descriptor } => {
-                process_buffer_creation!(
-                    CreateIndexBuffer,
-                    descriptor,
-                    self,
-                    cmd_buffer,
-                    index_buffers
-                )
-            }
-            SyncResourceCommand::CreateUniformBuffer { descriptor } => {
-                process_buffer_creation!(
-                    CreateUniformBuffer,
-                    descriptor,
-                    self,
-                    cmd_buffer,
-                    uniform_buffers
-                )
-            }
-        }
     }
 
     fn submit_command_buffer(&self, mut cmd_buffer: command::CommandBuffer) -> sync::Fence {
@@ -490,22 +329,10 @@ impl Renderer {
 
         done
     }
+}
 
-    fn execute_command(
-        &mut self,
-        command: SyncResourceCommand,
-    ) -> Result<FinishedResourceCommand, MemoryError> {
-        let mut raw_cmd_buf = self.util_command_pool.begin_single_submit()?;
-        let pending_cmd = self
-            .schedule_command(command, &mut raw_cmd_buf)
-            .expect("Should be pending");
-
-        let done = self.submit_command_buffer(raw_cmd_buf);
-        done.blocking_wait()
-            .expect("Failed to wait for resource creation");
-        Ok(pending_cmd.done())
-    }
-
+// Resource-related
+impl Renderer {
     fn create_presentation_render_target(
         &mut self,
         format: util::Format,
@@ -629,9 +456,7 @@ impl Renderer {
             command::CommandPool::new(&device, device.graphics_queue_family().clone())?;
         let descriptor_sets = pipeline_resource::PipelineResourceSetStorage::new(&device)?;
         let resources = resource::Resources {
-            uniform_buffers: buffer::UniformBuffers::default(),
-            vertex_buffers: buffer::VertexBuffers::default(),
-            index_buffers: buffer::IndexBuffers::default(),
+            buffers: buffer::Buffers::default(),
             textures: texture::Textures::default(),
             graphics_pipelines: pipeline::GraphicsPipelines::default(),
             descriptor_sets,
@@ -824,21 +649,6 @@ impl Renderer {
 
 /// These are functions only used by other parts of this lib
 impl Renderer {
-    fn update_uniform<T: Copy + traits::Uniform>(
-        &mut self,
-        h: &BufferHandle<buffer::DeviceUniformBuffer>,
-        data: &T,
-    ) -> Result<(), RenderError> {
-        let ubuf = self
-            .resources
-            .uniform_buffers
-            .get_buffered_mut(h, self.frame_idx as usize)
-            .ok_or_else(|| RenderError::InvalidHandle(h.handle().id()))?;
-
-        ubuf.update_with(data, h.idx() as u64);
-        Ok(())
-    }
-
     fn current_present_target(&self) -> &Handle<render_target::RenderTarget> {
         &self
             .presentation_render_target
@@ -874,51 +684,136 @@ impl Renderer {
     }
 }
 
-macro_rules! impl_buffer_manager {
-    ($desc:ty, $resource:ty, $handle:ty, $cmd_enum:ident, $storage:ident) => {
-        impl<'a> resource::ResourceManager<$desc, $resource, $handle> for Renderer {
-            type Error = MemoryError;
+impl Renderer {
+    // TODO: Should this ensure that this is only called between frames?
+    // This is only relevant for mutable buffers though so this should be fine?
+    pub fn get_buffer(&self, handle: BufferHandle) -> Option<&DeviceBuffer> {
+        self.resources.buffers.get(handle, self.frame_idx as usize)
+    }
 
-            fn get_resource(&self, handle: &$handle) -> Option<&$resource> {
-                self.resources.$storage.get(handle, self.frame_idx as usize)
-            }
+    /// Write the elements in `data` to the buffer in `h`, starting at element at `start`.
+    /// This function handles alignment requirements properly.
+    /// TODO: Accept frame to ensure that we can write to this buffer?
+    pub fn write_buffer_at<T: bytemuck::Pod>(
+        &mut self,
+        h: BufferHandle,
+        start: usize,
+        data: &[T],
+    ) -> Result<(), RenderError> {
+        assert!(h.n_elems() as usize >= data.len());
+        assert_eq!(
+            h.mutability(),
+            BufferMutability::Mutable,
+            "Can't modify immutable buffer"
+        );
 
-            fn create_resource_blocking(
-                &mut self,
-                descriptor: $desc,
-            ) -> Result<$handle, Self::Error> {
-                let cmd = SyncResourceCommand::$cmd_enum { descriptor };
-                let finished = self.execute_command(cmd)?;
-                match finished {
-                    FinishedResourceCommand::$cmd_enum { handle } => Ok(handle),
-                    _ => unreachable!(),
-                }
+        let buf = self
+            .resources
+            .buffers
+            .get_buffered_mut(h, self.frame_idx as usize)
+            .ok_or_else(|| RenderError::InvalidHandle(h.handle().id()))?;
+
+        let dst_offset = (h.idx() as usize + start) * buf.stride() as usize;
+        let raw_data = util::as_byte_slice(data);
+        buf.write(dst_offset, raw_data);
+        Ok(())
+    }
+
+    pub fn write_buffer<T: bytemuck::Pod>(
+        &mut self,
+        h: BufferHandle,
+        data: &[T],
+    ) -> Result<(), RenderError> {
+        self.write_buffer_at(h, 0, data)
+    }
+
+    // idx is in terms of T
+    pub fn write_buffer_element<T: bytemuck::Pod>(
+        &mut self,
+        h: BufferHandle,
+        data: &T,
+        idx: usize,
+    ) -> Result<(), RenderError> {
+        self.write_buffer_at(h, idx, std::slice::from_ref(data))
+    }
+
+    pub fn create_buffer(
+        &mut self,
+        descriptor: BufferDescriptor<'_>,
+    ) -> Result<BufferHandle, MemoryError> {
+        // The transients that contain the data to upload need to outlive the wait for the command buffer to finish.
+        // TOOD: Should descriptor.enqueue be unsafe?
+        let (buf0, buf1) = self
+            .submit_blocking(|cmd_buf| descriptor.enqueue(&self.device.allocator(), cmd_buf))
+            .expect("Failed to submit commands to create buffer")
+            .expect("Buffer creation failed");
+
+        let handle = {
+            let inner_handle = self
+                .resources
+                .buffers
+                .add(buf0.buffer, buf1.map(|x| x.buffer));
+            unsafe {
+                BufferHandle::from_buffer(
+                    inner_handle,
+                    0,
+                    descriptor.n_elems(),
+                    descriptor.mutability(),
+                    descriptor.buffer_type().ty(),
+                )
             }
+        };
+
+        Ok(handle)
+    }
+
+    /// Recreates a whole buffer, regardless if the buffer handle is only a subslice
+    /// Any handles pointing to this are invalidated and only the returned value should be
+    /// used. If the buffer is not "Mutable" & Available, then this will panic.
+    pub fn create_buffer_with(
+        &mut self,
+        descriptor: BufferDescriptor<'_>,
+        prev: BufferHandle,
+    ) -> Result<BufferHandle, MemoryError> {
+        assert_eq!(prev.mutability(), BufferMutability::Mutable);
+        // TODO: Check that self.frame_idx is not in-flight
+        if let Some(ref mut buf) = self
+            .resources
+            .buffers
+            .get_buffered_mut(prev, self.frame_idx as usize)
+        {
+            // TODO: Increment generation of backing storage
+            buf.recreate(&self.device.allocator(), &descriptor)?;
+            let handle = unsafe {
+                BufferHandle::from_buffer(
+                    *prev.handle(),
+                    0,
+                    descriptor.n_elems(),
+                    BufferMutability::Mutable,
+                    prev.buffer_type_id(),
+                )
+            };
+
+            Ok(handle)
+        } else {
+            // TODO: Should this be a recoverable error?
+            panic!("There is no buffer for: {prev:?}");
         }
-    };
-}
+    }
 
-impl_buffer_manager!(
-    buffer::VertexBufferDescriptor<'a>,
-    buffer::DeviceVertexBuffer,
-    BufferHandle<buffer::DeviceVertexBuffer>,
-    CreateVertexBuffer,
-    vertex_buffers
-);
-impl_buffer_manager!(
-    buffer::IndexBufferDescriptor<'a>,
-    buffer::DeviceIndexBuffer,
-    BufferHandle<buffer::DeviceIndexBuffer>,
-    CreateIndexBuffer,
-    index_buffers
-);
-impl_buffer_manager!(
-    buffer::UniformBufferDescriptor<'a>,
-    buffer::DeviceUniformBuffer,
-    BufferHandle<buffer::DeviceUniformBuffer>,
-    CreateUniformBuffer,
-    uniform_buffers
-);
+    /// TODO: Docs
+    pub fn create_buffer_ext(
+        &mut self,
+        descriptor: BufferDescriptor<'_>,
+        prev: Option<BufferHandle>,
+    ) -> Result<BufferHandle, MemoryError> {
+        if let Some(prev) = prev {
+            self.create_buffer_with(descriptor, prev)
+        } else {
+            self.create_buffer(descriptor)
+        }
+    }
+}
 
 impl Renderer {
     pub fn get_pipeline(&self, handle: &Handle<GraphicsPipeline>) -> Option<&GraphicsPipeline> {

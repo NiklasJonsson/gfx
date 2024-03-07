@@ -8,21 +8,15 @@ use winit::{
 use nalgebra_glm as glm;
 use resurs::{Async, Handle};
 
-use buffer::{
-    BufferHandle, BufferMutability, DeviceIndexBuffer, DeviceUniformBuffer, DeviceVertexBuffer,
-};
-use trekant::buffer;
 use trekant::pipeline::{
     GraphicsPipeline, GraphicsPipelineDescriptor, ShaderDescriptor, ShaderStage,
 };
 use trekant::util;
 use trekant::vertex::{VertexDefinition, VertexFormat};
+use trekant::{AsyncBufferHandle, BufferDescriptor, BufferHandle, BufferMutability};
 
-use trekant::Std140Compat;
+use trekant::Std140;
 use trekant::{Loader, RenderPass, Renderer, Texture};
-
-use trekant::loader::ResourceLoader as _;
-use trekant::ResourceManager as _;
 
 use std::sync::mpsc;
 use std::sync::Arc;
@@ -97,15 +91,15 @@ impl State {
     }
 }
 
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, bytemuck::Zeroable, bytemuck::Pod)]
 #[repr(C, packed)]
 struct Vertex {
-    pos: glm::Vec3,
-    col: glm::Vec3,
-    tex_coord: glm::Vec2,
+    pos: [f32; 3],
+    col: [f32; 3],
+    tex_coord: [f32; 2],
 }
 
-impl VertexDefinition for Vertex {
+unsafe impl VertexDefinition for Vertex {
     fn format() -> VertexFormat {
         VertexFormat::from([
             util::Format::FLOAT3,
@@ -115,21 +109,21 @@ impl VertexDefinition for Vertex {
     }
 }
 
-#[derive(Clone, Copy, Default)]
+#[derive(Clone, Copy, Default, bytemuck::Zeroable, bytemuck::Pod)]
 #[repr(transparent)]
-struct Mat4(glm::Mat4);
+struct Mat4([[f32; 4]; 4]);
 
-#[derive(Clone, Copy, Std140Compat)]
+unsafe impl trekant::Std140 for Mat4 {
+    const SIZE: usize = 64;
+    const ALIGNMENT: usize = 16;
+}
+
+#[derive(Clone, Copy, Std140, bytemuck::Zeroable, bytemuck::Pod)]
 #[repr(C)]
 struct UniformBufferObject {
     model: Mat4,
     view: Mat4,
     proj: Mat4,
-}
-
-unsafe impl trekant::Std140 for Mat4 {
-    const SIZE: usize = 64;
-    const ALIGNMENT: usize = 16;
 }
 
 fn get_fname(dir: &str, target: &str) -> std::path::PathBuf {
@@ -172,19 +166,21 @@ const OBJ_URL: &str = "https://vulkan-tutorial.com/resources/viking_room.obj";
 const TEX_URL: &str = "https://vulkan-tutorial.com/resources/viking_room.png";
 
 static RAW_VERT_SPV: &[u32] = inline_spirv::include_spirv!(
-    "examples/shaders/shader.vert.glsl",
+    "examples/shaders/vulkan-tutorial.vert.glsl",
     vert,
     glsl,
     entry = "main"
 );
 static RAW_FRAG_SPV: &[u32] = inline_spirv::include_spirv!(
-    "examples/shaders/shader.frag.glsl",
+    "examples/shaders/vulkan-tutorial.frag.glsl",
     frag,
     glsl,
     entry = "main"
 );
 
-fn load_viking_house() -> (Vec<Vertex>, Vec<u32>) {
+type VertexIndexTy = u32;
+
+fn load_viking_house() -> (Vec<Vertex>, Vec<VertexIndexTy>) {
     let mut cursor = load_url("models", OBJ_URL);
 
     let (mut models, _) = tobj::load_obj_buf(&mut cursor, true, |_| {
@@ -208,11 +204,12 @@ fn load_viking_house() -> (Vec<Vertex>, Vec<u32>) {
         ..
     } = model;
 
+    vertices.reserve(positions.len() / 3);
     for (pos, tc) in positions.chunks(3).zip(texcoords.chunks(2)) {
         let vertex = Vertex {
-            pos: glm::vec3(pos[0], pos[1], pos[2]),
-            col: glm::vec3(1.0, 1.0, 1.0),
-            tex_coord: glm::vec2(tc[0], 1.0 - tc[1]),
+            pos: [pos[0], pos[1], pos[2]],
+            col: [1.0, 1.0, 1.0],
+            tex_coord: [tc[0], 1.0 - tc[1]],
         };
         vertices.push(vertex);
     }
@@ -225,25 +222,28 @@ fn get_next_mvp(start: &std::time::Instant, aspect_ratio: f32) -> UniformBufferO
     let time = time.as_secs_f32();
 
     let mut ubo = UniformBufferObject {
-        model: Mat4(glm::rotate(
-            &glm::identity(),
-            time * std::f32::consts::FRAC_PI_2,
-            &glm::vec3(0.0, 0.0, 1.0),
-        )),
-        view: Mat4(glm::look_at(
-            &glm::vec3(2.0, 2.0, 2.0),
-            &glm::vec3(0.0, 0.0, 0.0),
-            &glm::vec3(0.0, 0.0, 1.0),
-        )),
-        proj: Mat4(glm::perspective_zo(
-            aspect_ratio,
-            std::f32::consts::FRAC_PI_4,
-            0.1,
-            10.0,
-        )),
+        model: Mat4(
+            glm::rotate(
+                &glm::identity(),
+                time * std::f32::consts::FRAC_PI_2,
+                &glm::vec3(0.0, 0.0, 1.0),
+            )
+            .into(),
+        ),
+        view: Mat4(
+            glm::look_at(
+                &glm::vec3(2.0, 2.0, 2.0),
+                &glm::vec3(0.0, 0.0, 0.0),
+                &glm::vec3(0.0, 0.0, 1.0),
+            )
+            .into(),
+        ),
+        proj: Mat4(
+            glm::perspective_zo(aspect_ratio, std::f32::consts::FRAC_PI_4, 0.1, 10.0).into(),
+        ),
     };
 
-    ubo.proj.0[(1, 1)] *= -1.0;
+    ubo.proj.0[1][1] *= -1.0;
 
     ubo
 }
@@ -266,44 +266,51 @@ fn create_texture(
     texture_sender.send(texture).expect("Failed to send");
 }
 
-type PendingMesh = (
-    BufferHandle<Async<DeviceVertexBuffer>>,
-    BufferHandle<Async<DeviceIndexBuffer>>,
-);
+#[derive(Clone, Copy)]
+struct PendingMesh {
+    vertex_buffer: AsyncBufferHandle,
+    index_buffer: AsyncBufferHandle,
+}
 
 fn create_mesh(loader: Arc<Loader>, mesh_sender: mpsc::Sender<PendingMesh>) {
     let (vertices, indices) = load_viking_house();
 
     let vertex_buffer_descriptor =
-        buffer::VertexBufferDescriptor::from_vec(vertices, BufferMutability::Immutable);
+        BufferDescriptor::vertex_buffer(vertices, BufferMutability::Immutable);
 
     let vertex_buffer = loader
-        .load(vertex_buffer_descriptor)
+        .load_buffer(vertex_buffer_descriptor)
         .expect("Failed to load vertex buffer");
 
     let index_buffer_descriptor =
-        buffer::IndexBufferDescriptor::from_vec(indices, BufferMutability::Immutable);
+        BufferDescriptor::index_buffer(indices, BufferMutability::Immutable);
     let index_buffer = loader
-        .load(index_buffer_descriptor)
+        .load_buffer(index_buffer_descriptor)
         .expect("Failed to load index buffer");
 
     mesh_sender
-        .send((vertex_buffer, index_buffer))
+        .send(PendingMesh {
+            vertex_buffer,
+            index_buffer,
+        })
         .expect("Failed to send");
 }
 
-fn create_mvp_ubuf(renderer: &mut Renderer) -> BufferHandle<DeviceUniformBuffer> {
-    let data = vec![UniformBufferObject {
+fn create_mvp_ubuf(renderer: &mut Renderer) -> BufferHandle {
+    let data = UniformBufferObject {
         model: Mat4::default(),
         view: Mat4::default(),
         proj: Mat4::default(),
-    }];
+    };
 
-    let uniform_buffer_desc =
-        buffer::UniformBufferDescriptor::from_slice(&data, buffer::BufferMutability::Mutable);
+    let uniform_buffer_desc = BufferDescriptor::uniform_buffer(
+        std::slice::from_ref(&data),
+        BufferMutability::Mutable,
+        trekant::BufferLayout::Std140,
+    );
 
     renderer
-        .create_resource_blocking(uniform_buffer_desc)
+        .create_buffer(uniform_buffer_desc)
         .expect("Failed to create uniform buffer")
 }
 
@@ -360,8 +367,8 @@ fn main() {
     let mut pending_tex: Option<Handle<Async<Texture>>> = None;
 
     // The final handles used for rendering
-    let mut vbuf: Option<BufferHandle<DeviceVertexBuffer>> = None;
-    let mut ibuf: Option<BufferHandle<DeviceIndexBuffer>> = None;
+    let mut vbuf: Option<BufferHandle> = None;
+    let mut ibuf: Option<BufferHandle> = None;
     let mut tex: Option<Handle<Texture>> = None;
 
     // Can only created once the texture is done.
@@ -391,22 +398,19 @@ fn main() {
                         use trekant::loader::HandleMapping;
 
                         match mapping {
-                            HandleMapping::IndexBuffer { old, new } => {
-                                assert_eq!(old.handle(), pending_mesh.1.handle());
-                                assert!(ibuf.is_none(), "Double return?");
-                                ibuf = Some(new);
-                            }
-                            HandleMapping::VertexBuffer { old, new } => {
-                                assert_eq!(old.handle(), pending_mesh.0.handle());
-                                assert!(vbuf.is_none(), "Double return?");
-                                vbuf = Some(new);
+                            HandleMapping::Buffer { old, new } => {
+                                if old == pending_mesh.index_buffer {
+                                    ibuf = Some(new);
+                                } else {
+                                    assert_eq!(old, pending_mesh.vertex_buffer);
+                                    vbuf = Some(new);
+                                }
                             }
                             HandleMapping::Texture { old, new } => {
                                 assert_eq!(old, pending_tex);
                                 assert!(tex.is_none());
                                 tex = Some(new);
                             }
-                            _ => unreachable!("Haven't tried to load any other types"),
                         }
                     }
                 }
@@ -419,8 +423,8 @@ fn main() {
                         .expect("Failed to generate mipmaps");
                     desc_set = Some(
                         trekant::PipelineResourceSet::builder(&mut renderer)
-                            .add_buffer(&ubuf, 0, ShaderStage::VERTEX)
-                            .add_texture(&tex, 1, ShaderStage::FRAGMENT, false)
+                            .add_buffer(ubuf, 0, ShaderStage::VERTEX)
+                            .add_texture(tex, 1, ShaderStage::FRAGMENT, false)
                             .build(),
                     );
                 }
@@ -445,11 +449,11 @@ fn main() {
 
                 let next_mvp = get_next_mvp(&state.start, aspect_ratio);
                 frame
-                    .update_uniform_blocking(&ubuf, &next_mvp)
+                    .write_buffer_element(ubuf, &next_mvp, 0)
                     .expect("Failed to update uniform buffer!");
 
                 // All loading needs to be done before drawing
-                if let (Some(vbuf), Some(ibuf), Some(desc_set)) = (&vbuf, &ibuf, desc_set) {
+                if let (Some(vbuf), Some(ibuf), Some(desc_set)) = (vbuf, ibuf, desc_set) {
                     let cmd_buf = frame
                         .new_command_buffer()
                         .expect("Failed to create render command buffer");

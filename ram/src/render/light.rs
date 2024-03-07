@@ -1,5 +1,4 @@
 use crate::ecs::prelude::*;
-use crate::imdbg;
 use crate::math::{
     orthographic_vk, perspective_vk, Aabb, FrustrumPlanes, Mat4, Obb, Rgb, Rgba, Transform, Vec2,
     Vec3,
@@ -7,9 +6,9 @@ use crate::math::{
 use crate::render::debug::LineConfig;
 
 use trekant::{
-    vk, BufferHandle, BufferMutability, CommandBuffer, DeviceUniformBuffer, Extent2D,
+    vk, BufferDescriptor, BufferHandle, BufferMutability, CommandBuffer, Extent2D,
     GraphicsPipeline, Handle, PipelineResourceSet, RenderPass, RenderTarget, Renderer,
-    ResourceManager, UniformBufferDescriptor, VertexFormat,
+    VertexFormat,
 };
 
 use crate::render::uniform::{LightingData, PackedLight, MAX_NUM_LIGHTS};
@@ -91,7 +90,7 @@ pub struct ShadowMap {
 struct ShadowRenderPassInfo {
     extent: Extent2D,
     render_target: Handle<RenderTarget>,
-    view_data_buf: BufferHandle<DeviceUniformBuffer>,
+    view_data_buf: BufferHandle,
     view_data: Handle<PipelineResourceSet>,
     shadow_map: ShadowMap,
     light_entity: Entity,
@@ -225,7 +224,7 @@ fn debug_directional_shadow_bounds(world: &World, light_bounds_ls: Obb, shadow_m
 
 pub struct Shadow {
     pub render_target: Handle<RenderTarget>,
-    pub view_data_buffer: BufferHandle<DeviceUniformBuffer>,
+    pub view_data_buffer: BufferHandle,
     pub view_data_desc_set: Handle<PipelineResourceSet>,
     pub texture: Handle<trekant::Texture>,
     pub extent: Extent2D,
@@ -234,7 +233,7 @@ pub struct Shadow {
 pub struct ShadowResources {
     pub render_pass: Handle<trekant::RenderPass>,
     pub dummy_pipeline: Handle<GraphicsPipeline>,
-    pub shadow_matrices_buf: BufferHandle<DeviceUniformBuffer>,
+    pub shadow_matrices_buf: BufferHandle,
     pub directional: Shadow,
     pub spotlights: Vec<Shadow>,
 }
@@ -360,13 +359,13 @@ fn shadow_pipeline_desc(
 
 fn build_single_shadow(
     renderer: &mut Renderer,
-    view_data: BufferHandle<DeviceUniformBuffer>,
+    view_data: BufferHandle,
     shadow_render_pass: Handle<RenderPass>,
     extent: Extent2D,
 ) -> Shadow {
     let (texture, render_target) = shadow_render_target(renderer, &shadow_render_pass, extent);
     let sh_view_data_set = PipelineResourceSet::builder(renderer)
-        .add_buffer(&view_data, 0, trekant::pipeline::ShaderStage::VERTEX)
+        .add_buffer(view_data, 0, trekant::pipeline::ShaderStage::VERTEX)
         .build();
 
     Shadow {
@@ -397,7 +396,7 @@ pub fn get_shadow_pipeline_for(
     Ok(renderer.create_gfx_pipeline(descriptor, &frame_data.shadow.render_pass)?)
 }
 
-const NUM_SHADOW_MATRICES: u32 =
+pub const NUM_SHADOW_MATRICES: u32 =
     uniform::SPOTLIGHT_SHADOW_MAP_COUNT + uniform::DIRECTIONAL_SHADOW_MAP_COUNT;
 
 pub fn setup_shadow_resources(
@@ -418,10 +417,14 @@ pub fn setup_shadow_resources(
     let view_data = [uniform::PosOnlyViewData {
         view_proj: uniform::Mat4::default(),
     }; NUM_SHADOW_MATRICES as usize];
-    let view_data = UniformBufferDescriptor::from_slice(&view_data, BufferMutability::Mutable);
+    let view_data = BufferDescriptor::uniform_buffer(
+        &view_data,
+        BufferMutability::Mutable,
+        trekant::BufferLayout::MinBufferOffset,
+    );
 
     let shadow_matrices_buf = renderer
-        .create_resource_blocking(view_data)
+        .create_buffer(view_data)
         .expect("Failed to create buffer for shadow view and projection matrices");
 
     let directional = build_single_shadow(
@@ -436,7 +439,7 @@ pub fn setup_shadow_resources(
     for buf_i in 1..1 + n_spotlights {
         spotlights.push(build_single_shadow(
             renderer,
-            BufferHandle::sub_buffer(shadow_matrices_buf, buf_i as u32, 1),
+            BufferHandle::sub_buffer(shadow_matrices_buf, buf_i, 1),
             shadow_render_pass,
             SPOTLIGHT_SHADOW_MAP_EXTENT,
         ));
@@ -463,8 +466,7 @@ pub fn setup_shadow_resources(
 }
 
 pub struct ShadowPassOutput {
-    pub shadow_matrices: [uniform::Mat4; MAX_NUM_LIGHTS as usize],
-    pub count: usize,
+    pub shadow_matrices: Vec<uniform::Mat4>,
 }
 
 fn transition_unused_map(
@@ -529,8 +531,9 @@ pub fn shadow_pass(
     // 2. The buffer in the output of this pass: This is the shadow passes that were actually run and that may be used later by the light pass.
     // Each ShadowMap component has an index into 2.
     // TODO: Can we simplify the above? E.g. by late creation and binding of desc set
-    let mut shadow_matrices = [super::uniform::Mat4::default(); MAX_NUM_LIGHTS as usize];
-    let mut shadow_render_info: [Option<ShadowRenderPassInfo>; MAX_NUM_LIGHTS as usize] =
+    // Maybe it is possible to write directly to view_data_buf and then copy from that buffer to the output on the gpu?
+    let mut shadow_matrices = [super::uniform::mat4_nan(); MAX_NUM_LIGHTS];
+    let mut shadow_render_info: [Option<ShadowRenderPassInfo>; MAX_NUM_LIGHTS] =
         [None; MAX_NUM_LIGHTS];
 
     const MAX_NUM_SPOTLIGHTS: usize = if MAX_NUM_LIGHTS > 0 {
@@ -586,10 +589,10 @@ pub fn shadow_pass(
 
                 let dir = &shadow_resources.directional;
 
-                let light_bounds_ls = to_lightspace * shadow_bounds_ws;
-                let aabb = compute_directional_shadow_bounds(light_bounds_ls, dir.extent);
+                let shadow_bounds_ls = to_lightspace * shadow_bounds_ws;
+                let aabb = compute_directional_shadow_bounds(shadow_bounds_ls, dir.extent);
                 {
-                    debug_directional_shadow_bounds(world, light_bounds_ls, aabb);
+                    debug_directional_shadow_bounds(world, shadow_bounds_ls, aabb);
                 }
 
                 let proj: Mat4 = orthographic_vk(FrustrumPlanes {
@@ -624,7 +627,6 @@ pub fn shadow_pass(
             Light::Point { .. } => continue,
             Light::Ambient { .. } => continue,
         };
-
         // The shadow_map stores the index into the output shadow matrices buffer
         // but the shadow pass will use this shadow matrix instead so write the proj matrix there.
         shadow_matrices[render_info.view_data_buf.idx() as usize] =
@@ -634,7 +636,7 @@ pub fn shadow_pass(
     }
 
     frame
-        .update_uniform_blocking(&shadow_resources.shadow_matrices_buf, &shadow_matrices)
+        .write_buffer_element(shadow_resources.shadow_matrices_buf, &shadow_matrices, 0)
         .expect("Failed to update matrices for shadow coords");
 
     // TODO: Push all unused into a vec to iterate over?
@@ -647,8 +649,7 @@ pub fn shadow_pass(
     );
 
     let mut output = ShadowPassOutput {
-        shadow_matrices: Default::default(),
-        count: n_shadows,
+        shadow_matrices: Vec::with_capacity(n_shadows),
     };
 
     // Render passes
@@ -678,7 +679,9 @@ pub fn shadow_pass(
         super::draw_entities(world, &mut shadow_rp, super::DrawMode::ShadowsOnly);
         cmd_buffer = shadow_rp.end().expect("Failed to end shadow render pass");
 
-        output.shadow_matrices[i] = shadow_matrices[view_data_buf.idx() as usize];
+        output
+            .shadow_matrices
+            .push(shadow_matrices[view_data_buf.idx() as usize]);
         shadow_maps
             .insert(light_entity, shadow_map)
             .expect("Failed to add shadow map for light entity");
@@ -771,29 +774,17 @@ pub fn write_lighting_data(
     lighting_data.num_lights = [packed_light_count; 4];
 
     frame
-        .update_uniform_blocking(
-            &frame_resources.engine_shader_resources.lighting_data,
+        .write_buffer_element(
+            frame_resources.engine_shader_resources.lighting_data,
             &lighting_data,
+            0,
         )
         .expect("Failed to update uniform for lighting data");
 
-    {
-        let shadow_data = uniform::ShadowData {
-            matrices: shadow_pass_output.shadow_matrices,
-            count: [
-                shadow_pass_output.count as u32,
-                u32::MAX,
-                u32::MAX,
-                u32::MAX,
-            ],
-        };
-
-        // TODO: Merge into LightingData?
-        frame
-            .update_uniform_blocking(
-                &frame_resources.engine_shader_resources.shadow_data,
-                &shadow_data,
-            )
-            .expect("Failed to write the ShadowData uniform during the lighting pass");
-    }
+    frame
+        .write_buffer(
+            frame_resources.engine_shader_resources.world_to_shadow,
+            &shadow_pass_output.shadow_matrices,
+        )
+        .expect("Failed to write the shadow matrices storage buffer for the main render pass");
 }

@@ -1,4 +1,4 @@
-use crate::buffer::{BufferHandle, DeviceIndexBuffer, DeviceVertexBuffer};
+use crate::buffer::BufferHandle;
 use crate::resource::Handle;
 use crate::util;
 
@@ -53,10 +53,10 @@ impl<'a> RenderPassEncoder<'a> {
         self
     }
 
-    pub fn bind_index_buffer(&mut self, handle: &BufferHandle<DeviceIndexBuffer>) -> &mut Self {
+    pub fn bind_index_buffer(&mut self, handle: BufferHandle) -> &mut Self {
         let ib = self
             .resources
-            .index_buffers
+            .buffers
             .get(handle, self.frame_idx as usize)
             .expect("Failed to get index buffer");
 
@@ -65,10 +65,10 @@ impl<'a> RenderPassEncoder<'a> {
         self
     }
 
-    pub fn bind_vertex_buffer(&mut self, handle: &BufferHandle<DeviceVertexBuffer>) -> &mut Self {
+    pub fn bind_vertex_buffer(&mut self, handle: BufferHandle) -> &mut Self {
         let vb = self
             .resources
-            .vertex_buffers
+            .buffers
             .get(handle, self.frame_idx as usize)
             .expect("Failed to get index buffer");
 
@@ -79,8 +79,8 @@ impl<'a> RenderPassEncoder<'a> {
 
     pub fn draw_mesh(
         &mut self,
-        vertex_buffer: &BufferHandle<DeviceVertexBuffer>,
-        index_buffer: &BufferHandle<DeviceIndexBuffer>,
+        vertex_buffer: BufferHandle,
+        index_buffer: BufferHandle,
     ) -> &mut Self {
         let vertex_index = vertex_buffer.idx() as i32;
         let indices_index = index_buffer.idx();
@@ -88,13 +88,13 @@ impl<'a> RenderPassEncoder<'a> {
 
         let vb = self
             .resources
-            .vertex_buffers
+            .buffers
             .get(vertex_buffer, self.frame_idx as usize)
             .expect("Failed to get index buffer");
 
         let ib = self
             .resources
-            .index_buffers
+            .buffers
             .get(index_buffer, self.frame_idx as usize)
             .expect("Failed to get index buffer");
 

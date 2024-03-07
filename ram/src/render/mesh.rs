@@ -1,10 +1,9 @@
 use crate::ecs::prelude::*;
 use crate::render::GpuBuffer;
 
-use trekant::buffer::{DeviceIndexBuffer, DeviceVertexBuffer, HostIndexBuffer, HostVertexBuffer};
-use trekant::loader::{Loader, ResourceLoader};
-use trekant::resource::Async;
-use trekant::{BufferHandle, BufferMutability};
+use trekant::loader::Loader;
+use trekant::{AsyncBufferHandle, BufferDescriptor, BufferHandle, BufferMutability};
+use trekant::{HostIndexBuffer, HostVertexBuffer};
 
 use ram_derive::Visitable;
 
@@ -12,8 +11,8 @@ use ram_derive::Visitable;
 pub struct Mesh {
     pub cpu_vertex_buffer: HostVertexBuffer,
     pub cpu_index_buffer: HostIndexBuffer,
-    pub gpu_vertex_buffer: GpuBuffer<DeviceVertexBuffer>,
-    pub gpu_index_buffer: GpuBuffer<DeviceIndexBuffer>,
+    pub gpu_vertex_buffer: GpuBuffer,
+    pub gpu_index_buffer: GpuBuffer,
 }
 
 impl Mesh {
@@ -27,55 +26,29 @@ impl Mesh {
     }
 }
 
-fn map_buffer_handle<BT>(
-    h: &mut GpuBuffer<BT>,
-    old: BufferHandle<Async<BT>>,
-    new: BufferHandle<BT>,
-) -> bool {
-    match h {
-        GpuBuffer::InFlight(cur) if cur.handle() == old.handle() => {
-            *h = GpuBuffer::Available(BufferHandle::sub_buffer(new, cur.idx(), cur.n_elems()));
-            true
-        }
-        _ => false,
-    }
-}
-
 impl Mesh {
-    pub fn try_consume_vertex_buffer(
-        &mut self,
-        old: BufferHandle<Async<DeviceVertexBuffer>>,
-        new: BufferHandle<DeviceVertexBuffer>,
-    ) -> bool {
-        map_buffer_handle(&mut self.gpu_vertex_buffer, old, new)
-    }
-
-    pub fn try_consume_index_buffer(
-        &mut self,
-        old: BufferHandle<Async<DeviceIndexBuffer>>,
-        new: BufferHandle<DeviceIndexBuffer>,
-    ) -> bool {
-        map_buffer_handle(&mut self.gpu_index_buffer, old, new)
-    }
-
     pub fn load_gpu(&mut self, loader: &Loader) {
-        use trekant::buffer::{IndexBufferDescriptor, VertexBufferDescriptor};
-        let vbuf_desc = VertexBufferDescriptor::from_host_buffer(
+        let vbuf_desc = BufferDescriptor::from_host_buffer(
             &self.cpu_vertex_buffer,
             BufferMutability::Immutable,
+            None,
         );
-        let ibuf_desc = IndexBufferDescriptor::from_host_buffer(
+        let ibuf_desc = BufferDescriptor::from_host_buffer(
             &self.cpu_index_buffer,
             BufferMutability::Immutable,
+            None,
         );
 
         self.gpu_vertex_buffer = GpuBuffer::InFlight(
             loader
-                .load(vbuf_desc)
+                .load_buffer(vbuf_desc)
                 .expect("Failed to load vertex buffer"),
         );
-        self.gpu_index_buffer =
-            GpuBuffer::InFlight(loader.load(ibuf_desc).expect("Failed to load index buffer"));
+        self.gpu_index_buffer = GpuBuffer::InFlight(
+            loader
+                .load_buffer(ibuf_desc)
+                .expect("Failed to load index buffer"),
+        );
     }
 }
 

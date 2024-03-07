@@ -274,7 +274,8 @@ impl GraphicsPipeline {
             .name(name)
             .build();
 
-        let new_refl_data = parse_spirv(&desc.spirv_code).map_err(PipelineError::Reflection)?;
+        let new_refl_data =
+            parse_spirv(&desc.spirv_code, stage).map_err(PipelineError::Reflection)?;
 
         refl_data.merge(new_refl_data);
 
