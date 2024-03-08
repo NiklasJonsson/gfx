@@ -16,20 +16,14 @@ use ash::vk;
 use std::convert::TryInto;
 use std::sync::Arc;
 
-pub use descriptor::{
-    BufferDescriptor, IndexBufferDescriptor, StorageBufferDescriptor, UniformBufferDescriptor,
-    VertexBufferDescriptor,
-};
+pub use descriptor::BufferDescriptor;
 
 pub use buffer_storage::DrainIterator;
 use buffer_storage::{AsyncDeviceBufferStorage, DeviceBufferStorage};
-pub type UniformBuffers = DeviceBufferStorage<DeviceUniformBuffer>;
-pub type AsyncUniformBuffers = AsyncDeviceBufferStorage<DeviceUniformBuffer>;
-pub type VertexBuffers = DeviceBufferStorage<DeviceVertexBuffer>;
-pub type AsyncVertexBuffers = AsyncDeviceBufferStorage<DeviceVertexBuffer>;
-pub type IndexBuffers = DeviceBufferStorage<DeviceIndexBuffer>;
-pub type StorageBuffers = DeviceBufferStorage<DeviceStorageBuffer>;
-pub type AsyncIndexBuffers = AsyncDeviceBufferStorage<DeviceIndexBuffer>;
+pub type Buffers = DeviceBufferStorage;
+pub type AsyncBuffers = AsyncDeviceBufferStorage<DeviceBuffer>;
+
+pub struct BufferTypeId(pub std::mem::Discriminant<BufferTypeDesc>);
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum BufferMutability {
@@ -37,42 +31,24 @@ pub enum BufferMutability {
     Mutable,
 }
 
-#[derive(Debug)]
-pub struct BufferHandle<T> {
-    h: Handle<T>,
+pub trait BufferType {
+    const USAGE: vk::BufferUsageFlags;
+    fn elem_align(&self, _allocator: &AllocatorHandle) -> u16 {
+        self.elem_size()
+    }
+    fn elem_size(&self) -> u16;
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub struct BufferHandle {
+    h: Handle<DeviceBuffer>,
     mutability: BufferMutability,
     idx: u32,
     n_elems: u32,
+    ty: BufferTypeId,
 }
 
-// TODO: try to derive these instead (tricky because of generic T)
-impl<T> Clone for BufferHandle<T> {
-    fn clone(&self) -> Self {
-        Self { ..*self }
-    }
-}
-impl<T> Copy for BufferHandle<T> {}
-
-impl<T> PartialEq for BufferHandle<T> {
-    fn eq(&self, o: &Self) -> bool {
-        self.h == o.h
-            && self.mutability == o.mutability
-            && self.idx == o.idx
-            && self.n_elems == o.n_elems
-    }
-}
-impl<T> Eq for BufferHandle<T> {}
-
-impl<T> std::hash::Hash for BufferHandle<T> {
-    fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
-        self.h.hash(state);
-        self.mutability.hash(state);
-        self.idx.hash(state);
-        self.n_elems.hash(state);
-    }
-}
-
-impl<T> BufferHandle<T> {
+impl BufferHandle {
     pub fn sub_buffer(h: Self, idx: u32, n_elems: u32) -> Self {
         assert!((idx + n_elems) <= (h.idx + h.n_elems));
         Self { idx, n_elems, ..h }
@@ -81,20 +57,22 @@ impl<T> BufferHandle<T> {
     /// # Safety
     /// The handle must refer to a valid buffer resource. idx + n_elems must be less than or equal to the number of elements the buffer that the handle refers to was created with.
     pub unsafe fn from_buffer(
-        handle: Handle<T>,
+        handle: Handle<DeviceBuffer>,
         idx: u32,
         n_elems: u32,
         mutability: BufferMutability,
+        ty: BufferTypeId,
     ) -> Self {
         Self {
             h: handle,
             mutability,
             idx,
             n_elems,
+            ty,
         }
     }
 
-    pub fn handle(&self) -> &Handle<T> {
+    pub fn handle(&self) -> &Handle<DeviceBuffer> {
         &self.h
     }
 
@@ -125,17 +103,9 @@ impl<T> BufferHandle<T> {
     }
 }
 
-pub trait BufferType {
-    const USAGE: vk::BufferUsageFlags;
-    fn elem_align(&self, _allocator: &AllocatorHandle) -> Option<u16> {
-        None
-    }
-    fn elem_size(&self) -> u16;
-}
-
 #[derive(Debug, Clone)]
 pub struct UniformBufferType {
-    size: u16,
+    elem_size: u16,
 }
 impl BufferType for UniformBufferType {
     const USAGE: vk::BufferUsageFlags = vk::BufferUsageFlags::UNIFORM_BUFFER;
@@ -154,13 +124,15 @@ impl BufferType for UniformBufferType {
         }
     }
     fn elem_size(&self) -> u16 {
-        self.size
+        self.elem_size
     }
 }
 
 impl UniformBufferType {
     fn from_trait<U: Uniform>() -> Self {
-        Self { size: U::size() }
+        Self {
+            elem_size: U::size(),
+        }
     }
 }
 
@@ -284,20 +256,35 @@ impl StorageBufferType {
     }
 }
 
+#[derive(Debug, Clone)]
+pub enum BufferTypeDesc {
+    Vertex(VertexBufferType),
+    Index(IndexBufferType),
+    Uniform(UniformBufferType),
+    Storage(StorageBufferType),
+}
+
+impl BufferTypeDesc {
+    pub fn ty(&self) -> BufferTypeId {
+        BufferTypeId(std::mem::discriminant(self))
+    }
+}
+
 #[derive(Debug)]
-pub struct DeviceBuffer<BT> {
+pub struct DeviceBuffer {
     buffer: Buffer,
     n_elems: u32,
-    buffer_type: BT,
+    buffer_type: BufferTypeDesc,
     stride: u16,
 }
 
-impl<BT: BufferType + Clone> DeviceBuffer<BT> {
+impl DeviceBuffer {
+    /// NOTE: The returned staging buffer needs to outlive the command buffer!
+    /// TODO: This should probably be unsafe or handled by the API...
     pub fn create(
         allocator: &AllocatorHandle,
         command_buffer: &mut CommandBuffer,
-        descriptor: &BufferDescriptor<BT>,
-        buffer_type: BT,
+        descriptor: &BufferDescriptor,
     ) -> Result<(Self, Option<Buffer>), MemoryError> {
         log::trace!("Creating buffer");
         let elem_size = descriptor.elem_size();
@@ -305,6 +292,7 @@ impl<BT: BufferType + Clone> DeviceBuffer<BT> {
         let vk_buffer_usage_flags = descriptor.vk_usage_flags();
         let data = descriptor.data();
         let n_elems = descriptor.n_elems();
+        let buffer_type = descriptor.buffer_type().clone();
 
         let (buffer, staging) = match descriptor.mutability() {
             BufferMutability::Immutable => {
@@ -335,9 +323,9 @@ impl<BT: BufferType + Clone> DeviceBuffer<BT> {
         Ok((
             Self {
                 buffer,
-                stride,
                 n_elems,
                 buffer_type,
+                stride,
             },
             staging,
         ))
@@ -346,7 +334,7 @@ impl<BT: BufferType + Clone> DeviceBuffer<BT> {
     pub fn recreate(
         &mut self,
         allocator: &AllocatorHandle,
-        descriptor: &BufferDescriptor<BT>,
+        descriptor: &BufferDescriptor,
     ) -> Result<(), MemoryError> {
         assert!(descriptor.mutability() == BufferMutability::Mutable);
         let elem_size = descriptor.elem_size();
@@ -365,12 +353,13 @@ impl<BT: BufferType + Clone> DeviceBuffer<BT> {
                 stride,
             )?;
         } else {
+            todo!("Revisit");
             if elem_size == elem_align {
                 unsafe {
                     self.buffer.update_data_at(descriptor.data(), 0);
                 }
             } else {
-                unimplemented!("Can't use update_data_at under these conitions");
+                unimplemented!("Can't use update_data_at under these conditions");
             }
         }
         self.stride = stride;
@@ -393,7 +382,7 @@ impl<BT: BufferType + Clone> DeviceBuffer<BT> {
         self.n_elems
     }
 
-    pub fn buffer_type(&self) -> &BT {
+    pub fn buffer_type(&self) -> &BufferTypeDesc {
         &self.buffer_type
     }
 
@@ -402,9 +391,9 @@ impl<BT: BufferType + Clone> DeviceBuffer<BT> {
     }
 }
 
-pub type DeviceVertexBuffer = DeviceBuffer<VertexBufferType>;
+/* pub type DeviceVertexBuffer = DeviceBuffer<VertexBufferType>;
 impl DeviceVertexBuffer {
-    pub fn format(&self) -> &VertexFormat {
+    pub fn vertex_format(&self) -> &VertexFormat {
         &self.buffer_type().format
     }
 }
@@ -419,15 +408,7 @@ impl DeviceIndexBuffer {
 pub type DeviceUniformBuffer = DeviceBuffer<UniformBufferType>;
 impl DeviceUniformBuffer {
     pub fn update_with<T: Uniform>(&mut self, data: &T, idx: u64) {
-        let offset = (idx * self.stride() as u64) as usize;
-        let buf = self.buffer_mut();
-        unsafe {
-            // SAFETY: The Uniform trait guarantees that we can pass this as bytes to the gpu.
-            let raw_data = as_bytes(data);
-            // SAFETY: We are only copying a single element so no need to worry about alignment/size as we
-            // have already computed the stride
-            buf.update_data_at(raw_data, offset);
-        }
+
     }
 
     pub fn size(&self) -> u64 {
@@ -437,6 +418,7 @@ impl DeviceUniformBuffer {
 }
 
 pub type DeviceStorageBuffer = DeviceBuffer<StorageBufferType>;
+*/
 
 #[derive(Debug, Clone)]
 pub struct HostBuffer<BT> {

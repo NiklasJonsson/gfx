@@ -1,23 +1,23 @@
 use crate::resource::{BufferedStorage, Handle, Storage};
 
-use super::{BufferDescriptor, BufferHandle, BufferMutability};
+use super::{BufferDescriptor, BufferHandle, BufferMutability, DeviceBuffer};
 
-pub struct DeviceBufferStorage<T> {
-    buffered: BufferedStorage<T>,
-    unbuffered: Storage<T>,
+pub struct DeviceBufferStorage {
+    buffered: BufferedStorage<DeviceBuffer>,
+    unbuffered: Storage<DeviceBuffer>,
 }
 
-impl<T> Default for DeviceBufferStorage<T> {
+impl Default for DeviceBufferStorage {
     fn default() -> Self {
         Self {
-            buffered: BufferedStorage::<T>::default(),
-            unbuffered: Storage::<T>::default(),
+            buffered: BufferedStorage::<DeviceBuffer>::default(),
+            unbuffered: Storage::<DeviceBuffer>::default(),
         }
     }
 }
 
-impl<T> DeviceBufferStorage<T> {
-    pub fn get_all(&self, h: &BufferHandle<T>) -> Option<(&T, Option<&T>)> {
+impl DeviceBufferStorage {
+    pub fn get_all(&self, h: &BufferHandle) -> Option<(&DeviceBuffer, Option<&DeviceBuffer>)> {
         match h.mutability() {
             BufferMutability::Immutable => self.unbuffered.get(h.handle()).map(|x| (x, None)),
             BufferMutability::Mutable => {
@@ -26,7 +26,10 @@ impl<T> DeviceBufferStorage<T> {
         }
     }
 
-    pub fn get_all_mut(&mut self, h: &BufferHandle<T>) -> Option<(&mut T, Option<&mut T>)> {
+    pub fn get_all_mut(
+        &mut self,
+        h: &BufferHandle,
+    ) -> Option<(&mut DeviceBuffer, Option<&mut DeviceBuffer>)> {
         match h.mutability() {
             BufferMutability::Immutable => self.unbuffered.get_mut(h.handle()).map(|x| (x, None)),
             BufferMutability::Mutable => self
@@ -36,54 +39,58 @@ impl<T> DeviceBufferStorage<T> {
         }
     }
 
-    pub fn get_buffered(&self, h: &BufferHandle<T>, idx: usize) -> Option<&T> {
+    pub fn get_buffered(&self, h: &BufferHandle, idx: usize) -> Option<&DeviceBuffer> {
         assert_eq!(h.mutability(), BufferMutability::Mutable);
         self.buffered.get(h.handle(), idx)
     }
 
-    pub fn get_buffered_mut(&mut self, h: &BufferHandle<T>, idx: usize) -> Option<&mut T> {
+    pub fn get_buffered_mut(&mut self, h: &BufferHandle, idx: usize) -> Option<&mut DeviceBuffer> {
         assert_eq!(h.mutability(), BufferMutability::Mutable);
         self.buffered.get_mut(h.handle(), idx)
     }
 
-    pub fn get_unbuffered(&self, h: &BufferHandle<T>) -> Option<&T> {
+    pub fn get_unbuffered(&self, h: &BufferHandle) -> Option<&DeviceBuffer> {
         assert_eq!(h.mutability(), BufferMutability::Immutable);
         self.unbuffered.get(h.handle())
     }
 
     // TODO: BufferHandle here. Needs buffer type which exposes sizes etc.
-    pub fn add(&mut self, data0: T, data1: Option<T>) -> resurs::Handle<T> {
+    pub fn add(
+        &mut self,
+        data0: DeviceBuffer,
+        data1: Option<DeviceBuffer>,
+    ) -> resurs::Handle<DeviceBuffer> {
         match data1 {
             Some(data1) => self.buffered.add([data0, data1]),
             None => self.unbuffered.add(data0),
         }
     }
 
-    pub fn get(&self, h: &BufferHandle<T>, idx: usize) -> Option<&T> {
+    pub fn get(&self, h: &BufferHandle, idx: usize) -> Option<&DeviceBuffer> {
         match h.mutability() {
             BufferMutability::Immutable => self.unbuffered.get(h.handle()),
             BufferMutability::Mutable => self.buffered.get(h.handle(), idx),
         }
     }
 
-    pub fn get_mut(&mut self, h: &BufferHandle<T>, idx: usize) -> Option<&mut T> {
+    pub fn get_mut(&mut self, h: &BufferHandle, idx: usize) -> Option<&mut DeviceBuffer> {
         match h.mutability() {
             BufferMutability::Immutable => self.unbuffered.get_mut(h.handle()),
             BufferMutability::Mutable => self.buffered.get_mut(h.handle(), idx),
         }
     }
 
-    pub fn has(&self, h: &BufferHandle<T>) -> bool {
+    pub fn has(&self, h: &BufferHandle) -> bool {
         match h.mutability() {
             BufferMutability::Immutable => self.unbuffered.has(h.handle()),
             BufferMutability::Mutable => self.buffered.has(h.handle()),
         }
     }
 
-    pub fn drain_filter<F1, F2>(&mut self, f1: F1, f2: F2) -> DrainFilter<'_, F1, F2, T>
+    pub fn drain_filter<F1, F2>(&mut self, f1: F1, f2: F2) -> DrainFilter<'_, F1, F2, DeviceBuffer>
     where
-        F1: FnMut(&mut T) -> bool,
-        F2: FnMut(&mut [T; 2]) -> bool,
+        F1: FnMut(&mut DeviceBuffer) -> bool,
+        F2: FnMut(&mut [DeviceBuffer; 2]) -> bool,
     {
         DrainFilter {
             unbuffered_iter: self.unbuffered.drain_filter(f1),
@@ -92,21 +99,21 @@ impl<T> DeviceBufferStorage<T> {
     }
 }
 
-pub struct DrainFilter<'a, F1, F2, T>
+pub struct DrainFilter<'a, F1, F2, DeviceBuffer>
 where
-    F1: FnMut(&mut T) -> bool,
-    F2: FnMut(&mut [T; 2]) -> bool,
+    F1: FnMut(&mut DeviceBuffer) -> bool,
+    F2: FnMut(&mut [DeviceBuffer; 2]) -> bool,
 {
-    unbuffered_iter: resurs::storage::DrainFilter<'a, F1, T>,
-    buffered_iter: resurs::storage::DrainFilter<'a, F2, [T; 2]>,
+    unbuffered_iter: resurs::storage::DrainFilter<'a, F1, DeviceBuffer>,
+    buffered_iter: resurs::storage::DrainFilter<'a, F2, [DeviceBuffer; 2]>,
 }
 
-impl<'a, F1, F2, T> Iterator for DrainFilter<'a, F1, F2, T>
+impl<'a, F1, F2, DeviceBuffer> Iterator for DrainFilter<'a, F1, F2, DeviceBuffer>
 where
-    F1: FnMut(&mut T) -> bool,
-    F2: FnMut(&mut [T; 2]) -> bool,
+    F1: FnMut(&mut DeviceBuffer) -> bool,
+    F2: FnMut(&mut [DeviceBuffer; 2]) -> bool,
 {
-    type Item = (Handle<T>, T, Option<T>);
+    type Item = (Handle<DeviceBuffer>, DeviceBuffer, Option<DeviceBuffer>);
     fn next(&mut self) -> Option<<Self as Iterator>::Item> {
         if let Some((handle, item)) = self.unbuffered_iter.next() {
             return Some((handle, item, None));
@@ -122,67 +129,83 @@ where
 
 use crate::resource::Async;
 
-pub struct AsyncDeviceBufferStorage<T> {
-    inner: DeviceBufferStorage<Async<T>>,
+// TODO:
+// Rethink async implementation. We don't need inner and buffering for async since it is fire and forget.
+
+pub struct AsyncDeviceBufferStorage<DeviceBuffer> {
+    // inner: DeviceBufferStorage<Async<DeviceBuffer>>,
 }
 
 impl<T> Default for AsyncDeviceBufferStorage<T> {
     fn default() -> Self {
         Self {
-            inner: DeviceBufferStorage::default(),
+            // inner: DeviceBufferStorage::default(),
         }
     }
 }
 
 impl<T> AsyncDeviceBufferStorage<T> {
-    pub fn get_buffered(&self, h: &BufferHandle<Async<T>>, idx: usize) -> Option<&Async<T>> {
+    pub fn get_buffered(&self, h: &BufferHandle, idx: usize) -> Option<&Async<DeviceBuffer>> {
         self.inner.get_buffered(h, idx)
     }
 
     pub fn get_buffered_mut(
         &mut self,
-        h: &BufferHandle<Async<T>>,
+        h: &BufferHandle,
         idx: usize,
-    ) -> Option<&mut Async<T>> {
-        self.inner.get_buffered_mut(h, idx)
+    ) -> Option<&mut Async<DeviceBuffer>> {
+        todo!()
+        // self.inner.get_buffered_mut(h, idx)
     }
 
-    pub fn allocate<BT>(&mut self, desc: &BufferDescriptor<BT>) -> BufferHandle<Async<T>> {
-        let buffer1 = match desc.mutability() {
-            BufferMutability::Immutable => None,
-            BufferMutability::Mutable => Some(Async::<T>::Pending),
-        };
-        let inner_handle = self.inner.add(Async::<T>::Pending, buffer1);
-        unsafe { BufferHandle::from_buffer(inner_handle, 0, desc.n_elems(), desc.mutability()) }
+    pub fn allocate<BT>(&mut self, desc: &BufferDescriptor) -> BufferHandle {
+        todo!()
+        /*  let buffer1 = match desc.mutability() {
+               BufferMutability::Immutable => None,
+               BufferMutability::Mutable => Some(Async::<T>::Pending),
+           };
+           let inner_handle = self.inner.add(Async::<T>::Pending, buffer1);
+           unsafe { BufferHandle::from_buffer(inner_handle, 0, desc.n_elems(), desc.mutability()) }
+
+        */
     }
 
-    pub fn get(&self, h: &BufferHandle<Async<T>>, idx: usize) -> Option<&Async<T>> {
-        self.inner.get(h, idx)
+    pub fn get(&self, h: &BufferHandle, idx: usize) -> Option<&Async<T>> {
+        todo!()
+        // self.inner.get(h, idx)
     }
 
-    pub fn is_done(&self, h: &BufferHandle<Async<T>>) -> Option<bool> {
-        self.inner
-            .get_all(h)
-            .map(|(buf0, buf1)| !buf0.is_pending() && buf1.map(|x| !x.is_pending()).unwrap_or(true))
+    pub fn is_done(&self, h: &BufferHandle) -> Option<bool> {
+        todo!()
+        /*  self.inner
+               .get_all(h)
+               .map(|(buf0, buf1)| !buf0.is_pending() && buf1.map(|x| !x.is_pending()).unwrap_or(true))
+        */
     }
 
-    pub fn insert(&mut self, h: &BufferHandle<Async<T>>, buf0: T, buf1: Option<T>) {
-        if let Some((slot0, slot1)) = self.inner.get_all_mut(h) {
-            *slot0 = Async::Available(buf0);
-            match (buf1, slot1) {
-                (Some(buf1), Some(slot1)) => *slot1 = Async::Available(buf1),
-                (None, None) => (),
-                _ => unreachable!(
-                    "mutability mismatch, expected buffers & pre-allocted slots to match"
-                ),
-            }
-        }
+    pub fn insert(&mut self, h: &BufferHandle, buf0: T, buf1: Option<T>) {
+        todo!()
+        /*
+               if let Some((slot0, slot1)) = self.inner.get_all_mut(h) {
+                   *slot0 = Async::Available(buf0);
+                   match (buf1, slot1) {
+                       (Some(buf1), Some(slot1)) => *slot1 = Async::Available(buf1),
+                       (None, None) => (),
+                       _ => unreachable!(
+                           "mutability mismatch, expected buffers & pre-allocted slots to match"
+                       ),
+                   }
+               }
+        */
     }
 
     pub fn drain_available(&mut self) -> DrainIterator<'_, T> {
+        /*
         let f1 = |x: &mut Async<T>| std::matches!(x, Async::Available(_));
         let f2 = |x: &mut [Async<T>; 2]| std::matches!(x[0], Async::Available(_));
         self.inner.drain_filter(f1, f2)
+        */
+        todo!()
     }
 }
 

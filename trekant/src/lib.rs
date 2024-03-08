@@ -18,10 +18,9 @@ pub mod util;
 pub mod vertex;
 
 pub use backend::command::CommandBuffer;
-pub use buffer::{
-    BufferHandle, BufferMutability, DeviceIndexBuffer, DeviceUniformBuffer, DeviceVertexBuffer,
-    IndexBufferDescriptor, UniformBufferDescriptor, VertexBufferDescriptor,
-};
+use buffer::BufferDescriptor;
+use buffer::DeviceBuffer;
+pub use buffer::{BufferHandle, BufferMutability};
 pub use descriptor::DescriptorData;
 pub use error::RenderError;
 pub use error::ResizeReason;
@@ -659,6 +658,7 @@ impl Renderer {
             command::CommandPool::new(&device, device.graphics_queue_family().clone())?;
         let descriptor_sets = pipeline_resource::PipelineResourceSetStorage::new(&device)?;
         let resources = resource::Resources {
+            buffers: buffer::Buffers::default(),
             uniform_buffers: buffer::UniformBuffers::default(),
             vertex_buffers: buffer::VertexBuffers::default(),
             index_buffers: buffer::IndexBuffers::default(),
@@ -855,21 +855,6 @@ impl Renderer {
 
 /// These are functions only used by other parts of this lib
 impl Renderer {
-    fn update_uniform<T: Copy + traits::Uniform>(
-        &mut self,
-        h: &BufferHandle<buffer::DeviceUniformBuffer>,
-        data: &T,
-    ) -> Result<(), RenderError> {
-        let ubuf = self
-            .resources
-            .uniform_buffers
-            .get_buffered_mut(h, self.frame_idx as usize)
-            .ok_or_else(|| RenderError::InvalidHandle(h.handle().id()))?;
-
-        ubuf.update_with(data, h.idx() as u64);
-        Ok(())
-    }
-
     fn current_present_target(&self) -> &Handle<render_target::RenderTarget> {
         &self
             .presentation_render_target
@@ -905,58 +890,73 @@ impl Renderer {
     }
 }
 
-macro_rules! impl_buffer_manager {
-    ($desc:ty, $resource:ty, $handle:ty, $cmd_enum:ident, $storage:ident) => {
-        impl<'a> resource::ResourceManager<$desc, $resource, $handle> for Renderer {
-            type Error = MemoryError;
+impl Renderer {
+    // TODO: Should this ensure that this is only called between frames?
+    // This is only relevant for mutable buffers though so this should be fine?
+    fn get_buffer(&self, handle: BufferHandle) -> Option<&DeviceBuffer> {
+        self.resources.buffers.get(&handle, self.frame_idx as usize)
+    }
 
-            fn get_resource(&self, handle: &$handle) -> Option<&$resource> {
-                self.resources.$storage.get(handle, self.frame_idx as usize)
-            }
+    /// Write the elements in `data` to the buffer in `h`, starting at element at `start`.
+    /// This function handles alignment requirements properly.
+    /// TODO: Accept frame to ensure that we can write to this buffer?
+    fn write_buffer_at<T: Std140>(
+        &mut self,
+        h: &BufferHandle,
+        start: usize,
+        data: &[T],
+    ) -> Result<(), RenderError> {
+        assert!(h.n_elems() >= data.len());
+        assert_eq!(
+            h.mutability(),
+            BufferMutability::Mutable,
+            "Can't modify immutable buffer"
+        );
 
-            fn create_resource_blocking(
-                &mut self,
-                descriptor: $desc,
-            ) -> Result<$handle, Self::Error> {
-                let cmd = SyncResourceCommand::$cmd_enum { descriptor };
-                let finished = self.execute_command(cmd)?;
-                match finished {
-                    FinishedResourceCommand::$cmd_enum { handle } => Ok(handle),
-                    _ => unreachable!(),
-                }
-            }
+        let buf = self
+            .resources
+            .buffers
+            .get_buffered_mut(h, self.frame_idx as usize)
+            .ok_or_else(|| RenderError::InvalidHandle(h.handle().id()))?;
+
+        let dst_offset = (h.idx() as usize + start) * buf.stride() as usize;
+        unsafe {
+            // Safety: The Std140 trait guarantees that we can pass this as bytes to the gpu.
+            let raw_data = util::as_bytes(data);
+            // Safety: TODO
+            let elem_align = todo!();
+            buf.write(raw_data, dst_offset, buf.elem_size(), elem_align);
         }
-    };
-}
+        Ok(())
+    }
+    fn create_buffer<'a>(
+        &mut self,
+        descriptor: BufferDescriptor<'a>,
+    ) -> Result<BufferHandle, MemoryError> {
+        // The transients that contain the data to upload need to outlive the wait for the command buffer to finish.
+        // This should probably be unsafe...?
+        let (buf0, buf1) = self
+            .submit_blocking(|cmd_buf| descriptor.enqueue(&self.device.allocator(), cmd_buf))
+            .expect("Failed to submit commands to create buffer")
+            .expect("Buffer creation failed");
 
-impl_buffer_manager!(
-    buffer::VertexBufferDescriptor<'a>,
-    buffer::DeviceVertexBuffer,
-    BufferHandle<buffer::DeviceVertexBuffer>,
-    CreateVertexBuffer,
-    vertex_buffers
-);
-impl_buffer_manager!(
-    buffer::IndexBufferDescriptor<'a>,
-    buffer::DeviceIndexBuffer,
-    BufferHandle<buffer::DeviceIndexBuffer>,
-    CreateIndexBuffer,
-    index_buffers
-);
-impl_buffer_manager!(
-    buffer::UniformBufferDescriptor<'a>,
-    buffer::DeviceUniformBuffer,
-    BufferHandle<buffer::DeviceUniformBuffer>,
-    CreateUniformBuffer,
-    uniform_buffers
-);
-impl_buffer_manager!(
-    buffer::StorageBufferDescriptor<'a>,
-    buffer::DeviceStorageBuffer,
-    BufferHandle<buffer::DeviceStorageBuffer>,
-    CreateStorageBuffer,
-    storage_buffers
-);
+        let handle = {
+            let inner_handle = self
+                .resources
+                .buffers
+                .add(buf0.buffer, buf1.map(|x| x.buffer));
+            unsafe {
+                BufferHandle::from_buffer(
+                    inner_handle,
+                    0,
+                    descriptor.n_elems(),
+                    descriptor.mutability(),
+                    descriptor.ty(),
+                )
+            }
+        };
+    }
+}
 
 impl Renderer {
     pub fn get_pipeline(&self, handle: &Handle<GraphicsPipeline>) -> Option<&GraphicsPipeline> {

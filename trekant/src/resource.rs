@@ -16,6 +16,7 @@ pub struct AsyncResources {
 }
 
 pub struct Resources {
+    pub buffers: buffer::Buffers,
     pub uniform_buffers: buffer::UniformBuffers,
     pub vertex_buffers: buffer::VertexBuffers,
     pub index_buffers: buffer::IndexBuffers,

@@ -33,7 +33,7 @@ enum Mappability {
 /// Copy the elements in src to dst, assmuming:
 /// * Elements in src are laid out linearly, with no padding.
 /// * Elements in dst are aligned to dst_elem_align, with possible padding in-between. This padding is not touched.
-unsafe fn element_copy(src: &[u8], dst: *mut u8, elem_size: u16, dst_elem_align: u16) {
+pub unsafe fn element_copy(src: &[u8], dst: *mut u8, elem_size: u16, dst_elem_align: u16) {
     let size = src.len();
     let src = src.as_ptr() as *const u8;
     if elem_size == dst_elem_align {
@@ -225,22 +225,32 @@ impl Buffer {
         self.vk_buffer
     }
 
+    /// Write 'data' to the buffer at 'offset', assuming elem_size and elem_align requirements.
+    /// Safet
+    pub unsafe fn write(
+        &mut self,
+        offset: usize,
+        data: &[u8],
+        elem_size: u16,
+        dst_elem_align: u16,
+    ) {
+        assert!(self.is_mapped);
+        let src_size = data.len();
+        let dst = self
+            .allocator
+            .get_allocation_info(&self.allocation)
+            .mapped_data as *mut u8;
+        let dst = dst.add(offset);
+        element_copy(data, dst, elem_size, dst_elem_align);
+    }
+
     /// Update the data at `offset` in the buffer from the slice.
     /// SAFETY: The buffer needs to be writable for (offset, offset+size],
     /// e.g. there can be no padding/alignment requirements on the elements
     /// of the buffer.
     pub unsafe fn update_data_at(&mut self, data: &[u8], offset: usize) {
-        assert!(self.is_mapped);
-        let size = data.len();
-        let dst_base = self
-            .allocator
-            .get_allocation_info(&self.allocation)
-            .mapped_data as *mut u8;
-
-        let src = data.as_ptr() as *const u8;
-        assert!(offset + size <= self.size());
-        let dst = dst_base.add(offset);
-        std::ptr::copy_nonoverlapping::<u8>(src, dst, size);
+        todo!("Is this needed?");
+        self.write(data, offset, data.len(), data.len());
     }
 
     pub fn size(&self) -> usize {

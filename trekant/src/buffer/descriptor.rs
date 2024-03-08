@@ -1,6 +1,6 @@
 use super::{
-    BufferMutability, BufferType, DeviceBuffer, HostBuffer, IndexBufferType, IndexInt,
-    StorageBufferType, UniformBufferType, VertexBufferType,
+    BufferMutability, BufferType, BufferTypeDesc, DeviceBuffer, HostBuffer, IndexBufferType,
+    IndexInt, StorageBufferType, UniformBufferType, VertexBufferType,
 };
 use crate::{backend, Std140};
 
@@ -19,14 +19,14 @@ pub struct BufferResult<B> {
     pub transient: Option<Buffer>,
 }
 
-pub struct BufferDescriptor<'a, BT> {
+pub struct BufferDescriptor<'a> {
     data: DescriptorData<'a>,
     mutability: BufferMutability,
     n_elems: u32,
-    buffer_type: BT,
+    buffer_type: BufferTypeDesc,
 }
 
-impl<BT: Clone + BufferType> BufferDescriptor<'static, BT> {
+impl<BT: Clone + BufferType> BufferDescriptor<'static> {
     pub fn from_host_buffer(hb: &HostBuffer<BT>, mutability: BufferMutability) -> Self {
         Self {
             data: DescriptorData::Shared(hb.data.clone()),
@@ -101,17 +101,12 @@ macro_rules! impl_descriptor_from {
     };
 }
 
-pub type UniformBufferDescriptor<'a> = BufferDescriptor<'a, UniformBufferType>;
-pub type VertexBufferDescriptor<'a> = BufferDescriptor<'a, VertexBufferType>;
-pub type IndexBufferDescriptor<'a> = BufferDescriptor<'a, IndexBufferType>;
-pub type StorageBufferDescriptor<'a> = BufferDescriptor<'a, StorageBufferType>;
+impl_descriptor_from!(BufferDescriptor, Uniform, UniformBufferType);
+impl_descriptor_from!(BufferDescriptor, VertexDefinition, VertexBufferType);
+impl_descriptor_from!(BufferDescriptor, IndexInt, IndexBufferType);
+impl_descriptor_from!(BufferDescriptor, Std140, StorageBufferType);
 
-impl_descriptor_from!(UniformBufferDescriptor, Uniform, UniformBufferType);
-impl_descriptor_from!(VertexBufferDescriptor, VertexDefinition, VertexBufferType);
-impl_descriptor_from!(IndexBufferDescriptor, IndexInt, IndexBufferType);
-impl_descriptor_from!(StorageBufferDescriptor, Std140, StorageBufferType);
-
-impl<'a, BT> BufferDescriptor<'a, BT> {
+impl<'a> BufferDescriptor<'a> {
     pub fn mutability(&self) -> BufferMutability {
         self.mutability
     }
@@ -129,9 +124,9 @@ impl<'a, BT> BufferDescriptor<'a, BT> {
     }
 }
 
-impl<'a, BT: BufferType> BufferDescriptor<'a, BT> {
+impl<'a> BufferDescriptor<'a> {
     pub fn vk_usage_flags(&self) -> vk::BufferUsageFlags {
-        BT::USAGE
+        todo!()
     }
 
     pub fn elem_size(&self) -> u16 {
@@ -143,16 +138,19 @@ impl<'a, BT: BufferType> BufferDescriptor<'a, BT> {
             .elem_align(allocator)
             .unwrap_or_else(|| self.elem_size())
     }
+
+    pub fn buffer_type(&self) -> &BufferTypeDesc {
+        &self.buffer_type
+    }
 }
 
-impl<'a, BT: BufferType + Clone> BufferDescriptor<'a, BT> {
+impl<'a> BufferDescriptor<'a> {
     pub fn enqueue_single(
         &self,
         allocator: &AllocatorHandle,
         command_buffer: &mut CommandBuffer,
-    ) -> Result<BufferResult<DeviceBuffer<BT>>, MemoryError> {
-        let (buffer, transient) =
-            DeviceBuffer::<BT>::create(allocator, command_buffer, self, self.buffer_type.clone())?;
+    ) -> Result<BufferResult<DeviceBuffer>, MemoryError> {
+        let (buffer, transient) = DeviceBuffer::create(allocator, command_buffer, self)?;
 
         Ok(BufferResult { buffer, transient })
     }
@@ -164,8 +162,8 @@ impl<'a, BT: BufferType + Clone> BufferDescriptor<'a, BT> {
         command_buffer: &mut CommandBuffer,
     ) -> Result<
         (
-            BufferResult<DeviceBuffer<BT>>,
-            Option<BufferResult<DeviceBuffer<BT>>>,
+            BufferResult<DeviceBuffer>,
+            Option<BufferResult<DeviceBuffer>>,
         ),
         MemoryError,
     > {
