@@ -360,3 +360,18 @@ START HERE
 1. Finish supporting storage buffers
 2. light::write_lighting_data needs to write the shadow matrices from the shadow pass
 3. Test!
+
+## Untyped buffers
+
+Start removing the template type for device buffers that signify the type of the buffer contents
+(vertex, uniform etc.). While adding support for storage buffers, it got in the way more than it
+helped. The amount of code required to just add support for storage buffers does not seems to be
+worthwhile the compared to the amount of bugs it might have stopped. Maybe it is more worthwhile
+in a production/commercial environment but it seems overkill for this repo. Progress
+
+1. Renderer internals should be largely finished
+2. Loader has some implementation done
+3. AsyncBuffers need a complete rewrite including the async buffer handles
+4. Trekant examples need updating
+5. Ram-code needs updating
+6. Continue on shadow coords in fragment shaders! :smile:
