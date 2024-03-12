@@ -1,13 +1,13 @@
 use crate::backend;
 
-use crate::buffer::{BufferDescriptor, BufferHandle, DeviceBuffer, DrainIterator as BufferDrainIterator};
-use crate::resource::{Async, AsyncResources, Handle, Resources};
+use crate::buffer::{
+    BufferDescriptor, BufferHandle, DeviceBuffer, DrainIterator as BufferDrainIterator,
+};
+use crate::resource::{Async, Handle, Resources};
 use crate::texture::{DrainIterator as TextureDrainIterator, Texture, TextureDescriptor};
 use crate::Renderer;
 use crate::{
-    backend::{
-        AllocatorHandle, CommandBuffer, CommandPool, Fence, HasVkDevice, Queue, VkDeviceHandle,
-    },
+    backend::{AllocatorHandle, CommandPool, Fence, HasVkDevice, Queue, VkDeviceHandle},
     BufferMutability,
 };
 use backend::buffer::Buffer;
@@ -36,52 +36,32 @@ struct AsyncResources {
     pub textures: crate::texture::AsyncTextures,
 }
 
-// TODO
-type AsyncBufferHandle = BufferHandle;
-
 impl std::fmt::Display for LoaderError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(f, "{:?}", self)
     }
 }
 
-pub enum AsyncResourceCommand {
-    CreateVertexBuffer {
-        descriptor: VertexBufferDescriptor<'static>,
-        handle: BufferHandle<Async<DeviceVertexBuffer>>,
+#[allow(clippy::enum_variant_names)]
+enum PendingResourceCommand {
+    CreateBuffer {
+        descriptor: BufferDescriptor<'static>,
+        handle: BufferHandle,
+        buffer0: DeviceBuffer,
+        buffer1: Option<DeviceBuffer>, // For double buffering
+        transients: [Option<Buffer>; 2],
     },
-    CreateIndexBuffer {
-        descriptor: IndexBufferDescriptor<'static>,
-        handle: BufferHandle<Async<DeviceIndexBuffer>>,
-    },
-    CreateUniformBuffer {
-        descriptor: UniformBufferDescriptor<'static>,
-        handle: BufferHandle<Async<DeviceUniformBuffer>>,
+    CreateTexture {
+        handle: Handle<Async<Texture>>,
+        texture: Texture,
+        _transients: Buffer,
     },
 }
-
-
-struct PendingBuffer {
-    descriptor: BufferDescriptor<'static>,
-    handle: BufferHandle,
-    buffer0: DeviceBuffer,
-    buffer1: Option<DeviceBuffer>, // For double buffering
-    transients: [Option<Buffer>; 2],
-}
-
 
 pub enum HandleMapping {
     Buffer {
-        old: BufferHandle<Async<DeviceUniformBuffer>>,
-        new: BufferHandle<DeviceUniformBuffer>,
-    },
-    VertexBuffer {
-        old: BufferHandle<Async<DeviceVertexBuffer>>,
-        new: BufferHandle<DeviceVertexBuffer>,
-    },
-    IndexBuffer {
-        old: BufferHandle<Async<DeviceIndexBuffer>>,
-        new: BufferHandle<DeviceIndexBuffer>,
+        old: BufferHandle,
+        new: BufferHandle,
     },
     Texture {
         old: Handle<Async<Texture>>,
@@ -89,17 +69,10 @@ pub enum HandleMapping {
     },
 }
 
-struct PendingTexture {
-    handle: Handle<Async<Texture>>,
-    texture: Texture,
-    _transients: Buffer,
-}
-
 struct NonSync {
     queue: Queue,
     command_pool: CommandPool,
-    pending_textures: Vec<PendingTexture>,
-    pending_buffers: Vec<PendingBuffer>,
+    pending_resource_jobs: Vec<PendingResourceJob>,
     resources: AsyncResources,
 }
 
@@ -114,74 +87,9 @@ struct PendingResourceJob {
     done: Fence,
 }
 
-macro_rules! process_buffer_creation {
-    ($cmd:ident, $desc:ident, $self:ident, $cmd_buffer:ident, $handle:ident) => {{
-        let (buf0, buf1) = $desc.enqueue(&$self.allocator, $cmd_buffer).expect("Fail");
-
-        let (buffer1, transient1) = if let Some(buf1) = buf1 {
-            (Some(buf1.buffer), buf1.transient)
-        } else {
-            (None, None)
-        };
-
-        let buffer0 = buf0.buffer;
-        let transients = [buf0.transient, transient1];
-        PendingResourceCommand::$cmd {
-            descriptor: $desc,
-            handle: $handle,
-            buffer0,
-            buffer1,
-            transients,
-        }
-    }};
-}
-
-impl Loader {
-    fn process_command(
-        &self,
-        command: AsyncResourceCommand,
-        cmd_buffer: &mut CommandBuffer,
-    ) -> PendingResourceCommand {
-        match command {
-            AsyncResourceCommand::CreateVertexBuffer { handle, descriptor } => {
-                process_buffer_creation!(CreateVertexBuffer, descriptor, self, cmd_buffer, handle)
-            }
-            AsyncResourceCommand::CreateIndexBuffer { handle, descriptor } => {
-                process_buffer_creation!(CreateIndexBuffer, descriptor, self, cmd_buffer, handle)
-            }
-            AsyncResourceCommand::CreateUniformBuffer { handle, descriptor } => {
-                process_buffer_creation!(CreateUniformBuffer, descriptor, self, cmd_buffer, handle)
-            }
-        }
-    }
-}
-
 // Good reads for mutex + iterating over contents
 // https://users.rust-lang.org/t/creating-an-iterator-over-mutex-contents-cannot-infer-an-appropriate-lifetime/24458/7
 // https://www.reddit.com/r/rust/comments/7l97u0/iterator_struct_of_an_iterable_inside_a_lock_from/
-
-macro_rules! map_buffer {
-    ($resources:ident, $buf:ident, $mapping_enum:ident, $storage:ident) => {{
-        let (h, b0, b1) = $buf;
-        let b0 = b0.expect("should be avail");
-        let n_elems = b0.n_elems();
-        let mutability = if b1.is_some() {
-            BufferMutability::Mutable
-        } else {
-            BufferMutability::Immutable
-        };
-        let new = $resources
-            .$storage
-            .add(b0, b1.map(|b| b.expect("should be avail")));
-        let (old, new) = unsafe {
-            (
-                BufferHandle::from_buffer(h, 0, n_elems, mutability),
-                BufferHandle::from_buffer(new, 0, n_elems, mutability),
-            )
-        };
-        HandleMapping::$mapping_enum { old, new }
-    }};
-}
 
 impl AsyncResources {
     fn drain_available<'i, 's: 'i, 'r: 'i>(
@@ -191,34 +99,48 @@ impl AsyncResources {
         let bufs = self
             .buffers
             .drain_available()
+            .map(IntermediateIteratorItem::Buffer);
 
         let textures = self
             .textures
             .drain_available()
             .map(IntermediateIteratorItem::Texture);
 
-        vbufs
-            .chain(ubufs)
-            .chain(ibufs)
-            .chain(textures)
-            .map(move |item| match item {
-                IntermediateIteratorItem::Vertex(buf) => {
-                    map_buffer!(resources, buf, VertexBuffer, vertex_buffers)
+        bufs.chain(textures).map(move |item| match item {
+            IntermediateIteratorItem::Buffer(buf) => {
+                let (h, b0, b1) = buf;
+                let b0 = b0.expect("should be avail");
+                let n_elems = b0.n_elems();
+                let mutability = if b1.is_some() {
+                    BufferMutability::Mutable
+                } else {
+                    BufferMutability::Immutable
+                };
+                let new = resources
+                    .buffers
+                    .add(b0, b1.map(|b| b.expect("should be avail")));
+                let (old, new) = unsafe {
+                    (
+                        BufferHandle::from_buffer(h, 0, n_elems, mutability, b0.buffer_type().ty()),
+                        BufferHandle::from_buffer(
+                            new,
+                            0,
+                            n_elems,
+                            mutability,
+                            b0.buffer_type().ty(),
+                        ),
+                    )
+                };
+                HandleMapping::Buffer { old, new }
+            }
+            IntermediateIteratorItem::Texture((handle, tex)) => {
+                let new_handle = resources.textures.add(tex.expect("Should be available"));
+                HandleMapping::Texture {
+                    old: handle,
+                    new: new_handle,
                 }
-                IntermediateIteratorItem::Index(buf) => {
-                    map_buffer!(resources, buf, IndexBuffer, index_buffers)
-                }
-                IntermediateIteratorItem::Uniform(buf) => {
-                    map_buffer!(resources, buf, UniformBuffer, uniform_buffers)
-                }
-                IntermediateIteratorItem::Texture((handle, tex)) => {
-                    let new_handle = resources.textures.add(tex.expect("Should be available"));
-                    HandleMapping::Texture {
-                        old: handle,
-                        new: new_handle,
-                    }
-                }
-            })
+            }
+        })
     }
 }
 
@@ -250,8 +172,7 @@ impl Loader {
         let locked = Mutex::new(NonSync {
             queue,
             command_pool,
-            pending_buffers: Vec::new(),
-            pending_textures: Vec::new(),
+            pending_resource_jobs: Vec::with_capacity(16),
             resources: AsyncResources::default(),
         });
         Self {
@@ -370,57 +291,58 @@ fn validate_texture_descriptor(d: &TextureDescriptor) -> Result<(), LoaderError>
     Ok(())
 }
 
-macro_rules! impl_buffer_loader {
-    ($desc:ty, $handle:ty, $storage:ident, $cmd_enum:ident) => {
-        impl ResourceLoader<$desc, $handle> for Loader {
-            fn load(&self, descriptor: $desc) -> Result<$handle, LoaderError> {
-                let mut guard = self.locked.lock().map_err(|_| LoaderError::Mutex)?;
-
-                let handle = guard.resources.$storage.allocate(&descriptor);
-                let (command, done) =
-                    Loader::submit_commands(&self.vk_device, &guard, |command_buffer| {
-                        let cmd = AsyncResourceCommand::$cmd_enum { descriptor, handle };
-                        self.process_command(cmd, command_buffer)
-                    })
-                    .expect("Failed to submit command");
-                let job = PendingResourceJob { command, done };
-                guard.pending_resource_jobs.push(job);
-
-                Ok(handle)
-            }
-        }
-    };
-}
-
-impl_buffer_loader!(
-    IndexBufferDescriptor<'static>,
-    BufferHandle<Async<DeviceIndexBuffer>>,
-    index_buffers,
-    CreateIndexBuffer
-);
-impl_buffer_loader!(
-    VertexBufferDescriptor<'static>,
-    BufferHandle<Async<DeviceVertexBuffer>>,
-    vertex_buffers,
-    CreateVertexBuffer
-);
-impl_buffer_loader!(
-    UniformBufferDescriptor<'static>,
-    BufferHandle<Async<DeviceUniformBuffer>>,
-    uniform_buffers,
-    CreateUniformBuffer
-);
-
 impl Loader {
+    pub fn load_buffer(
+        &self,
+        descriptor: BufferDescriptor<'static>,
+    ) -> Result<BufferHandle, LoaderError> {
+        log::trace!("Loading buffer with descriptor {descriptor:?}");
+        assert!(descriptor.n_elems() != 0);
+
+        let mut guard = self.locked.lock().map_err(|_| LoaderError::Mutex)?;
+
+        let handle = guard.resources.buffers.allocate(&descriptor);
+        let (result, done) = Loader::submit_commands(&self.vk_device, &guard, |cmd_buf| {
+            descriptor.enqueue(&self.allocator, cmd_buf)
+        })
+        .expect("Failed to submit command to create buffer");
+
+        let (buf0, buf1) = result.expect("Failed to create buffers");
+
+        let (buffer1, transient1) = if let Some(buf1) = buf1 {
+            (Some(buf1.buffer), buf1.transient)
+        } else {
+            (None, None)
+        };
+
+        let buffer0 = buf0.buffer;
+        let transients = [buf0.transient, transient1];
+        let job = PendingResourceJob {
+            command: PendingResourceCommand::CreateBuffer {
+                descriptor,
+                handle,
+                buffer0,
+                buffer1,
+                transients,
+            },
+            done,
+        };
+        guard.pending_resource_jobs.push(job);
+
+        Ok(handle)
+    }
+
     pub fn load_texture(
         &self,
         descriptor: TextureDescriptor<'static>,
     ) -> Result<Handle<Async<Texture>>, LoaderError> {
         log::trace!("Loading texture with descriptor {descriptor:?}");
+        // TODO: Move this into this function?
         validate_texture_descriptor(&descriptor)?;
 
         let (desc, mipmaps, data) = descriptor
             .split_desc_data()
+            // TODO: Return error here
             .expect("Failed to load descriptor data");
         if let Some(data) = data {
             let mut guard = self.locked.lock().map_err(|_| LoaderError::Mutex)?;
@@ -446,12 +368,8 @@ impl Loader {
                 },
                 done,
             };
-            guard.pending_textures.push(PendingTexture {
-                handle,
-                texture: tex,
-                _transients: buf,
-            });
 
+            guard.pending_resource_jobs.push(job);
             Ok(handle)
         } else {
             Err(LoaderError::InvalidDescriptor(String::from(

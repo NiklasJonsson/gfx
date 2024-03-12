@@ -25,7 +25,8 @@ pub struct BufferDescriptor<'a> {
     n_elems: u32,
     buffer_type: BufferTypeDesc,
 }
-
+/*
+TODO: Probably needs to live on the HostBuffer instead
 impl<BT: Clone + BufferType> BufferDescriptor<'static> {
     pub fn from_host_buffer(hb: &HostBuffer<BT>, mutability: BufferMutability) -> Self {
         Self {
@@ -37,6 +38,7 @@ impl<BT: Clone + BufferType> BufferDescriptor<'static> {
     }
 }
 
+ */
 macro_rules! impl_descriptor_from {
     ($name:ident, $trait:ident, $buffer_type:ident) => {
         impl $name<'static> {
@@ -101,9 +103,9 @@ macro_rules! impl_descriptor_from {
     };
 }
 
-impl_descriptor_from!(BufferDescriptor, Uniform, UniformBufferType);
-impl_descriptor_from!(BufferDescriptor, VertexDefinition, VertexBufferType);
-impl_descriptor_from!(BufferDescriptor, IndexInt, IndexBufferType);
+//impl_descriptor_from!(BufferDescriptor, Uniform, UniformBufferType);
+//impl_descriptor_from!(BufferDescriptor, VertexDefinition, VertexBufferType);
+//impl_descriptor_from!(BufferDescriptor, IndexInt, IndexBufferType);
 impl_descriptor_from!(BufferDescriptor, Std140, StorageBufferType);
 
 impl<'a> BufferDescriptor<'a> {
