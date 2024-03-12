@@ -7,20 +7,8 @@ use crate::render_pass;
 use crate::render_target;
 use crate::texture;
 
-#[derive(Default)]
-pub struct AsyncResources {
-    pub uniform_buffers: buffer::AsyncUniformBuffers,
-    pub vertex_buffers: buffer::AsyncVertexBuffers,
-    pub index_buffers: buffer::AsyncIndexBuffers,
-    pub textures: texture::AsyncTextures,
-}
-
 pub struct Resources {
     pub buffers: buffer::Buffers,
-    pub uniform_buffers: buffer::UniformBuffers,
-    pub vertex_buffers: buffer::VertexBuffers,
-    pub index_buffers: buffer::IndexBuffers,
-    pub storage_buffers: buffer::StorageBuffers,
     pub textures: texture::Textures,
     pub graphics_pipelines: pipeline::GraphicsPipelines,
     pub descriptor_sets: pipeline_resource::PipelineResourceSetStorage,

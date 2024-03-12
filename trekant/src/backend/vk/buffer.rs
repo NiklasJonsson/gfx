@@ -1,7 +1,7 @@
 use ash::vk;
 
 use crate::backend::vk::{
-    command::CommandBuffer, device::AllocatorHandle, util::stride, MemoryError,
+    command::CommandBuffer, device::AllocatorHandle, util::compute_stride, MemoryError,
 };
 use vma::{Alloc as _, Allocation, AllocationCreateInfo, MemoryUsage};
 
@@ -28,31 +28,6 @@ impl std::fmt::Debug for Buffer {
 enum Mappability {
     Mappable,
     NonMappable,
-}
-
-/// Copy the elements in src to dst, assmuming:
-/// * Elements in src are laid out linearly, with no padding.
-/// * Elements in dst are aligned to dst_elem_align, with possible padding in-between. This padding is not touched.
-pub unsafe fn element_copy(src: &[u8], dst: *mut u8, elem_size: u16, dst_elem_align: u16) {
-    let size = src.len();
-    let src = src.as_ptr() as *const u8;
-    if elem_size == dst_elem_align {
-        log::trace!("Straight copy from {:?} to {:?}, size: {}", src, dst, size);
-        unsafe {
-            std::ptr::copy_nonoverlapping::<u8>(src, dst, size);
-        }
-    } else {
-        log::trace!("Strided copy from {:?} to {:?}, size: {}", src, dst, size);
-        let n_elems = size / elem_size as usize;
-        let stride = stride(elem_size, dst_elem_align);
-        for i in 0..n_elems {
-            unsafe {
-                let src = src.add(i * (elem_size as usize));
-                let dst = dst.add(i * (stride as usize));
-                std::ptr::copy_nonoverlapping::<u8>(src, dst, elem_size as usize);
-            }
-        }
-    }
 }
 
 impl Buffer {
@@ -123,7 +98,7 @@ impl Buffer {
             elem_size,
             elem_align,
         );
-        let stride = stride(elem_size, elem_align);
+        let stride = compute_stride(elem_size, elem_align);
         let size = stride as usize * n_elems;
         log::trace!("Total buffer size: {}", size);
 
@@ -136,7 +111,7 @@ impl Buffer {
         )?;
         let dst = buffer.map()?;
         unsafe {
-            element_copy(data, dst, elem_size, elem_align);
+            crate::util::copy_nonoverlapping_aligned(data, dst, elem_size, elem_align);
         }
 
         if do_unmap {
@@ -210,47 +185,34 @@ impl Buffer {
 
 impl Buffer {
     pub fn map(&mut self) -> Result<*mut u8, MemoryError> {
-        self.is_mapped = true;
         unsafe { self.allocator.map_memory(&mut self.allocation) }
-            .map_err(MemoryError::MemoryMapping)
+            .map_err(MemoryError::MemoryMapping)?;
+        self.is_mapped = true;
     }
 
     pub fn unmap(&mut self) {
         assert!(self.is_mapped);
-        self.is_mapped = false;
         unsafe { self.allocator.unmap_memory(&mut self.allocation) }
+        self.is_mapped = false;
     }
 
     pub fn vk_buffer(&self) -> vk::Buffer {
         self.vk_buffer
     }
 
-    /// Write 'data' to the buffer at 'offset', assuming elem_size and elem_align requirements.
-    /// Safet
-    pub unsafe fn write(
-        &mut self,
-        offset: usize,
-        data: &[u8],
-        elem_size: u16,
-        dst_elem_align: u16,
-    ) {
+    fn mapped_data(&self) -> *mut std::ffi::c_void {
         assert!(self.is_mapped);
-        let src_size = data.len();
-        let dst = self
-            .allocator
+        self.allocator
             .get_allocation_info(&self.allocation)
-            .mapped_data as *mut u8;
-        let dst = dst.add(offset);
-        element_copy(data, dst, elem_size, dst_elem_align);
+            .mapped_data
     }
 
-    /// Update the data at `offset` in the buffer from the slice.
-    /// SAFETY: The buffer needs to be writable for (offset, offset+size],
-    /// e.g. there can be no padding/alignment requirements on the elements
-    /// of the buffer.
-    pub unsafe fn update_data_at(&mut self, data: &[u8], offset: usize) {
-        todo!("Is this needed?");
-        self.write(data, offset, data.len(), data.len());
+    pub fn mut_ptr(&mut self) -> *mut u8 {
+        self.mapped_data() as *mut u8
+    }
+
+    pub fn ptr(&mut self) -> *const u8 {
+        self.mapped_data() as *const u8
     }
 
     pub fn size(&self) -> usize {

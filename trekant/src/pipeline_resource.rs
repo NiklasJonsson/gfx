@@ -5,8 +5,6 @@ use thiserror::Error;
 use crate::backend;
 
 use crate::buffer::BufferHandle;
-use crate::buffer::DeviceStorageBuffer;
-use crate::buffer::DeviceUniformBuffer;
 use crate::pipeline::ShaderStage;
 use crate::resource::{BufferedStorage, Handle};
 use crate::texture::Texture;
@@ -165,7 +163,7 @@ impl<'a> PipelineResourceSetBuilder<'a> {
 
     pub fn add_uniform_buffer(
         mut self,
-        buf_h: &BufferHandle<DeviceUniformBuffer>,
+        buf_h: &BufferHandle,
         binding: u32,
         stage: ShaderStage,
     ) -> Self {
@@ -215,7 +213,7 @@ impl<'a> PipelineResourceSetBuilder<'a> {
     // TODO: Fix duplication here
     pub fn add_storage_buffer(
         mut self,
-        buf_h: &BufferHandle<DeviceStorageBuffer>,
+        buf_h: &BufferHandle,
         binding: u32,
         stage: ShaderStage,
     ) -> Self {

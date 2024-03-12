@@ -3,9 +3,9 @@ mod descriptor;
 
 use crate::resource::Handle;
 use crate::vertex::VertexFormat;
-use crate::{backend, Std140};
+use crate::{backend, util, Std140};
 use backend::command::CommandBuffer;
-use backend::{buffer::Buffer, util::stride, AllocatorHandle, MemoryError};
+use backend::{buffer::Buffer, util::compute_stride, AllocatorHandle, MemoryError};
 
 use crate::traits::Uniform;
 use crate::util::{as_bytes, ByteBuffer};
@@ -274,8 +274,10 @@ impl BufferTypeDesc {
 pub struct DeviceBuffer {
     buffer: Buffer,
     n_elems: u32,
+    elem_size: u16,
+    elem_align: u16,
+    mutability: BufferMutability,
     buffer_type: BufferTypeDesc,
-    stride: u16,
 }
 
 impl DeviceBuffer {
@@ -318,14 +320,14 @@ impl DeviceBuffer {
             ),
         };
 
-        let stride = stride(elem_size, elem_align);
-
         Ok((
             Self {
                 buffer,
                 n_elems,
                 buffer_type,
-                stride,
+                elem_align,
+                elem_size,
+                mutability: descriptor.mutability(),
             },
             staging,
         ))
@@ -342,28 +344,53 @@ impl DeviceBuffer {
         let elem_align = descriptor.elem_align(allocator);
         let vk_buffer_usage_flags = descriptor.vk_usage_flags();
         let data = descriptor.data();
-        let stride = stride(elem_size, elem_align);
+        let stride = compute_stride(elem_size, elem_align);
         let size = stride as usize * n_elems as usize;
-        if size > self.buffer.size() {
-            self.buffer = Buffer::persistent_mapped(
-                allocator,
-                vk_buffer_usage_flags,
-                data,
-                elem_size,
-                stride,
-            )?;
+        let buffer = if size > self.buffer.size() {
+            Buffer::persistent_mapped(allocator, vk_buffer_usage_flags, data, elem_size, stride)?
         } else {
-            todo!("Revisit");
-            if elem_size == elem_align {
-                unsafe {
-                    self.buffer.update_data_at(descriptor.data(), 0);
-                }
-            } else {
-                unimplemented!("Can't use update_data_at under these conditions");
+            unsafe {
+                self.write(0, descriptor.data());
             }
-        }
-        self.stride = stride;
+            self.buffer
+        };
+
+        *self = Self {
+            buffer,
+            n_elems,
+            elem_align,
+            elem_size,
+            buffer_type: descriptor.buffer_type().clone(),
+            mutability: descriptor.mutability(),
+        };
         Ok(())
+    }
+
+    /// Write the 'data' at 'offset' in this buffer.
+    /// # Panic:
+    /// * If the buffer is not mutable.
+    /// * If the data does not fit.
+    pub fn write(&mut self, offset: usize, data: &[u8]) {
+        if self.mutability != BufferMutability::Mutable {
+            panic!(
+                "Buffer at {:p} is not mutable, can't write to it",
+                self.buffer.get_ptr()
+            );
+        }
+
+        if (offset + data.len()) >= self.buffer.size() {
+            panic!(
+                "Data of {} bytes does not fit in buffer {:p}, at {offset}",
+                data.len(),
+                self.buffer.ptr()
+            );
+        }
+
+        let dst_start = self.buffer.mut_ptr();
+        unsafe {
+            let dst = dst_start.add(offset);
+            util::copy_nonoverlapping_aligned(data, dst, self.elem_size, self.elem_align);
+        }
     }
 
     pub fn buffer_mut(&mut self) -> &mut Buffer {
@@ -387,7 +414,7 @@ impl DeviceBuffer {
     }
 
     pub fn stride(&self) -> u16 {
-        self.stride
+        compute_stride(self.elem_size, self.elem_align)
     }
 }
 

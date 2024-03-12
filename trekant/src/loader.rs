@@ -1,10 +1,6 @@
 use crate::backend;
 
-use crate::buffer::{
-    BufferHandle, DeviceIndexBuffer, DeviceUniformBuffer, DeviceVertexBuffer,
-    DrainIterator as BufferDrainIterator, IndexBufferDescriptor, UniformBufferDescriptor,
-    VertexBufferDescriptor,
-};
+use crate::buffer::{BufferDescriptor, BufferHandle, DeviceBuffer, DrainIterator as BufferDrainIterator};
 use crate::resource::{Async, AsyncResources, Handle, Resources};
 use crate::texture::{DrainIterator as TextureDrainIterator, Texture, TextureDescriptor};
 use crate::Renderer;
@@ -34,6 +30,15 @@ pub enum LoaderError {
     Mutex,
 }
 
+#[derive(Default)]
+struct AsyncResources {
+    pub buffers: crate::buffer::AsyncBuffers,
+    pub textures: crate::texture::AsyncTextures,
+}
+
+// TODO
+type AsyncBufferHandle = BufferHandle;
+
 impl std::fmt::Display for LoaderError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(f, "{:?}", self)
@@ -55,38 +60,18 @@ pub enum AsyncResourceCommand {
     },
 }
 
-#[allow(clippy::enum_variant_names)]
-enum PendingResourceCommand {
-    CreateVertexBuffer {
-        descriptor: VertexBufferDescriptor<'static>,
-        handle: BufferHandle<Async<DeviceVertexBuffer>>,
-        buffer0: DeviceVertexBuffer,
-        buffer1: Option<DeviceVertexBuffer>, // For double buffering
-        transients: [Option<Buffer>; 2],
-    },
-    CreateIndexBuffer {
-        descriptor: IndexBufferDescriptor<'static>,
-        handle: BufferHandle<Async<DeviceIndexBuffer>>,
-        buffer0: DeviceIndexBuffer,
-        buffer1: Option<DeviceIndexBuffer>, // For double buffering
-        transients: [Option<Buffer>; 2],
-    },
-    CreateUniformBuffer {
-        descriptor: UniformBufferDescriptor<'static>,
-        handle: BufferHandle<Async<DeviceUniformBuffer>>,
-        buffer0: DeviceUniformBuffer,
-        buffer1: Option<DeviceUniformBuffer>, // For double buffering
-        transients: [Option<Buffer>; 2],
-    },
-    CreateTexture {
-        handle: Handle<Async<Texture>>,
-        texture: Texture,
-        _transients: Buffer,
-    },
+
+struct PendingBuffer {
+    descriptor: BufferDescriptor<'static>,
+    handle: BufferHandle,
+    buffer0: DeviceBuffer,
+    buffer1: Option<DeviceBuffer>, // For double buffering
+    transients: [Option<Buffer>; 2],
 }
 
+
 pub enum HandleMapping {
-    UniformBuffer {
+    Buffer {
         old: BufferHandle<Async<DeviceUniformBuffer>>,
         new: BufferHandle<DeviceUniformBuffer>,
     },
@@ -104,10 +89,17 @@ pub enum HandleMapping {
     },
 }
 
+struct PendingTexture {
+    handle: Handle<Async<Texture>>,
+    texture: Texture,
+    _transients: Buffer,
+}
+
 struct NonSync {
     queue: Queue,
     command_pool: CommandPool,
-    pending_resource_jobs: Vec<PendingResourceJob>,
+    pending_textures: Vec<PendingTexture>,
+    pending_buffers: Vec<PendingBuffer>,
     resources: AsyncResources,
 }
 
@@ -196,20 +188,9 @@ impl AsyncResources {
         &'s mut self,
         resources: &'r mut Resources,
     ) -> impl Iterator<Item = HandleMapping> + 'i {
-        let vbufs = self
-            .vertex_buffers
+        let bufs = self
+            .buffers
             .drain_available()
-            .map(IntermediateIteratorItem::Vertex);
-
-        let ubufs = self
-            .uniform_buffers
-            .drain_available()
-            .map(IntermediateIteratorItem::Uniform);
-
-        let ibufs = self
-            .index_buffers
-            .drain_available()
-            .map(IntermediateIteratorItem::Index);
 
         let textures = self
             .textures
@@ -247,9 +228,7 @@ pub struct TransferGuard<'mutex, 'renderer> {
 }
 
 enum IntermediateIteratorItem {
-    Vertex(<BufferDrainIterator<'static, DeviceVertexBuffer> as Iterator>::Item),
-    Index(<BufferDrainIterator<'static, DeviceIndexBuffer> as Iterator>::Item),
-    Uniform(<BufferDrainIterator<'static, DeviceUniformBuffer> as Iterator>::Item),
+    Buffer(<BufferDrainIterator<'static, DeviceBuffer> as Iterator>::Item),
     Texture(<TextureDrainIterator<'static> as Iterator>::Item),
 }
 
@@ -271,7 +250,8 @@ impl Loader {
         let locked = Mutex::new(NonSync {
             queue,
             command_pool,
-            pending_resource_jobs: Vec::with_capacity(16),
+            pending_buffers: Vec::new(),
+            pending_textures: Vec::new(),
             resources: AsyncResources::default(),
         });
         Self {
@@ -466,8 +446,12 @@ impl Loader {
                 },
                 done,
             };
+            guard.pending_textures.push(PendingTexture {
+                handle,
+                texture: tex,
+                _transients: buf,
+            });
 
-            guard.pending_resource_jobs.push(job);
             Ok(handle)
         } else {
             Err(LoaderError::InvalidDescriptor(String::from(
