@@ -1,6 +1,6 @@
 use crate::resource::{BufferedStorage, Handle, Storage};
 
-use super::{BufferDescriptor, BufferHandle, BufferMutability, DeviceBuffer};
+use super::{AsyncBufferHandle, BufferDescriptor, BufferHandle, BufferMutability, DeviceBuffer};
 
 pub struct DeviceBufferStorage {
     buffered: BufferedStorage<DeviceBuffer>,
@@ -129,61 +129,52 @@ where
 
 use crate::resource::Async;
 
-// TODO:
-// Rethink async implementation. We don't need inner and buffering for async since it is fire and forget.
-
-pub struct AsyncDeviceBufferStorage<DeviceBuffer> {
-    // inner: DeviceBufferStorage<Async<DeviceBuffer>>,
+pub struct AsyncDeviceBufferStorage {
+    buffered: BufferedStorage<Async<DeviceBuffer>>,
+    unbuffered: Storage<Async<DeviceBuffer>>,
 }
 
-impl<T> Default for AsyncDeviceBufferStorage<T> {
+impl Default for AsyncDeviceBufferStorage {
     fn default() -> Self {
         Self {
-            // inner: DeviceBufferStorage::default(),
+            buffered: Default::default(),
+            unbuffered: Default::default(),
         }
     }
 }
 
-impl<T> AsyncDeviceBufferStorage<T> {
-    pub fn get_buffered(&self, h: &BufferHandle, idx: usize) -> Option<&Async<DeviceBuffer>> {
-        self.inner.get_buffered(h, idx)
+impl AsyncDeviceBufferStorage {
+    pub fn get_buffered(&self, h: &AsyncBufferHandle, idx: usize) -> Option<&Async<DeviceBuffer>> {
+        self.buffered.get(&h.h, idx)
     }
 
     pub fn get_buffered_mut(
         &mut self,
-        h: &BufferHandle,
+        h: &AsyncBufferHandle,
         idx: usize,
     ) -> Option<&mut Async<DeviceBuffer>> {
-        todo!()
-        // self.inner.get_buffered_mut(h, idx)
+        self.buffered.get_mut(&h.h, idx)
     }
 
-    pub fn allocate<BT>(&mut self, desc: &BufferDescriptor) -> BufferHandle {
-        todo!()
-        /*  let buffer1 = match desc.mutability() {
-               BufferMutability::Immutable => None,
-               BufferMutability::Mutable => Some(Async::<T>::Pending),
-           };
-           let inner_handle = self.inner.add(Async::<T>::Pending, buffer1);
-           unsafe { BufferHandle::from_buffer(inner_handle, 0, desc.n_elems(), desc.mutability()) }
-
-        */
+    pub fn allocate<'a>(&mut self, desc: &BufferDescriptor<'a>) -> AsyncBufferHandle {
+        let raw_handle = match desc.mutability() {
+            BufferMutability::Immutable => self.unbuffered.add(Async::<DeviceBuffer>::Pending),
+            BufferMutability::Mutable => self.buffered.add([
+                Async::<DeviceBuffer>::Pending,
+                Async::<DeviceBuffer>::Pending,
+            ]),
+        };
+        unsafe {
+            AsyncBufferHandle::from_buffer(
+                raw_handle,
+                desc.mutability(),
+                desc.n_elems(),
+                desc.buffer_type().ty(),
+            )
+        }
     }
 
-    pub fn get(&self, h: &BufferHandle, idx: usize) -> Option<&Async<T>> {
-        todo!()
-        // self.inner.get(h, idx)
-    }
-
-    pub fn is_done(&self, h: &BufferHandle) -> Option<bool> {
-        todo!()
-        /*  self.inner
-               .get_all(h)
-               .map(|(buf0, buf1)| !buf0.is_pending() && buf1.map(|x| !x.is_pending()).unwrap_or(true))
-        */
-    }
-
-    pub fn insert(&mut self, h: &BufferHandle, buf0: T, buf1: Option<T>) {
+    pub fn insert(&mut self, h: &BufferHandle, buf0: DeviceBuffer, buf1: Option<DeviceBuffer>) {
         todo!()
         /*
                if let Some((slot0, slot1)) = self.inner.get_all_mut(h) {
@@ -199,7 +190,7 @@ impl<T> AsyncDeviceBufferStorage<T> {
         */
     }
 
-    pub fn drain_available(&mut self) -> DrainIterator<'_, T> {
+    pub fn drain_available(&mut self) -> DrainIterator<'_, DeviceBuffer> {
         /*
         let f1 = |x: &mut Async<T>| std::matches!(x, Async::Available(_));
         let f2 = |x: &mut [Async<T>; 2]| std::matches!(x[0], Async::Available(_));

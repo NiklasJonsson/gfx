@@ -38,7 +38,6 @@ impl<BT: Clone + BufferType> BufferDescriptor<'static> {
     }
 }
 
- */
 macro_rules! impl_descriptor_from {
     ($name:ident, $trait:ident, $buffer_type:ident) => {
         impl $name<'static> {
@@ -106,7 +105,9 @@ macro_rules! impl_descriptor_from {
 //impl_descriptor_from!(BufferDescriptor, Uniform, UniformBufferType);
 //impl_descriptor_from!(BufferDescriptor, VertexDefinition, VertexBufferType);
 //impl_descriptor_from!(BufferDescriptor, IndexInt, IndexBufferType);
-impl_descriptor_from!(BufferDescriptor, Std140, StorageBufferType);
+// impl_descriptor_from!(BufferDescriptor, Std140, StorageBufferType);
+
+ */
 
 impl<'a> BufferDescriptor<'a> {
     pub fn mutability(&self) -> BufferMutability {

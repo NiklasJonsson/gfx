@@ -1,7 +1,8 @@
 use crate::backend;
 
 use crate::buffer::{
-    BufferDescriptor, BufferHandle, DeviceBuffer, DrainIterator as BufferDrainIterator,
+    AsyncBufferHandle, BufferDescriptor, BufferHandle, DeviceBuffer,
+    DrainIterator as BufferDrainIterator,
 };
 use crate::resource::{Async, Handle, Resources};
 use crate::texture::{DrainIterator as TextureDrainIterator, Texture, TextureDescriptor};
@@ -26,6 +27,7 @@ pub enum LoaderError {
     Command(#[from] command::CommandError),
     Queue(#[from] queue::QueueError),
     Sync(#[from] sync::SyncError),
+    Texture(#[from] image::ImageError),
     InvalidDescriptor(String),
     Mutex,
 }
@@ -60,7 +62,7 @@ enum PendingResourceCommand {
 
 pub enum HandleMapping {
     Buffer {
-        old: BufferHandle,
+        old: AsyncBufferHandle,
         new: BufferHandle,
     },
     Texture {
@@ -121,7 +123,13 @@ impl AsyncResources {
                     .add(b0, b1.map(|b| b.expect("should be avail")));
                 let (old, new) = unsafe {
                     (
-                        BufferHandle::from_buffer(h, 0, n_elems, mutability, b0.buffer_type().ty()),
+                        AsyncBufferHandle::from_buffer(
+                            h,
+                            0,
+                            n_elems,
+                            mutability,
+                            b0.buffer_type().ty(),
+                        ),
                         BufferHandle::from_buffer(
                             new,
                             0,
@@ -199,36 +207,13 @@ impl Loader {
                 } = guard.pending_resource_jobs.remove(i);
 
                 match command {
-                    PendingResourceCommand::CreateVertexBuffer {
+                    PendingResourceCommand::CreateBuffer {
                         handle,
                         buffer0,
                         buffer1,
                         transients: _transients,
                         descriptor: _descriptor,
-                    } => guard
-                        .resources
-                        .vertex_buffers
-                        .insert(&handle, buffer0, buffer1),
-                    PendingResourceCommand::CreateIndexBuffer {
-                        handle,
-                        buffer0,
-                        buffer1,
-                        transients: _transients,
-                        descriptor: _descriptor,
-                    } => guard
-                        .resources
-                        .index_buffers
-                        .insert(&handle, buffer0, buffer1),
-                    PendingResourceCommand::CreateUniformBuffer {
-                        handle,
-                        buffer0,
-                        buffer1,
-                        transients: _transients,
-                        descriptor: _descriptor,
-                    } => guard
-                        .resources
-                        .uniform_buffers
-                        .insert(&handle, buffer0, buffer1),
+                    } => guard.resources.buffers.insert(&handle, buffer0, buffer1),
                     PendingResourceCommand::CreateTexture {
                         handle, texture, ..
                     } => {
@@ -281,16 +266,6 @@ pub trait ResourceLoader<D, H> {
     fn load(&self, descriptor: D) -> Result<H, LoaderError>;
 }
 
-fn validate_texture_descriptor(d: &TextureDescriptor) -> Result<(), LoaderError> {
-    if d.mipmaps() == crate::texture::MipMaps::Generate {
-        return Err(LoaderError::InvalidDescriptor(String::from(
-            "Can't generate mipmaps on loader queue",
-        )));
-    }
-
-    Ok(())
-}
-
 impl Loader {
     pub fn load_buffer(
         &self,
@@ -337,44 +312,44 @@ impl Loader {
         descriptor: TextureDescriptor<'static>,
     ) -> Result<Handle<Async<Texture>>, LoaderError> {
         log::trace!("Loading texture with descriptor {descriptor:?}");
-        // TODO: Move this into this function?
-        validate_texture_descriptor(&descriptor)?;
-
-        let (desc, mipmaps, data) = descriptor
-            .split_desc_data()
-            // TODO: Return error here
-            .expect("Failed to load descriptor data");
-        if let Some(data) = data {
-            let mut guard = self.locked.lock().map_err(|_| LoaderError::Mutex)?;
-            let handle = guard.resources.textures.allocate();
-            let (result, done) =
-                Loader::submit_commands(&self.vk_device, &guard, |command_buffer| {
-                    crate::texture::load_texture_from_data(
-                        &self.vk_device,
-                        &self.allocator,
-                        command_buffer,
-                        desc,
-                        data.data(),
-                        mipmaps,
-                    )
-                })
-                .expect("Failed to submit command");
-            let (tex, buf) = result.expect("Failed to load texture from data");
-            let job = PendingResourceJob {
-                command: PendingResourceCommand::CreateTexture {
-                    handle,
-                    texture: tex,
-                    _transients: buf,
-                },
-                done,
-            };
-
-            guard.pending_resource_jobs.push(job);
-            Ok(handle)
-        } else {
-            Err(LoaderError::InvalidDescriptor(String::from(
-                "Can't load empty textures in the loader (for now)",
-            )))
+        if descriptor.mipmaps() == crate::texture::MipMaps::Generate {
+            return Err(LoaderError::InvalidDescriptor(String::from(
+                "Can't generate mipmaps on loader queue",
+            )));
         }
+
+        let (desc, mipmaps, data) = descriptor.split_desc_data()?;
+
+        let Some(data) = data else {
+            return Err(LoaderError::InvalidDescriptor(String::from(
+                "Can't load empty textures in the loader (for now)",
+            )));
+        };
+
+        let mut guard = self.locked.lock().map_err(|_| LoaderError::Mutex)?;
+        let handle = guard.resources.textures.allocate();
+        let (result, done) = Loader::submit_commands(&self.vk_device, &guard, |command_buffer| {
+            crate::texture::load_texture_from_data(
+                &self.vk_device,
+                &self.allocator,
+                command_buffer,
+                desc,
+                data.data(),
+                mipmaps,
+            )
+        })
+        .expect("Failed to submit command");
+        let (tex, buf) = result.expect("Failed to load texture from data");
+        let job = PendingResourceJob {
+            command: PendingResourceCommand::CreateTexture {
+                handle,
+                texture: tex,
+                _transients: buf,
+            },
+            done,
+        };
+
+        guard.pending_resource_jobs.push(job);
+        Ok(handle)
     }
 }

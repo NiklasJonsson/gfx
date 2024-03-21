@@ -185,9 +185,10 @@ impl Buffer {
 
 impl Buffer {
     pub fn map(&mut self) -> Result<*mut u8, MemoryError> {
-        unsafe { self.allocator.map_memory(&mut self.allocation) }
+        let ptr = unsafe { self.allocator.map_memory(&mut self.allocation) }
             .map_err(MemoryError::MemoryMapping)?;
         self.is_mapped = true;
+        Ok(ptr)
     }
 
     pub fn unmap(&mut self) {

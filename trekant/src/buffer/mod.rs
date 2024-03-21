@@ -8,7 +8,7 @@ use backend::command::CommandBuffer;
 use backend::{buffer::Buffer, util::compute_stride, AllocatorHandle, MemoryError};
 
 use crate::traits::Uniform;
-use crate::util::{as_bytes, ByteBuffer};
+use crate::util::ByteBuffer;
 use crate::vertex::VertexDefinition;
 
 use ash::vk;
@@ -21,8 +21,9 @@ pub use descriptor::BufferDescriptor;
 pub use buffer_storage::DrainIterator;
 use buffer_storage::{AsyncDeviceBufferStorage, DeviceBufferStorage};
 pub type Buffers = DeviceBufferStorage;
-pub type AsyncBuffers = AsyncDeviceBufferStorage<DeviceBuffer>;
+pub type AsyncBuffers = AsyncDeviceBufferStorage;
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct BufferTypeId(pub std::mem::Discriminant<BufferTypeDesc>);
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -103,24 +104,47 @@ impl BufferHandle {
     }
 }
 
+pub struct AsyncBufferHandle {
+    h: Handle<resurs::Async<DeviceBuffer>>,
+    mutability: BufferMutability,
+    n_elems: u32,
+    ty: BufferTypeId,
+}
+
+impl AsyncBufferHandle {
+    /// # Safety
+    /// The handle must refer to a valid buffer resource. idx + n_elems must be less than or equal to the number of elements the buffer that the handle refers to was created with.
+    pub unsafe fn from_buffer(
+        handle: Handle<resurs::Async<DeviceBuffer>>,
+        mutability: BufferMutability,
+        n_elems: u32,
+        ty: BufferTypeId,
+    ) -> Self {
+        Self {
+            h: handle,
+            mutability,
+            n_elems,
+            ty,
+        }
+    }
+}
+
 #[derive(Debug, Clone)]
 pub struct UniformBufferType {
     elem_size: u16,
 }
 impl BufferType for UniformBufferType {
     const USAGE: vk::BufferUsageFlags = vk::BufferUsageFlags::UNIFORM_BUFFER;
-    fn elem_align(&self, allocator: &AllocatorHandle) -> Option<u16> {
+    fn elem_align(&self, allocator: &AllocatorHandle) -> u16 {
         const REQUIRED_ALIGNMENT_SUPPORT: u16 = 256;
         let props = unsafe { allocator.get_physical_device_properties() }.expect("Bad allocator");
         let alignment = props.limits.min_uniform_buffer_offset_alignment;
         if alignment == 0 {
-            Some(REQUIRED_ALIGNMENT_SUPPORT)
+            REQUIRED_ALIGNMENT_SUPPORT
         } else {
-            Some(
-                alignment
-                    .try_into()
-                    .expect("Alignment requirement is too big"),
-            )
+            alignment
+                .try_into()
+                .expect("Alignment requirement is too big")
         }
     }
     fn elem_size(&self) -> u16 {
@@ -227,18 +251,16 @@ pub struct StorageBufferType {
 
 impl BufferType for StorageBufferType {
     const USAGE: vk::BufferUsageFlags = vk::BufferUsageFlags::STORAGE_BUFFER;
-    fn elem_align(&self, allocator: &AllocatorHandle) -> Option<u16> {
+    fn elem_align(&self, allocator: &AllocatorHandle) -> u16 {
         const REQUIRED_ALIGNMENT_SUPPORT: u16 = 256;
         let props = unsafe { allocator.get_physical_device_properties() }.expect("Bad allocator");
         let alignment = props.limits.min_storage_buffer_offset_alignment;
         if alignment == 0 {
-            Some(REQUIRED_ALIGNMENT_SUPPORT)
+            REQUIRED_ALIGNMENT_SUPPORT
         } else {
-            Some(
-                alignment
-                    .try_into()
-                    .expect("Alignment requirement is too big"),
-            )
+            alignment
+                .try_into()
+                .expect("Alignment requirement is too big"),
         }
     }
     fn elem_size(&self) -> u16 {
@@ -267,6 +289,24 @@ pub enum BufferTypeDesc {
 impl BufferTypeDesc {
     pub fn ty(&self) -> BufferTypeId {
         BufferTypeId(std::mem::discriminant(self))
+    }
+
+    pub fn elem_size(&self) -> u16 {
+        match self {
+            Self::Index(idx) => idx.elem_size(),
+            Self::Vertex(vertex) => vertex.elem_size(),
+            Self::Uniform(uni) => uni.elem_size(),
+            Self::Storage(s) => s.elem_size(),
+        }
+    }
+
+    pub fn elem_align(&self, allocator: &) -> u16 {
+        match self {
+            Self::Index(idx) => idx.elem_size(),
+            Self::Vertex(vertex) => vertex.elem_size(),
+            Self::Uniform(uni) => uni.elem_size(),
+            Self::Storage(s) => s.elem_size(),
+        }
     }
 }
 
@@ -418,6 +458,16 @@ impl DeviceBuffer {
     }
 }
 
+impl DeviceBuffer {
+    pub fn vk_index_type(&self) -> Option<vk::IndexType> {
+        match self.buffer_type {
+            BufferTypeDesc::Index(idx) => Some(vk::IndexType::from(idx.size)),
+            _ => None,
+        }
+    }
+}
+
+
 /* pub type DeviceVertexBuffer = DeviceBuffer<VertexBufferType>;
 impl DeviceVertexBuffer {
     pub fn vertex_format(&self) -> &VertexFormat {
@@ -426,12 +476,6 @@ impl DeviceVertexBuffer {
 }
 
 pub type DeviceIndexBuffer = DeviceBuffer<IndexBufferType>;
-impl DeviceIndexBuffer {
-    pub fn vk_index_type(&self) -> vk::IndexType {
-        vk::IndexType::from(self.buffer_type().size)
-    }
-}
-
 pub type DeviceUniformBuffer = DeviceBuffer<UniformBufferType>;
 impl DeviceUniformBuffer {
     pub fn update_with<T: Uniform>(&mut self, data: &T, idx: u64) {

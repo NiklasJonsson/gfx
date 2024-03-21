@@ -302,7 +302,7 @@ impl CommandBuffer {
                 self.vk_cmd_buffer,
                 buffer.vk_buffer(),
                 offset,
-                buffer.vk_index_type(),
+                buffer.vk_index_type().expect("Not an index buffer"),
             );
         }
 
