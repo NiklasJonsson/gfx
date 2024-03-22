@@ -8,9 +8,7 @@ use winit::{
 use nalgebra_glm as glm;
 use resurs::Handle;
 
-use buffer::{
-    BufferHandle, BufferMutability, DeviceIndexBuffer, DeviceUniformBuffer, DeviceVertexBuffer,
-};
+use buffer::{BufferHandle, BufferMutability, DeviceBuffer};
 use trekant::buffer;
 use trekant::pipeline::{
     GraphicsPipeline, GraphicsPipelineDescriptor, ShaderDescriptor, ShaderStage,
@@ -20,13 +18,13 @@ use trekant::vertex::{VertexDefinition, VertexFormat};
 use trekant::{RenderPass, Renderer, Texture};
 
 use trekant::ResourceManager as _;
-use trekant::Std140Compat;
+use trekant::Std140;
 
 use std::time::{Duration, Instant};
 
 const WINDOW_HEIGHT: u32 = 300;
 const WINDOW_WIDTH: u32 = 300;
-const WINDOW_TITLE: &str = "Trekanten Vulkan Tutoria";
+const WINDOW_TITLE: &str = "Trekanten Vulkan Tutorial";
 
 struct State {
     pub window: winit::window::Window,
@@ -48,7 +46,6 @@ impl State {
         (
             Self {
                 window,
-
                 frame_times: [std::time::Duration::default(); 10],
                 frame_time_idx: 0,
                 start: Instant::now(),
@@ -102,7 +99,7 @@ struct Vertex {
     tex_coord: glm::Vec2,
 }
 
-impl VertexDefinition for Vertex {
+unsafe impl VertexDefinition for Vertex {
     fn format() -> VertexFormat {
         VertexFormat::from([
             util::Format::FLOAT3,
@@ -116,17 +113,17 @@ impl VertexDefinition for Vertex {
 #[repr(transparent)]
 struct Mat4(glm::Mat4);
 
-#[derive(Clone, Copy, Std140Compat)]
+unsafe impl trekant::Std140 for Mat4 {
+    const SIZE: usize = 64;
+    const ALIGNMENT: usize = 16;
+}
+
+#[derive(Clone, Copy, Std140)]
 #[repr(C)]
 struct UniformBufferObject {
     model: Mat4,
     view: Mat4,
     proj: Mat4,
-}
-
-unsafe impl trekant::Std140 for Mat4 {
-    const SIZE: usize = 64;
-    const ALIGNMENT: usize = 16;
 }
 
 fn get_fname(dir: &str, target: &str) -> std::path::PathBuf {
@@ -260,29 +257,26 @@ fn create_texture(renderer: &mut Renderer) -> Handle<Texture> {
         .expect("Failed to create texture")
 }
 
-type Mesh = (
-    BufferHandle<DeviceVertexBuffer>,
-    BufferHandle<DeviceIndexBuffer>,
-);
+type Mesh = (BufferHandle, BufferHandle);
 
 fn create_mesh(renderer: &mut Renderer) -> Mesh {
     let (vertices, indices) = load_viking_house();
 
     let vertex_buffer_descriptor =
-        buffer::VertexBufferDescriptor::from_slice(&vertices, BufferMutability::Immutable);
+        buffer::BufferDescriptor::from_slice(&vertices, BufferMutability::Immutable);
     let vertex_buffer = renderer
         .create_resource_blocking(vertex_buffer_descriptor)
         .expect("Failed to create vertex buffer");
 
     let index_buffer_descriptor =
-        buffer::IndexBufferDescriptor::from_slice(&indices, BufferMutability::Immutable);
+        buffer::BufferDescriptor::from_slice(&indices, BufferMutability::Immutable);
     let index_buffer = renderer
         .create_resource_blocking(index_buffer_descriptor)
         .expect("Failed to create index buffer");
     (vertex_buffer, index_buffer)
 }
 
-fn create_mvp_ubuf(renderer: &mut Renderer) -> BufferHandle<DeviceUniformBuffer> {
+fn create_mvp_ubuf(renderer: &mut Renderer) -> BufferHandle {
     let data = vec![UniformBufferObject {
         model: Mat4::default(),
         view: Mat4::default(),
@@ -290,7 +284,7 @@ fn create_mvp_ubuf(renderer: &mut Renderer) -> BufferHandle<DeviceUniformBuffer>
     }];
 
     let uniform_buffer_desc =
-        buffer::UniformBufferDescriptor::from_slice(&data, BufferMutability::Mutable);
+        buffer::BufferDescriptor::from_slice(&data, BufferMutability::Mutable);
 
     renderer
         .create_resource_blocking(uniform_buffer_desc)

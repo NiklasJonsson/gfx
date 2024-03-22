@@ -4,7 +4,7 @@ use thiserror::Error;
 
 use crate::backend;
 
-use crate::buffer::BufferHandle;
+use crate::buffer::{BufferHandle, BufferTypeDesc};
 use crate::pipeline::ShaderStage;
 use crate::resource::{BufferedStorage, Handle};
 use crate::texture::Texture;
@@ -161,14 +161,9 @@ impl<'a> PipelineResourceSetBuilder<'a> {
         );
     }
 
-    pub fn add_uniform_buffer(
-        mut self,
-        buf_h: &BufferHandle,
-        binding: u32,
-        stage: ShaderStage,
-    ) -> Self {
-        let (buf0, buf1, stride0, stride1) = {
-            let ubufs = &self.renderer.resources.uniform_buffers;
+    pub fn add_buffer(mut self, buf_h: BufferHandle, binding: u32, stage: ShaderStage) -> Self {
+        let (buffer_type, buf0, buf1, stride0, stride1) = {
+            let ubufs = &self.renderer.resources.buffers;
 
             let (buf0, buf1) = ubufs.get_all(buf_h).expect("Failed to get buffer");
 
@@ -177,6 +172,7 @@ impl<'a> PipelineResourceSetBuilder<'a> {
             );
             let buf1 = buf1.unwrap_or(buf0);
             (
+                buf0.buffer_type(),
                 buf0.vk_buffer(),
                 buf1.vk_buffer(),
                 buf0.stride(),
@@ -184,62 +180,13 @@ impl<'a> PipelineResourceSetBuilder<'a> {
             )
         };
 
-        self.add_binding(
-            vk::DescriptorType::UNIFORM_BUFFER,
-            binding,
-            vk::ShaderStageFlags::from(stage),
-            1,
-        );
-
-        // TODO: This should check mutability of buffer
-        // VMA allocator creates vk::Buffer from the device memory + offset so the offset from the buffer handle is enough here
-        self.buffer_infos.push([
-            vk::DescriptorBufferInfo {
-                buffer: buf0,
-                offset: buf_h.idx() as u64 * stride0 as u64,
-                range: buf_h.n_elems() as u64 * stride0 as u64,
-            },
-            vk::DescriptorBufferInfo {
-                buffer: buf1,
-                offset: buf_h.idx() as u64 * stride1 as u64,
-                range: buf_h.n_elems() as u64 * stride1 as u64,
-            },
-        ]);
-
-        log::trace!("Added buffer info {:?}", self.buffer_infos.last().unwrap());
-        self
-    }
-
-    // TODO: Fix duplication here
-    pub fn add_storage_buffer(
-        mut self,
-        buf_h: &BufferHandle,
-        binding: u32,
-        stage: ShaderStage,
-    ) -> Self {
-        let (buf0, buf1, stride0, stride1) = {
-            let ubufs = &self.renderer.resources.storage_buffers;
-
-            let (buf0, buf1) = ubufs.get_all(buf_h).expect("Failed to get buffer");
-
-            assert!(
-                buf1.is_some() || buf_h.mutability() == crate::buffer::BufferMutability::Immutable
-            );
-            let buf1 = buf1.unwrap_or(buf0);
-            (
-                buf0.vk_buffer(),
-                buf1.vk_buffer(),
-                buf0.stride(),
-                buf1.stride(),
-            )
+        let vk_desc_ty = match buffer_type {
+            BufferTypeDesc::Uniform(_) => vk::DescriptorType::UNIFORM_BUFFER,
+            BufferTypeDesc::Storage(_) => vk::DescriptorType::STORAGE_BUFFER,
+            _ => panic!("Invalid buffer type, needs to be either uniform or storage."),
         };
 
-        self.add_binding(
-            vk::DescriptorType::STORAGE_BUFFER,
-            binding,
-            vk::ShaderStageFlags::from(stage),
-            1,
-        );
+        self.add_binding(vk_desc_ty, binding, vk::ShaderStageFlags::from(stage), 1);
 
         // TODO: This should check mutability of buffer
         // VMA allocator creates vk::Buffer from the device memory + offset so the offset from the buffer handle is enough here

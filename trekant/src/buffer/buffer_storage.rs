@@ -17,7 +17,7 @@ impl Default for DeviceBufferStorage {
 }
 
 impl DeviceBufferStorage {
-    pub fn get_all(&self, h: &BufferHandle) -> Option<(&DeviceBuffer, Option<&DeviceBuffer>)> {
+    pub fn get_all(&self, h: BufferHandle) -> Option<(&DeviceBuffer, Option<&DeviceBuffer>)> {
         match h.mutability() {
             BufferMutability::Immutable => self.unbuffered.get(h.handle()).map(|x| (x, None)),
             BufferMutability::Mutable => {
@@ -28,7 +28,7 @@ impl DeviceBufferStorage {
 
     pub fn get_all_mut(
         &mut self,
-        h: &BufferHandle,
+        h: BufferHandle,
     ) -> Option<(&mut DeviceBuffer, Option<&mut DeviceBuffer>)> {
         match h.mutability() {
             BufferMutability::Immutable => self.unbuffered.get_mut(h.handle()).map(|x| (x, None)),
@@ -39,17 +39,17 @@ impl DeviceBufferStorage {
         }
     }
 
-    pub fn get_buffered(&self, h: &BufferHandle, idx: usize) -> Option<&DeviceBuffer> {
+    pub fn get_buffered(&self, h: BufferHandle, idx: usize) -> Option<&DeviceBuffer> {
         assert_eq!(h.mutability(), BufferMutability::Mutable);
         self.buffered.get(h.handle(), idx)
     }
 
-    pub fn get_buffered_mut(&mut self, h: &BufferHandle, idx: usize) -> Option<&mut DeviceBuffer> {
+    pub fn get_buffered_mut(&mut self, h: BufferHandle, idx: usize) -> Option<&mut DeviceBuffer> {
         assert_eq!(h.mutability(), BufferMutability::Mutable);
         self.buffered.get_mut(h.handle(), idx)
     }
 
-    pub fn get_unbuffered(&self, h: &BufferHandle) -> Option<&DeviceBuffer> {
+    pub fn get_unbuffered(&self, h: BufferHandle) -> Option<&DeviceBuffer> {
         assert_eq!(h.mutability(), BufferMutability::Immutable);
         self.unbuffered.get(h.handle())
     }
@@ -66,21 +66,21 @@ impl DeviceBufferStorage {
         }
     }
 
-    pub fn get(&self, h: &BufferHandle, idx: usize) -> Option<&DeviceBuffer> {
+    pub fn get(&self, h: BufferHandle, idx: usize) -> Option<&DeviceBuffer> {
         match h.mutability() {
             BufferMutability::Immutable => self.unbuffered.get(h.handle()),
             BufferMutability::Mutable => self.buffered.get(h.handle(), idx),
         }
     }
 
-    pub fn get_mut(&mut self, h: &BufferHandle, idx: usize) -> Option<&mut DeviceBuffer> {
+    pub fn get_mut(&mut self, h: BufferHandle, idx: usize) -> Option<&mut DeviceBuffer> {
         match h.mutability() {
             BufferMutability::Immutable => self.unbuffered.get_mut(h.handle()),
             BufferMutability::Mutable => self.buffered.get_mut(h.handle(), idx),
         }
     }
 
-    pub fn has(&self, h: &BufferHandle) -> bool {
+    pub fn has(&self, h: BufferHandle) -> bool {
         match h.mutability() {
             BufferMutability::Immutable => self.unbuffered.has(h.handle()),
             BufferMutability::Mutable => self.buffered.has(h.handle()),
@@ -144,13 +144,13 @@ impl Default for AsyncDeviceBufferStorage {
 }
 
 impl AsyncDeviceBufferStorage {
-    pub fn get_buffered(&self, h: &AsyncBufferHandle, idx: usize) -> Option<&Async<DeviceBuffer>> {
+    pub fn get_buffered(&self, h: AsyncBufferHandle, idx: usize) -> Option<&Async<DeviceBuffer>> {
         self.buffered.get(&h.h, idx)
     }
 
     pub fn get_buffered_mut(
         &mut self,
-        h: &AsyncBufferHandle,
+        h: AsyncBufferHandle,
         idx: usize,
     ) -> Option<&mut Async<DeviceBuffer>> {
         self.buffered.get_mut(&h.h, idx)
@@ -174,7 +174,7 @@ impl AsyncDeviceBufferStorage {
         }
     }
 
-    pub fn insert(&mut self, h: &BufferHandle, buf0: DeviceBuffer, buf1: Option<DeviceBuffer>) {
+    pub fn insert(&mut self, h: AsyncBufferHandle, buf0: DeviceBuffer, buf1: Option<DeviceBuffer>) {
         todo!()
         /*
                if let Some((slot0, slot1)) = self.inner.get_all_mut(h) {

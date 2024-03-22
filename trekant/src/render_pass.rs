@@ -53,7 +53,7 @@ impl<'a> RenderPassEncoder<'a> {
         self
     }
 
-    pub fn bind_index_buffer(&mut self, handle: &BufferHandle) -> &mut Self {
+    pub fn bind_index_buffer(&mut self, handle: BufferHandle) -> &mut Self {
         let ib = self
             .resources
             .buffers
@@ -65,7 +65,7 @@ impl<'a> RenderPassEncoder<'a> {
         self
     }
 
-    pub fn bind_vertex_buffer(&mut self, handle: &BufferHandle) -> &mut Self {
+    pub fn bind_vertex_buffer(&mut self, handle: BufferHandle) -> &mut Self {
         let vb = self
             .resources
             .buffers
@@ -79,8 +79,8 @@ impl<'a> RenderPassEncoder<'a> {
 
     pub fn draw_mesh(
         &mut self,
-        vertex_buffer: &BufferHandle,
-        index_buffer: &BufferHandle,
+        vertex_buffer: BufferHandle,
+        index_buffer: BufferHandle,
     ) -> &mut Self {
         let vertex_index = vertex_buffer.idx() as i32;
         let indices_index = index_buffer.idx();

@@ -48,7 +48,7 @@ impl std::fmt::Display for LoaderError {
 enum PendingResourceCommand {
     CreateBuffer {
         descriptor: BufferDescriptor<'static>,
-        handle: BufferHandle,
+        handle: AsyncBufferHandle,
         buffer0: DeviceBuffer,
         buffer1: Option<DeviceBuffer>, // For double buffering
         transients: [Option<Buffer>; 2],
@@ -112,6 +112,7 @@ impl AsyncResources {
             IntermediateIteratorItem::Buffer(buf) => {
                 let (h, b0, b1) = buf;
                 let b0 = b0.expect("should be avail");
+                let ty = b0.buffer_type().ty();
                 let n_elems = b0.n_elems();
                 let mutability = if b1.is_some() {
                     BufferMutability::Mutable
@@ -123,20 +124,8 @@ impl AsyncResources {
                     .add(b0, b1.map(|b| b.expect("should be avail")));
                 let (old, new) = unsafe {
                     (
-                        AsyncBufferHandle::from_buffer(
-                            h,
-                            0,
-                            n_elems,
-                            mutability,
-                            b0.buffer_type().ty(),
-                        ),
-                        BufferHandle::from_buffer(
-                            new,
-                            0,
-                            n_elems,
-                            mutability,
-                            b0.buffer_type().ty(),
-                        ),
+                        AsyncBufferHandle::from_buffer(h, mutability, n_elems, ty),
+                        BufferHandle::from_buffer(new, 0, n_elems, mutability, ty),
                     )
                 };
                 HandleMapping::Buffer { old, new }
@@ -213,7 +202,7 @@ impl Loader {
                         buffer1,
                         transients: _transients,
                         descriptor: _descriptor,
-                    } => guard.resources.buffers.insert(&handle, buffer0, buffer1),
+                    } => guard.resources.buffers.insert(handle, buffer0, buffer1),
                     PendingResourceCommand::CreateTexture {
                         handle, texture, ..
                     } => {
@@ -270,7 +259,7 @@ impl Loader {
     pub fn load_buffer(
         &self,
         descriptor: BufferDescriptor<'static>,
-    ) -> Result<BufferHandle, LoaderError> {
+    ) -> Result<AsyncBufferHandle, LoaderError> {
         log::trace!("Loading buffer with descriptor {descriptor:?}");
         assert!(descriptor.n_elems() != 0);
 

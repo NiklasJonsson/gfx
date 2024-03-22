@@ -1,6 +1,6 @@
-use trekant::Std140Compat;
+use trekant::Std140;
 
-#[derive(Copy, Clone, Debug, Std140Compat)]
+#[derive(Copy, Clone, Debug, Std140)]
 #[repr(C, packed)]
 pub struct PBRMaterialData {
     pub base_color_factor: [f32; 4],
@@ -10,7 +10,7 @@ pub struct PBRMaterialData {
     pub _padding: f32,
 }
 
-#[derive(Copy, Clone, Debug, Std140Compat)]
+#[derive(Copy, Clone, Debug, Std140)]
 #[repr(C, packed)]
 pub struct UnlitUniformData {
     pub color: [f32; 4],
@@ -23,7 +23,7 @@ pub const SHADOW_TYPE_POINT: u32 = 3;
 pub const SPOTLIGHT_SHADOW_MAP_COUNT: u32 = 16;
 pub const DIRECTIONAL_SHADOW_MAP_COUNT: u32 = 1;
 
-#[derive(Copy, Clone, Debug, Std140Compat)]
+#[derive(Copy, Clone, Debug, Std140)]
 #[repr(C, packed)]
 pub struct PackedLight {
     pub pos: [f32; 4],         // position for point/spot light
@@ -51,7 +51,7 @@ pub const fn mat4_nan() -> Mat4 {
 
 pub const MAX_NUM_LIGHTS: usize = 16;
 
-#[derive(Copy, Clone, Debug, Default, Std140Compat)]
+#[derive(Copy, Clone, Debug, Default, Std140)]
 #[repr(C, packed)]
 pub struct LightingData {
     pub lights: [PackedLight; MAX_NUM_LIGHTS as usize],
@@ -60,21 +60,21 @@ pub struct LightingData {
     pub num_lights: [u32; 4],
 }
 
-#[derive(Copy, Clone, Debug, Std140Compat)]
+#[derive(Copy, Clone, Debug, Std140)]
 #[repr(C, packed)]
 pub struct Model {
     pub model: Mat4,
     pub model_it: Mat4,
 }
 
-#[derive(Copy, Clone, Debug, Default, Std140Compat)]
+#[derive(Copy, Clone, Debug, Default, Std140)]
 #[repr(C, packed)]
 pub struct ViewData {
     pub view_proj: Mat4,
     pub view_pos: [f32; 4],
 }
 
-#[derive(Copy, Clone, Debug, Default, Std140Compat)]
+#[derive(Copy, Clone, Debug, Default, Std140)]
 #[repr(C, packed)]
 pub struct PosOnlyViewData {
     pub view_proj: Mat4,

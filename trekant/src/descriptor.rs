@@ -21,9 +21,9 @@ impl<'a> DescriptorData<'a> {
 impl<'a> DescriptorData<'a> {
     pub fn data(&self) -> &[u8] {
         match self {
-            Self::Owned(buf) => &buf,
+            Self::Owned(buf) => buf,
             Self::Borrowed(buf) => buf,
-            Self::Shared(buf) => *&buf,
+            Self::Shared(buf) => buf,
         }
     }
 }

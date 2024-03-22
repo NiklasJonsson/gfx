@@ -1,5 +1,4 @@
-use trekant::traits::Std140;
-use trekant::Std140Compat;
+use trekant::Std140;
 
 #[allow(unused)]
 #[cfg(test)]
@@ -7,7 +6,7 @@ mod tests {
     use super::*;
     #[test]
     fn test_a() {
-        #[derive(Clone, Copy, Std140Compat)]
+        #[derive(Clone, Copy, Std140)]
         struct A {
             x: f32,
             y: [f32; 2],
@@ -22,7 +21,7 @@ mod tests {
 
     #[test]
     fn test_b() {
-        #[derive(Clone, Copy, Std140Compat)]
+        #[derive(Clone, Copy, Std140)]
         struct B {
             x: [f32; 3],
             y: f32,
@@ -37,7 +36,7 @@ mod tests {
 
     #[test]
     fn test_c() {
-        #[derive(Clone, Copy, Std140Compat)]
+        #[derive(Clone, Copy, Std140)]
         struct C {
             a: [f32; 4],
             b: f32,
@@ -58,7 +57,7 @@ mod tests {
 
     #[test]
     fn test_d() {
-        #[derive(Clone, Copy, Std140Compat)]
+        #[derive(Clone, Copy, Std140)]
         struct D {
             a: f32,
             b: [f32; 4],
@@ -77,7 +76,7 @@ mod tests {
 
     #[test]
     fn test_e() {
-        #[derive(Clone, Copy, Std140Compat)]
+        #[derive(Clone, Copy, Std140)]
         struct E {
             a: [f32; 16],
             b: [f32; 3],
@@ -92,13 +91,13 @@ mod tests {
 
     #[test]
     fn test_nested() {
-        #[derive(Clone, Copy, Std140Compat)]
+        #[derive(Clone, Copy, Std140)]
         struct E {
             a: [f32; 16],
             b: [f32; 3],
         }
 
-        #[derive(Clone, Copy, Std140Compat)]
+        #[derive(Clone, Copy, Std140)]
         struct F {
             a: E,
             b: f32,
@@ -118,7 +117,7 @@ mod tests {
         assert_eq!(<Mat as Std140>::SIZE, 64);
         assert_eq!(<[Mat; LEN] as Std140>::SIZE, 1024);
 
-        #[derive(Clone, Copy, Std140Compat)]
+        #[derive(Clone, Copy, Std140)]
         pub struct Matrices {
             pub matrices: [Mat; LEN],
             pub num_matrices: u32,
@@ -136,7 +135,7 @@ mod tests {
     fn test_light() {
         const LEN: usize = 16;
 
-        #[derive(Clone, Copy, Std140Compat)]
+        #[derive(Clone, Copy, Std140)]
         pub struct PackedLight {
             pub pos: [f32; 4],
             pub dir_cutoff: [f32; 4],
@@ -148,7 +147,7 @@ mod tests {
         assert_eq!(PackedLight::ALIGNMENT, 16);
         assert!(PackedLight::SIZE == std::mem::size_of::<PackedLight>());
 
-        #[derive(Clone, Copy, Std140Compat)]
+        #[derive(Clone, Copy, Std140)]
         pub struct LightingData {
             pub punctual_lights: [PackedLight; LEN],
             pub ambient: [f32; 4],

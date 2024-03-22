@@ -104,6 +104,7 @@ impl BufferHandle {
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct AsyncBufferHandle {
     h: Handle<resurs::Async<DeviceBuffer>>,
     mutability: BufferMutability,
@@ -260,7 +261,7 @@ impl BufferType for StorageBufferType {
         } else {
             alignment
                 .try_into()
-                .expect("Alignment requirement is too big"),
+                .expect("Alignment requirement is too big")
         }
     }
     fn elem_size(&self) -> u16 {
@@ -300,12 +301,12 @@ impl BufferTypeDesc {
         }
     }
 
-    pub fn elem_align(&self, allocator: &) -> u16 {
+    pub fn elem_align(&self, allocator: &AllocatorHandle) -> u16 {
         match self {
-            Self::Index(idx) => idx.elem_size(),
-            Self::Vertex(vertex) => vertex.elem_size(),
-            Self::Uniform(uni) => uni.elem_size(),
-            Self::Storage(s) => s.elem_size(),
+            Self::Index(ty) => ty.elem_align(allocator),
+            Self::Vertex(ty) => ty.elem_align(allocator),
+            Self::Uniform(ty) => ty.elem_align(allocator),
+            Self::Storage(s) => s.elem_align(allocator),
         }
     }
 }
@@ -379,6 +380,8 @@ impl DeviceBuffer {
         descriptor: &BufferDescriptor,
     ) -> Result<(), MemoryError> {
         assert!(descriptor.mutability() == BufferMutability::Mutable);
+        assert!(self.mutability == BufferMutability::Mutable);
+        assert_eq!(self.buffer_type().ty(), descriptor.buffer_type().ty());
         let elem_size = descriptor.elem_size();
         let n_elems = descriptor.n_elems();
         let elem_align = descriptor.elem_align(allocator);
@@ -386,23 +389,25 @@ impl DeviceBuffer {
         let data = descriptor.data();
         let stride = compute_stride(elem_size, elem_align);
         let size = stride as usize * n_elems as usize;
-        let buffer = if size > self.buffer.size() {
-            Buffer::persistent_mapped(allocator, vk_buffer_usage_flags, data, elem_size, stride)?
+
+        // NOTE: The below seems a bit incorrect, what about the capacity that is lost when we overwrite the n_elems?
+        // It seems like it would lead to unaccessiable memory if we keep succesively using less and less of the buffer?
+        // TODO: Revisit this! We might want some kind of a resize/reserve/realloc API instead.
+        if size > self.buffer.size() {
+            self.buffer = Buffer::persistent_mapped(
+                allocator,
+                vk_buffer_usage_flags,
+                data,
+                elem_size,
+                stride,
+            )?
         } else {
-            unsafe {
-                self.write(0, descriptor.data());
-            }
-            self.buffer
+            self.write(0, descriptor.data());
         };
 
-        *self = Self {
-            buffer,
-            n_elems,
-            elem_align,
-            elem_size,
-            buffer_type: descriptor.buffer_type().clone(),
-            mutability: descriptor.mutability(),
-        };
+        self.n_elems = n_elems;
+        self.elem_align = elem_align;
+        self.elem_size = elem_size;
         Ok(())
     }
 
@@ -414,7 +419,7 @@ impl DeviceBuffer {
         if self.mutability != BufferMutability::Mutable {
             panic!(
                 "Buffer at {:p} is not mutable, can't write to it",
-                self.buffer.get_ptr()
+                self.buffer.ptr()
             );
         }
 
@@ -460,13 +465,12 @@ impl DeviceBuffer {
 
 impl DeviceBuffer {
     pub fn vk_index_type(&self) -> Option<vk::IndexType> {
-        match self.buffer_type {
+        match &self.buffer_type {
             BufferTypeDesc::Index(idx) => Some(vk::IndexType::from(idx.size)),
             _ => None,
         }
     }
 }
-
 
 /* pub type DeviceVertexBuffer = DeviceBuffer<VertexBufferType>;
 impl DeviceVertexBuffer {

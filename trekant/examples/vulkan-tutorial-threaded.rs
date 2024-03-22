@@ -18,7 +18,7 @@ use trekant::pipeline::{
 use trekant::util;
 use trekant::vertex::{VertexDefinition, VertexFormat};
 
-use trekant::Std140Compat;
+use trekant::Std140;
 use trekant::{Loader, RenderPass, Renderer, Texture};
 
 use trekant::loader::ResourceLoader as _;
@@ -119,7 +119,7 @@ impl VertexDefinition for Vertex {
 #[repr(transparent)]
 struct Mat4(glm::Mat4);
 
-#[derive(Clone, Copy, Std140Compat)]
+#[derive(Clone, Copy, Std140)]
 #[repr(C)]
 struct UniformBufferObject {
     model: Mat4,

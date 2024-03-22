@@ -177,6 +177,9 @@ impl VertexFormatBuilder {
     }
 }
 
-pub trait VertexDefinition {
+/// # Safety
+///
+/// This trait should be implemented for types that are valid vertex definitions as per the vulkan spec.
+pub unsafe trait VertexDefinition {
     fn format() -> VertexFormat;
 }

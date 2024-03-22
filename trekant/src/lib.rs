@@ -12,6 +12,7 @@ pub mod pipeline_resource;
 mod render_pass;
 mod render_target;
 pub mod resource;
+pub mod std140;
 mod texture;
 pub mod traits;
 pub mod util;
@@ -30,15 +31,16 @@ pub use pipeline_resource::PipelineResourceSet;
 pub use render_pass::{RenderPass, RenderPassEncoder};
 pub use render_target::RenderTarget;
 pub use resource::{Async, Handle, MutResourceManager, ResourceManager};
+pub use std140::{Std140, Std140Struct};
 pub use texture::{
     BorderColor, Filter, MipMaps, SamplerAddressMode, SamplerDescriptor, Texture,
     TextureDescriptor, TextureUsage,
 };
-pub use traits::{PushConstant, Std140, Uniform};
+pub use traits::{PushConstant, Uniform};
 pub use util::{Extent2D, Format};
 pub use vertex::VertexFormat;
 
-pub use trekant_derive::Std140Compat;
+pub use trekant_derive::Std140;
 
 use backend::device::HasVkDevice as _;
 use backend::{command, device, framebuffer, instance, surface, swapchain, sync};
@@ -102,12 +104,12 @@ impl<'a> Frame<'a> {
     }
 
     // TODO: Could we use vkCmdUpdateBuffer instead? Note that it can't be inside a render pass
-    pub fn update_uniform_blocking<T: Copy + traits::Uniform>(
+    pub fn update_uniform_blocking<T: Copy + traits::Uniform + Std140Struct>(
         &mut self,
-        h: &BufferHandle,
+        h: BufferHandle,
         data: &T,
     ) -> Result<(), RenderError> {
-        self.renderer.update_uniform(h, data)
+        self.renderer.write_buffer(h, std::slice::from_ref(data))
     }
 
     pub fn begin_render_pass(
@@ -807,19 +809,19 @@ impl Renderer {
     // TODO: Should this ensure that this is only called between frames?
     // This is only relevant for mutable buffers though so this should be fine?
     pub fn get_buffer(&self, handle: BufferHandle) -> Option<&DeviceBuffer> {
-        self.resources.buffers.get(&handle, self.frame_idx as usize)
+        self.resources.buffers.get(handle, self.frame_idx as usize)
     }
 
     /// Write the elements in `data` to the buffer in `h`, starting at element at `start`.
     /// This function handles alignment requirements properly.
     /// TODO: Accept frame to ensure that we can write to this buffer?
-    pub fn write_buffer_at<T: Std140>(
+    pub fn write_buffer_at<T: Std140 + Copy>(
         &mut self,
         h: BufferHandle,
         start: usize,
         data: &[T],
     ) -> Result<(), RenderError> {
-        assert!(h.n_elems() >= data.len());
+        assert!(h.n_elems() as usize >= data.len());
         assert_eq!(
             h.mutability(),
             BufferMutability::Mutable,
@@ -829,17 +831,17 @@ impl Renderer {
         let buf = self
             .resources
             .buffers
-            .get_buffered_mut(&h, self.frame_idx as usize)
+            .get_buffered_mut(h, self.frame_idx as usize)
             .ok_or_else(|| RenderError::InvalidHandle(h.handle().id()))?;
 
         let dst_offset = (h.idx() as usize + start) * buf.stride() as usize;
         // Safety: The Std140 trait guarantees that we can pass this as bytes to the gpu.
-        let raw_data = unsafe { util::as_bytes(data) };
+        let raw_data = unsafe { util::as_byte_slice(data) };
         buf.write(dst_offset, raw_data);
         Ok(())
     }
 
-    pub fn write_buffer<T: Std140>(
+    pub fn write_buffer<T: Std140 + Copy>(
         &mut self,
         h: BufferHandle,
         data: &[T],
@@ -847,12 +849,12 @@ impl Renderer {
         self.write_buffer_at(h, 0, data)
     }
 
-    pub fn create_buffer<'a>(
+    pub fn create_buffer(
         &mut self,
-        descriptor: BufferDescriptor<'a>,
+        descriptor: BufferDescriptor<'_>,
     ) -> Result<BufferHandle, MemoryError> {
         // The transients that contain the data to upload need to outlive the wait for the command buffer to finish.
-        // This should probably be unsafe...?
+        // TOOD: Should descriptor.enqueue be unsafe?
         let (buf0, buf1) = self
             .submit_blocking(|cmd_buf| descriptor.enqueue(&self.device.allocator(), cmd_buf))
             .expect("Failed to submit commands to create buffer")
@@ -869,10 +871,12 @@ impl Renderer {
                     0,
                     descriptor.n_elems(),
                     descriptor.mutability(),
-                    descriptor.ty(),
+                    descriptor.buffer_type().ty(),
                 )
             }
         };
+
+        Ok(handle)
     }
 }
 

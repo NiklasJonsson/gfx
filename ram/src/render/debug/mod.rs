@@ -122,7 +122,7 @@ impl DebugRenderer {
     pub fn new(
         shader_compiler: &shader::ShaderCompiler,
         render_pass: &Handle<RenderPass>,
-        view_data_buf: &BufferHandle<DeviceUniformBuffer>,
+        view_data_buf: BufferHandle<DeviceUniformBuffer>,
         renderer: &mut trekant::Renderer,
     ) -> Self {
         use trekant::pipeline::{
@@ -131,7 +131,7 @@ impl DebugRenderer {
         };
 
         let shader_resource_group = PipelineResourceSet::builder(renderer)
-            .add_uniform_buffer(view_data_buf, 0, ShaderStage::VERTEX)
+            .add_buffer(view_data_buf, 0, ShaderStage::VERTEX)
             .build();
 
         let vertex_format = Vertex::format();

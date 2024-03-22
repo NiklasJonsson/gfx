@@ -14,7 +14,7 @@ use trekant::vertex::{VertexDefinition, VertexFormat};
 use trekant::Frame;
 use trekant::RenderPassEncoder;
 use trekant::Renderer;
-use trekant::{BufferHandle, Handle, Std140Compat};
+use trekant::{BufferHandle, Handle, Std140};
 use trekant::{MipMaps, Texture, TextureDescriptor};
 
 use crate::common::Name;
@@ -656,7 +656,7 @@ pub struct UIDrawCommands {
     commands: Vec<UIDrawCommand>,
 }
 
-#[derive(Debug, Clone, Copy, Std140Compat)]
+#[derive(Debug, Clone, Copy, Std140)]
 #[repr(C, packed)]
 pub struct VertexShaderData {
     scale_translate: [f32; 4],

@@ -109,7 +109,7 @@ fn create_material_descriptor_set(
         } => {
             let mut desc_set_builder = PipelineResourceSet::builder(renderer);
 
-            desc_set_builder = desc_set_builder.add_uniform_buffer(
+            desc_set_builder = desc_set_builder.add_buffer(
                 material_uniforms,
                 0,
                 trekant::pipeline::ShaderStage::FRAGMENT,
@@ -146,7 +146,7 @@ fn create_material_descriptor_set(
         }
         material::GpuMaterial::Unlit { color_uniform, .. } => {
             PipelineResourceSet::builder(renderer)
-                .add_uniform_buffer(color_uniform, 0, trekant::pipeline::ShaderStage::FRAGMENT)
+                .add_buffer(color_uniform, 0, trekant::pipeline::ShaderStage::FRAGMENT)
                 .build()
         }
     }
@@ -588,7 +588,7 @@ pub fn create_frame_resources(
         .iter()
         .map(|x| (x.texture, true));
     let engine_shader_resource_group = PipelineResourceSet::builder(renderer)
-        .add_uniform_buffer(&view_data, 0, ShaderStage::VERTEX | ShaderStage::FRAGMENT)
+        .add_buffer(&view_data, 0, ShaderStage::VERTEX | ShaderStage::FRAGMENT)
         .add_storage_buffer(&world_to_shadow, 1, ShaderStage::FRAGMENT)
         .add_uniform_buffer(&lighting_data, 2, ShaderStage::FRAGMENT)
         .add_texture(

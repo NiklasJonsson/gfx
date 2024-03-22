@@ -19,12 +19,45 @@ pub struct BufferResult<B> {
     pub transient: Option<Buffer>,
 }
 
+#[derive(Debug)]
 pub struct BufferDescriptor<'a> {
     data: DescriptorData<'a>,
     mutability: BufferMutability,
     n_elems: u32,
     buffer_type: BufferTypeDesc,
 }
+
+pub trait IntoBufferData {
+    fn data(&self) -> DescriptorData<'_>;
+    fn n_elems(&self) -> u32;
+    fn buffer_type(&self) -> BufferTypeDesc;
+}
+
+pub trait BufferContents {}
+
+impl<T> IntoBufferData for [T]
+where
+    T: BufferContents,
+{
+    fn data(&self) -> DescriptorData<'_> {
+        todo!()
+    }
+
+    fn buffer_type(&self) -> BufferTypeDesc {
+        todo!()
+    }
+
+    fn n_elems(&self) -> u32 {
+        todo!()
+    }
+}
+
+impl<'a> BufferDescriptor<'a> {
+    pub fn from_slice<D: IntoBufferData>(data: &D, mutability: BufferMutability) -> Self {
+        todo!()
+    }
+}
+
 /*
 TODO: Probably needs to live on the HostBuffer instead
 impl<BT: Clone + BufferType> BufferDescriptor<'static> {
@@ -137,9 +170,7 @@ impl<'a> BufferDescriptor<'a> {
     }
 
     pub fn elem_align(&self, allocator: &AllocatorHandle) -> u16 {
-        self.buffer_type
-            .elem_align(allocator)
-            .unwrap_or_else(|| self.elem_size())
+        self.buffer_type.elem_align(allocator)
     }
 
     pub fn buffer_type(&self) -> &BufferTypeDesc {
