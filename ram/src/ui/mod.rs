@@ -19,41 +19,44 @@ fn name(world: &World, ent: Entity) -> String {
     }
 }
 
-fn build_tree<'a>(
+fn build_tree(
     world: &World,
-    ui: &crate::render::imgui::UiFrame<'a>,
+    ui: &crate::render::imgui::UiFrame<'_>,
     ent: specs::Entity,
 ) -> Option<specs::Entity> {
     let mut inspected = None;
     let has_children = world.has_component::<graph::Children>(ent);
-    ui.inner()
-        .tree_node_config(name(world, ent))
-        .leaf(!has_children)
-        .build(|| {
-            if let Some(children) = world.read_storage::<graph::Children>().get(ent) {
-                for child in children.iter() {
-                    let new = build_tree(world, ui, *child);
-                    inspected = inspected.or(new);
-                }
-            }
-        });
-
-    ui.inner().same_line();
-    let pressed = ui
+    let tree_node = ui
         .inner()
-        .small_button(std::format!("inspect##{}", ent.id()));
-    if pressed {
-        inspected = Some(ent);
+        .tree_node_config(name(world, ent))
+        .leaf(!has_children);
+
+    let mut inspect_button = || {
+        ui.inner().same_line();
+        let pressed = ui
+            .inner()
+            .small_button(std::format!("inspect##{}", ent.id()));
+        if pressed {
+            inspected = Some(ent);
+        }
+    };
+
+    if let Some(_token) = tree_node.push() {
+        inspect_button();
+        if let Some(children) = world.read_storage::<graph::Children>().get(ent) {
+            for child in children.iter() {
+                let new = build_tree(world, ui, *child);
+                inspected = inspected.or(new);
+            }
+        }
+    } else {
+        inspect_button();
     }
 
     inspected
 }
 
-fn build_inspector<'a>(
-    world: &mut World,
-    ui: &crate::render::imgui::UiFrame<'a>,
-    ent: specs::Entity,
-) {
+fn build_inspector(world: &mut World, ui: &crate::render::imgui::UiFrame<'_>, ent: specs::Entity) {
     use crate::render::ReloadMaterial;
     let pressed = ui.inner().small_button("reload material");
     if pressed {

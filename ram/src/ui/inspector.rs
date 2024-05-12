@@ -36,7 +36,7 @@ pub struct Inspector {
 pub trait ImguiVisitableComponent<'a>: Visitable<ImguiVisitor<'a>> + Component + 'static {}
 impl<'a, T: Visitable<ImguiVisitor<'a>> + Component + 'static> ImguiVisitableComponent<'a> for T {}
 
-fn inspect_component<'a, C>(v: &mut ImguiVisitor<'a>, world: &World, e: Entity)
+fn inspect_component<C>(v: &mut ImguiVisitor<'_>, world: &World, e: Entity)
 where
     for<'b> C: ImguiVisitableComponent<'b>,
 {
@@ -73,7 +73,7 @@ impl Inspector {
         self.components.push(inspect_component::<C>);
     }
 
-    pub fn inspect_components<'a>(&self, v: &mut ImguiVisitor<'a>, w: &World, e: Entity) {
+    pub fn inspect_components(&self, v: &mut ImguiVisitor<'_>, w: &World, e: Entity) {
         for comp in &self.components {
             comp(v, w, e);
         }
