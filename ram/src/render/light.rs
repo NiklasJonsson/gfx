@@ -699,7 +699,7 @@ pub fn shadow_pass(
 
     // Collect rendering info.
     for (light_entity, light, tfm) in (&entities, &lights, &transforms).join() {
-        if render_passes.len() >= MAX_NUM_LIGHTS as usize {
+        if render_passes.len() >= MAX_NUM_LIGHTS {
             log::warn!("Too many punctual lights, skipping {light_entity:?}");
             break;
         }
@@ -715,7 +715,7 @@ pub fn shadow_pass(
                     );
                     break;
                 }
-                // TODO: Aspect ratio here?
+                // TODO: Aspect ratio based on texture?
                 let mtx = perspective_vk(angle * 2.0, 1.0, range.start, range.end) * to_lightspace;
 
                 let spotlight_idx = n_spotlights;

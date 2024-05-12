@@ -257,6 +257,42 @@ struct PointlightTest;
 
 impl Module for PointlightTest {
     fn load(&mut self, loader: &mut ModuleLoader) {
+        let world = &mut loader.world;
+        let spawn_cube = |world: &mut World, i: usize, x: f32, z: f32| {
+            world
+                .create_entity()
+                .with(Name::from(format!("Cube {i}")))
+                .with(Transform::pos(x, 3.0, z))
+                .with(render::Shape::Box {
+                    width: 1.0,
+                    height: 1.0,
+                    depth: 1.0,
+                })
+                .with(render::material::PhysicallyBased {
+                    base_color_factor: Rgba {
+                        r: 0.3,
+                        g: 0.6,
+                        b: 0.3,
+                        a: 1.0,
+                    },
+                    metallic_factor: 0.0,
+                    roughness_factor: 0.7,
+                    ..Default::default()
+                })
+                .build();
+        };
+        const DIST: f32 = 5.0;
+
+        let mut i = 0;
+        let coords = [-1.0, 0.0, 1.0];
+        for x in coords {
+            for z in coords {
+                let x = x * DIST;
+                let z = z * DIST;
+                spawn_cube(world, i, x, z);
+                i += 1;
+            }
+        }
         loader
             .world
             .create_entity()

@@ -121,7 +121,8 @@ float sample_shadow_map(vec3 coords, ShadowInfo info, float n_dot_l) {
     } else if (info.type == SHADOW_TYPE_SPOT) {
         depth = texture(spotlight_shadow_maps[info.texture_idx], coords.xy).r;
     } else {
-        // TODO
+        // START HERE:
+        // Figure out how to sample the cube map.
         // depth = texture(pointlight_shadow_maps[info.texture_idx], coords.xy).r;
     }
 

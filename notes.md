@@ -481,21 +481,14 @@ Current state: Code is compiling and running but the pointlight shadows are not 
 Repro with:
 
 ```bash
-cargo run --bin dbg -- --pointlight --spawn-plane --spawn-cube --rsf-file data\ambient_light.ron.rsf
+cargo run --bin dbg -- --pointlight-test --rsf-file data\ambient_light.ron.rsf --spawn-plane
 ```
 
-Findings:
+Tasks:
 
-* The shadow maps are completely white is due to all depth values being 1.0. This means the rasterization never hits the
-  geometry.
-* In renderdoc, the VS in looks correct but the VS out shows just a white rectangle.
-* In renderdoc, the viewproj matrix is just 0,0,0 but it is not on the CPU so it might be that the gpu memory is not
-  written correctly.
-
-There seems to have been issues with the buffer management code in that it is incorrectly allocating the viewproj
-buffer for the point lights. Also, writing the uniform buffer data during the shadow pass uses a fixed size stack
-array for the matrices but the underlying buffer is dynamic. The uniform management needs to be revisited from
-the ground up!
+1. Figure out how to sample the cube maps in the fragment shader in the main lighting pass.
+2. Test and fix!
+3. Sponza test.
 
 ## Future work
 
