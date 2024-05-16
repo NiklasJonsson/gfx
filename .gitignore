@@ -2,3 +2,5 @@
 **/*.rs.bk
 Cargo.lock
 **/imgui.ini
+.vscode/settings.json
+.vscode/extensions.json
