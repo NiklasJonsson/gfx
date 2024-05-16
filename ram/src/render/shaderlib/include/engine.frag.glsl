@@ -114,16 +114,15 @@ bool light_has_shadow(Light l) {
     return l.shadow_info.type != SHADOW_TYPE_INVALID;
 }
 
-float sample_shadow_map(vec3 coords, ShadowInfo info, float n_dot_l) {
+float sample_shadow_map(vec3 coords, ShadowInfo info, vec3 frag_to_light_dir_ls, float n_dot_l) {
     float depth = 1.0;
     if (info.type == SHADOW_TYPE_DIRECTIONAL) {
         depth = texture(directional_shadow_map, coords.xy).r;
     } else if (info.type == SHADOW_TYPE_SPOT) {
         depth = texture(spotlight_shadow_maps[info.texture_idx], coords.xy).r;
     } else {
-        // START HERE:
-        // Figure out how to sample the cube map.
-        // depth = texture(pointlight_shadow_maps[info.texture_idx], coords.xy).r;
+        // TODO: Do we need to scale z?
+        depth = texture(pointlight_shadow_maps[info.texture_idx], -frag_to_light_dir_ls).r;
     }
 
     // Texture sample is done before the depth if to remain within uniform ctrl-flow 
@@ -155,7 +154,8 @@ float compute_shadow_factor(vec3 fragment_world_pos, Light light, float n_dot_l)
         ShadowInfo info = light.shadow_info;
         vec4 fragment_shadow_pos = clip_bias * world_to_shadow.data[info.coords_idx] * vec4(fragment_world_pos, 1.0);
         vec3 coords = fragment_shadow_pos.xyz / fragment_shadow_pos.w;
-        shadow_factor = sample_shadow_map(coords, info, n_dot_l);
+        vec3 frag_to_light_dir_ls = (world_to_shadow.data[info.coords_idx] * vec4(light.direction, 0.0)).xyz;
+        shadow_factor = sample_shadow_map(coords, info, frag_to_light_dir_ls, n_dot_l);
     }
     return shadow_factor;
 }
