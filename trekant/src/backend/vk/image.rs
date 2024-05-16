@@ -37,6 +37,7 @@ impl ImageView {
         format: util::Format,
         aspect_mask: vk::ImageAspectFlags,
         mip_levels: u32,
+        image_view_type: vk::ImageViewType,
     ) -> Result<Self, ImageViewError> {
         let vk_format = format.into();
         let comp_mapping = vk::ComponentMapping {
@@ -56,7 +57,7 @@ impl ImageView {
 
         let info = vk::ImageViewCreateInfo::builder()
             .image(vk_image)
-            .view_type(vk::ImageViewType::TYPE_2D)
+            .view_type(image_view_type)
             .format(vk_format)
             .components(comp_mapping)
             .subresource_range(subresource_range);

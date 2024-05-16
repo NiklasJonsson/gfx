@@ -194,6 +194,7 @@ impl Swapchain {
                     util_format,
                     vk::ImageAspectFlags::COLOR,
                     mip_levels,
+                    vk::ImageViewType::TYPE_2D,
                 )
             })
             .collect::<Result<Vec<_>, ImageViewError>>()?;

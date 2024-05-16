@@ -239,7 +239,7 @@ pub(crate) fn load_texture_from_data<D: HasVkDevice>(
     } = descriptor;
 
     if ty != TextureType::Tex2D {
-        unimplemented!("Non 2D textures are not supported");
+        unimplemented!("Non-2D textures are not supported");
     }
 
     let generate_mipmaps = mipmaps == MipMaps::Generate;
@@ -523,12 +523,19 @@ impl Texture {
     ) -> Result<Self, TextureError> {
         let desc = image.descriptor();
         let aspect = usage_to_aspect(desc.image_usage);
+        let image_view_type = match desc.array_layers {
+            6 => vk::ImageViewType::CUBE,
+            1 => vk::ImageViewType::TYPE_2D,
+            n => unimplemented!("Can't handle {n} array layers"),
+        };
+
         let full_image_view = ImageView::new(
             device,
             image.vk_image(),
             desc.format,
             aspect,
             desc.mip_levels,
+            image_view_type,
         )?;
 
         let sub_image_views = (0..desc.array_layers)
@@ -539,6 +546,7 @@ impl Texture {
                     desc.format,
                     aspect,
                     desc.mip_levels,
+                    vk::ImageViewType::TYPE_2D,
                 )
             })
             .collect::<Result<Vec<_>, _>>()?;
