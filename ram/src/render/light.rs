@@ -565,6 +565,8 @@ fn transition_unused_map(
     cmdbuf: &mut CommandBuffer,
     frame: &mut trekant::Frame,
     texture: Handle<trekant::Texture>,
+    // TODO: Clean this up
+    is_cube: bool,
 ) {
     let vk_image = frame
         .get_texture(&texture)
@@ -581,7 +583,7 @@ fn transition_unused_map(
             base_mip_level: 0,
             level_count: 1,
             base_array_layer: 0,
-            layer_count: 1,
+            layer_count: if is_cube { 6 } else { 1 },
         },
         src_access_mask: vk::AccessFlags::DEPTH_STENCIL_ATTACHMENT_WRITE,
         dst_access_mask: vk::AccessFlags::SHADER_READ,
@@ -886,7 +888,7 @@ pub fn shadow_pass(
         .iter()
         .skip(n_spotlights as usize)
     {
-        transition_unused_map(&mut cmd_buffer, frame, spotlight.texture);
+        transition_unused_map(&mut cmd_buffer, frame, spotlight.texture, false);
     }
 
     for pointlight in shadow_resources
@@ -894,12 +896,17 @@ pub fn shadow_pass(
         .iter()
         .skip(n_pointlights as usize)
     {
-        transition_unused_map(&mut cmd_buffer, frame, pointlight.cube_map);
+        transition_unused_map(&mut cmd_buffer, frame, pointlight.cube_map, true);
     }
 
     // This will always be one until cascaded directional lights
     for _ in n_directional_lights..MAX_NUM_DIRECTIONAL_LIGHTS {
-        transition_unused_map(&mut cmd_buffer, frame, shadow_resources.directional.texture);
+        transition_unused_map(
+            &mut cmd_buffer,
+            frame,
+            shadow_resources.directional.texture,
+            false,
+        );
     }
 
     (cmd_buffer, output)

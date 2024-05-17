@@ -38,6 +38,7 @@ impl ImageView {
         aspect_mask: vk::ImageAspectFlags,
         mip_levels: u32,
         image_view_type: vk::ImageViewType,
+        layer_count: u32,
     ) -> Result<Self, ImageViewError> {
         let vk_format = format.into();
         let comp_mapping = vk::ComponentMapping {
@@ -52,7 +53,7 @@ impl ImageView {
             base_mip_level: 0,
             level_count: mip_levels,
             base_array_layer: 0,
-            layer_count: 1,
+            layer_count,
         };
 
         let info = vk::ImageViewCreateInfo::builder()

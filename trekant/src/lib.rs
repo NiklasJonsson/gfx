@@ -372,6 +372,7 @@ impl Renderer {
                 vk::ImageAspectFlags::DEPTH,
                 mip_levels,
                 vk::ImageViewType::TYPE_2D,
+                1,
             )
             .map_err(RenderError::RenderTargetImageView)?;
             backend::image::ImageAttachment { image, image_view }
@@ -402,6 +403,7 @@ impl Renderer {
                 vk::ImageAspectFlags::COLOR,
                 mip_levels,
                 vk::ImageViewType::TYPE_2D,
+                1,
             )
             .map_err(RenderError::RenderTargetImageView)?;
             backend::image::ImageAttachment { image, image_view }

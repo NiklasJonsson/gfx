@@ -490,6 +490,15 @@ Tasks:
 2. Test and fix!
 3. Sponza test.
 
+### Validation layer errors
+
+> = 0x4dae5635 | Submitted command buffer expects VkImage 0x932ea900000000ac[] (subresource: aspectMask 0x2 array layer 1, mip level 0) to be in layout VK_IMAGE_LAYOUT_DEPTH_STENCIL_READ_ONLY_OPTIMAL--instead, current layout is VK_IMAGE_LAYOUT_UNDEFINED.")
+
+TODO:
+
+* Read up on subpass dependencies.
+* REvisit how it is done for shadow passes
+
 ## Future work
 
 ### Loader API

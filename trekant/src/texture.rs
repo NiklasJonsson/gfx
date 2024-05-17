@@ -536,6 +536,7 @@ impl Texture {
             aspect,
             desc.mip_levels,
             image_view_type,
+            desc.array_layers,
         )?;
 
         let sub_image_views = (0..desc.array_layers)
@@ -547,6 +548,7 @@ impl Texture {
                     aspect,
                     desc.mip_levels,
                     vk::ImageViewType::TYPE_2D,
+                    1,
                 )
             })
             .collect::<Result<Vec<_>, _>>()?;
