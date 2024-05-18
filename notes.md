@@ -498,6 +498,9 @@ TODO:
 
 * Read up on subpass dependencies.
 * REvisit how it is done for shadow passes
+* Switch to pipeline barrier for all images to the main render pass. Shadow write to render?
+* vlaidation layer say array_layer 1? Also, logs indicate that this is the in-use map.
+* What about the subpass dep is wrong?
 
 ## Future work
 

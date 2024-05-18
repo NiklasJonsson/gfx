@@ -197,7 +197,7 @@ unsafe extern "system" fn vk_debug_callback(
 
     if message_severity.contains(Severity::ERROR) {
         log::error!("{}", message);
-        assert!(false);
+        panic!("Got error from vulkan validation layers");
     }
 
     // According to the lunarg tutorial for the callback, false => don't bail out

@@ -68,7 +68,7 @@ float normal_distribution_function(float cos_angle, float alpha_roughness) {
     return top / bottom;
 }
 
-#define DEBUG_SHADOW_MAP 1
+#define DEBUG_SHADOW_MAP 0
 
 vec3 debug_color(vec3 fragment_world_pos, Light light, float n_dot_l) {
 
@@ -175,7 +175,6 @@ void main() {
         color += debug_color(vs_out.world_pos, light, n_dot_l);
 
         float shadow_factor = compute_shadow_factor(vs_out.world_pos, light, n_dot_l);
-        shadow_factor = 1.0;
         if (shadow_factor == 0.0) {
             continue;
         }

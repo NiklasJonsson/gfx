@@ -571,6 +571,10 @@ impl Texture {
         &self.full_image_view
     }
 
+    pub fn sub_image_views(&self) -> &[ImageView] {
+        &self.sub_image_views
+    }
+
     pub fn sub_image_view(&self, idx: usize) -> &ImageView {
         &self.sub_image_views[idx]
     }

@@ -565,13 +565,12 @@ fn transition_unused_map(
     cmdbuf: &mut CommandBuffer,
     frame: &mut trekant::Frame,
     texture: Handle<trekant::Texture>,
-    // TODO: Clean this up
-    is_cube: bool,
 ) {
-    let vk_image = frame
+    let texture = frame
         .get_texture(&texture)
-        .expect("Failed to get shadow texture for mem barrier")
-        .vk_image();
+        .expect("Failed to get shadow texture for mem barrier");
+    let vk_image = texture.vk_image();
+    let layer_count = texture.sub_image_views().len().try_into().unwrap();
     let barrier = vk::ImageMemoryBarrier {
         old_layout: vk::ImageLayout::UNDEFINED,
         new_layout: vk::ImageLayout::DEPTH_STENCIL_READ_ONLY_OPTIMAL,
@@ -583,7 +582,7 @@ fn transition_unused_map(
             base_mip_level: 0,
             level_count: 1,
             base_array_layer: 0,
-            layer_count: if is_cube { 6 } else { 1 },
+            layer_count,
         },
         src_access_mask: vk::AccessFlags::DEPTH_STENCIL_ATTACHMENT_WRITE,
         dst_access_mask: vk::AccessFlags::SHADER_READ,
@@ -888,7 +887,7 @@ pub fn shadow_pass(
         .iter()
         .skip(n_spotlights as usize)
     {
-        transition_unused_map(&mut cmd_buffer, frame, spotlight.texture, false);
+        transition_unused_map(&mut cmd_buffer, frame, spotlight.texture);
     }
 
     for pointlight in shadow_resources
@@ -896,17 +895,12 @@ pub fn shadow_pass(
         .iter()
         .skip(n_pointlights as usize)
     {
-        transition_unused_map(&mut cmd_buffer, frame, pointlight.cube_map, true);
+        transition_unused_map(&mut cmd_buffer, frame, pointlight.cube_map);
     }
 
     // This will always be one until cascaded directional lights
     for _ in n_directional_lights..MAX_NUM_DIRECTIONAL_LIGHTS {
-        transition_unused_map(
-            &mut cmd_buffer,
-            frame,
-            shadow_resources.directional.texture,
-            false,
-        );
+        transition_unused_map(&mut cmd_buffer, frame, shadow_resources.directional.texture);
     }
 
     (cmd_buffer, output)
