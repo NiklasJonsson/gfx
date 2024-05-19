@@ -31,6 +31,7 @@ impl std::ops::Drop for ImageView {
 }
 
 impl ImageView {
+    // TODO: Refactor? Lots of parameters...
     pub fn new<D: HasVkDevice>(
         device: &D,
         vk_image: vk::Image,
@@ -38,6 +39,7 @@ impl ImageView {
         aspect_mask: vk::ImageAspectFlags,
         mip_levels: u32,
         image_view_type: vk::ImageViewType,
+        base_array_layer: u32,
         layer_count: u32,
     ) -> Result<Self, ImageViewError> {
         let vk_format = format.into();
@@ -52,7 +54,7 @@ impl ImageView {
             aspect_mask,
             base_mip_level: 0,
             level_count: mip_levels,
-            base_array_layer: 0,
+            base_array_layer,
             layer_count,
         };
 

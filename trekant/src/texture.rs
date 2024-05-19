@@ -536,11 +536,12 @@ impl Texture {
             aspect,
             desc.mip_levels,
             image_view_type,
+            0,
             desc.array_layers,
         )?;
 
         let sub_image_views = (0..desc.array_layers)
-            .map(|_| {
+            .map(|i| {
                 ImageView::new(
                     device,
                     image.vk_image(),
@@ -548,6 +549,7 @@ impl Texture {
                     aspect,
                     desc.mip_levels,
                     vk::ImageViewType::TYPE_2D,
+                    i,
                     1,
                 )
             })
