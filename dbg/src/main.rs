@@ -293,8 +293,7 @@ impl Module for PointlightTest {
                 i += 1;
             }
         }
-        loader
-            .world
+        world
             .create_entity()
             .with(Transform {
                 position: Vec3 {
@@ -314,6 +313,29 @@ impl Module for PointlightTest {
                 range: 10.0,
             })
             .with(Name::from("Point light"))
+            .build();
+        let plane_side = 100.0;
+        let plane_height = 1.0;
+        world
+            .create_entity()
+            .with(Name::from("Top Plane"))
+            .with(Transform::pos(0.0, 10.0, 0.0))
+            .with(render::Shape::Box {
+                width: plane_side,
+                height: plane_height,
+                depth: plane_side,
+            })
+            .with(render::material::PhysicallyBased {
+                base_color_factor: Rgba {
+                    r: 0.3,
+                    g: 0.3,
+                    b: 0.3,
+                    a: 1.0,
+                },
+                metallic_factor: 0.0,
+                roughness_factor: 0.7,
+                ..Default::default()
+            })
             .build();
     }
 }

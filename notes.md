@@ -418,6 +418,7 @@ Implement support for point light shadows.
 1. There is a sasha willems example on [omni-directional shadow mapping](https://github.com/SaschaWillems/Vulkan/blob/master/examples/shadowmappingomni/shadowmappingomni.cpp)
    with the shaders located [here](https://github.com/SaschaWillems/Vulkan/tree/master/shaders/glsl/shadowmappingomni).
 2. learn opengl has a section on [point-shadows](https://learnopengl.com/Advanced-Lighting/Shadows/Point-Shadows).
+3. Good blog article on cube maps in vulkan: <https://satellitnorden.wordpress.com/2018/01/23/vulkan-adventures-cube-map-tutorial/>.
 
 ### Reading the examples
 
@@ -497,7 +498,7 @@ Current state: Code is compiling and running but the pointlight shadows are not 
 Repro with:
 
 ```bash
-cargo run --bin dbg -* --pointlight-test --rsf-file data\ambient_light.ron.rsf --spawn-plane
+cargo run --bin dbg -- --pointlight-test --rsf-file data\ambient_light.ron.rsf --spawn-plane
 ```
 
 ### Findings

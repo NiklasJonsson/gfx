@@ -594,6 +594,39 @@ fn transition_unused_map(
 
 const POINTLIGHT_DIRECTIONS: [Vec3; N_SHADOW_PASSES_POINTLIGHT] = [
     Vec3 {
+        x: 1.0,
+        y: 0.0,
+        z: 0.0,
+    },
+    Vec3 {
+        x: -1.0,
+        y: 0.0,
+        z: 0.0,
+    },
+    Vec3 {
+        x: 0.0,
+        y: 1.0,
+        z: 0.0,
+    },
+    Vec3 {
+        x: 0.0,
+        y: -1.0,
+        z: 0.0,
+    },
+    Vec3 {
+        x: 0.0,
+        y: 0.0,
+        z: 1.0,
+    },
+    Vec3 {
+        x: 0.0,
+        y: 0.0,
+        z: -1.0,
+    },
+];
+
+const POINTLIGHT_DIRECTIONS_OLD: [Vec3; N_SHADOW_PASSES_POINTLIGHT] = [
+    Vec3 {
         x: 0.0,
         y: 0.0,
         z: -1.0,
