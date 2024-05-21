@@ -141,7 +141,7 @@ float sample_shadow_map(vec3 coords, ShadowInfo info, vec3 frag_to_light_dir_ls,
 // Map clip space coords [-w, w] to [0, w] so that perspective divide
 // transforms it into [0, 1] (unit interval) which we can use to sample the shadow map.
 // (Embarassing note to self: Column-major order of arguments, meaning the first 4 args are the first column).
-const mat4 clip_bias = mat4(
+const mat4 CLIP_BIAS = mat4(
     0.5, 0.0, 0.0, 0.0,
     0.0, 0.5, 0.0, 0.0,
     0.0, 0.0, 1.0, 0.0,
@@ -152,7 +152,7 @@ float compute_shadow_factor(vec3 fragment_world_pos, Light light, float n_dot_l)
     float shadow_factor = 1.0;
     if (light_has_shadow(light)) {
         ShadowInfo info = light.shadow_info;
-        vec4 fragment_shadow_pos = clip_bias * world_to_shadow.data[info.coords_idx] * vec4(fragment_world_pos, 1.0);
+        vec4 fragment_shadow_pos = CLIP_BIAS * world_to_shadow.data[info.coords_idx] * vec4(fragment_world_pos, 1.0);
         vec3 coords = fragment_shadow_pos.xyz / fragment_shadow_pos.w;
         vec3 frag_to_light_dir_ls = (world_to_shadow.data[info.coords_idx] * vec4(light.direction, 0.0)).xyz;
         shadow_factor = sample_shadow_map(coords, info, frag_to_light_dir_ls, n_dot_l);

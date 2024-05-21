@@ -91,10 +91,7 @@ pub struct ShadowMap {
 struct ShadowRenderPassInfo {
     extent: Extent2D,
     render_target: Handle<RenderTarget>,
-    view_data_buf: BufferHandle,
     view_data: Handle<PipelineResourceSet>,
-    shadow_map: ShadowMap,
-    light_entity: Entity,
 }
 
 /// Compute the bounds of the view are that we want to cast shadows on.
@@ -628,39 +625,94 @@ const POINTLIGHT_DIRECTIONS: [Vec3; N_SHADOW_PASSES_POINTLIGHT] = [
     },
 ];
 
-pub fn shadow_pass(
-    world: &World,
-    frame: &mut trekant::Frame,
-    shadow_resources: &ShadowResources,
-    mut cmd_buffer: CommandBuffer,
-) -> (CommandBuffer, ShadowPassOutput) {
-    const SHADOW_CLEAR_VALUES: [vk::ClearValue; 1] = [vk::ClearValue {
-        depth_stencil: vk::ClearDepthStencilValue {
-            depth: 1.0,
-            stencil: 0,
-        },
-    }];
+struct ShadowRenderPasses {
+    // The matrices for each of the shadow passes
+    render_pass_viewproj_mats: Vec<uniform::Mat4>,
+    render_passes: Vec<ShadowRenderPassInfo>,
+    shadow_maps: Vec<(Entity, ShadowMap)>,
+    shadow_pass_output: ShadowPassOutput,
+    unused_textures: Vec<Handle<trekant::Texture>>,
+}
 
+impl ShadowRenderPasses {
+    fn new(resources: &ShadowResources) -> Self {
+        assert!(resources.shadow_matrices_buf.len() >= resources.config.max_num_views());
+        let cap = resources.config.max_num_views() as usize;
+
+        // TODO(perf): Alloc-reuse
+        Self {
+            render_pass_viewproj_mats: vec![uniform::mat4_nan(); cap],
+            render_passes: Vec::with_capacity(cap),
+            shadow_maps: Vec::with_capacity(cap),
+            shadow_pass_output: ShadowPassOutput {
+                // NOTE: This vector is technically over-allocated as there are 6 render passes for one point light
+                shadow_matrices: Vec::with_capacity(cap),
+            },
+            unused_textures: Vec::with_capacity(cap),
+        }
+    }
+
+    // For directional and spotlights, the matrix is the combined view-projection matrix
+    // but for point lights, this is just the view matrix as we don't need projection
+    // for the cubemap.
+    // We could also consider making this function take more granular information, e.g. the light position,
+    // so that the main render pass can construct its own matrices. This would reduce the implicit coupling
+    // a bit but would complicate the code in the main render pass.
+    fn add_shadow_map(
+        &mut self,
+        entity: Entity,
+        mtx: Mat4,
+        texture_idx: u32,
+        shadow_type: ShadowType,
+    ) {
+        let matrix_idx = self
+            .shadow_pass_output
+            .shadow_matrices
+            .len()
+            .try_into()
+            .unwrap();
+        self.shadow_pass_output
+            .shadow_matrices
+            .push(mtx.into_col_array());
+        self.shadow_maps.push((
+            entity,
+            ShadowMap {
+                matrix_idx,
+                texture_idx,
+                shadow_type,
+            },
+        ));
+    }
+
+    fn add_shadow_pass(
+        &mut self,
+        render_target: Handle<RenderTarget>,
+        view_data_buffer: BufferHandle,
+        view_data_desc_set: Handle<PipelineResourceSet>,
+        extent: Extent2D,
+        viewproj: Mat4,
+    ) {
+        self.render_passes.push(ShadowRenderPassInfo {
+            extent,
+            render_target,
+            view_data: view_data_desc_set,
+        });
+        let matrix_buf_idx = view_data_buffer.offset() as usize;
+        self.render_pass_viewproj_mats[matrix_buf_idx] = viewproj.into_col_array();
+    }
+
+    fn n_lights(&self) -> usize {
+        self.shadow_pass_output.shadow_matrices.len()
+    }
+}
+
+fn collect_shadow_passes(world: &World, shadow_resources: &ShadowResources) -> ShadowRenderPasses {
     let shadow_bounds_ws =
         compute_world_shadow_bounds(world).expect("Failed to compute bounds for shadows");
 
     {
         debug_shadow_bounds(world, shadow_bounds_ws);
     }
-
-    let lights = world.read_storage::<Light>();
-    let transforms = world.read_storage::<Transform>();
-    let entities = world.read_resource::<EntitiesRes>();
-
-    // Note that we are using two buffers of shadow matrices:
-    // 1. The buffer that is used for the shadow passes as the view proj matrix. This is allocated upfront to the max number of shadowing lights.
-    // 2. The buffer in the output of this pass: This is the shadow passes that were actually run and that may be used later by the light pass.
-    // Each ShadowMap component has an index into 2.
-    // TODO(perf): Reuse alloc
-    let mut shadow_matrices =
-        vec![uniform::mat4_nan(); shadow_resources.config.max_num_views() as usize];
-    // TODO(perf): Reuse alloc from prev frame
-    let mut render_passes: Vec<ShadowRenderPassInfo> = Vec::new();
 
     // Always make room for the directional light
     const MAX_NUM_DIRECTIONAL_LIGHTS: u32 = 1;
@@ -669,39 +721,14 @@ pub fn shadow_pass(
     let mut n_pointlights: u32 = 0;
     let mut n_directional_lights: u32 = 0;
 
-    let add_render_pass = |passes: &mut Vec<ShadowRenderPassInfo>,
-                           render_target: Handle<RenderTarget>,
-                           view_data_buffer: BufferHandle,
-                           view_data_desc_set: Handle<PipelineResourceSet>,
-                           extent: Extent2D,
-                           shadow_type: ShadowType,
-                           texture_idx: u32,
-                           light_entity: Entity| {
-        let render_pass_idx = passes.len();
-        passes.push(ShadowRenderPassInfo {
-            extent,
-            render_target,
-            view_data_buf: view_data_buffer,
-            view_data: view_data_desc_set,
-            shadow_map: ShadowMap {
-                matrix_idx: render_pass_idx as u32,
-                texture_idx,
-                shadow_type,
-            },
-            light_entity,
-        })
-    };
+    let mut shadow_render_passes = ShadowRenderPasses::new(shadow_resources);
 
-    let write_view_matrix =
-        |matrices: &mut [super::uniform::Mat4], handle: BufferHandle, matrix: Mat4| {
-            let matrix_buf_idx = handle.offset() as usize;
-            matrices[matrix_buf_idx] = matrix.into_col_array();
-        };
-
-    // Collect rendering info.
+    let lights = world.read_storage::<Light>();
+    let transforms = world.read_storage::<Transform>();
+    let entities = world.read_resource::<EntitiesRes>();
     for (light_entity, light, tfm) in (&entities, &lights, &transforms).join() {
-        if render_passes.len() >= MAX_NUM_LIGHTS {
-            log::warn!("Too many punctual lights, skipping {light_entity:?}");
+        if shadow_render_passes.n_lights() >= MAX_NUM_LIGHTS {
+            log::warn!("Too many lights, skipping remaining");
             break;
         }
 
@@ -714,7 +741,7 @@ pub fn shadow_pass(
                     log::warn!(
                         "Too many spot lights, skipping shadow generation for {light_entity:?}"
                     );
-                    break;
+                    continue;
                 }
                 // TODO: Aspect ratio based on texture?
                 let mtx = perspective_vk(angle * 2.0, 1.0, range.start, range.end) * to_lightspace;
@@ -722,25 +749,20 @@ pub fn shadow_pass(
                 let spotlight_idx = n_spotlights;
                 n_spotlights += 1;
 
-                let Shadow {
-                    extent,
-                    render_target,
-                    view_data_buffer,
-                    view_data_desc_set,
-                    ..
-                } = shadow_resources.spotlights[spotlight_idx as usize];
+                let resource = shadow_resources.spotlights[spotlight_idx as usize];
 
-                write_view_matrix(&mut shadow_matrices, view_data_buffer, mtx);
-
-                add_render_pass(
-                    &mut render_passes,
-                    render_target,
-                    view_data_buffer,
-                    view_data_desc_set,
-                    extent,
-                    ShadowType::Spot,
-                    spotlight_idx,
+                shadow_render_passes.add_shadow_map(
                     light_entity,
+                    mtx,
+                    spotlight_idx,
+                    ShadowType::Spot,
+                );
+                shadow_render_passes.add_shadow_pass(
+                    resource.render_target,
+                    resource.view_data_buffer,
+                    resource.view_data_desc_set,
+                    resource.extent,
+                    mtx,
                 );
             }
             Light::Directional { .. } => {
@@ -770,18 +792,18 @@ pub fn shadow_pass(
                 });
 
                 let mtx = proj * to_lightspace;
-
-                write_view_matrix(&mut shadow_matrices, resource.view_data_buffer, mtx);
-
-                add_render_pass(
-                    &mut render_passes,
+                shadow_render_passes.add_shadow_map(
+                    light_entity,
+                    mtx,
+                    directional_light_idx,
+                    ShadowType::Directional,
+                );
+                shadow_render_passes.add_shadow_pass(
                     resource.render_target,
                     resource.view_data_buffer,
                     resource.view_data_desc_set,
                     resource.extent,
-                    ShadowType::Directional,
-                    directional_light_idx,
-                    light_entity,
+                    mtx,
                 );
             }
             Light::Point { range, .. } => {
@@ -803,10 +825,15 @@ pub fn shadow_pass(
                 let far = *range;
                 let perspective =
                     perspective_vk(std::f32::consts::FRAC_PI_2, aspect_ratio, NEAR, far);
-                imdbg!(perspective);
+                shadow_render_passes.add_shadow_map(
+                    light_entity,
+                    // NOTE: No projection matrix here as the cube map is sampled with a direction vector in light-space
+                    to_lightspace,
+                    pointlight_idx,
+                    ShadowType::Point,
+                );
 
-                for pass_idx in 0..N_SHADOW_PASSES_POINTLIGHT {
-                    let cube_face_dir = POINTLIGHT_DIRECTIONS[pass_idx];
+                for (pass_idx, cube_face_dir) in POINTLIGHT_DIRECTIONS.into_iter().enumerate() {
                     let shadow_view = Mat4::from(Transform {
                         position: tfm.position,
                         rotation: Quat::rotation_from_to_3d(Light::DEFAULT_FACING, cube_face_dir),
@@ -815,21 +842,15 @@ pub fn shadow_pass(
                     .inverted();
 
                     let viewproj = perspective * shadow_view;
-                    imdbg!((pass_idx, shadow_view, viewproj));
-
                     let matrix_buffer_elem: BufferHandle =
                         pointlight_shadow.view_data_buffer.slice(pass_idx as u32, 1);
-                    write_view_matrix(&mut shadow_matrices, matrix_buffer_elem, viewproj);
 
-                    add_render_pass(
-                        &mut render_passes,
+                    shadow_render_passes.add_shadow_pass(
                         pointlight_shadow.render_targets[pass_idx],
                         matrix_buffer_elem,
                         pointlight_shadow.view_data_pr_sets[pass_idx],
                         pointlight_shadow.extent,
-                        ShadowType::Point,
-                        pointlight_idx,
-                        light_entity,
+                        viewproj,
                     );
                 }
             }
@@ -837,25 +858,56 @@ pub fn shadow_pass(
         };
     }
 
+    let unused_itr = shadow_resources
+        .spotlights
+        .iter()
+        .skip(n_spotlights as usize)
+        .map(|l| l.texture);
+    let unused_itr = unused_itr.chain(
+        shadow_resources
+            .pointlights
+            .iter()
+            .skip(n_pointlights as usize)
+            .map(|l| l.cube_map),
+    );
+    let unused_itr = unused_itr.chain(
+        std::iter::once(shadow_resources.directional.texture).skip(n_directional_lights as usize),
+    );
+
+    shadow_render_passes.unused_textures = unused_itr.collect();
+
+    shadow_render_passes
+}
+
+pub fn shadow_pass(
+    world: &World,
+    frame: &mut trekant::Frame,
+    shadow_resources: &ShadowResources,
+    mut cmd_buffer: CommandBuffer,
+) -> (CommandBuffer, ShadowPassOutput) {
+    const SHADOW_CLEAR_VALUES: [vk::ClearValue; 1] = [vk::ClearValue {
+        depth_stencil: vk::ClearDepthStencilValue {
+            depth: 1.0,
+            stencil: 0,
+        },
+    }];
+
+    let shadow_render_passes = collect_shadow_passes(world, shadow_resources);
     frame
-        .write_buffer(shadow_resources.shadow_matrices_buf, &shadow_matrices)
+        .write_buffer(
+            shadow_resources.shadow_matrices_buf,
+            &shadow_render_passes.render_pass_viewproj_mats,
+        )
         .expect("Failed to update matrices for shadow coords");
 
     let mut shadow_maps = world.write_storage::<ShadowMap>();
 
-    let mut output = ShadowPassOutput {
-        shadow_matrices: Vec::with_capacity(render_passes.len()),
-    };
-
     // Render passes
-    for render_pass in render_passes {
+    for render_pass in shadow_render_passes.render_passes {
         let ShadowRenderPassInfo {
             extent,
             render_target,
             view_data,
-            shadow_map,
-            light_entity,
-            view_data_buf,
         } = render_pass;
 
         let mut shadow_rp = frame
@@ -873,37 +925,21 @@ pub fn shadow_pass(
             .bind_shader_resource_group(0u32, &view_data, &shadow_resources.dummy_pipeline);
         super::draw_entities(world, &mut shadow_rp, super::DrawMode::ShadowsOnly);
         cmd_buffer = shadow_rp.end().expect("Failed to end shadow render pass");
+    }
 
-        output
-            .shadow_matrices
-            .push(shadow_matrices[view_data_buf.offset() as usize]);
+    // TODO: Get rid of the intermediate entities
+    for (entity, shadow_map) in shadow_render_passes.shadow_maps {
         shadow_maps
-            .insert(light_entity, shadow_map)
+            .insert(entity, shadow_map)
             .expect("Failed to add shadow map for light entity");
     }
 
-    for spotlight in shadow_resources
-        .spotlights
-        .iter()
-        .skip(n_spotlights as usize)
-    {
-        transition_unused_map(&mut cmd_buffer, frame, spotlight.texture);
+    // TODO: Merge all transitions into one barrier
+    for tex in shadow_render_passes.unused_textures {
+        transition_unused_map(&mut cmd_buffer, frame, tex);
     }
 
-    for pointlight in shadow_resources
-        .pointlights
-        .iter()
-        .skip(n_pointlights as usize)
-    {
-        transition_unused_map(&mut cmd_buffer, frame, pointlight.cube_map);
-    }
-
-    // This will always be one until cascaded directional lights
-    for _ in n_directional_lights..MAX_NUM_DIRECTIONAL_LIGHTS {
-        transition_unused_map(&mut cmd_buffer, frame, shadow_resources.directional.texture);
-    }
-
-    (cmd_buffer, output)
+    (cmd_buffer, shadow_render_passes.shadow_pass_output)
 }
 
 pub fn write_lighting_data(
