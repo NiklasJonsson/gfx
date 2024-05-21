@@ -114,6 +114,7 @@ pub struct InputContextBuilder {
     consume_all: bool,
 }
 
+#[allow(clippy::enum_variant_names)]
 #[derive(PartialEq, Debug)]
 pub enum InputContextError {
     DuplicateActionForKey(ActionId),

@@ -502,7 +502,7 @@ cargo run --bin dbg -* --pointlight-test --rsf-file data\ambient_light.ron.rsf -
 
 ### Findings
 
-* In RenderDoc, the cube map viewer shows Y+ containing what I would expect Y\* to be.
+* In RenderDoc, the cube map viewer shows Y+ containing what I would expect Y- to be.
   * To test this, add a new plane above the current one and see if the shadow shows up there.
   * How does vulkan combine the array layers into a cube map? Is the ordering they are rendering incorrect w.r.t. this?
 
@@ -515,7 +515,7 @@ These structures would then be used in the rest of the rendering rather than sto
 
 ### Loader API
 
-Maybe we can allow users to create several loader _ one per thread/system _ and contain the resource flushing to that system.
+Maybe we can allow users to create several loader _one per thread/system_ and contain the resource flushing to that system.
 Should loaders always be used and have blocking functions?
 
 ### Frame API
