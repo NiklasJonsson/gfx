@@ -506,6 +506,8 @@ cargo run --bin dbg -- --pointlight-test --rsf-file data\ambient_light.ron.rsf -
 * In RenderDoc, the cube map viewer shows Y+ containing what I would expect Y- to be.
   * To test this, add a new plane above the current one and see if the shadow shows up there.
   * How does vulkan combine the array layers into a cube map? Is the ordering they are rendering incorrect w.r.t. this?
+TODO:
+* Face order seems correct but shadows are still buggy...
 
 ## Future work
 
