@@ -476,7 +476,7 @@ mod tests {
             id2ent.push(root);
         }
 
-        let expected = vec![0, 1, 2, 2, 2, 3, 3, 3];
+        let expected = [0, 1, 2, 2, 2, 3, 3, 3];
         for (ent, ID(id)) in joined {
             let e = expected[*id];
             assert_eq!(root_to_node_path(&w, ent).len(), e);
