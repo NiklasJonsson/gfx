@@ -509,12 +509,23 @@ cargo run --bin dbg -- --pointlight-test --rsf-file data\ambient_light.ron.rsf -
 TODO:
 * Face order seems correct but shadows are still buggy...
 
+I think I am start to understand. Most of the tutorial (laernopengl and sacha) use a color buffer for the cube maps and write a custom linear depth.
+They can sample the cube map in the fragment shader and compare directly with the depth. Using the depth buffers to construct a cube map, we need to recompute a bit more, it seems like.
+
+Each face is a spotlight so we'd need to convert the coords of the fragment not just
+with the to_lightspace matrix but with the specific view-proj matrix for that face of the cubemap. We'd almost be better of with not a cube map at all? If instead, we use 6 regular texture, we'd just need to figure out which of them
+to sample.
+
+Actually, for sampling across seams, it would be a lot more involved to not use a cubemap.
+
 ## Future work
 
 ### ram::render::draw_frame structure
 
 Instead of passing around the World, consider extracting all rendering info from it in one or several passes over the world.
 These structures would then be used in the rest of the rendering rather than storing intermediate data in the world.
+
+(2, 2), (0, 1)
 
 ### Loader API
 
@@ -540,3 +551,5 @@ this internally in the renderer and panic if it is not done correctly. In additi
 * Directional lights improvements: Try to reproduce the scene bounds in the opengl or sascha willems examples for
   directional light shadows and see if the issues with pixelated examples can be reproduced.
 * Implement cascaded shadow maps for directional lights.
+
+### BUG: Changes in #included files in shaders are not recompiled during runtime
