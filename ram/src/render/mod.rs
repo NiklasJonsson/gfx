@@ -87,7 +87,6 @@ pub struct ReloadMaterial;
 #[derive(Component, Visitable)]
 pub struct RenderableMaterial {
     gfx_pipeline: Handle<GraphicsPipeline>,
-    shadow_pipeline: Option<Handle<GraphicsPipeline>>,
     material_descriptor_set: Handle<PipelineResourceSet>,
 }
 
@@ -251,32 +250,6 @@ fn get_pipeline_for(
     Ok(pipe)
 }
 
-fn create_renderable(
-    renderer: &mut Renderer,
-    world: &World,
-    mesh: &Mesh,
-    material: &GpuMaterial,
-) -> RenderableMaterial {
-    log::trace!("Creating renderable: {:?}", material);
-    let material_descriptor_set = create_material_descriptor_set(renderer, material);
-    let gfx_pipeline =
-        get_pipeline_for(renderer, world, mesh, material, true).expect("Failed to get pipeline");
-    let shadow_pipeline = if let material::GpuMaterial::PBR { .. } = material {
-        Some(
-            light::get_shadow_pipeline_for(renderer, world, mesh)
-                .expect("Failed to create shadow pipeline"),
-        )
-    } else {
-        None
-    };
-
-    RenderableMaterial {
-        gfx_pipeline,
-        shadow_pipeline,
-        material_descriptor_set,
-    }
-}
-
 #[profiling::function]
 fn create_renderables(renderer: &mut Renderer, world: &mut World) {
     use specs::storage::StorageEntry;
@@ -310,7 +283,15 @@ fn create_renderables(renderer: &mut Renderer, world: &mut World) {
             }
             StorageEntry::Vacant(entry) => {
                 log::trace!("No Renderable found, creating new");
-                let rend = create_renderable(renderer, world, mesh, mat);
+                log::trace!("Creating renderable: {:?}", mat);
+                let material_descriptor_set = create_material_descriptor_set(renderer, mat);
+                let gfx_pipeline = get_pipeline_for(renderer, world, mesh, mat, true)
+                    .expect("Failed to get pipeline");
+
+                let rend = RenderableMaterial {
+                    gfx_pipeline,
+                    material_descriptor_set,
+                };
                 entry.insert(rend);
             }
         }
@@ -323,67 +304,54 @@ fn create_renderables(renderer: &mut Renderer, world: &mut World) {
 enum DrawMode {
     Lit,
     Unlit,
-    ShadowsOnly,
 }
 
 #[profiling::function]
-fn draw_entities<'a>(world: &World, cmd_buf: &mut RenderPassEncoder<'a>, mode: DrawMode) {
+fn draw_entities(world: &World, cmd_buf: &mut RenderPassEncoder<'_>, draw_mode: DrawMode) {
     let model_matrices = world.read_storage::<ModelMatrix>();
     let meshes = world.read_storage::<Mesh>();
     let renderables = world.read_storage::<RenderableMaterial>();
+    let materials = world.read_storage::<material::GpuMaterial>();
     use trekant::pipeline::ShaderStage;
 
     let mut prev_handle: Option<Handle<GraphicsPipeline>> = None;
 
     // Only bind the pipeline if we need to
-    let mut bind_pipeline = |enc: &mut RenderPassEncoder<'a>, handle: &Handle<GraphicsPipeline>| {
+    let mut bind_pipeline = |enc: &mut RenderPassEncoder<'_>, handle: &Handle<GraphicsPipeline>| {
         if prev_handle.map(|h| h != *handle).unwrap_or(true) {
             enc.bind_graphics_pipeline(handle);
             prev_handle = Some(*handle);
         }
     };
 
-    for (mesh, renderable, mtx) in (&meshes, &renderables, &model_matrices).join() {
+    for (mesh, renderable, mtx, mat) in (&meshes, &renderables, &model_matrices, &materials).join()
+    {
         let (vertex_buffer, index_buffer) = match (&mesh.gpu_vertex_buffer, &mesh.gpu_index_buffer)
         {
             (GpuResource::Available(vbuf), GpuResource::Available(ibuf)) => (vbuf, ibuf),
             _ => continue,
         };
 
+        match (mat, draw_mode) {
+            (GpuMaterial::PBR { .. }, DrawMode::Lit) => (),
+            (GpuMaterial::Unlit { .. }, DrawMode::Unlit) => (),
+            _ => continue,
+        }
+
         let tfm = uniform::Model {
             model: mtx.0.into_col_array(),
             model_it: mtx.0.inverted().transposed().into_col_array(),
         };
 
-        match (renderable, mode) {
-            (
-                RenderableMaterial {
-                    shadow_pipeline: Some(shadow_pipeline),
-                    ..
-                },
-                DrawMode::ShadowsOnly,
-            ) => {
-                bind_pipeline(cmd_buf, shadow_pipeline);
-                cmd_buf
-                    .bind_push_constant(shadow_pipeline, ShaderStage::VERTEX, &tfm)
-                    .draw_mesh(*vertex_buffer, *index_buffer);
-            }
-            (
-                RenderableMaterial {
-                    gfx_pipeline,
-                    material_descriptor_set,
-                    ..
-                },
-                DrawMode::Lit,
-            ) => {
-                bind_pipeline(cmd_buf, gfx_pipeline);
-                cmd_buf
-                    .bind_shader_resource_group(1, material_descriptor_set, gfx_pipeline)
-                    .bind_push_constant(gfx_pipeline, ShaderStage::VERTEX, &tfm)
-                    .draw_mesh(*vertex_buffer, *index_buffer);
-            }
-            _ => (),
-        }
+        let RenderableMaterial {
+            gfx_pipeline,
+            material_descriptor_set,
+        } = renderable;
+        bind_pipeline(cmd_buf, gfx_pipeline);
+        cmd_buf
+            .bind_shader_resource_group(1, material_descriptor_set, gfx_pipeline)
+            .bind_push_constant(gfx_pipeline, ShaderStage::VERTEX, &tfm)
+            .draw_mesh(*vertex_buffer, *index_buffer);
     }
 }
 
@@ -399,6 +367,7 @@ pub fn draw_frame(world: &mut World, ui: &mut imgui::UIContext, renderer: &mut R
 
     GpuUpload::resolve_pending(world, renderer);
     create_renderables(renderer, world);
+    light::prepare_entities(world, renderer);
 
     let main_window_extents = world.read_resource::<crate::io::MainWindow>().extents();
 
