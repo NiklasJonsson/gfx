@@ -1,11 +1,12 @@
 use crate::ecs::prelude::*;
 use crate::math::{
     orthographic_vk, perspective_vk, Aabb, FrustrumPlanes, Mat4, Obb, Quat, Rgb, Rgba, Transform,
-    Vec2, Vec3,
+    Vec2, Vec3, Vec4,
 };
 use crate::render::debug::LineConfig;
 use crate::{imdbg, render};
 
+use gltf::json::extensions::buffer::Buffer;
 use trekant::{
     vk, BufferDescriptor, BufferHandle, BufferMutability, CommandBuffer, Extent2D,
     GraphicsPipeline, Handle, PipelineResourceSet, RenderPass, RenderTarget, Renderer,
@@ -89,9 +90,9 @@ pub struct ShadowMap {
 
 #[derive(Clone, Copy, Component)]
 pub struct ShadowPipeline {
-    directional_pipeline: Handle<trekant::GraphicsPipeline>,
-    spotlight_pipeline: Handle<trekant::GraphicsPipeline>,
-    pointlight_pipeline: Handle<trekant::GraphicsPipeline>,
+    directional: Handle<trekant::GraphicsPipeline>,
+    spotlight: Handle<trekant::GraphicsPipeline>,
+    pointlight: Handle<trekant::GraphicsPipeline>,
 }
 
 #[derive(Clone, Copy)]
@@ -100,6 +101,7 @@ struct ShadowRenderPassInfo {
     render_target: Handle<RenderTarget>,
     view_data: Handle<PipelineResourceSet>,
     render_pass: Handle<trekant::RenderPass>,
+    shadow_type: ShadowType,
 }
 
 /// Compute the bounds of the view are that we want to cast shadows on.
@@ -116,7 +118,6 @@ pub fn compute_world_shadow_bounds(world: &World) -> Option<Obb> {
     let (cameras, transforms, markers) = SysData::fetch(world);
     let mut obb = None;
     for (cam, tfm, _marker) in (&cameras, &transforms, &markers).join() {
-        // TODO: Some sites suggest to use view_proj.inverse() * NDC cube, try this.
         let view_matrix = Mat4::from(*tfm).inverted();
         if obb.is_none() {
             obb = Some(view_matrix.inverted() * cam.view_obb());
@@ -232,8 +233,8 @@ const N_SHADOW_PASSES_POINTLIGHT: usize = 6;
 
 pub struct DirectionalShadow {
     pub render_target: Handle<RenderTarget>,
-    pub view_data_buffer: BufferHandle,
-    pub view_data_desc_set: Handle<PipelineResourceSet>,
+    pub light_info_buf: BufferHandle,
+    pub light_info_prs: Handle<PipelineResourceSet>,
     pub texture: Handle<trekant::Texture>,
     pub extent: Extent2D,
 }
@@ -241,8 +242,8 @@ pub struct DirectionalShadow {
 #[derive(Clone, Copy)]
 pub struct SpotlightShadow {
     pub render_target: Handle<RenderTarget>,
-    pub view_data_buffer: BufferHandle,
-    pub view_data_desc_set: Handle<PipelineResourceSet>,
+    pub light_info_buf: BufferHandle,
+    pub light_info_prs: Handle<PipelineResourceSet>,
     pub texture: Handle<trekant::Texture>,
     pub extent: Extent2D,
 }
@@ -262,12 +263,12 @@ pub struct ShadowResources {
     pub spotlight_render_pass: Handle<trekant::RenderPass>,
     pub directional_light_render_pass: Handle<trekant::RenderPass>,
     pub pointlight_render_pass: Handle<trekant::RenderPass>,
-    pub dummy_pipeline: Handle<GraphicsPipeline>,
-    pub shadow_matrices_buf: BufferHandle,
+    pub shadow_light_info_buf: BufferHandle,
     pub directional: DirectionalShadow,
     pub spotlights: Vec<SpotlightShadow>,
     pub pointlights: Vec<PointlightShadow>,
     pub config: ShadowConfig,
+    pub dummy_pipeline: Handle<GraphicsPipeline>,
 }
 
 pub fn prepare_entities(world: &World, renderer: &mut Renderer) {
@@ -319,9 +320,9 @@ pub fn prepare_entities(world: &World, renderer: &mut Renderer) {
             if let Err(e) = renderables.insert(
                 entity,
                 ShadowPipeline {
-                    spotlight_pipeline,
-                    directional_pipeline,
-                    pointlight_pipeline,
+                    spotlight: spotlight_pipeline,
+                    directional: directional_pipeline,
+                    pointlight: pointlight_pipeline,
                 },
             ) {
                 log::error!("Failed to insert shadow pipeline for {entity:?} due to {e}");
@@ -469,13 +470,13 @@ fn depth_shadow_pipeline_desc(
 ) -> Result<trekant::GraphicsPipelineDescriptor, super::MaterialError> {
     let no_defines = super::shader::Defines::empty();
     let vert = shader_compiler.compile(
-        &ShaderLocation::builtin("render/shaders/pos_only_vert.glsl"),
+        &ShaderLocation::builtin("render/shaders/shadow/depth_write_vert.glsl"),
         &no_defines,
         super::shader::ShaderType::Vertex,
     )?;
 
     let vert = super::ShaderDescriptor {
-        debug_name: Some("shadow-pos-only-vert".to_owned()),
+        debug_name: Some("shadow-depth-write-vert".to_owned()),
         spirv_code: vert.data(),
     };
 
@@ -493,19 +494,28 @@ fn pointlight_shadow_pipeline_desc(
     let no_defines = super::shader::Defines::empty();
     let vert = {
         let vert = shader_compiler.compile(
-            &ShaderLocation::builtin("render/shaders/pos_only_vert.glsl"),
+            &ShaderLocation::builtin("render/shaders/shadow/pointlight_vert.glsl"),
             &no_defines,
             super::shader::ShaderType::Vertex,
         )?;
 
-        let vert = super::ShaderDescriptor {
-            debug_name: Some("shadow-pos-only-vert".to_owned()),
+        super::ShaderDescriptor {
+            debug_name: Some("pointlight-shadow-vert".to_owned()),
             spirv_code: vert.data(),
-        };
-        vert
+        }
     };
+    let frag = {
+        let frag = shader_compiler.compile(
+            &ShaderLocation::builtin("render/shaders/shadow/pointlight_frag.glsl"),
+            &no_defines,
+            super::shader::ShaderType::Fragment,
+        )?;
 
-    let frag = { todo!() };
+        super::ShaderDescriptor {
+            debug_name: Some("pointlight-shadow-frag".to_owned()),
+            spirv_code: frag.data(),
+        }
+    };
 
     Ok(trekant::GraphicsPipelineDescriptor::builder()
         .vertex_format(format)
@@ -560,36 +570,31 @@ pub fn setup_shadow_resources(
     shader_compiler: &super::shader::ShaderCompiler,
     renderer: &mut Renderer,
 ) -> ShadowResources {
+    use trekant::{BorderColor, Filter, SamplerAddressMode};
     let config = ShadowConfig::default();
 
     let pointlight_render_pass = create_shadow_render_pass_pointlight(renderer, &config);
     let depth_render_pass = create_shadow_render_pass_depth(renderer, &config);
 
-    let shadow_matrices_buf = {
-        let view_data = vec![
-            uniform::PosOnlyViewData {
-                view_proj: uniform::Mat4::default(),
-            };
-            config.max_num_views() as usize
-        ];
-        let view_data = BufferDescriptor::uniform_buffer(
-            &view_data,
+    let shadow_light_info_buf = {
+        let initial_data =
+            vec![uniform::ShadowLightInfo::default(); config.max_num_views() as usize];
+        let desc = BufferDescriptor::uniform_buffer(
+            &initial_data,
             BufferMutability::Mutable,
             trekant::BufferLayout::MinBufferOffset,
         );
 
         renderer
-            .create_buffer(view_data)
+            .create_buffer(desc)
             .expect("Failed to create buffer for shadow view and projection matrices")
     };
 
-    let mut cur_buf = shadow_matrices_buf;
+    let mut next_info_buf = shadow_light_info_buf;
     let directional = {
         let extent = config.directional_light_shadow_map_extent;
-        let view_data = cur_buf.take_first(1);
+        let view_data = next_info_buf.take_first(1);
         let (texture, render_target) = {
-            use trekant::{BorderColor, Filter, SamplerAddressMode};
-
             let desc = trekant::TextureDescriptor::Empty {
                 extent,
                 format: config.depth_texture_format,
@@ -618,8 +623,8 @@ pub fn setup_shadow_resources(
         DirectionalShadow {
             texture,
             render_target,
-            view_data_buffer: view_data,
-            view_data_desc_set: sh_view_data_set,
+            light_info_buf: view_data,
+            light_info_prs: sh_view_data_set,
             extent,
         }
     };
@@ -628,10 +633,8 @@ pub fn setup_shadow_resources(
     for _ in 0..config.max_spotlights {
         let spotlight = {
             let extent = config.spotlight_shadow_map_extent;
-            let view_data = cur_buf.take_first(1);
+            let light_info = next_info_buf.take_first(1);
             let (texture, render_target) = {
-                use trekant::{BorderColor, Filter, SamplerAddressMode};
-
                 let desc = trekant::TextureDescriptor::Empty {
                     extent,
                     format: config.depth_texture_format,
@@ -654,14 +657,14 @@ pub fn setup_shadow_resources(
                 (tex, render_target)
             };
             let sh_view_data_set = PipelineResourceSet::builder(renderer)
-                .add_buffer(view_data, 0, trekant::pipeline::ShaderStage::VERTEX)
+                .add_buffer(light_info, 0, trekant::pipeline::ShaderStage::VERTEX)
                 .build();
 
             SpotlightShadow {
                 texture,
                 render_target,
-                view_data_buffer: view_data,
-                view_data_desc_set: sh_view_data_set,
+                light_info_buf: light_info,
+                light_info_prs: sh_view_data_set,
                 extent,
             }
         };
@@ -689,23 +692,23 @@ pub fn setup_shadow_resources(
             .expect("Failed to create texture for shadow map");
 
         let render_targets = renderer
-            .create_cube_render_targets(depth_render_pass, cube_map)
+            .create_cube_render_targets(pointlight_render_pass, cube_map)
             .expect("Failed to create render targets for cube map");
-        let view_data_buffer = cur_buf.take_first(6);
-        let view_data_pr_sets = std::array::from_fn(|i| {
+        let light_info_buffer = next_info_buf.take_first(6);
+        let pr_sets = std::array::from_fn(|i| {
             PipelineResourceSet::builder(renderer)
                 .add_buffer(
-                    view_data_buffer.slice(i as u32, 1),
+                    light_info_buffer.slice(i as u32, 1),
                     0,
-                    trekant::pipeline::ShaderStage::VERTEX,
+                    trekant::ShaderStage::VERTEX | trekant::ShaderStage::FRAGMENT,
                 )
                 .build()
         });
         pointlights.push(PointlightShadow {
             render_pass: pointlight_render_pass,
             render_targets,
-            view_data_buffer,
-            view_data_pr_sets,
+            view_data_buffer: light_info_buffer,
+            view_data_pr_sets: pr_sets,
             cube_map,
             extent,
         })
@@ -726,7 +729,7 @@ pub fn setup_shadow_resources(
         pointlight_render_pass,
         dummy_pipeline: shadow_dummy_pipeline,
         spotlights,
-        shadow_matrices_buf,
+        shadow_light_info_buf,
         directional,
         pointlights,
         config,
@@ -749,9 +752,15 @@ fn transition_unused_maps(
             .expect("Failed to get shadow texture for mem barrier");
         let vk_image = texture.vk_image();
         let layer_count = texture.sub_image_views().len().try_into().unwrap();
+        // TODO: This is a hack. Likely need to rewrite this function to run one for cube maps and one for depth textures
+        let new_layout = match layer_count {
+            1 => vk::ImageLayout::DEPTH_ATTACHMENT_STENCIL_READ_ONLY_OPTIMAL,
+            6 => vk::ImageLayout::COLOR_ATTACHMENT_OPTIMAL,
+            _ => panic!(),
+        };
         barriers.push(vk::ImageMemoryBarrier {
             old_layout: vk::ImageLayout::UNDEFINED,
-            new_layout: vk::ImageLayout::DEPTH_STENCIL_READ_ONLY_OPTIMAL,
+            new_layout,
             src_queue_family_index: vk::QUEUE_FAMILY_IGNORED,
             dst_queue_family_index: vk::QUEUE_FAMILY_IGNORED,
             image: vk_image,
@@ -809,23 +818,21 @@ const POINTLIGHT_DIRECTIONS: [Vec3; N_SHADOW_PASSES_POINTLIGHT] = [
 
 struct ShadowRenderPasses {
     // The matrices for each of the shadow passes
-    render_pass_viewproj_mats: Vec<uniform::Mat4>,
+    shadow_light_info: Vec<uniform::ShadowLightInfo>,
     render_passes: Vec<ShadowRenderPassInfo>,
     shadow_maps: Vec<(Entity, ShadowMap)>,
     shadow_pass_output: ShadowPassOutput,
     unused_textures: Vec<Handle<trekant::Texture>>,
-    unused_textures_2d: Vec<Handle<trekant::Texture>>,
-    unused_textures_cubemap: Vec<Handle<trekant::Texture>>,
 }
 
 impl ShadowRenderPasses {
     fn new(resources: &ShadowResources) -> Self {
-        assert!(resources.shadow_matrices_buf.len() >= resources.config.max_num_views());
+        assert!(resources.shadow_light_info_buf.len() >= resources.config.max_num_views());
         let cap = resources.config.max_num_views() as usize;
 
         // TODO(perf): Alloc-reuse
         Self {
-            render_pass_viewproj_mats: vec![uniform::mat4_nan(); cap],
+            shadow_light_info: vec![uniform::ShadowLightInfo::default(); cap],
             render_passes: Vec::with_capacity(cap),
             shadow_maps: Vec::with_capacity(cap),
             shadow_pass_output: ShadowPassOutput {
@@ -833,8 +840,6 @@ impl ShadowRenderPasses {
                 shadow_matrices: Vec::with_capacity(cap),
             },
             unused_textures: Vec::with_capacity(cap),
-            unused_textures_2d: Vec::with_capacity(cap),
-            unused_textures_cubemap: Vec::with_capacity(cap),
         }
     }
 
@@ -870,6 +875,7 @@ impl ShadowRenderPasses {
         ));
     }
 
+    #[allow(clippy::too_many_arguments)]
     fn add_shadow_pass(
         &mut self,
         render_pass: Handle<trekant::RenderPass>,
@@ -878,15 +884,21 @@ impl ShadowRenderPasses {
         view_data_desc_set: Handle<PipelineResourceSet>,
         extent: Extent2D,
         viewproj: Mat4,
+        pos: Vec3,
+        shadow_type: ShadowType,
     ) {
         self.render_passes.push(ShadowRenderPassInfo {
             render_pass,
             extent,
             render_target,
             view_data: view_data_desc_set,
+            shadow_type,
         });
         let matrix_buf_idx = view_data_buffer.offset() as usize;
-        self.render_pass_viewproj_mats[matrix_buf_idx] = viewproj.into_col_array();
+        self.shadow_light_info[matrix_buf_idx] = uniform::ShadowLightInfo {
+            view_proj: viewproj.into_col_array(),
+            pos: pos.with_w(1.0).into_array(),
+        };
     }
 
     fn n_lights(&self) -> usize {
@@ -948,10 +960,12 @@ fn collect_shadow_passes(world: &World, shadow_resources: &ShadowResources) -> S
                 shadow_render_passes.add_shadow_pass(
                     shadow_resources.spotlight_render_pass,
                     resource.render_target,
-                    resource.view_data_buffer,
-                    resource.view_data_desc_set,
+                    resource.light_info_buf,
+                    resource.light_info_prs,
                     resource.extent,
                     mtx,
+                    tfm.position,
+                    ShadowType::Spot,
                 );
             }
             Light::Directional { .. } => {
@@ -990,10 +1004,12 @@ fn collect_shadow_passes(world: &World, shadow_resources: &ShadowResources) -> S
                 shadow_render_passes.add_shadow_pass(
                     shadow_resources.directional_light_render_pass,
                     resource.render_target,
-                    resource.view_data_buffer,
-                    resource.view_data_desc_set,
+                    resource.light_info_buf,
+                    resource.light_info_prs,
                     resource.extent,
                     mtx,
+                    tfm.position,
+                    ShadowType::Directional,
                 );
             }
             Light::Point { range, .. } => {
@@ -1042,6 +1058,8 @@ fn collect_shadow_passes(world: &World, shadow_resources: &ShadowResources) -> S
                         pointlight_shadow.view_data_pr_sets[pass_idx],
                         pointlight_shadow.extent,
                         viewproj,
+                        tfm.position,
+                        ShadowType::Point,
                     );
                 }
             }
@@ -1071,7 +1089,11 @@ fn collect_shadow_passes(world: &World, shadow_resources: &ShadowResources) -> S
 }
 
 #[profiling::function]
-pub fn draw_entities_shadow(world: &World, cmd_buf: &mut trekant::RenderPassEncoder<'_>) {
+pub fn draw_entities_shadow(
+    world: &World,
+    cmd_buf: &mut trekant::RenderPassEncoder<'_>,
+    shadow_type: ShadowType,
+) {
     let model_matrices = world.read_storage::<super::ModelMatrix>();
     let meshes = world.read_storage::<super::Mesh>();
     let pipelines = world.read_storage::<ShadowPipeline>();
@@ -1090,15 +1112,20 @@ pub fn draw_entities_shadow(world: &World, cmd_buf: &mut trekant::RenderPassEnco
             model: mtx.0.into_col_array(),
             model_it: mtx.0.inverted().transposed().into_col_array(),
         };
-        let do_bind = prev_handle
-            .map(|h| h != pipeline.directional_pipeline)
-            .unwrap_or(true);
+
+        let pipeline_handle = match shadow_type {
+            ShadowType::Directional => pipeline.directional,
+            ShadowType::Point => pipeline.pointlight,
+            ShadowType::Spot => pipeline.spotlight,
+        };
+
+        let do_bind = prev_handle.map(|h| h != pipeline_handle).unwrap_or(true);
         if do_bind {
-            cmd_buf.bind_graphics_pipeline(&pipeline.directional_pipeline);
-            prev_handle = Some(pipeline.directional_pipeline);
+            cmd_buf.bind_graphics_pipeline(&pipeline_handle);
+            prev_handle = Some(pipeline_handle);
         }
         cmd_buf
-            .bind_push_constant(&pipeline.directional_pipeline, ShaderStage::VERTEX, &tfm)
+            .bind_push_constant(&pipeline_handle, ShaderStage::VERTEX, &tfm)
             .draw_mesh(*vbuf, *ibuf);
     }
 }
@@ -1110,19 +1137,25 @@ pub fn shadow_pass(
     mut cmd_buffer: CommandBuffer,
 ) -> (CommandBuffer, ShadowPassOutput) {
     // TODO: Move to Config
-    // TODO: Fix for pointlights
-    const SHADOW_CLEAR_VALUES: [vk::ClearValue; 1] = [vk::ClearValue {
-        depth_stencil: vk::ClearDepthStencilValue {
-            depth: 1.0,
-            stencil: 0,
+    const SHADOW_CLEAR_VALUES: [vk::ClearValue; 2] = [
+        vk::ClearValue {
+            depth_stencil: vk::ClearDepthStencilValue {
+                depth: 1.0,
+                stencil: 0,
+            },
         },
-    }];
+        vk::ClearValue {
+            color: vk::ClearColorValue {
+                float32: [0.0, 0.0, 0.0, 0.0],
+            },
+        },
+    ];
 
     let shadow_render_passes = collect_shadow_passes(world, shadow_resources);
     frame
         .write_buffer(
-            shadow_resources.shadow_matrices_buf,
-            &shadow_render_passes.render_pass_viewproj_mats,
+            shadow_resources.shadow_light_info_buf,
+            &shadow_render_passes.shadow_light_info,
         )
         .expect("Failed to update matrices for shadow coords");
 
@@ -1135,6 +1168,7 @@ pub fn shadow_pass(
             render_target,
             view_data,
             render_pass,
+            shadow_type,
         } = render_pass;
 
         let mut shadow_rp = frame
@@ -1150,7 +1184,7 @@ pub fn shadow_pass(
         shadow_rp
             .bind_graphics_pipeline(&shadow_resources.dummy_pipeline)
             .bind_shader_resource_group(0u32, &view_data, &shadow_resources.dummy_pipeline);
-        draw_entities_shadow(world, &mut shadow_rp);
+        draw_entities_shadow(world, &mut shadow_rp, shadow_type);
         cmd_buffer = shadow_rp.end().expect("Failed to end shadow render pass");
     }
 

@@ -560,7 +560,7 @@ pub fn create_frame_resources(
     let pointlight_textures = shadow_resources
         .pointlights
         .iter()
-        .map(|x| (x.cube_map, true));
+        .map(|x| (x.cube_map, false));
 
     let engine_shader_resource_group = PipelineResourceSet::builder(renderer)
         .add_buffer(view_data, 0, ShaderStage::VERTEX | ShaderStage::FRAGMENT)
@@ -930,6 +930,7 @@ pub fn register_components(world: &mut World) {
 
     world.register::<light::ShadowViewer>();
     world.register::<light::ShadowMap>();
+    world.register::<light::ShadowPipeline>();
     world.register::<light::Light>();
 
     world.register::<debug::light::RenderLightVolume>();

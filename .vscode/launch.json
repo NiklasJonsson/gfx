@@ -192,7 +192,7 @@
                 // "--gltf-file",
                 // "../glTF-Sample-Models/2.0/Sponza/glTF/Sponza.gltf",
                 "--spawn-plane",
-                "--pointlight-test",
+                "--spotlight-test",
                 // "--rsf-file",
                 // "data/ambient_light.ron.rsf",
                 // "--sun-simulation",

@@ -80,3 +80,19 @@ pub struct ViewData {
 pub struct PosOnlyViewData {
     pub view_proj: Mat4,
 }
+
+#[derive(Copy, Clone, Debug, Std140, bytemuck::Zeroable, bytemuck::Pod)]
+#[repr(C)]
+pub struct ShadowLightInfo {
+    pub view_proj: Mat4,
+    pub pos: [f32; 4],
+}
+
+impl Default for ShadowLightInfo {
+    fn default() -> Self {
+        Self {
+            view_proj: mat4_nan(),
+            pos: [f32::NAN; 4],
+        }
+    }
+}
