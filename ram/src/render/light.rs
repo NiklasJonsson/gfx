@@ -740,27 +740,22 @@ pub struct ShadowPassOutput {
     pub shadow_matrices: Vec<uniform::Mat4>,
 }
 
-fn transition_unused_maps(
+fn transition_unused_textures(
     cmdbuf: &mut CommandBuffer,
     frame: &mut trekant::Frame,
-    textures: &[Handle<trekant::Texture>],
+    depth_textures: &[Handle<trekant::Texture>],
+    cubemap_textures: &[Handle<trekant::Texture>],
 ) {
-    let mut barriers = Vec::with_capacity(textures.len());
-    for texture in textures {
+    let mut barriers = Vec::with_capacity(depth_textures.len() + cubemap_textures.len());
+    for texture in depth_textures {
         let texture = frame
             .get_texture(texture)
             .expect("Failed to get shadow texture for mem barrier");
         let vk_image = texture.vk_image();
-        let layer_count = texture.sub_image_views().len().try_into().unwrap();
-        // TODO: This is a hack. Likely need to rewrite this function to run one for cube maps and one for depth textures
-        let new_layout = match layer_count {
-            1 => vk::ImageLayout::DEPTH_ATTACHMENT_STENCIL_READ_ONLY_OPTIMAL,
-            6 => vk::ImageLayout::COLOR_ATTACHMENT_OPTIMAL,
-            _ => panic!(),
-        };
+
         barriers.push(vk::ImageMemoryBarrier {
             old_layout: vk::ImageLayout::UNDEFINED,
-            new_layout,
+            new_layout: vk::ImageLayout::DEPTH_STENCIL_READ_ONLY_OPTIMAL,
             src_queue_family_index: vk::QUEUE_FAMILY_IGNORED,
             dst_queue_family_index: vk::QUEUE_FAMILY_IGNORED,
             image: vk_image,
@@ -769,16 +764,43 @@ fn transition_unused_maps(
                 base_mip_level: 0,
                 level_count: 1,
                 base_array_layer: 0,
-                layer_count,
+                layer_count: 1,
             },
             src_access_mask: vk::AccessFlags::DEPTH_STENCIL_ATTACHMENT_WRITE,
             dst_access_mask: vk::AccessFlags::SHADER_READ,
             ..Default::default()
         })
     }
+
+    for texture in cubemap_textures {
+        let texture = frame
+            .get_texture(texture)
+            .expect("Failed to get shadow texture for mem barrier");
+        let vk_image = texture.vk_image();
+
+        barriers.push(vk::ImageMemoryBarrier {
+            old_layout: vk::ImageLayout::UNDEFINED,
+            new_layout: vk::ImageLayout::COLOR_ATTACHMENT_OPTIMAL,
+            src_queue_family_index: vk::QUEUE_FAMILY_IGNORED,
+            dst_queue_family_index: vk::QUEUE_FAMILY_IGNORED,
+            image: vk_image,
+            subresource_range: vk::ImageSubresourceRange {
+                aspect_mask: vk::ImageAspectFlags::COLOR,
+                base_mip_level: 0,
+                level_count: 1,
+                base_array_layer: 0,
+                layer_count: 6,
+            },
+            src_access_mask: vk::AccessFlags::COLOR_ATTACHMENT_WRITE,
+            dst_access_mask: vk::AccessFlags::SHADER_READ,
+            ..Default::default()
+        })
+    }
+
     cmdbuf.pipeline_barrier(
         &barriers,
-        vk::PipelineStageFlags::LATE_FRAGMENT_TESTS,
+        vk::PipelineStageFlags::LATE_FRAGMENT_TESTS
+            | vk::PipelineStageFlags::COLOR_ATTACHMENT_OUTPUT,
         vk::PipelineStageFlags::FRAGMENT_SHADER,
     );
 }
@@ -822,7 +844,8 @@ struct ShadowRenderPasses {
     render_passes: Vec<ShadowRenderPassInfo>,
     shadow_maps: Vec<(Entity, ShadowMap)>,
     shadow_pass_output: ShadowPassOutput,
-    unused_textures: Vec<Handle<trekant::Texture>>,
+    unused_depth_textures: Vec<Handle<trekant::Texture>>,
+    unused_pointlight_textures: Vec<Handle<trekant::Texture>>,
 }
 
 impl ShadowRenderPasses {
@@ -839,7 +862,8 @@ impl ShadowRenderPasses {
                 // NOTE: This vector is technically over-allocated as there are 6 render passes for one point light
                 shadow_matrices: Vec::with_capacity(cap),
             },
-            unused_textures: Vec::with_capacity(cap),
+            unused_depth_textures: Vec::with_capacity(cap),
+            unused_pointlight_textures: Vec::with_capacity(cap),
         }
     }
 
@@ -1073,17 +1097,16 @@ fn collect_shadow_passes(world: &World, shadow_resources: &ShadowResources) -> S
         .skip(n_spotlights as usize)
         .map(|l| l.texture);
     let unused_itr = unused_itr.chain(
-        shadow_resources
-            .pointlights
-            .iter()
-            .skip(n_pointlights as usize)
-            .map(|l| l.cube_map),
-    );
-    let unused_itr = unused_itr.chain(
         std::iter::once(shadow_resources.directional.texture).skip(n_directional_lights as usize),
     );
+    shadow_render_passes.unused_depth_textures = unused_itr.collect();
 
-    shadow_render_passes.unused_textures = unused_itr.collect();
+    shadow_render_passes.unused_pointlight_textures = shadow_resources
+        .pointlights
+        .iter()
+        .skip(n_pointlights as usize)
+        .map(|l| l.cube_map)
+        .collect();
 
     shadow_render_passes
 }
@@ -1195,10 +1218,11 @@ pub fn shadow_pass(
             .expect("Failed to add shadow map for light entity");
     }
 
-    transition_unused_maps(
+    transition_unused_textures(
         &mut cmd_buffer,
         frame,
-        &shadow_render_passes.unused_textures,
+        &shadow_render_passes.unused_depth_textures,
+        &shadow_render_passes.unused_pointlight_textures,
     );
 
     (cmd_buffer, shadow_render_passes.shadow_pass_output)

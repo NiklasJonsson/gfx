@@ -518,6 +518,10 @@ to sample.
 
 Actually, for sampling across seams, it would be a lot more involved to not use a cubemap.
 
+TODO:
+
+1. Go through layout transitions for cube maps and depth texture and verify they are correct.
+
 ## Future work
 
 ### ram::render::draw_frame structure
