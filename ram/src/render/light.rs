@@ -360,9 +360,9 @@ fn create_shadow_render_pass_depth(
 
     let deps = [
         vk::SubpassDependency {
-            // The source pass deps here refer to the previous frame (I think :))
+            // The source pass deps here refer to any commands before this render pass in "submission order".
             src_subpass: vk::SUBPASS_EXTERNAL,
-            // Any previous fragment shader reads should be done
+            // srevious fragment shader reads should be done
             src_stage_mask: vk::PipelineStageFlags::FRAGMENT_SHADER,
             src_access_mask: vk::AccessFlags::SHADER_READ,
             dst_subpass: 0,
@@ -427,18 +427,15 @@ fn create_shadow_render_pass_pointlight(
 
     let deps = [
         vk::SubpassDependency {
-            // The source pass deps here refer to the previous frame (I think :))
+            // The source pass deps here refer to any commands before this render pass in "submission order".
             src_subpass: vk::SUBPASS_EXTERNAL,
             // Any previous fragment shader reads should be done
             src_stage_mask: vk::PipelineStageFlags::FRAGMENT_SHADER,
             src_access_mask: vk::AccessFlags::SHADER_READ,
             dst_subpass: 0,
-            // EARLY_FRAGMENT_TESTS include subpass load operations for depth/stencil
             dst_stage_mask: vk::PipelineStageFlags::COLOR_ATTACHMENT_OUTPUT,
-            // We are writing to the depth attachment
             dst_access_mask: vk::AccessFlags::COLOR_ATTACHMENT_WRITE,
-            // We don't need a global dependency for the whole framebuffer
-            dependency_flags: vk::DependencyFlags::BY_REGION,
+            dependency_flags: vk::DependencyFlags::empty(),
         },
         vk::SubpassDependency {
             src_subpass: 0,
@@ -780,7 +777,7 @@ fn transition_unused_textures(
 
         barriers.push(vk::ImageMemoryBarrier {
             old_layout: vk::ImageLayout::UNDEFINED,
-            new_layout: vk::ImageLayout::COLOR_ATTACHMENT_OPTIMAL,
+            new_layout: vk::ImageLayout::SHADER_READ_ONLY_OPTIMAL,
             src_queue_family_index: vk::QUEUE_FAMILY_IGNORED,
             dst_queue_family_index: vk::QUEUE_FAMILY_IGNORED,
             image: vk_image,
