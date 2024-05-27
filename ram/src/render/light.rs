@@ -614,7 +614,7 @@ pub fn setup_shadow_resources(
             (tex, render_target)
         };
         let sh_view_data_set = PipelineResourceSet::builder(renderer)
-            .add_buffer(view_data, 0, trekant::pipeline::ShaderStage::VERTEX)
+            .add_buffer(view_data, 0, trekant::ShaderStage::VERTEX)
             .build();
 
         DirectionalShadow {
@@ -654,7 +654,7 @@ pub fn setup_shadow_resources(
                 (tex, render_target)
             };
             let sh_view_data_set = PipelineResourceSet::builder(renderer)
-                .add_buffer(light_info, 0, trekant::pipeline::ShaderStage::VERTEX)
+                .add_buffer(light_info, 0, trekant::ShaderStage::VERTEX)
                 .build();
 
             SpotlightShadow {
@@ -711,6 +711,7 @@ pub fn setup_shadow_resources(
         })
     }
 
+    todo!("Compile dummy pipeline for pointlight as well");
     let shadow_dummy_pipeline = {
         let pos_only_vertex_format = VertexFormat::from(trekant::Format::FLOAT3);
         let pipeline_desc = depth_shadow_pipeline_desc(shader_compiler, pos_only_vertex_format)
