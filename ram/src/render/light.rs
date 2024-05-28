@@ -268,7 +268,8 @@ pub struct ShadowResources {
     pub spotlights: Vec<SpotlightShadow>,
     pub pointlights: Vec<PointlightShadow>,
     pub config: ShadowConfig,
-    pub dummy_pipeline: Handle<GraphicsPipeline>,
+    pub depth_dummy_pipeline: Handle<GraphicsPipeline>,
+    pub pointlight_dummy_pipeline: Handle<GraphicsPipeline>,
 }
 
 pub fn prepare_entities(world: &World, renderer: &mut Renderer) {
@@ -711,21 +712,31 @@ pub fn setup_shadow_resources(
         })
     }
 
-    todo!("Compile dummy pipeline for pointlight as well");
-    let shadow_dummy_pipeline = {
+    let depth_dummy_pipeline = {
         let pos_only_vertex_format = VertexFormat::from(trekant::Format::FLOAT3);
         let pipeline_desc = depth_shadow_pipeline_desc(shader_compiler, pos_only_vertex_format)
-            .expect("Failed to create graphics pipeline descriptor for shadows");
+            .expect("failed to create graphics pipeline descriptor for shadows");
         renderer
             .create_gfx_pipeline(pipeline_desc, &depth_render_pass)
-            .expect("Failed to create pipeline for shadow")
+            .expect("failed to create pipeline for shadow")
+    };
+
+    let pointlight_dummy_pipeline = {
+        let pos_only_vertex_format = VertexFormat::from(trekant::Format::FLOAT3);
+        let pipeline_desc =
+            pointlight_shadow_pipeline_desc(shader_compiler, pos_only_vertex_format)
+                .expect("failed to create graphics pipeline descriptor for shadows");
+        renderer
+            .create_gfx_pipeline(pipeline_desc, &pointlight_render_pass)
+            .expect("failed to create pipeline for shadow")
     };
 
     ShadowResources {
         spotlight_render_pass: depth_render_pass,
         directional_light_render_pass: depth_render_pass,
         pointlight_render_pass,
-        dummy_pipeline: shadow_dummy_pipeline,
+        depth_dummy_pipeline,
+        pointlight_dummy_pipeline,
         spotlights,
         shadow_light_info_buf,
         directional,
@@ -1202,9 +1213,15 @@ pub fn shadow_pass(
             )
             .expect("Failed to shadow begin render pass");
 
+        let dummy_pipeline = match shadow_type {
+            ShadowType::Point => shadow_resources.pointlight_dummy_pipeline,
+            ShadowType::Directional => shadow_resources.depth_dummy_pipeline,
+            ShadowType::Spot => shadow_resources.depth_dummy_pipeline,
+        };
+
         shadow_rp
-            .bind_graphics_pipeline(&shadow_resources.dummy_pipeline)
-            .bind_shader_resource_group(0u32, &view_data, &shadow_resources.dummy_pipeline);
+            .bind_graphics_pipeline(&dummy_pipeline)
+            .bind_shader_resource_group(0u32, &view_data, &dummy_pipeline);
         draw_entities_shadow(world, &mut shadow_rp, shadow_type);
         cmd_buffer = shadow_rp.end().expect("Failed to end shadow render pass");
     }

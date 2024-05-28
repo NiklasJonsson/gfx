@@ -520,7 +520,7 @@ Actually, for sampling across seams, it would be a lot more involved to not use 
 
 TODO:
 
-1. Go through layout transitions for cube maps and depth texture and verify they are correct.
+1. Figure out sampling the fragment shader
 
 ## Future work
 

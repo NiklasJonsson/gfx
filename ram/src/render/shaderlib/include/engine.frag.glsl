@@ -154,8 +154,7 @@ float compute_shadow_factor(vec3 fragment_world_pos, Light light, float n_dot_l)
         ShadowInfo info = light.shadow_info;
         vec4 fragment_shadow_pos = CLIP_BIAS * world_to_shadow.data[info.coords_idx] * vec4(fragment_world_pos, 1.0);
         vec3 coords = fragment_shadow_pos.xyz / fragment_shadow_pos.w;
-        vec3 frag_to_light_dir_ls = (world_to_shadow.data[info.coords_idx] * vec4(light.direction, 0.0)).xyz;
-        shadow_factor = sample_shadow_map(coords, info, frag_to_light_dir_ls, n_dot_l);
+        shadow_factor = sample_shadow_map(coords, info, light.direction, n_dot_l);
     }
     return shadow_factor;
 }
