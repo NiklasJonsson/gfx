@@ -521,6 +521,28 @@ Actually, for sampling across seams, it would be a lot more involved to not use 
 TODO:
 
 1. Figure out sampling the fragment shader
+2. Why are the cube map faces red? Redder is higher? Which means the depth is the highest? Shadow depth texture are the opposite, whiter is the deeper?
+
+### Solution
+
+Pointlight shadows use multiple render passes, one for each face of a cube map to write single-channel color textures.
+These textures are combined into a cubemap that is used in the pbr fragment shader to sample the pointlight shadow.
+The reason for going with color textures rather than depth textures is that it makes the sampling calculations easier.
+
+The 6 point light shadow passes consist of one vertex shader that:
+
+1. Computes the world position of the vertex and writes that to frag input.
+2. Computes the light-space clip position of the vertex and writes that to gl_Position.
+
+and one fragment shader that:
+
+1. Writes the length of the vector from the fragment world position to the light world position.
+    * This is the "depth" of the shadow, i.e. how far the light reaches in this direction.
+    * The length is not normalized as we are writing to a 32-bit floating point format that can handle the full range.
+
+When sampling the fragment shader, this is required:
+
+TODO: START HERE and figure this out.
 
 ## Future work
 
