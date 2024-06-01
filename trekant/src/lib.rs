@@ -628,6 +628,8 @@ impl Renderer {
     pub fn loader(&mut self) -> Option<Loader> {
         self.loader.take()
     }
+
+    pub fn resources()
 }
 
 /// Vulkan-specific
@@ -955,6 +957,12 @@ impl Renderer {
         let done = self.submit_command_buffer(cmd_buf);
         done.blocking_wait().expect("Failed to wait for mipmapping");
         Ok(())
+    }
+}
+
+impl Renderer {
+    pub fn get_render_pass(&self, h: Handle<RenderPass>) -> Option<&RenderPass> {
+        self.resources.render_passes.get(&h)
     }
 }
 

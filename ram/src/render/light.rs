@@ -18,7 +18,7 @@ use std::ops::Range;
 
 use super::imgui::UiFrame;
 use super::shader::ShaderLocation;
-use super::uniform;
+use super::uniform::{self, DIRECTIONAL_SHADOW_MAP_COUNT};
 
 #[derive(Component, ram_derive::Visitable, serde::Serialize, serde::Deserialize, Clone, Debug)]
 pub enum Light {
@@ -256,6 +256,7 @@ pub struct PointlightShadow {
     pub view_data_pr_sets: [Handle<PipelineResourceSet>; N_SHADOW_PASSES_POINTLIGHT],
     // Cube
     pub cube_map: Handle<trekant::Texture>,
+    pub depth_buffer: Handle<trekant::Texture>,
     pub extent: Extent2D,
 }
 
@@ -332,8 +333,6 @@ pub fn prepare_entities(world: &World, renderer: &mut Renderer) {
     }
 }
 
-// TODO: Re-evaluate subpass dependencies for shadows. Can we do layout transitions in a better way?
-
 fn create_shadow_render_pass_depth(
     renderer: &mut Renderer,
     config: &ShadowConfig,
@@ -406,7 +405,7 @@ fn create_shadow_render_pass_pointlight(
     config: &ShadowConfig,
 ) -> Handle<trekant::RenderPass> {
     let color_buffer = vk::AttachmentDescription {
-        format: config.color_texture_format.into(),
+        format: config.pointlight.color_texture_format.into(),
         samples: vk::SampleCountFlags::TYPE_1,
         load_op: vk::AttachmentLoadOp::CLEAR,
         store_op: vk::AttachmentStoreOp::STORE,
@@ -417,14 +416,32 @@ fn create_shadow_render_pass_pointlight(
         flags: vk::AttachmentDescriptionFlags::empty(),
     };
 
-    let attachment_references = [vk::AttachmentReference {
+    let depth_buffer = vk::AttachmentDescription {
+        format: config.depth_texture_format.into(),
+        samples: vk::SampleCountFlags::TYPE_1,
+        load_op: vk::AttachmentLoadOp::CLEAR,
+        store_op: vk::AttachmentStoreOp::STORE,
+        stencil_load_op: vk::AttachmentLoadOp::DONT_CARE,
+        stencil_store_op: vk::AttachmentStoreOp::DONT_CARE,
+        initial_layout: vk::ImageLayout::UNDEFINED,
+        final_layout: vk::ImageLayout::DEPTH_STENCIL_READ_ONLY_OPTIMAL,
+        flags: vk::AttachmentDescriptionFlags::empty(),
+    };
+
+    let color_attach = [vk::AttachmentReference {
         attachment: 0,
         layout: vk::ImageLayout::COLOR_ATTACHMENT_OPTIMAL,
     }];
 
+    let depth_attach = vk::AttachmentReference {
+        attachment: 1,
+        layout: vk::ImageLayout::DEPTH_STENCIL_ATTACHMENT_OPTIMAL,
+    };
+
     let subpass = vk::SubpassDescription::builder()
         .pipeline_bind_point(vk::PipelineBindPoint::GRAPHICS)
-        .color_attachments(&attachment_references);
+        .color_attachments(&color_attach)
+        .depth_stencil_attachment(&depth_attach);
 
     let deps = [
         vk::SubpassDependency {
@@ -450,7 +467,7 @@ fn create_shadow_render_pass_pointlight(
         },
     ];
 
-    let attachments = [color_buffer];
+    let attachments = [color_buffer, depth_buffer];
     let subpasses = [subpass.build()];
     let create_info = vk::RenderPassCreateInfo::builder()
         .attachments(&attachments)
@@ -523,15 +540,21 @@ fn pointlight_shadow_pipeline_desc(
         .build()?)
 }
 
+#[derive(Debug, Clone, Copy)]
+struct PointlightShadowConfig {
+    color_texture_format: trekant::Format,
+    depth_texture_format: trekant::Format,
+    max: u32,
+    shadow_map_extent: Extent2D,
+}
+
 pub struct ShadowConfig {
     spotlight_shadow_map_extent: Extent2D,
     directional_light_shadow_map_extent: Extent2D,
-    point_light_shadow_map_extent: Extent2D,
-    max_pointlights: u32,
+    depth_texture_format: trekant::Format,
     max_directional_lights: u32,
     max_spotlights: u32,
-    depth_texture_format: trekant::Format,
-    color_texture_format: trekant::Format,
+    pointlight: PointlightShadowConfig,
 }
 
 impl Default for ShadowConfig {
@@ -545,22 +568,25 @@ impl Default for ShadowConfig {
                 width: 4096,
                 height: 4096,
             },
-            point_light_shadow_map_extent: Extent2D {
-                width: 512,
-                height: 512,
+            pointlight: PointlightShadowConfig {
+                shadow_map_extent: Extent2D {
+                    width: 512,
+                    height: 512,
+                },
+                max: uniform::POINTLIGHT_SHADOW_MAP_COUNT,
+                color_texture_format: trekant::Format::FLOAT1,
+                depth_texture_format: trekant::Format::D16_UNORM,
             },
-            max_pointlights: uniform::POINTLIGHT_SHADOW_MAP_COUNT,
             max_directional_lights: uniform::DIRECTIONAL_SHADOW_MAP_COUNT,
             max_spotlights: uniform::SPOTLIGHT_SHADOW_MAP_COUNT,
             depth_texture_format: trekant::Format::D16_UNORM,
-            color_texture_format: trekant::Format::FLOAT1,
         }
     }
 }
 
 impl ShadowConfig {
     fn max_num_views(&self) -> u32 {
-        self.max_directional_lights + self.max_spotlights + self.max_pointlights * 6
+        self.max_directional_lights + self.max_spotlights + self.pointlight.max * 6
     }
 }
 
@@ -669,12 +695,12 @@ pub fn setup_shadow_resources(
         spotlights.push(spotlight);
     }
 
-    let mut pointlights = Vec::with_capacity(config.max_pointlights as usize);
-    for _ in 0..config.max_pointlights {
-        let extent = config.point_light_shadow_map_extent;
-        let desc = trekant::TextureDescriptor::Empty {
+    let mut pointlights = Vec::with_capacity(config.pointlight.max as usize);
+    for _ in 0..config.pointlight.max {
+        let extent = config.pointlight.shadow_map_extent;
+        let cube_desc = trekant::TextureDescriptor::Empty {
             extent,
-            format: config.color_texture_format,
+            format: config.pointlight.color_texture_format,
             usage: trekant::TextureUsage::Color,
             sampler: trekant::SamplerDescriptor {
                 filter: trekant::Filter::Linear,
@@ -686,9 +712,54 @@ pub fn setup_shadow_resources(
         };
 
         let cube_map = renderer
-            .create_texture(desc)
+            .create_texture(cube_desc)
             .expect("Failed to create texture for shadow map");
 
+        let depth_desc = trekant::TextureDescriptor::Empty {
+            extent,
+            format: config.pointlight.depth_texture_format,
+            usage: trekant::TextureUsage::Depth,
+            sampler: trekant::SamplerDescriptor {
+                filter: trekant::Filter::Linear,
+                address_mode: trekant::SamplerAddressMode::ClampToEdge,
+                max_anisotropy: None,
+                border_color: trekant::BorderColor::FloatOpaqueWhite,
+            },
+            ty: trekant::TextureType::Tex2D,
+        };
+
+        let depth_buffer = renderer
+            .create_texture(depth_desc)
+            .expect("Failed to create texture for shadow map");
+
+        let render_target = {
+            renderer.get_render_pass(h)
+
+        }
+  // TODO: Refactor this. It seems a bit to narrow of a use-case to expose in the API here.
+    pub fn create_cube_render_targets(
+        &mut self,
+        render_pass: Handle<RenderPass>,
+        cube_map: Handle<Texture>,
+    ) -> Result<[Handle<RenderTarget>; 6], RenderError> {
+        let render_pass = self
+            .resources
+            .render_passes
+            .get(&render_pass)
+            .ok_or_else(|| RenderError::InvalidHandle(render_pass.id()))?;
+        let texture = self
+            .resources
+            .textures
+            .get(&cube_map)
+            .ok_or_else(|| RenderError::InvalidHandle(cube_map.id()))?;
+
+        let render_targets = std::array::from_fn(|idx| {
+            let image_view = texture.sub_image_view(idx);
+            let data =
+                RenderTarget::new_raw(&self.device, &[image_view], render_pass, &texture.extent())
+                    .expect("Failed to create render target");
+            self.resources.render_targets.add(data)
+        });
         let render_targets = renderer
             .create_cube_render_targets(pointlight_render_pass, cube_map)
             .expect("Failed to create render targets for cube map");
@@ -709,6 +780,7 @@ pub fn setup_shadow_resources(
             view_data_pr_sets: pr_sets,
             cube_map,
             extent,
+            depth_buffer,
         })
     }
 
@@ -1162,29 +1234,34 @@ pub fn draw_entities_shadow(
     }
 }
 
+// TODO: Move to config
+const POINTLIGHT_CLEAR_VALUES: &[vk::ClearValue] = &[
+    vk::ClearValue {
+        depth_stencil: vk::ClearDepthStencilValue {
+            depth: 1.0,
+            stencil: 0,
+        },
+    },
+    vk::ClearValue {
+        color: vk::ClearColorValue {
+            float32: [f32::MAX; 4],
+        },
+    },
+];
+
+const DEPTH_ONLY_CLEAR_VALUES: &[vk::ClearValue] = &[vk::ClearValue {
+    depth_stencil: vk::ClearDepthStencilValue {
+        depth: 1.0,
+        stencil: 0,
+    },
+}];
+
 pub fn shadow_pass(
     world: &World,
     frame: &mut trekant::Frame,
     shadow_resources: &ShadowResources,
     mut cmd_buffer: CommandBuffer,
 ) -> (CommandBuffer, ShadowPassOutput) {
-    // TODO: Move to RenderPass desc
-    // Swtuich to using a single depth texture with f32 format
-    // Clear it with max f32?!
-    const SHADOW_CLEAR_VALUES: [vk::ClearValue; 2] = [
-        vk::ClearValue {
-            depth_stencil: vk::ClearDepthStencilValue {
-                depth: 1.0,
-                stencil: 0,
-            },
-        },
-        vk::ClearValue {
-            color: vk::ClearColorValue {
-                float32: [0.0, 0.0, 0.0, 0.0],
-            },
-        },
-    ];
-
     let shadow_render_passes = collect_shadow_passes(world, shadow_resources);
     frame
         .write_buffer(
@@ -1205,10 +1282,19 @@ pub fn shadow_pass(
             shadow_type,
         } = render_pass;
 
-        let clear_values = match shadow_type {
-            ShadowType::Point => 1,
-            ShadowType::Directional => 0,
-            ShadowType::Spot => 0,
+        let (clear_values, dummy_pipeline) = match shadow_type {
+            ShadowType::Spot => (
+                DEPTH_ONLY_CLEAR_VALUES,
+                shadow_resources.depth_dummy_pipeline,
+            ),
+            ShadowType::Directional => (
+                DEPTH_ONLY_CLEAR_VALUES,
+                shadow_resources.depth_dummy_pipeline,
+            ),
+            ShadowType::Point => (
+                POINTLIGHT_CLEAR_VALUES,
+                shadow_resources.pointlight_dummy_pipeline,
+            ),
         };
 
         let mut shadow_rp = frame
@@ -1217,15 +1303,9 @@ pub fn shadow_pass(
                 &render_pass,
                 &render_target,
                 extent,
-                &[SHADOW_CLEAR_VALUES[clear_values]],
+                clear_values,
             )
             .expect("Failed to shadow begin render pass");
-
-        let dummy_pipeline = match shadow_type {
-            ShadowType::Point => shadow_resources.pointlight_dummy_pipeline,
-            ShadowType::Directional => shadow_resources.depth_dummy_pipeline,
-            ShadowType::Spot => shadow_resources.depth_dummy_pipeline,
-        };
 
         shadow_rp
             .bind_graphics_pipeline(&dummy_pipeline)

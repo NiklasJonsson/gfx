@@ -30,7 +30,7 @@ impl RenderTarget {
         render_pass: &RenderPass,
         extent: &util::Extent2D,
     ) -> Result<Self, RenderError> {
-        let inner = FrameBuffer::new(device, &attachments, &render_pass.0, extent)?;
+        let inner = FrameBuffer::new(device, attachments, &render_pass.0, extent)?;
         Ok(Self { inner })
     }
 }
