@@ -536,15 +536,24 @@ The 6 point light shadow passes consist of one vertex shader that:
 
 and one fragment shader that:
 
-1. Writes the length of the vector from the fragment world position to the light world position.
-    * This is the "depth" of the shadow, i.e. how far the light reaches in this direction.
-    * The length is not normalized as we are writing to a 32-bit floating point format that can handle the full range.
+Writes the length of the vector from the fragment world position to the light world position.
+
+* This is the "depth" of the shadow, i.e. how far the light reaches in this direction.
+* The length is not normalized as we are writing to a 32-bit floating point format that can handle the full range.
+
+Each pixel in this texture is the world space depth of that fragment compared to the light source.
 
 When sampling the fragment shader, this is required:
+
+1.
 
 TODO: START HERE and figure this out.
 
 ## Future work
+
+### Multiview rendering for cubemaps
+
+<https://www.reddit.com/r/vulkan/comments/17rhrrc/question_about_rendering_to_cubemaps/>
 
 ### ram::render::draw_frame structure
 

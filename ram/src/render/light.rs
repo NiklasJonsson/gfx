@@ -1168,7 +1168,9 @@ pub fn shadow_pass(
     shadow_resources: &ShadowResources,
     mut cmd_buffer: CommandBuffer,
 ) -> (CommandBuffer, ShadowPassOutput) {
-    // TODO: Move to Config
+    // TODO: Move to RenderPass desc
+    // Swtuich to using a single depth texture with f32 format
+    // Clear it with max f32?!
     const SHADOW_CLEAR_VALUES: [vk::ClearValue; 2] = [
         vk::ClearValue {
             depth_stencil: vk::ClearDepthStencilValue {
@@ -1203,13 +1205,19 @@ pub fn shadow_pass(
             shadow_type,
         } = render_pass;
 
+        let clear_values = match shadow_type {
+            ShadowType::Point => 1,
+            ShadowType::Directional => 0,
+            ShadowType::Spot => 0,
+        };
+
         let mut shadow_rp = frame
             .begin_render_pass(
                 cmd_buffer,
                 &render_pass,
                 &render_target,
                 extent,
-                &SHADOW_CLEAR_VALUES,
+                &[SHADOW_CLEAR_VALUES[clear_values]],
             )
             .expect("Failed to shadow begin render pass");
 
