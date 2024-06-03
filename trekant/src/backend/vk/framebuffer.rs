@@ -33,7 +33,7 @@ impl Framebuffer {
         device: &D,
         attachments: &[&ImageView],
         render_pass: &RenderPass,
-        extent: &util::Extent2D,
+        extent: util::Extent2D,
     ) -> Result<Self, FramebufferError> {
         let vk_device = device.vk_device();
 

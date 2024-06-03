@@ -50,7 +50,9 @@ struct ShadowInfo {
 struct Light {
     vec3 color;
     float attenuation;
+    // TODO: Rename to normalized_direction
     vec3 direction;
+    vec3 position;
     ShadowInfo shadow_info;
 };
 
@@ -86,15 +88,18 @@ Light unpack_light(PackedLight l, vec3 world_pos) {
         // Directional
         r.direction = normalize(-l.dir_cutoff.xyz);
         r.attenuation = 1.0;
+        r.position = vec3(0.0);
     } else if (l.dir_cutoff.w == 0.0) {
         // Point
         vec3 direction_unnormalized = l.pos.xyz - world_pos;
         r.direction = normalize(direction_unnormalized);
         r.attenuation = distance_attenuation(direction_unnormalized, l.color_range.w);
+        r.position = vec3(l.pos.xyz);
     } else {
         // Spot
         vec3 direction_unnormalized = l.pos.xyz - world_pos;
         r.direction = normalize(direction_unnormalized);
+        r.position = vec3(l.pos.xyz);
         r.attenuation = 0.0;
         vec3 spot_dir = normalize(-l.dir_cutoff.xyz);
         float cos_angle = dot(r.direction, spot_dir);
@@ -136,7 +141,7 @@ float sample_shadow_map(vec3 coords, ShadowInfo info, vec3 frag_to_light_ls, flo
         // TODO: Bias here as well
         vec3 light_to_frag_ls = -frag_to_light_ls;
         float sample_depth = texture(pointlight_shadow_maps[info.texture_idx], light_to_frag_ls).r;
-        return length(light_to_frag_ls) < sample_depth ? 1.0 : 0.0;
+        return length(light_to_frag_ls) > sample_depth ? 0.0 : 1.0;
     }
 }
 
@@ -156,7 +161,7 @@ float compute_shadow_factor(vec3 fragment_world_pos, Light light, float n_dot_l)
         ShadowInfo info = light.shadow_info;
         vec4 fragment_shadow_pos = CLIP_BIAS * world_to_shadow.data[info.coords_idx] * vec4(fragment_world_pos, 1.0);
         vec3 coords = fragment_shadow_pos.xyz / fragment_shadow_pos.w;
-        vec4 frag_to_light_ls = world_to_shadow.data[info.coords_idx] * vec4(light.direction, 0.0);
+        vec4 frag_to_light_ls = world_to_shadow.data[info.coords_idx] * vec4(light.position - fragment_world_pos, 0.0);
         shadow_factor = sample_shadow_map(coords, info, frag_to_light_ls.xyz, n_dot_l);
     }
     return shadow_factor;

@@ -631,14 +631,17 @@ pub fn setup_shadow_resources(
                 },
                 ty: trekant::TextureType::Tex2D,
             };
-            let tex = renderer
+            let texture = renderer
                 .create_texture(desc)
                 .expect("Failed to create texture for shadow map");
-            let attachments = [&tex];
+            let attachments = [trekant::RenderTargetAttachment {
+                texture,
+                range: trekant::TextureImageRange::Full,
+            }];
             let render_target = renderer
                 .create_render_target(depth_render_pass, &attachments)
                 .expect("Failed to create render target for shadow map");
-            (tex, render_target)
+            (texture, render_target)
         };
         let sh_view_data_set = PipelineResourceSet::builder(renderer)
             .add_buffer(view_data, 0, trekant::ShaderStage::VERTEX)
@@ -671,14 +674,17 @@ pub fn setup_shadow_resources(
                     },
                     ty: trekant::TextureType::Tex2D,
                 };
-                let tex = renderer
+                let texture = renderer
                     .create_texture(desc)
                     .expect("Failed to create texture for shadow map");
-                let attachments = [&tex];
+                let attachments = [trekant::RenderTargetAttachment {
+                    texture,
+                    range: trekant::TextureImageRange::Full,
+                }];
                 let render_target = renderer
                     .create_render_target(depth_render_pass, &attachments)
                     .expect("Failed to create render target for shadow map");
-                (tex, render_target)
+                (texture, render_target)
             };
             let sh_view_data_set = PipelineResourceSet::builder(renderer)
                 .add_buffer(light_info, 0, trekant::ShaderStage::VERTEX)
@@ -732,37 +738,25 @@ pub fn setup_shadow_resources(
             .create_texture(depth_desc)
             .expect("Failed to create texture for shadow map");
 
-        let render_target = {
-            renderer.get_render_pass(h)
+        let render_targets = {
+            let render_targets: [Handle<trekant::RenderTarget>; 6] = std::array::from_fn(|idx| {
+                let attachments = [
+                    trekant::RenderTargetAttachment {
+                        texture: cube_map,
+                        range: trekant::TextureImageRange::Part { start: idx, len: 1 },
+                    },
+                    trekant::RenderTargetAttachment {
+                        texture: depth_buffer,
+                        range: trekant::TextureImageRange::Full,
+                    },
+                ];
+                renderer
+                    .create_render_target(pointlight_render_pass, &attachments)
+                    .expect("Failed to create render target for cubemap")
+            });
+            render_targets
+        };
 
-        }
-  // TODO: Refactor this. It seems a bit to narrow of a use-case to expose in the API here.
-    pub fn create_cube_render_targets(
-        &mut self,
-        render_pass: Handle<RenderPass>,
-        cube_map: Handle<Texture>,
-    ) -> Result<[Handle<RenderTarget>; 6], RenderError> {
-        let render_pass = self
-            .resources
-            .render_passes
-            .get(&render_pass)
-            .ok_or_else(|| RenderError::InvalidHandle(render_pass.id()))?;
-        let texture = self
-            .resources
-            .textures
-            .get(&cube_map)
-            .ok_or_else(|| RenderError::InvalidHandle(cube_map.id()))?;
-
-        let render_targets = std::array::from_fn(|idx| {
-            let image_view = texture.sub_image_view(idx);
-            let data =
-                RenderTarget::new_raw(&self.device, &[image_view], render_pass, &texture.extent())
-                    .expect("Failed to create render target");
-            self.resources.render_targets.add(data)
-        });
-        let render_targets = renderer
-            .create_cube_render_targets(pointlight_render_pass, cube_map)
-            .expect("Failed to create render targets for cube map");
         let light_info_buffer = next_info_buf.take_first(6);
         let pr_sets = std::array::from_fn(|i| {
             PipelineResourceSet::builder(renderer)
@@ -1237,14 +1231,14 @@ pub fn draw_entities_shadow(
 // TODO: Move to config
 const POINTLIGHT_CLEAR_VALUES: &[vk::ClearValue] = &[
     vk::ClearValue {
-        depth_stencil: vk::ClearDepthStencilValue {
-            depth: 1.0,
-            stencil: 0,
+        color: vk::ClearColorValue {
+            float32: [f32::MAX; 4],
         },
     },
     vk::ClearValue {
-        color: vk::ClearColorValue {
-            float32: [f32::MAX; 4],
+        depth_stencil: vk::ClearDepthStencilValue {
+            depth: 1.0,
+            stencil: 0,
         },
     },
 ];

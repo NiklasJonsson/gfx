@@ -422,7 +422,7 @@ impl Renderer {
                 &self.device,
                 &views,
                 &render_pass.0,
-                &self.swapchain_extent(),
+                self.swapchain_extent(),
             )?;
             let handle = self
                 .resources
@@ -628,8 +628,6 @@ impl Renderer {
     pub fn loader(&mut self) -> Option<Loader> {
         self.loader.take()
     }
-
-    pub fn resources()
 }
 
 /// Vulkan-specific
@@ -966,29 +964,49 @@ impl Renderer {
     }
 }
 
+#[derive(Debug, Clone, Copy)]
+pub enum TextureImageRange {
+    Full,
+    Part { start: usize, len: usize },
+}
+
+#[derive(Debug, Clone, Copy)]
+pub struct RenderTargetAttachment {
+    pub texture: Handle<Texture>,
+    pub range: TextureImageRange,
+}
+
 impl Renderer {
+    /// All attachments need to have the same extent.
     pub fn create_render_target(
         &mut self,
         render_pass: Handle<RenderPass>,
-        attachments: &[&Handle<Texture>],
+        attachments: &[RenderTargetAttachment],
     ) -> Result<Handle<RenderTarget>, RenderError> {
         let render_pass = self
             .resources
             .render_passes
             .get(&render_pass)
             .ok_or_else(|| RenderError::InvalidHandle(render_pass.id()))?;
-        let attachments: Result<Vec<&Texture>, RenderError> = attachments
-            .iter()
-            .map(|h| {
-                self.resources
-                    .textures
-                    .get(h)
-                    .ok_or_else(|| RenderError::InvalidHandle(h.id()))
-            })
-            .collect();
-        let attachments = attachments?;
-        let extent = attachments[0].extent();
-        let data = RenderTarget::new(&self.device, &attachments, render_pass, &extent)?;
+        let mut image_views = Vec::with_capacity(attachments.len());
+        let mut extent = None;
+        for attachment in attachments {
+            let tex = self
+                .resources
+                .textures
+                .get(&attachment.texture)
+                .ok_or_else(|| RenderError::InvalidHandle(attachment.texture.id()))?;
+            extent = Some(tex.extent());
+            let views = match attachment.range {
+                TextureImageRange::Full => std::slice::from_ref(tex.full_image_view()),
+                TextureImageRange::Part { start, len } => {
+                    &tex.sub_image_views()[start..start + len]
+                }
+            };
+            image_views.extend(views);
+        }
+        let extent = extent.expect("No attachments");
+        let data = RenderTarget::new_raw(&self.device, &image_views, render_pass, extent)?;
         let render_target = self.resources.render_targets.add(data);
         Ok(render_target)
     }
@@ -1013,7 +1031,7 @@ impl Renderer {
         let render_targets = std::array::from_fn(|idx| {
             let image_view = texture.sub_image_view(idx);
             let data =
-                RenderTarget::new_raw(&self.device, &[image_view], render_pass, &texture.extent())
+                RenderTarget::new_raw(&self.device, &[image_view], render_pass, texture.extent())
                     .expect("Failed to create render target");
             self.resources.render_targets.add(data)
         });

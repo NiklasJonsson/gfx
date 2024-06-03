@@ -16,7 +16,7 @@ impl RenderTarget {
         device: &Device,
         attachments: &[&Texture],
         render_pass: &RenderPass,
-        extent: &util::Extent2D,
+        extent: util::Extent2D,
     ) -> Result<Self, RenderError> {
         let image_views: Vec<&ImageView> =
             attachments.iter().map(|t| t.full_image_view()).collect();
@@ -28,7 +28,7 @@ impl RenderTarget {
         device: &Device,
         attachments: &[&crate::backend::image::ImageView],
         render_pass: &RenderPass,
-        extent: &util::Extent2D,
+        extent: util::Extent2D,
     ) -> Result<Self, RenderError> {
         let inner = FrameBuffer::new(device, attachments, &render_pass.0, extent)?;
         Ok(Self { inner })
