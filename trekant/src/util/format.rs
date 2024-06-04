@@ -12,6 +12,8 @@ impl Format {
             Self::FLOAT1 => 4,
             Self::RGBA_SRGB => 4,
             Self::RGBA_UNORM => 4,
+            // TODO
+            // Self::D16_UNORM => 2,
             _ => unimplemented!("Missing case in match"),
         }
     }
