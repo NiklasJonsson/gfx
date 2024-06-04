@@ -19,7 +19,6 @@ pub use input_context::InputContext;
 pub use input_context::InputContextError;
 pub use input_context::InputContextPriority;
 pub use input_context::InputPassthrough;
-pub use input_context::{ActionMap, StateMap};
 
 pub use winit::event::MouseButton;
 pub use winit::event::VirtualKeyCode as KeyCode;

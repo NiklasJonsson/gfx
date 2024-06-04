@@ -9,8 +9,8 @@ use trekant::vertex::{VertexDefinition, VertexFormat};
 use trekant::RenderPassEncoder;
 use trekant::Renderer;
 use trekant::{BufferDescriptor, BufferHandle, Handle, Std140};
-use trekant::{BufferMutability, BufferType, VertexBufferType};
-use trekant::{Frame, IndexBufferType};
+use trekant::{BufferMutability};
+use trekant::{Frame};
 use trekant::{MipMaps, Texture, TextureDescriptor};
 
 use crate::common::Name;
@@ -77,7 +77,7 @@ pub struct UiFrame<'a> {
 
 impl<'a> UiFrame<'a> {
     pub fn inner(&self) -> &imgui::Ui {
-        &self.imgui
+        self.imgui
     }
 
     pub fn storage(&self) -> std::cell::RefMut<'_, polymap::PolyMap<String>> {

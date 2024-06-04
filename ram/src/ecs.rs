@@ -77,7 +77,7 @@ pub mod serde {
         }
     }
 
-    pub fn from_ron_str<'a>(ron: &str, serde_data: &mut Data<'a>) -> Result<(), Error> {
+    pub fn from_ron_str(ron: &str, serde_data: &mut Data<'_>) -> Result<(), Error> {
         let Data {
             entities,
             markers,

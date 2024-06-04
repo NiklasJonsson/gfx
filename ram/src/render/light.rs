@@ -1,15 +1,13 @@
 use crate::ecs::prelude::*;
 use crate::math::{
     orthographic_vk, perspective_vk, Aabb, FrustrumPlanes, Mat4, Obb, Quat, Rgb, Rgba, Transform,
-    Vec2, Vec3, Vec4,
+    Vec2, Vec3,
 };
 use crate::render::debug::LineConfig;
-use crate::{imdbg, render};
 
-use gltf::json::extensions::buffer::Buffer;
 use trekant::{
     vk, BufferDescriptor, BufferHandle, BufferMutability, CommandBuffer, Extent2D,
-    GraphicsPipeline, Handle, PipelineResourceSet, RenderPass, RenderTarget, Renderer,
+    GraphicsPipeline, Handle, PipelineResourceSet, RenderTarget, Renderer,
     VertexFormat,
 };
 
@@ -18,7 +16,7 @@ use std::ops::Range;
 
 use super::imgui::UiFrame;
 use super::shader::ShaderLocation;
-use super::uniform::{self, DIRECTIONAL_SHADOW_MAP_COUNT};
+use super::uniform::{self};
 
 #[derive(Component, ram_derive::Visitable, serde::Serialize, serde::Deserialize, Clone, Debug)]
 pub enum Light {

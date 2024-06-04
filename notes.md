@@ -404,7 +404,7 @@ The fov_y variable which was 0.7 was truncated to 0 when it was cast to int to b
 Rewrite the UI-code to use `input_scalar` rather than `input_int` and skip all casting (thus truncation).
 Also, add support for more primitive types.
 
-## Point light shadows (WIP)
+## Point light shadows
 
 Implement support for point light shadows.
 
@@ -491,38 +491,6 @@ six of them are added to the output list, meaning that the main render pass samp
 
 Instead, the point light cube map sampling in the main render passes should have a matrix for the light space conversion.
 
-### START HERE
-
-Current state: Code is compiling and running but the pointlight shadows are not working.
-
-Repro with:
-
-```bash
-cargo run --bin dbg -- --pointlight-test --rsf-file data\ambient_light.ron.rsf --spawn-plane
-```
-
-### Findings
-
-* In RenderDoc, the cube map viewer shows Y+ containing what I would expect Y- to be.
-  * To test this, add a new plane above the current one and see if the shadow shows up there.
-  * How does vulkan combine the array layers into a cube map? Is the ordering they are rendering incorrect w.r.t. this?
-TODO:
-* Face order seems correct but shadows are still buggy...
-
-I think I am start to understand. Most of the tutorial (laernopengl and sacha) use a color buffer for the cube maps and write a custom linear depth.
-They can sample the cube map in the fragment shader and compare directly with the depth. Using the depth buffers to construct a cube map, we need to recompute a bit more, it seems like.
-
-Each face is a spotlight so we'd need to convert the coords of the fragment not just
-with the to_lightspace matrix but with the specific view-proj matrix for that face of the cubemap. We'd almost be better of with not a cube map at all? If instead, we use 6 regular texture, we'd just need to figure out which of them
-to sample.
-
-Actually, for sampling across seams, it would be a lot more involved to not use a cubemap.
-
-TODO:
-
-1. Figure out sampling the fragment shader
-2. Why are the cube map faces red? Redder is higher? Which means the depth is the highest? Shadow depth texture are the opposite, whiter is the deeper?
-
 ### Solution
 
 Pointlight shadows use multiple render passes, one for each face of a cube map to write single-channel color textures.
@@ -545,11 +513,26 @@ Each pixel in this texture is the world space depth of that fragment compared to
 
 When sampling the fragment shader, this is required:
 
-1.
+1. Use the vector between the light and the fragment in light-space to sample the cube map.
+Likely, it should be fine to use the vector in world space as well, as the pointlight is 360
+degrees and the translation does not affect vectors.
+2. Compare the depth directly with the distance from the fragment to the light.
 
-TODO: START HERE and figure this out.
+NOTE: There are still some artifacts for point lights so they are not done yet.
 
 ## Future work
+
+### Startup speedup
+
+Sponza is slow to load. How can this be improved?
+
+### Shadow improvements
+
+* Both directional lights and point lights have some artifacts w.r.t. to blocky shadows in the main pass.
+* Consider switching to a single depth texture for point lights. Need to write manual (0,1) depth in the
+fragment shader just like learnopengl.com for this.
+* Cascaded directional lights.
+* Binning/clustering for supporting many lights.
 
 ### Multiview rendering for cubemaps
 

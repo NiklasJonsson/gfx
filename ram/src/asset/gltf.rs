@@ -168,7 +168,7 @@ fn to_index_buffer(indices: gltf::mesh::util::ReadIndices<'_>) -> HostIndexBuffe
     }
 }
 
-fn load_primitive<'a>(ctx: &mut RecGltfCtx, primitive: &gltf::Primitive<'a>) -> PendingGltfModel {
+fn load_primitive(ctx: &mut RecGltfCtx, primitive: &gltf::Primitive<'_>) -> PendingGltfModel {
     assert!(primitive.mode() == gltf::mesh::Mode::Triangles);
     let reader = primitive.reader(|buffer| Some(&ctx.buffers[buffer.index()]));
 

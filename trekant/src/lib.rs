@@ -1010,32 +1010,4 @@ impl Renderer {
         let render_target = self.resources.render_targets.add(data);
         Ok(render_target)
     }
-
-    // TODO: Refactor this. It seems a bit to narrow of a use-case to expose in the API here.
-    pub fn create_cube_render_targets(
-        &mut self,
-        render_pass: Handle<RenderPass>,
-        cube_map: Handle<Texture>,
-    ) -> Result<[Handle<RenderTarget>; 6], RenderError> {
-        let render_pass = self
-            .resources
-            .render_passes
-            .get(&render_pass)
-            .ok_or_else(|| RenderError::InvalidHandle(render_pass.id()))?;
-        let texture = self
-            .resources
-            .textures
-            .get(&cube_map)
-            .ok_or_else(|| RenderError::InvalidHandle(cube_map.id()))?;
-
-        let render_targets = std::array::from_fn(|idx| {
-            let image_view = texture.sub_image_view(idx);
-            let data =
-                RenderTarget::new_raw(&self.device, &[image_view], render_pass, texture.extent())
-                    .expect("Failed to create render target");
-            self.resources.render_targets.add(data)
-        });
-
-        Ok(render_targets)
-    }
 }
