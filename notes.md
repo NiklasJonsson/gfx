@@ -522,6 +522,10 @@ NOTE: There are still some artifacts for point lights so they are not done yet.
 
 ## Future work
 
+### Sponza doesn't run
+
+Fails to due running out of descriptor sets.
+
 ### Startup speedup
 
 Sponza is slow to load. How can this be improved?

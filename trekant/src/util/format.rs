@@ -2,7 +2,6 @@ use ash::vk;
 
 #[derive(Clone, Debug, Copy, PartialEq, Eq, Hash)]
 pub struct Format(vk::Format);
-// TODO: Define enum values so that size can be masked.
 impl Format {
     pub fn size(&self) -> u32 {
         match *self {
@@ -12,9 +11,8 @@ impl Format {
             Self::FLOAT1 => 4,
             Self::RGBA_SRGB => 4,
             Self::RGBA_UNORM => 4,
-            // TODO
-            // Self::D16_UNORM => 2,
-            _ => unimplemented!("Missing case in match"),
+            Self::D16_UNORM => 2,
+            _ => unimplemented!("Missing size for {self:?}"),
         }
     }
 

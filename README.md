@@ -1,7 +1,7 @@
 # Graphics exploration with vulkan
 
 ```sh
-cargo run --release --bin dbg -- --gltf-file ../glTF-Sample-Models/2.0/Sponza/glTF/Sponza.gltf --rsf-file data/ambient_light.ron.rsf --rsf-file data/spot_light.ron.rsf
+cargo run --release --bin dbg -- --gltf-file ../glTF-Sample-Models/2.0/Sponza/glTF/Sponza.gltf --ambient-light
 ```
 
 Graphics experimentation with vulkan (mostly contained in trekant/).

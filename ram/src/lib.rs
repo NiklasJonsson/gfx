@@ -187,7 +187,6 @@ fn default_modules() -> Modules {
         Box::new(camera::FPSCamera),
         Box::new(camera::DefaultCamera),
         Box::new(asset::GltfModule),
-        Box::new(asset::RsfModule),
     ])
 }
 
@@ -270,7 +269,6 @@ fn run(mut spec: Init) -> ! {
             let mut systems = Engine::finalize_executor(executor_builder);
             systems.setup(&mut world);
 
-            ecs::serde::setup_resources(&mut world);
             render::setup_resources(&mut world, &mut renderer);
 
             let mut ui_modules = vec![ui::ui_module()];

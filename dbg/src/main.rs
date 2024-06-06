@@ -14,8 +14,6 @@ use std::path::PathBuf;
 struct Args {
     #[clap(parse(from_os_str), name = "gltf-file", long)]
     gltf_files: Vec<PathBuf>,
-    #[clap(parse(from_os_str), name = "rsf-file", long)]
-    rsf_files: Vec<PathBuf>,
     #[clap(long)]
     spawn_plane: bool,
     #[clap(long)]
@@ -26,13 +24,15 @@ struct Args {
     sun_simulation: bool,
     #[clap(long)]
     pointlight_test: bool,
+    #[clap(long)]
+    ambient_light: bool,
 }
 
 struct Spawner {
     spawn_plane: bool,
     spawn_cube: bool,
+    spawn_ambient_light: bool,
     gltf_files: Vec<PathBuf>,
-    rsf_files: Vec<PathBuf>,
 }
 
 impl Module for Spawner {
@@ -42,9 +42,6 @@ impl Module for Spawner {
         self.gltf_files
             .iter()
             .for_each(|f| ram::asset::gltf::load_asset(world, f));
-        self.rsf_files
-            .iter()
-            .for_each(|f| ram::asset::rsf::load_asset(world, f));
 
         let plane_side = 100.0;
         let plane_height = 1.0;
@@ -92,6 +89,23 @@ impl Module for Spawner {
                     metallic_factor: 0.0,
                     roughness_factor: 0.7,
                     ..Default::default()
+                })
+                .build();
+        }
+
+        if self.spawn_ambient_light {
+            world
+                .create_entity()
+                .with(Name::from("Ambient light"))
+                // Ambient light needs a position to be picked up the lighting system
+                .with(Transform::pos(0.0, 3.0, 0.0))
+                .with(render::Light::Ambient {
+                    color: Rgb {
+                        r: 1.0,
+                        g: 1.0,
+                        b: 1.0,
+                    },
+                    strength: 0.01,
                 })
                 .build();
         }
@@ -347,8 +361,8 @@ fn main() {
     init.add_module(Spawner {
         spawn_cube: args.spawn_cube,
         spawn_plane: args.spawn_plane,
+        spawn_ambient_light: args.ambient_light,
         gltf_files: args.gltf_files,
-        rsf_files: args.rsf_files,
     });
 
     if args.sun_simulation {
