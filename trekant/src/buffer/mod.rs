@@ -8,13 +8,11 @@ use backend::command::CommandBuffer;
 use backend::{buffer::Buffer, util::compute_stride, AllocatorHandle, MemoryError};
 
 use crate::traits::Uniform;
-use crate::util::ByteBuffer;
 use crate::vertex::VertexDefinition;
 
 use ash::vk;
 
 use std::convert::TryInto;
-use std::sync::Arc;
 
 pub use descriptor::BufferDescriptor;
 pub use descriptor::BufferLayout;
@@ -31,7 +29,7 @@ pub enum BufferMutability {
     Mutable,
 }
 
-// TODO: Revisit this!
+// TODO: Revisit this! It's only used in ram?
 pub trait BufferTypeTrait {
     const USAGE: vk::BufferUsageFlags;
     fn elem_align(&self) -> u16;
@@ -210,6 +208,13 @@ impl UniformBufferType {
 pub struct VertexBufferType {
     format: VertexFormat,
 }
+
+impl VertexBufferType {
+    pub fn format(&self) -> &VertexFormat {
+        &self.format
+    }
+}
+
 impl BufferTypeTrait for VertexBufferType {
     const USAGE: vk::BufferUsageFlags = vk::BufferUsageFlags::VERTEX_BUFFER;
     fn elem_align(&self) -> u16 {
@@ -541,64 +546,6 @@ impl DeviceBuffer {
         }
     }
 }
-
-#[derive(Debug, Clone)]
-pub struct HostBuffer<BT> {
-    data: Arc<ByteBuffer>,
-    n_elems: u32,
-    buffer_type: BT,
-}
-
-pub type HostVertexBuffer = HostBuffer<VertexBufferType>;
-pub type HostIndexBuffer = HostBuffer<IndexBufferType>;
-pub type HostUniformBuffer = HostBuffer<UniformBufferType>;
-pub type HostStorageBuffer = HostBuffer<StorageBufferType>;
-
-macro_rules! impl_host_buffer_from {
-    ($name:ty, $trait:ident, $buffer_type:ident) => {
-        impl $name {
-            pub fn from_vec<T: Copy + $trait + 'static>(data: Vec<T>) -> Self {
-                let n_elems = data.len() as u32;
-                let data = Arc::new(unsafe { ByteBuffer::from_vec(data) });
-                let buffer_type = $buffer_type::from_type::<T>();
-                Self {
-                    data,
-                    n_elems,
-                    buffer_type,
-                }
-            }
-
-            pub fn from_single<T: Copy + $trait + 'static>(t: T) -> Self {
-                Self::from_vec(vec![t])
-            }
-
-            /// # Safety
-            /// The contents of the vector must match the description of it in buffer_type. Furthermore, the contents must fulfill vulkan requirements, e.g. alignment,
-            /// for the supplied buffer type.
-            pub unsafe fn from_raw(data: Vec<u8>, buffer_type: $buffer_type) -> Self {
-                assert_eq!(data.len() % buffer_type.elem_size() as usize, 0);
-                let n_elems = data.len() as u32 / buffer_type.elem_size() as u32;
-                let data = Arc::new(ByteBuffer::from_vec(data));
-                Self {
-                    data,
-                    n_elems,
-                    buffer_type,
-                }
-            }
-        }
-    };
-}
-
-impl_host_buffer_from!(HostUniformBuffer, Uniform, UniformBufferType);
-impl_host_buffer_from!(HostVertexBuffer, VertexDefinition, VertexBufferType);
-impl_host_buffer_from!(HostIndexBuffer, IndexInt, IndexBufferType);
-
-impl HostVertexBuffer {
-    pub fn format(&self) -> &VertexFormat {
-        &self.buffer_type.format
-    }
-}
-
 #[derive(Default)]
 pub struct DeviceBufferStorage {
     buffered: BufferedStorage<DeviceBuffer>,

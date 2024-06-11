@@ -2,10 +2,10 @@ use crate::ecs;
 use crate::ecs::prelude::*;
 use std::path::{Path, PathBuf};
 
+use crate::render::{HostIndexBuffer, HostVertexBuffer};
 use trekant::util;
-use trekant::vertex::VertexFormat;
-use trekant::{HostIndexBuffer, HostVertexBuffer, VertexBufferType};
 use trekant::{MipMaps, TextureDescriptor};
+use trekant::{VertexBufferType, VertexFormat};
 
 use ram_derive::Visitable;
 

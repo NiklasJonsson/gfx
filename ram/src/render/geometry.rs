@@ -1,8 +1,8 @@
 use crate::ecs::prelude::*;
 use crate::math::Vec3;
+use crate::render::{HostIndexBuffer, HostVertexBuffer};
 use trekant::util::Format;
 use trekant::vertex::{VertexDefinition, VertexFormat};
-use trekant::{HostIndexBuffer, HostVertexBuffer};
 
 use super::mesh::Mesh;
 

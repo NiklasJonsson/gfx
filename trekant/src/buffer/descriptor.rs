@@ -1,6 +1,6 @@
 use super::{
-    BufferMutability, BufferType, BufferTypeTrait, DeviceBuffer, HostBuffer, IndexBufferType,
-    IndexInt, StorageBufferType, UniformBufferType, VertexBufferType,
+    BufferMutability, BufferType, DeviceBuffer, IndexBufferType, IndexInt, StorageBufferType,
+    UniformBufferType, VertexBufferType,
 };
 use crate::vertex::VertexDefinition;
 use crate::{backend, Std140};
@@ -231,35 +231,6 @@ impl<'a> BufferDescriptor<'a> {
         let buffer_type = StorageBufferType::as_enum::<BD::T>();
         // Safety: Std140 trait
         unsafe { Self::any_buffer(data, mutability, buffer_type) }
-    }
-}
-
-// Only pass uniform_elem_align when creating uniform buffers, otherwise this function panics.
-// This is not great but it also doesn't make sense to have to supply this when creating the host buffer.
-impl<'a> BufferDescriptor<'a> {
-    pub fn from_host_buffer<BT>(
-        hb: &HostBuffer<BT>,
-        mutability: BufferMutability,
-        uniform_buffer_layout: Option<BufferLayout>,
-    ) -> Self
-    where
-        BT: BufferTypeTrait + Clone,
-    {
-        let mut buffer_type = hb.buffer_type.buffer_type();
-        if let Some(buffer_layout) = uniform_buffer_layout {
-            match &mut buffer_type {
-                BufferType::Uniform(UniformBufferType { elem_align, .. }) => {
-                    *elem_align = compute_required_alignment(buffer_layout, *elem_align);
-                }
-                _ => panic!("Can't change element alignment for non-uniform buffers"),
-            }
-        }
-        Self {
-            data: DescriptorData::Shared(std::sync::Arc::clone(&hb.data)),
-            mutability,
-            n_elems: hb.n_elems,
-            buffer_type,
-        }
     }
 }
 

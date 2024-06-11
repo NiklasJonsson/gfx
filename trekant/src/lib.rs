@@ -21,8 +21,8 @@ mod texture;
 pub use backend::command::CommandBuffer;
 pub use buffer::{
     AsyncBufferHandle, BufferDescriptor, BufferHandle, BufferLayout, BufferMutability, BufferType,
-    DeviceBuffer, HostBuffer, HostIndexBuffer, HostStorageBuffer, HostUniformBuffer,
-    HostVertexBuffer, IndexBufferType, StorageBufferType, UniformBufferType, VertexBufferType,
+    BufferTypeTrait, DeviceBuffer, IndexBufferType, IndexInt, StorageBufferType, UniformBufferType,
+    VertexBufferType,
 };
 pub use descriptor::DescriptorData;
 pub use error::RenderError;
@@ -40,8 +40,8 @@ pub use texture::{
 };
 pub use traits::{PushConstant, Uniform};
 pub use trekant_derive::Std140;
-pub use util::{Extent2D, Format};
-pub use vertex::VertexFormat;
+pub use util::{ByteBuffer, Extent2D, Format};
+pub use vertex::{VertexDefinition, VertexFormat};
 
 use crate::backend::image::ImageDescriptor;
 use crate::backend::vk::{image::Image, MemoryError};

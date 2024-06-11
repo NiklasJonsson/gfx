@@ -27,6 +27,7 @@ pub mod uniform;
 
 pub use geometry::Shape;
 pub use light::Light;
+pub use mesh::{HostBuffer, HostIndexBuffer, HostVertexBuffer};
 
 use mesh::Mesh;
 
