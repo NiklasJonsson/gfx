@@ -6,18 +6,18 @@ use trekant::pipeline::{
 use trekant::pipeline_resource::PipelineResourceSet;
 use trekant::util::{cast_transparent_slice, Extent2D, Format, Offset2D, Rect2D, Viewport};
 use trekant::vertex::{VertexDefinition, VertexFormat};
+use trekant::BufferMutability;
+use trekant::Frame;
 use trekant::RenderPassEncoder;
 use trekant::Renderer;
 use trekant::{BufferDescriptor, BufferHandle, Handle, Std140};
-use trekant::{BufferMutability};
-use trekant::{Frame};
 use trekant::{MipMaps, Texture, TextureDescriptor};
 
 use crate::common::Name;
 use crate::io::input;
 use crate::io::input::KeyCode;
 use crate::math::Vec2;
-use crate::render::shader::{Defines, ShaderCompiler, ShaderLocation, ShaderType};
+use crate::render::shader::{Defines, ShaderCompiler, ShaderType};
 use crate::time::Time;
 
 use specs::world::WorldExt;
@@ -322,14 +322,14 @@ impl UIContext {
             let defines = Defines::default();
             let vert = compiler
                 .compile(
-                    &ShaderLocation::builtin("render/shaders/imgui/vert.glsl"),
+                    &super::shader_path(&["imgui", "vert.glsl"]),
                     &defines,
                     ShaderType::Vertex,
                 )
                 .expect("Failed to compile imgui vert");
             let frag = compiler
                 .compile(
-                    &ShaderLocation::builtin("render/shaders/imgui/frag.glsl"),
+                    &super::shader_path(&["imgui", "frag.glsl"]),
                     &defines,
                     ShaderType::Fragment,
                 )

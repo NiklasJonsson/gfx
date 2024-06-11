@@ -194,7 +194,7 @@
                 "--spawn-plane",
                 "--spotlight-test",
                 // "--sun-simulation",
-                // "--ambient-light",
+                "--ambient-light",
             ],
             "cwd": "${workspaceFolder}"
         },

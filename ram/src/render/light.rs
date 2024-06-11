@@ -7,15 +7,13 @@ use crate::render::debug::LineConfig;
 
 use trekant::{
     vk, BufferDescriptor, BufferHandle, BufferMutability, CommandBuffer, Extent2D,
-    GraphicsPipeline, Handle, PipelineResourceSet, RenderTarget, Renderer,
-    VertexFormat,
+    GraphicsPipeline, Handle, PipelineResourceSet, RenderTarget, Renderer, VertexFormat,
 };
 
 use crate::render::uniform::{LightingData, PackedLight, MAX_NUM_LIGHTS};
 use std::ops::Range;
 
 use super::imgui::UiFrame;
-use super::shader::ShaderLocation;
 use super::uniform::{self};
 
 #[derive(Component, ram_derive::Visitable, serde::Serialize, serde::Deserialize, Clone, Debug)]
@@ -483,7 +481,7 @@ fn depth_shadow_pipeline_desc(
 ) -> Result<trekant::GraphicsPipelineDescriptor, super::MaterialError> {
     let no_defines = super::shader::Defines::empty();
     let vert = shader_compiler.compile(
-        &ShaderLocation::builtin("render/shaders/shadow/depth_write_vert.glsl"),
+        &super::shader_path(&["shadow", "depth_write_vert.glsl"]),
         &no_defines,
         super::shader::ShaderType::Vertex,
     )?;
@@ -507,7 +505,7 @@ fn pointlight_shadow_pipeline_desc(
     let no_defines = super::shader::Defines::empty();
     let vert = {
         let vert = shader_compiler.compile(
-            &ShaderLocation::builtin("render/shaders/shadow/pointlight_vert.glsl"),
+            &super::shader_path(&["shadow", "pointlight_vert.glsl"]),
             &no_defines,
             super::shader::ShaderType::Vertex,
         )?;
@@ -519,7 +517,7 @@ fn pointlight_shadow_pipeline_desc(
     };
     let frag = {
         let frag = shader_compiler.compile(
-            &ShaderLocation::builtin("render/shaders/shadow/pointlight_frag.glsl"),
+            &super::shader_path(&["shadow", "pointlight_frag.glsl"]),
             &no_defines,
             super::shader::ShaderType::Fragment,
         )?;

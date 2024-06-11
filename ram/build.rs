@@ -11,7 +11,7 @@ fn find_ext(dir: &Path, ext: &str) -> Vec<PathBuf> {
         let path = entry.path();
         if path.is_dir() {
             ret.extend(find_ext(&path, ext));
-        } else {
+        } else if entry.file_name().to_string_lossy().ends_with(ext) {
             ret.push(path.to_path_buf());
         }
     }
@@ -20,7 +20,7 @@ fn find_ext(dir: &Path, ext: &str) -> Vec<PathBuf> {
 
 fn main() {
     let out_dir = env::var_os("OUT_DIR").unwrap();
-    let dest_path = Path::new(&out_dir).join("builtin-shaders");
+    let dest_path = Path::new(&out_dir).join("shaders");
     if !dest_path.is_dir() {
         if dest_path.exists() {
             std::fs::remove_file(&dest_path).unwrap_or_else(|err| {

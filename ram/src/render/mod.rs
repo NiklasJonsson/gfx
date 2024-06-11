@@ -1,3 +1,4 @@
+use shader::ShaderLocation;
 use thiserror::Error;
 
 use crate::ecs::prelude::*;
@@ -156,18 +157,32 @@ pub enum MaterialError {
     GlslCompiler(#[from] shader::CompilerError),
 }
 
+pub(crate) fn shader_path<P>(shader_path: &[P]) -> shader::ShaderLocation
+where
+    P: AsRef<std::path::Path>,
+{
+    let mut path = std::path::PathBuf::new();
+    path.push("render");
+    path.push("shaders");
+
+    for component in shader_path {
+        path.push(component);
+    }
+    ShaderLocation::search(path)
+}
+
 fn unlit_pipeline_desc(
     shader_compiler: &shader::ShaderCompiler,
     vertex_format: VertexFormat,
     polygon_mode: trekant::pipeline::PolygonMode,
 ) -> Result<GraphicsPipelineDescriptor, MaterialError> {
     let vert = shader_compiler.compile(
-        &shader::ShaderLocation::builtin("render/shaders/unlit/vert.glsl"),
+        &shader_path(&["unlit", "vert.glsl"]),
         &shader::Defines::empty(),
         shader::ShaderType::Vertex,
     )?;
     let frag = shader_compiler.compile(
-        &shader::ShaderLocation::builtin("render/shaders/unlit/frag.glsl"),
+        &shader_path(&["unlit", "frag.glsl"]),
         &shader::Defines::empty(),
         shader::ShaderType::Fragment,
     )?;
@@ -194,8 +209,6 @@ fn get_pipeline_for(
     world: &World,
     mesh: &Mesh,
     mat: &material::GpuMaterial,
-    // TODO: Clean this up
-    use_builtin: bool,
 ) -> Result<Handle<GraphicsPipeline>, MaterialError> {
     let vertex_format = mesh.cpu_vertex_buffer.format().clone();
 
@@ -222,7 +235,7 @@ fn get_pipeline_for(
                 has_normal_map: has_nm,
             };
 
-            let (vert, frag) = shader::pbr_gltf::compile(&shader_compiler, &def, use_builtin)?;
+            let (vert, frag) = shader::pbr_gltf::compile(&shader_compiler, &def)?;
 
             let vert = ShaderDescriptor {
                 debug_name: Some("pbr-vert".to_owned()),
@@ -275,7 +288,7 @@ fn create_renderables(renderer: &mut Renderer, world: &mut World) {
                 if should_reload.contains(ent) {
                     log::trace!("Reloading shader for {:?}", ent);
                     // TODO: Destroy the previous pipeline
-                    match get_pipeline_for(renderer, world, mesh, mat, false) {
+                    match get_pipeline_for(renderer, world, mesh, mat) {
                         Ok(pipeline) => entry.get_mut().gfx_pipeline = pipeline,
                         Err(e) => log::error!("Failed to compile pipeline: {}", e),
                     }
@@ -285,8 +298,8 @@ fn create_renderables(renderer: &mut Renderer, world: &mut World) {
                 log::trace!("No Renderable found, creating new");
                 log::trace!("Creating renderable: {:?}", mat);
                 let material_descriptor_set = create_material_descriptor_set(renderer, mat);
-                let gfx_pipeline = get_pipeline_for(renderer, world, mesh, mat, true)
-                    .expect("Failed to get pipeline");
+                let gfx_pipeline =
+                    get_pipeline_for(renderer, world, mesh, mat).expect("Failed to get pipeline");
 
                 let rend = RenderableMaterial {
                     gfx_pipeline,
@@ -633,7 +646,48 @@ pub fn create_frame_resources(
 }
 
 pub fn setup_resources(world: &mut World, renderer: &mut Renderer) {
-    let shader_compiler = shader::ShaderCompiler::new().expect("Failed to create shader compiler");
+    let mut shader_compiler =
+        shader::ShaderCompiler::new().expect("Failed to create shader compiler");
+
+    let include_path_rel = std::path::PathBuf::from_iter(["render", "shaders", "include"]);
+    let mut roots = Vec::with_capacity(3);
+    match std::env::current_exe() {
+        Ok(path) => {
+            let path = path
+                .parent()
+                .unwrap_or_else(|| {
+                    panic!(
+                        "Executable always has a parent directory but {} doesn't",
+                        path.display()
+                    )
+                })
+                .to_path_buf()
+                .join("shaders");
+            roots.push(path);
+        }
+        Err(e) => {
+            log::error!("Failed to read current executable location due to {e}. Can't load shader relative to it.");
+        }
+    }
+
+    let build_out_dir = std::path::PathBuf::from(env!("OUT_DIR")).join("shaders");
+    roots.push(build_out_dir);
+
+    for root in roots {
+        shader_compiler.add_shader_path(root.as_path());
+        shader_compiler.add_include_path(root.as_path().join(&include_path_rel));
+    }
+
+    if let Ok(cwd) = std::env::current_dir() {
+        let mut root = cwd;
+        root.push("ram");
+        root.push("src");
+        shader_compiler.add_shader_path(&root);
+        root.push(include_path_rel);
+        shader_compiler.add_include_path(root);
+    } else {
+        log::error!("Failed to read current working directory, can't load shaders relative to it");
+    }
 
     let frame_resources = create_frame_resources(renderer, &shader_compiler);
 

@@ -139,7 +139,7 @@ impl DebugRenderer {
 
         let vert = shader_compiler
             .compile(
-                &shader::ShaderLocation::builtin("render/shaders/world_pos_only_vert.glsl"),
+                &super::shader_path(&["world_pos_only_vert.glsl"]),
                 &shader::Defines::empty(),
                 shader::ShaderType::Vertex,
             )
@@ -147,7 +147,7 @@ impl DebugRenderer {
 
         let frag = shader_compiler
             .compile(
-                &shader::ShaderLocation::builtin("render/shaders/push_constant_color_frag.glsl"),
+                &super::shader_path(&["push_constant_color_frag.glsl"]),
                 &shader::Defines::empty(),
                 shader::ShaderType::Fragment,
             )
