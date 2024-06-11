@@ -673,20 +673,18 @@ pub fn setup_resources(world: &mut World, renderer: &mut Renderer) {
     let build_out_dir = std::path::PathBuf::from(env!("OUT_DIR")).join("shaders");
     roots.push(build_out_dir);
 
-    for root in roots {
-        shader_compiler.add_shader_path(root.as_path());
-        shader_compiler.add_include_path(root.as_path().join(&include_path_rel));
-    }
-
     if let Ok(cwd) = std::env::current_dir() {
         let mut root = cwd;
         root.push("ram");
         root.push("src");
-        shader_compiler.add_shader_path(&root);
-        root.push(include_path_rel);
-        shader_compiler.add_include_path(root);
+        roots.push(root);
     } else {
         log::error!("Failed to read current working directory, can't load shaders relative to it");
+    }
+
+    for root in roots {
+        shader_compiler.add_shader_path(root.as_path());
+        shader_compiler.add_include_path(root.as_path().join(&include_path_rel));
     }
 
     let frame_resources = create_frame_resources(renderer, &shader_compiler);

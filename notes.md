@@ -520,6 +520,12 @@ degrees and the translation does not affect vectors.
 
 NOTE: There are still some artifacts for point lights so they are not done yet.
 
+## BUG: Changes in #included files in shaders are not recompiled during runtime
+
+Fixed by changing the shader loading. The framework added in (#shader-recompilation-and-failure-management) was changed
+to be path-based where we setup a set of paths that the compiler should search for includes and shaders in, if the shader
+path is not already absolute.
+
 ## Future work
 
 ### Sponza doesn't run
@@ -573,5 +579,3 @@ this internally in the renderer and panic if it is not done correctly. In additi
 * Directional lights improvements: Try to reproduce the scene bounds in the opengl or sascha willems examples for
   directional light shadows and see if the issues with pixelated examples can be reproduced.
 * Implement cascaded shadow maps for directional lights.
-
-### BUG: Changes in #included files in shaders are not recompiled during runtime
