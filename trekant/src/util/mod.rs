@@ -76,7 +76,6 @@ pub fn compute_stride(elem_size: u16, elem_align: u16) -> u16 {
 /// is performed.
 // TODO:
 // * dst should be a slice, then we can panic if the copy is not alright
-// * Remove logging
 pub unsafe fn copy_nonoverlapping_aligned(
     src: &[u8],
     dst: *mut u8,
@@ -84,14 +83,12 @@ pub unsafe fn copy_nonoverlapping_aligned(
     elem_align: u16,
 ) {
     let size = src.len();
-    let src = src.as_ptr() as *const u8;
+    let src: *const u8 = src.as_ptr();
     if elem_size == elem_align {
-        log::trace!("Straight copy from {:?} to {:?}, size: {}", src, dst, size);
         unsafe {
             std::ptr::copy_nonoverlapping::<u8>(src, dst, size);
         }
     } else {
-        log::trace!("Strided copy from {:?} to {:?}, size: {}", src, dst, size);
         let n_elems = size / elem_size as usize;
         let stride = compute_stride(elem_size, elem_align);
         for i in 0..n_elems {

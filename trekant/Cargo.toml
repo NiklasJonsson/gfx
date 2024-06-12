@@ -16,7 +16,7 @@ raw-window-handle = "0.5.2"
 # Util
 log = "0.4.8"
 env_logger = "0.7.1"
-image = "0.23.8"
+image = "0.25.1"
 thiserror = "1.0.20"
 derive_builder = "0.10.2"
 num-traits = "0.2.14"

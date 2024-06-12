@@ -526,11 +526,26 @@ Fixed by changing the shader loading. The framework added in (#shader-recompilat
 to be path-based where we setup a set of paths that the compiler should search for includes and shaders in, if the shader
 path is not already absolute.
 
-## Future work
-
-### Startup speedup
+### WIP: Startup speedup
 
 Sponza is slow to load. How can this be improved?
+
+It seems to be due to a mix of shader compilation and texture loading (jpg decoding specifically):
+
+#### Shaders
+
+1. Look into shader compilation caching.
+    * Hash the source string to spv?
+    * Save the modification date of the file and compare to not read again?
+2. Can we compile shaders in parallel?
+
+#### Textures
+
+1. Look into caching?
+2. Parallel loads
+3. Pipelining?
+
+## Future work
 
 ### Shadow improvements
 
