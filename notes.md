@@ -538,6 +538,7 @@ It seems to be due to a mix of shader compilation and texture loading (jpg decod
     * Hash the source string to spv?
     * Save the modification date of the file and compare to not read again?
 2. Can we compile shaders in parallel?
+3. Consider compiling built-in shaders to spirv for startup to be fast.
 
 #### Textures
 

@@ -1,3 +1,4 @@
+use std::hash::{Hash, Hasher};
 use std::path::{Path, PathBuf};
 use thiserror::Error;
 
@@ -14,12 +15,16 @@ impl Defines {
         self.vals.push(v);
     }
 
-    pub fn iter(&self) -> impl Iterator<Item = &(String, String)> {
-        self.vals.iter()
-    }
-
     pub fn empty() -> Self {
         Self { vals: Vec::new() }
+    }
+}
+
+impl<'a> IntoIterator for &'a Defines {
+    type IntoIter = std::slice::Iter<'a, (String, String)>;
+    type Item = &'a (String, String);
+    fn into_iter(self) -> Self::IntoIter {
+        self.vals.as_slice().iter()
     }
 }
 
@@ -104,6 +109,7 @@ pub mod pbr_gltf {
 
     pub fn compile(
         compiler: &ShaderCompiler,
+        cache: &mut ShaderCache,
         def: &ShaderDefinition,
     ) -> Result<(SpvBinary, SpvBinary), CompilerError> {
         assert!(def.is_valid());
@@ -118,6 +124,7 @@ pub mod pbr_gltf {
             ])),
             &defines,
             ShaderType::Vertex,
+            Some(cache),
         )?;
         let frag = compiler.compile(
             &ShaderLocation::search(PathBuf::from_iter([
@@ -128,6 +135,7 @@ pub mod pbr_gltf {
             ])),
             &defines,
             ShaderType::Fragment,
+            Some(cache),
         )?;
 
         Ok((vert, frag))
@@ -135,11 +143,13 @@ pub mod pbr_gltf {
 
     pub fn compile_default(
         compiler: &ShaderCompiler,
+        cache: &mut ShaderCache,
     ) -> Result<(SpvBinary, SpvBinary), CompilerError> {
-        compile(compiler, &ShaderDefinition::empty())
+        compile(compiler, cache, &ShaderDefinition::empty())
     }
 }
 
+#[derive(Clone)]
 pub struct SpvBinary {
     data: Vec<u32>,
     _ty: ShaderType,
@@ -185,10 +195,35 @@ pub enum CompilerError {
     Sync,
 }
 
+#[derive(Clone, PartialEq, Eq, Hash)]
+struct ShaderCacheKey {
+    source: String,
+    defines: Vec<(String, String)>,
+}
+
+impl ShaderCacheKey {
+    fn new(source: String, mut defines: Vec<(String, String)>) -> Self {
+        // Make sure the hashing of defines is not order-dependent
+        defines.sort();
+        Self { source, defines }
+    }
+}
+
+#[derive(Default)]
+pub struct ShaderCache {
+    cache: std::collections::HashMap<ShaderCacheKey, SpvBinary>,
+}
+
+impl ShaderCache {
+    pub fn new() -> Self {
+        Self::default()
+    }
+}
+
 fn log_compilation(defines: &Defines, loc: &ShaderLocation, ty: ShaderType) {
     log::trace!("Compiling {loc} as {ty:?}");
     log::trace!("With defines:");
-    for d in defines.iter() {
+    for d in defines {
         log::trace!("{} = {}", d.0, d.1);
     }
 }
@@ -359,6 +394,7 @@ impl ShaderCompiler {
         shader: &ShaderLocation,
         defines: &Defines,
         ty: ShaderType,
+        cache: Option<&mut ShaderCache>,
     ) -> Result<SpvBinary, CompilerError> {
         let (path, source) = match read_shader(&self.shader_paths, shader) {
             Ok(FoundFile(path, contents)) => {
@@ -373,6 +409,14 @@ impl ShaderCompiler {
             }
         };
 
+        if let Some(cache) = &cache {
+            // TODO: Can we use a non-owning cache key here?
+            let key = ShaderCacheKey::new(source.clone(), defines.vals.clone());
+            if let Some(binary) = cache.cache.get(&key) {
+                return Ok(binary.clone());
+            }
+        }
+
         log_compilation(defines, shader, ty);
 
         let stage = match ty {
@@ -382,7 +426,7 @@ impl ShaderCompiler {
 
         let mut options =
             shaderc::CompileOptions::new().expect("Failed to create compiler options");
-        for d in defines.iter() {
+        for d in defines {
             options.add_macro_definition(&d.0, Some(&d.1));
         }
 
@@ -402,22 +446,38 @@ impl ShaderCompiler {
 
         options.set_include_callback(callback);
 
+        let mut hasher = std::hash::DefaultHasher::new();
+        source.hash(&mut hasher);
+        for d in defines {
+            d.hash(&mut hasher);
+        }
+
+        log::info!("Shader {shader} hashed to {}", hasher.finish());
+
         let binary_result = self
             .compiler
             .lock()
             .map_err(|_| CompilerError::Sync)?
             .compile_into_spirv(&source, stage, &shader.to_string(), "main", Some(&options));
 
-        match binary_result {
-            Err(e) => Err(CompilerError::ShaderC {
-                source: e,
-                loc: shader.clone(),
-                path,
-            }),
-            Ok(bin) => Ok(SpvBinary {
+        let binary = match binary_result {
+            Err(e) => {
+                return Err(CompilerError::ShaderC {
+                    source: e,
+                    loc: shader.clone(),
+                    path,
+                });
+            }
+            Ok(bin) => SpvBinary {
                 _ty: ty,
                 data: Vec::from(bin.as_binary()),
-            }),
+            },
+        };
+
+        if let Some(cache) = cache {
+            let key = ShaderCacheKey::new(source.clone(), defines.vals.clone());
+            cache.cache.insert(key, binary.clone());
         }
+        Ok(binary)
     }
 }
