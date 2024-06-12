@@ -271,6 +271,8 @@ pub struct ShadowResources {
 
 pub fn prepare_entities(world: &World, renderer: &mut Renderer) {
     let shader_compiler = world.read_resource::<super::shader::ShaderCompiler>();
+    let shader_cache = world.write_resource::<super::GlobalShaderCache>();
+    let mut shader_cache = shader_cache.0.lock().expect("mutex poison");
     let frame_data = world.read_resource::<super::FrameResources>();
     let meshes = world.read_storage::<super::Mesh>();
     let materials = world.read_storage::<super::GpuMaterial>();
@@ -289,27 +291,36 @@ pub fn prepare_entities(world: &World, renderer: &mut Renderer) {
 
             // TODO: Cleanup error handling
             let directional_pipeline = {
-                let desc =
-                    depth_shadow_pipeline_desc(&shader_compiler, shadow_vertex_format.clone())
-                        .unwrap();
+                let desc = depth_shadow_pipeline_desc(
+                    &shader_compiler,
+                    &mut *shader_cache,
+                    shadow_vertex_format.clone(),
+                )
+                .unwrap();
                 renderer
                     .create_gfx_pipeline(desc, &frame_data.shadow.directional_light_render_pass)
                     .unwrap()
             };
 
             let spotlight_pipeline = {
-                let desc =
-                    depth_shadow_pipeline_desc(&shader_compiler, shadow_vertex_format.clone())
-                        .unwrap();
+                let desc = depth_shadow_pipeline_desc(
+                    &shader_compiler,
+                    &mut *shader_cache,
+                    shadow_vertex_format.clone(),
+                )
+                .unwrap();
                 renderer
                     .create_gfx_pipeline(desc, &frame_data.shadow.spotlight_render_pass)
                     .unwrap()
             };
 
             let pointlight_pipeline = {
-                let desc =
-                    pointlight_shadow_pipeline_desc(&shader_compiler, shadow_vertex_format.clone())
-                        .unwrap();
+                let desc = pointlight_shadow_pipeline_desc(
+                    &shader_compiler,
+                    &mut *shader_cache,
+                    shadow_vertex_format.clone(),
+                )
+                .unwrap();
                 renderer
                     .create_gfx_pipeline(desc, &frame_data.shadow.pointlight_render_pass)
                     .unwrap()
@@ -477,6 +488,7 @@ fn create_shadow_render_pass_pointlight(
 
 fn depth_shadow_pipeline_desc(
     shader_compiler: &super::shader::ShaderCompiler,
+    shader_cache: &mut super::shader::ShaderCache,
     format: VertexFormat,
 ) -> Result<trekant::GraphicsPipelineDescriptor, super::MaterialError> {
     let no_defines = super::shader::Defines::empty();
@@ -484,6 +496,7 @@ fn depth_shadow_pipeline_desc(
         &super::shader_path(&["shadow", "depth_write_vert.glsl"]),
         &no_defines,
         super::shader::ShaderType::Vertex,
+        Some(shader_cache),
     )?;
 
     let vert = super::ShaderDescriptor {
@@ -500,6 +513,7 @@ fn depth_shadow_pipeline_desc(
 
 fn pointlight_shadow_pipeline_desc(
     shader_compiler: &super::shader::ShaderCompiler,
+    shader_cache: &mut super::shader::ShaderCache,
     format: VertexFormat,
 ) -> Result<trekant::GraphicsPipelineDescriptor, super::MaterialError> {
     let no_defines = super::shader::Defines::empty();
@@ -508,6 +522,7 @@ fn pointlight_shadow_pipeline_desc(
             &super::shader_path(&["shadow", "pointlight_vert.glsl"]),
             &no_defines,
             super::shader::ShaderType::Vertex,
+            Some(shader_cache),
         )?;
 
         super::ShaderDescriptor {
@@ -520,6 +535,7 @@ fn pointlight_shadow_pipeline_desc(
             &super::shader_path(&["shadow", "pointlight_frag.glsl"]),
             &no_defines,
             super::shader::ShaderType::Fragment,
+            Some(shader_cache),
         )?;
 
         super::ShaderDescriptor {
@@ -588,6 +604,7 @@ impl ShadowConfig {
 
 pub fn setup_shadow_resources(
     shader_compiler: &super::shader::ShaderCompiler,
+    shader_cache: &mut super::shader::ShaderCache,
     renderer: &mut Renderer,
 ) -> ShadowResources {
     use trekant::{BorderColor, Filter, SamplerAddressMode};
@@ -776,8 +793,9 @@ pub fn setup_shadow_resources(
 
     let depth_dummy_pipeline = {
         let pos_only_vertex_format = VertexFormat::from(trekant::Format::FLOAT3);
-        let pipeline_desc = depth_shadow_pipeline_desc(shader_compiler, pos_only_vertex_format)
-            .expect("failed to create graphics pipeline descriptor for shadows");
+        let pipeline_desc =
+            depth_shadow_pipeline_desc(shader_compiler, shader_cache, pos_only_vertex_format)
+                .expect("failed to create graphics pipeline descriptor for shadows");
         renderer
             .create_gfx_pipeline(pipeline_desc, &depth_render_pass)
             .expect("failed to create pipeline for shadow")
@@ -786,7 +804,7 @@ pub fn setup_shadow_resources(
     let pointlight_dummy_pipeline = {
         let pos_only_vertex_format = VertexFormat::from(trekant::Format::FLOAT3);
         let pipeline_desc =
-            pointlight_shadow_pipeline_desc(shader_compiler, pos_only_vertex_format)
+            pointlight_shadow_pipeline_desc(shader_compiler, shader_cache, pos_only_vertex_format)
                 .expect("failed to create graphics pipeline descriptor for shadows");
         renderer
             .create_gfx_pipeline(pipeline_desc, &pointlight_render_pass)

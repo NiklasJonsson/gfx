@@ -325,6 +325,7 @@ impl UIContext {
                     &super::shader_path(&["imgui", "vert.glsl"]),
                     &defines,
                     ShaderType::Vertex,
+                    None,
                 )
                 .expect("Failed to compile imgui vert");
             let frag = compiler
@@ -332,6 +333,7 @@ impl UIContext {
                     &super::shader_path(&["imgui", "frag.glsl"]),
                     &defines,
                     ShaderType::Fragment,
+                    None,
                 )
                 .expect("Failed to compile imgui frag");
             (vert, frag)

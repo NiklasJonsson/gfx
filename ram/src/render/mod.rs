@@ -1,4 +1,4 @@
-use shader::ShaderLocation;
+use shader::{ShaderCache, ShaderLocation};
 use thiserror::Error;
 
 use crate::ecs::prelude::*;
@@ -36,6 +36,8 @@ use crate::ecs;
 use crate::math::{Mat4, ModelMatrix, Transform, Vec3};
 use material::{GpuMaterial, PendingMaterial};
 use ram_derive::Visitable;
+
+pub struct GlobalShaderCache(std::sync::Mutex<shader::ShaderCache>);
 
 /// Utility for working with asynchronously uploaded gpu resources
 #[derive(Debug, Clone, Visitable)]
@@ -174,6 +176,7 @@ where
 
 fn unlit_pipeline_desc(
     shader_compiler: &shader::ShaderCompiler,
+    shader_cache: &mut shader::ShaderCache,
     vertex_format: VertexFormat,
     polygon_mode: trekant::pipeline::PolygonMode,
 ) -> Result<GraphicsPipelineDescriptor, MaterialError> {
@@ -181,11 +184,13 @@ fn unlit_pipeline_desc(
         &shader_path(&["unlit", "vert.glsl"]),
         &shader::Defines::empty(),
         shader::ShaderType::Vertex,
+        Some(shader_cache),
     )?;
     let frag = shader_compiler.compile(
         &shader_path(&["unlit", "frag.glsl"]),
         &shader::Defines::empty(),
         shader::ShaderType::Fragment,
+        Some(shader_cache),
     )?;
 
     let vert = ShaderDescriptor {
@@ -215,6 +220,9 @@ fn get_pipeline_for(
 
     let frame_data = world.read_resource::<FrameResources>();
     let shader_compiler = world.read_resource::<shader::ShaderCompiler>();
+    let shader_cache = world.write_resource::<GlobalShaderCache>();
+    let mut shader_cache = shader_cache.0.lock().expect("Mutex is poisoned");
+
     let pipe = match mat {
         material::GpuMaterial::PBR {
             normal_map,
@@ -236,7 +244,8 @@ fn get_pipeline_for(
                 has_normal_map: has_nm,
             };
 
-            let (vert, frag) = shader::pbr_gltf::compile(&shader_compiler, &def)?;
+            let (vert, frag) =
+                shader::pbr_gltf::compile(&shader_compiler, &mut *shader_cache, &def)?;
 
             let vert = ShaderDescriptor {
                 debug_name: Some("pbr-vert".to_owned()),
@@ -256,7 +265,12 @@ fn get_pipeline_for(
             renderer.create_gfx_pipeline(desc, &frame_data.main_render_pass)?
         }
         material::GpuMaterial::Unlit { polygon_mode, .. } => {
-            let desc = unlit_pipeline_desc(&shader_compiler, vertex_format, *polygon_mode)?;
+            let desc = unlit_pipeline_desc(
+                &shader_compiler,
+                &mut *shader_cache,
+                vertex_format,
+                *polygon_mode,
+            )?;
             renderer.create_gfx_pipeline(desc, &frame_data.main_render_pass)?
         }
     };
@@ -515,6 +529,7 @@ pub fn draw_frame(world: &mut World, ui: &mut imgui::UIContext, renderer: &mut R
 pub fn create_frame_resources(
     renderer: &mut Renderer,
     shader_compiler: &ShaderCompiler,
+    shader_cache: &mut ShaderCache,
 ) -> FrameResources {
     use trekant::pipeline::ShaderStage;
 
@@ -539,7 +554,7 @@ pub fn create_frame_resources(
             .expect("Failed to create view data uniform buffer")
     };
 
-    let shadow_resources = light::setup_shadow_resources(shader_compiler, renderer);
+    let shadow_resources = light::setup_shadow_resources(shader_compiler, shader_cache, renderer);
 
     let lighting_data = {
         let lighting_data = uniform::LightingData {
@@ -593,7 +608,7 @@ pub fn create_frame_resources(
     let pbr_resources = {
         // TODO: Share this code with get_pipeline_for?
         let vertex_format = VertexFormat::from([util::Format::FLOAT3; 2]);
-        let (vert, frag) = shader::pbr_gltf::compile_default(shader_compiler)
+        let (vert, frag) = shader::pbr_gltf::compile_default(shader_compiler, shader_cache)
             .expect("Failed to compile default PBR shaders");
         let vert = ShaderDescriptor {
             debug_name: Some("dummy-pbr-vert".to_owned()),
@@ -621,6 +636,7 @@ pub fn create_frame_resources(
         let vertex_format = VertexFormat::from(util::Format::FLOAT3);
         let desc = unlit_pipeline_desc(
             shader_compiler,
+            shader_cache,
             vertex_format,
             trekant::pipeline::PolygonMode::Line,
         )
@@ -649,6 +665,7 @@ pub fn create_frame_resources(
 pub fn setup_resources(world: &mut World, renderer: &mut Renderer) {
     let mut shader_compiler =
         shader::ShaderCompiler::new().expect("Failed to create shader compiler");
+    let mut shader_cache = shader::ShaderCache::default();
 
     let include_path_rel = std::path::PathBuf::from_iter(["render", "shaders", "include"]);
     let mut roots = Vec::with_capacity(3);
@@ -688,7 +705,7 @@ pub fn setup_resources(world: &mut World, renderer: &mut Renderer) {
         shader_compiler.add_include_path(root.as_path().join(&include_path_rel));
     }
 
-    let frame_resources = create_frame_resources(renderer, &shader_compiler);
+    let frame_resources = create_frame_resources(renderer, &shader_compiler, &mut shader_cache);
 
     let debug_renderer = debug::DebugRenderer::new(
         &shader_compiler,
@@ -698,6 +715,7 @@ pub fn setup_resources(world: &mut World, renderer: &mut Renderer) {
     );
 
     world.insert(shader_compiler);
+    world.insert(GlobalShaderCache(std::sync::Mutex::new(shader_cache)));
     world.insert(debug_renderer);
     world.insert(debug::OneShotDebugUI::new());
     world.insert(renderer.loader().unwrap());

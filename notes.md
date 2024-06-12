@@ -526,18 +526,30 @@ Fixed by changing the shader loading. The framework added in (#shader-recompilat
 to be path-based where we setup a set of paths that the compiler should search for includes and shaders in, if the shader
 path is not already absolute.
 
+## Shader caching
+
+GLSL to spirv compilation is now cached so that it is not redone for the same source.
+The cache key is the source code string after preprocessing by shaderc. This is done to
+make sure changed includes are not ignored by the caching.
+
+The preprocess step in shaderc still shows up in the profiler but the performance has been
+improved at least. To improve things further, it might be possible to resolve includes by inspecting
+the source code and doing an include-lookup manually and hashing all the source code. This way, we'd
+skip the source code processing. Since this wouldn't look at the defines, the defines would need to
+be hashed as well.
+
+Another feature to speed up the initial startup would be to compile to spirv at build-time but it would
+be nice to improve shader compilation in general.
+
+The file reading for shaders is not showing up in the profile so it doesn't seem like it would be valuable
+to hash the filenames instead of the contents. This would also introduce the complexity of timestamps/checksums
+and handling includes.
+
 ### WIP: Startup speedup
 
 Sponza is slow to load. How can this be improved?
 
-It seems to be due to a mix of shader compilation and texture loading (jpg decoding specifically):
-
-#### Shaders
-
-1. Look into shader compilation caching.
-    * Hash the source string to spv?
-    * Save the modification date of the file and compare to not read again?
-2. Can we compile shaders in parallel?
+Look into texture loading, jpeg decoding.
 
 #### Textures
 
@@ -588,3 +600,5 @@ this internally in the renderer and panic if it is not done correctly. In additi
 * Directional lights improvements: Try to reproduce the scene bounds in the opengl or sascha willems examples for
   directional light shadows and see if the issues with pixelated examples can be reproduced.
 * Implement cascaded shadow maps for directional lights.
+
+### Reloads do not affect all shaders, only PBR/unlit

@@ -142,6 +142,7 @@ impl DebugRenderer {
                 &super::shader_path(&["world_pos_only_vert.glsl"]),
                 &shader::Defines::empty(),
                 shader::ShaderType::Vertex,
+                None,
             )
             .expect("Failed to compile vert shader for debug renderer");
 
@@ -150,6 +151,7 @@ impl DebugRenderer {
                 &super::shader_path(&["push_constant_color_frag.glsl"]),
                 &shader::Defines::empty(),
                 shader::ShaderType::Fragment,
+                None,
             )
             .expect("Failed to compile frag shader for debug renderer");
 

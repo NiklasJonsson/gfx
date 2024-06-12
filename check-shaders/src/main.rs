@@ -52,7 +52,7 @@ fn main() {
         let display = shader.display();
         println!("[{i}/{count}] Checking {display}", i = idx + 1);
         let loc = ShaderLocation::abs(&shader);
-        let result = shader_compiler.compile(&loc, &Defines::empty(), ty);
+        let result = shader_compiler.compile(&loc, &Defines::empty(), ty, None);
 
         if let Err(e) = result {
             println!();
