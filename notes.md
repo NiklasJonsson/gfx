@@ -528,10 +528,6 @@ path is not already absolute.
 
 ## Future work
 
-### Sponza doesn't run
-
-Fails to due running out of descriptor sets.
-
 ### Startup speedup
 
 Sponza is slow to load. How can this be improved?
@@ -552,8 +548,6 @@ fragment shader just like learnopengl.com for this.
 
 Instead of passing around the World, consider extracting all rendering info from it in one or several passes over the world.
 These structures would then be used in the rest of the rendering rather than storing intermediate data in the world.
-
-(2, 2), (0, 1)
 
 ### Loader API
 

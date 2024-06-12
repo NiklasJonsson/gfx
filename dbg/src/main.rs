@@ -324,7 +324,7 @@ impl Module for PointlightTest {
                     g: 0.7,
                     b: 0.7,
                 },
-                range: 10.0,
+                range: 30.0,
             })
             .with(Name::from("Point light"))
             .build();

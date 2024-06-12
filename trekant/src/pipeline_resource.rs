@@ -50,7 +50,7 @@ impl std::ops::Drop for PipelineResourcePool {
 impl PipelineResourcePool {
     // TODO: Accept layout here to compute individual descriptor counts
     fn new(device: &Device) -> Result<Self, PipelineResourceError> {
-        let max_allocatable_sets = 128 * MAX_FRAMES_IN_FLIGHT as u32;
+        let max_allocatable_sets = 1024 * MAX_FRAMES_IN_FLIGHT as u32;
         let pool_sizes = [
             vk::DescriptorPoolSize {
                 ty: vk::DescriptorType::UNIFORM_BUFFER,
