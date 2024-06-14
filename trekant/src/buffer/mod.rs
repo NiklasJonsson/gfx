@@ -18,7 +18,6 @@ pub use descriptor::BufferDescriptor;
 pub use descriptor::BufferLayout;
 
 pub type Buffers = DeviceBufferStorage;
-pub type AsyncBuffers = AsyncDeviceBufferStorage;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct BufferTypeId(pub std::mem::Discriminant<BufferType>);
@@ -122,52 +121,6 @@ impl BufferHandle {
 
     pub fn buffer_type_id(&self) -> BufferTypeId {
         self.ty
-    }
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub struct AsyncBufferHandle {
-    h: Handle<resurs::Async<DeviceBuffer>>,
-    mutability: BufferMutability,
-    idx: u32,
-    n_elems: u32,
-    ty: BufferTypeId,
-}
-
-impl AsyncBufferHandle {
-    pub fn sub_buffer(h: Self, idx: u32, n_elems: u32) -> Self {
-        assert!((idx + n_elems) <= (h.idx + h.n_elems));
-        Self { idx, n_elems, ..h }
-    }
-
-    /// # Safety
-    /// The handle must refer to a valid buffer resource. idx + n_elems must be less than or equal to the number of elements the buffer that the handle refers to was created with.
-    pub unsafe fn from_buffer(
-        handle: Handle<resurs::Async<DeviceBuffer>>,
-        idx: u32,
-        n_elems: u32,
-        mutability: BufferMutability,
-        ty: BufferTypeId,
-    ) -> Self {
-        Self {
-            h: handle,
-            mutability,
-            idx,
-            n_elems,
-            ty,
-        }
-    }
-
-    pub fn base_buffer(&self) -> Handle<resurs::Async<DeviceBuffer>> {
-        self.h
-    }
-
-    pub fn idx(&self) -> u32 {
-        self.idx
-    }
-
-    pub fn n_elems(&self) -> u32 {
-        self.n_elems
     }
 }
 
@@ -662,64 +615,3 @@ where
         None
     }
 }
-
-use crate::resource::Async;
-
-#[derive(Default)]
-pub struct AsyncDeviceBufferStorage {
-    buffered: BufferedStorage<Async<DeviceBuffer>>,
-    unbuffered: Storage<Async<DeviceBuffer>>,
-}
-
-impl AsyncDeviceBufferStorage {
-    pub fn allocate(&mut self, desc: &BufferDescriptor<'_>) -> AsyncBufferHandle {
-        let raw_handle = match desc.mutability() {
-            BufferMutability::Immutable => self.unbuffered.add(Async::<DeviceBuffer>::Pending),
-            BufferMutability::Mutable => self.buffered.add([
-                Async::<DeviceBuffer>::Pending,
-                Async::<DeviceBuffer>::Pending,
-            ]),
-        };
-        unsafe {
-            AsyncBufferHandle::from_buffer(
-                raw_handle,
-                0,
-                desc.n_elems(),
-                desc.mutability(),
-                desc.buffer_type().ty(),
-            )
-        }
-    }
-
-    pub fn insert(&mut self, h: AsyncBufferHandle, buf0: DeviceBuffer, buf1: Option<DeviceBuffer>) {
-        match h.mutability {
-            BufferMutability::Immutable => {
-                let loc: &mut Async<DeviceBuffer> = self
-                    .unbuffered
-                    .get_mut(&h.h)
-                    .expect("Expected handle to be allocated");
-                *loc = Async::Available(buf0);
-            }
-            BufferMutability::Mutable => {
-                let loc = self
-                    .buffered
-                    .get_all_mut(&h.h)
-                    .expect("Expected handle to be allocated");
-                loc[0] = Async::Available(buf0);
-                loc[1] = Async::Available(buf1.expect("Mutable buffers require two buffers"));
-            }
-        }
-    }
-
-    pub fn drain_available(&mut self) -> DrainIterator<'_, DeviceBuffer> {
-        let f1 = |x: &mut Async<DeviceBuffer>| std::matches!(x, Async::Available(_));
-        let f2 = |x: &mut [Async<DeviceBuffer>; 2]| std::matches!(x[0], Async::Available(_));
-        DrainFilter {
-            unbuffered_iter: self.unbuffered.drain_filter(f1),
-            buffered_iter: self.buffered.drain_filter(f2),
-        }
-    }
-}
-
-pub type DrainIterator<'a, T> =
-    DrainFilter<'a, fn(&mut Async<T>) -> bool, fn(&mut [Async<T>; 2]) -> bool, Async<T>>;

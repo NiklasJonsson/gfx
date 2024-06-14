@@ -73,14 +73,12 @@ impl Engine {
 
 impl Engine {
     fn finalize_executor(builder: ExecutorBuilder) -> Executor {
-        register_module_systems!(builder, render)
-            .with_barrier()
-            .with(
-                graph::TransformPropagation,
-                graph::TransformPropagation::ID,
-                &[],
-            )
-            .build()
+        let builder = builder.with_barrier().with(
+            graph::TransformPropagation,
+            graph::TransformPropagation::ID,
+            &[],
+        );
+        register_module_systems!(builder, render).build()
     }
 
     fn next_event(&self) -> Option<Event> {

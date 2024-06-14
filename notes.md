@@ -545,27 +545,136 @@ The file reading for shaders is not showing up in the profile so it doesn't seem
 to hash the filenames instead of the contents. This would also introduce the complexity of timestamps/checksums
 and handling includes.
 
-### WIP: Startup speedup
+## Slow startup speedup due to texture/jpeg loading
 
-Sponza is slow to load. How can this be improved?
+### Findings
 
-Look into texture loading, jpeg decoding.
+* Loading the gltf file takes abit more than one second:
+    [2024-06-14T03:22:39Z TRACE ram::asset::gltf] gltf import took 1336.0782 ms
+* There is no caching for images, we load duplicate images several times.
+* Its not convenient to add caching on the async texture storage layer as the texture descriptor can contain raw data.
+* It might be time to move the file-support out of trekant::TextureDescriptor and move out the dep on `image`.
+* The material loading API in ram is not great as you can put a TextureDescriptor with raw data in a component.
 
-#### Textures
+  * Need to figure out the correct component to be in the asset-agnostic layer and work from there.
+  * There likely needs to be a way for components to have a handle to raw CPU texture-data. Use `resurs`?
+  * This is probably what the component should actually contain.
+  * Consider splitting all the components or not at all, not the current mix of some being enums and others
+    not. Might lead to some duplication but we'll see.
 
-1. Look into caching?
-2. Parallel loads
-3. Pipelining?
+* gltf loading needs to be moved to another thread to not block the main one.
+  Spawning a new thread is probably fine for now but ideally, we had a long-task threadpool that systems could use.
+* There needs to be a caching layer for file to raw data conversion.
+
+### Caching file -> raw image data
+
+Start sketching out a TextureAssetLoader that contains the storage and cache for file -> raw image data.
+
+START HERE:
+
+The code is in the middle of changing texture loading. The problem is that the current Loader API - that there can only be one
+instance, means that there is only one place where pending resources can be resolved. When they are flushed to the
+renderer. IIRC, this was to simplify the code to not send too much data around but instead, it would be good if mapping
+does not have to take effect immediately but instead be done in individual systems.
+
+Loader API:
+
+Start sketching an API where the loader accepts a RequesterId.
+
+Later, a function, `Loader::flush(RequestedId) -> impl Iterator` can be called to see which of the load requests have finished.
+The iterator returns proper handles that can be used in the renderer.
+Could also consider `flush_buffers` and `flush_textures`.
+
+Internally, we'll need to keep these mappings:
+
+Request ID -> Pending handles
+Pending handles -> Request ID
+
+Make sure to reconsider the current AsyncResources class - it might not be needed.
+
+### Solution
+
+There were several changes introduced to improve the texture loading speed.
+
+* A caching layer in `ram` for path -> image data. This is the `TextureAssetLoader`. Any use of a texture in a component
+now needs to go through this.
+* All material-related components have been re-written to have one type per material instance up until `RenderableMaterial`.
+The flow is as follows:
+
+  ```mermaid
+  graph TD
+      PhysicallyBased --> pbr_pending[pbr::Pending] --> pbr_done[pbr::Done]
+      Unlit --> unlit_pending[unlit::Pending] --> unlit_done[unlit::Done]
+      unlit_done --> RenderableMaterial
+      pbr_done --> RenderableMaterial
+  ```
+
+* Rewrote the Loader API. Now, the loader takes a `LoadId` for each call to `load_*` and to `flush`.
+This allows the loader to separate loads from different requesters. All loads for a specific id
+will be returned (at some point in the future) from a call to `Loader::flush` for the same id.
+* The above loader API changes means that the material loading could largely be moved to the `material`
+module. One drawback: It depends on the `Mesh` class to know the vertex format which is needed for pipeline
+creation.
+
+## Rendering pipeline
+
+This is the flow of component data that in the end leads to a rendered entity.
+
+The top-level components are assigned in user code, e.g. in the `dbg` executable while the remaining
+ones are computed based on the initial component data.
+
+```mermaid
+graph TD
+    PhysicallyBased --> pbr_pending[pbr::Pending] --> pbr_done[pbr::Done]
+    Unlit --> unlit_pending[unlit::Pending] --> unlit_done[unlit::Done]
+    unlit_done --> RenderableMaterial
+    pbr_done --> RenderableMaterial
+
+    RenderableMaterial --> render_entity{Render Entity}
+    Mesh --> render_entity
+    Children --> ModelMatrix
+    Parent --> ModelMatrix
+    Transform --> ModelMatrix
+    ModelMatrix --> render_entity
+```
 
 ## Future work
+
+### Fix hack with mipmap generation dependency
+
+There is a todo in `material.rs` for fixing this. The problem is that we shouldn't create the descriptor set
+before the mipmaps are generated.
+
+### Fix shader reloads
+
+During the startup time improvements, part of the code for reloading shaders with 'R' was deleted. Specifically,
+the check for `ReloadMaterial` was removed. This should be replaced with a reload of all pipeline handles that
+are in use. The problem is that there is no way to know how to recreate them properly.
+
+### Improve the imgui ECS debugger
+
+* Show all systems.
+  * Show timings.
+  * Show passes?
+* List all components an entity has.
+* Don't crash when editing a quat.
+
+### Rewrite mesh loading to use separate components like materials
+
+This would make the codebase more consistent.
 
 ### Shadow improvements
 
 * Both directional lights and point lights have some artifacts w.r.t. to blocky shadows in the main pass.
 * Consider switching to a single depth texture for point lights. Need to write manual (0,1) depth in the
 fragment shader just like learnopengl.com for this.
-* Cascaded directional lights.
+* Implement cascaded shadow maps for directional lights.
 * Binning/clustering for supporting many lights.
+
+#### Directional lights improvements
+
+Try to reproduce the scene bounds in the opengl or sascha willems examples for directional light shadows and see if the
+issues with pixelated examples can be reproduced.
 
 ### Multiview rendering for cubemaps
 
@@ -575,11 +684,6 @@ fragment shader just like learnopengl.com for this.
 
 Instead of passing around the World, consider extracting all rendering info from it in one or several passes over the world.
 These structures would then be used in the rest of the rendering rather than storing intermediate data in the world.
-
-### Loader API
-
-Maybe we can allow users to create several loader _one per thread/system_ and contain the resource flushing to that system.
-Should loaders always be used and have blocking functions?
 
 ### Frame API
 
@@ -591,14 +695,5 @@ this internally in the renderer and panic if it is not done correctly. In additi
 
 ### Buffer API
 
-* The host buffer is only used in `ram::render::Mesh`. Consider moving it to `ram`.
 * Consider moving `elem_size` and `elem_align` into BufferDescriptor. This would reduce the contents for most of the enums.
 * Consider moving the `enqueue` functions to free functions.
-
-### Directional lights improvements
-
-* Directional lights improvements: Try to reproduce the scene bounds in the opengl or sascha willems examples for
-  directional light shadows and see if the issues with pixelated examples can be reproduced.
-* Implement cascaded shadow maps for directional lights.
-
-### Reloads do not affect all shaders, only PBR/unlit

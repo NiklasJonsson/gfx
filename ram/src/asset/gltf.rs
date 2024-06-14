@@ -2,10 +2,9 @@ use crate::ecs;
 use crate::ecs::prelude::*;
 use std::path::{Path, PathBuf};
 
-use crate::render::{HostIndexBuffer, HostVertexBuffer};
+use crate::render::{HostIndexBuffer, HostVertexBuffer, TextureAssetLoader};
 use trekant::util;
-use trekant::{MipMaps, TextureDescriptor};
-use trekant::{VertexBufferType, VertexFormat};
+use trekant::{Format, VertexBufferType, VertexFormat};
 
 use ram_derive::Visitable;
 
@@ -14,15 +13,15 @@ use crate::common::Name;
 use crate::graph::sys as graph;
 use crate::math::*;
 use crate::render;
-use crate::render::material::{PhysicallyBased, TextureUse2};
+use crate::render::material::{HostTextureHandle, PhysicallyBased, TextureAsset};
 use crate::render::mesh::Mesh;
 
 fn load_texture(
-    ctx: &RecGltfCtx,
+    ctx: &mut RecGltfCtx,
     texture: &gltf::texture::Texture,
     coord_set: u32,
-    format: util::Format,
-) -> TextureUse2 {
+    format: Format,
+) -> HostTextureHandle {
     assert_eq!(coord_set, 0, "Not implemented!");
     assert_eq!(
         texture.sampler().wrap_s(),
@@ -46,15 +45,19 @@ fn load_texture(
         x => unimplemented!("Unsupported image source {:?}", x),
     };
 
-    TextureUse2 {
-        coord_set,
-        desc: TextureDescriptor::File {
-            path: image_path,
-            format,
-            mipmaps: MipMaps::None,
-            ty: trekant::TextureType::Tex2D,
-        },
-    }
+    let handle = ctx
+        .data
+        .texture_loader
+        .load(
+            TextureAsset {
+                path: image_path,
+                format,
+            },
+            texture.name().unwrap_or("N/A"),
+        )
+        .expect("Failed to load gltf texture");
+
+    HostTextureHandle { coord_set, handle }
 }
 
 fn check_supported(primitive: &gltf::Primitive<'_>) {
@@ -82,23 +85,23 @@ fn interleave_vertex_buffer(
     let normals = reader.read_normals().expect("Found no normals");
 
     let mut format = VertexFormat::builder()
-        .add_attribute(util::Format::FLOAT3) // position
-        .add_attribute(util::Format::FLOAT3); // normal
+        .add_attribute(Format::FLOAT3) // position
+        .add_attribute(Format::FLOAT3); // normal
 
     let tangents = reader.read_tangents();
     let tex_coords = reader.read_tex_coords(0);
     let colors = reader.read_colors(0);
 
     if tex_coords.is_some() {
-        format = format.add_attribute(util::Format::FLOAT2);
+        format = format.add_attribute(Format::FLOAT2);
     }
 
     if colors.is_some() {
-        format = format.add_attribute(util::Format::FLOAT4);
+        format = format.add_attribute(Format::FLOAT4);
     }
 
     if tangents.is_some() {
-        format = format.add_attribute(util::Format::FLOAT4);
+        format = format.add_attribute(Format::FLOAT4);
     }
 
     let format = format.build();
@@ -413,6 +416,7 @@ struct LoaderData<'a> {
     pb_materials: WriteStorage<'a, render::material::PhysicallyBased>,
     bboxes: WriteStorage<'a, Aabb>,
     cameras: WriteStorage<'a, Camera>,
+    texture_loader: Write<'a, TextureAssetLoader>,
 }
 
 struct CtxData<'a, 'b> {
@@ -426,6 +430,7 @@ struct CtxData<'a, 'b> {
     #[allow(dead_code)]
     cameras: &'b mut WriteStorage<'a, Camera>,
     bboxes: &'b mut WriteStorage<'a, Aabb>,
+    texture_loader: &'b mut Write<'a, TextureAssetLoader>,
 }
 
 struct RecGltfCtx<'a, 'b> {
@@ -449,6 +454,7 @@ impl<'a> System<'a> for GltfLoader {
             mut pb_materials,
             mut cameras,
             mut bboxes,
+            mut texture_loader,
         } = data;
 
         for (ent, _) in (&entities, &load_assets).join() {
@@ -473,6 +479,7 @@ impl<'a> System<'a> for GltfLoader {
                 bboxes: &mut bboxes,
                 pb_materials: &mut pb_materials,
                 meshes: &mut meshes,
+                texture_loader: &mut texture_loader,
             };
             assert_eq!(gltf_doc.scenes().len(), 1);
             let mut rec_ctx = RecGltfCtx {

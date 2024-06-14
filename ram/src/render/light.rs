@@ -269,73 +269,71 @@ pub struct ShadowResources {
     pub pointlight_dummy_pipeline: Handle<GraphicsPipeline>,
 }
 
-pub fn prepare_entities(world: &World, renderer: &mut Renderer) {
+pub fn pre_frame(world: &World, renderer: &mut Renderer) {
     let shader_compiler = world.read_resource::<super::shader::ShaderCompiler>();
     let shader_cache = world.write_resource::<super::GlobalShaderCache>();
     let mut shader_cache = shader_cache.0.lock().expect("mutex poison");
     let frame_data = world.read_resource::<super::FrameResources>();
     let meshes = world.read_storage::<super::Mesh>();
-    let materials = world.read_storage::<super::GpuMaterial>();
+    let materials = world.read_storage::<super::material::PhysicallyBased>();
     let mut renderables = world.write_storage::<ShadowPipeline>();
     let entities = world.entities();
 
-    for (mesh, material, entity, _) in
-        (&meshes, &materials, &entities, &!renderables.mask().clone()).join()
+    for (mesh, entity, _, _) in
+        (&meshes, &entities, &!renderables.mask().clone(), &materials).join()
     {
-        if let super::material::GpuMaterial::PBR { .. } = material {
-            let vertex_format_size = mesh.cpu_vertex_buffer.format().size();
-            let shadow_vertex_format = trekant::vertex::VertexFormat::builder()
-                .add_attribute(trekant::util::Format::FLOAT3) // pos
-                .skip(vertex_format_size - trekant::util::Format::FLOAT3.size())
-                .build();
+        let vertex_format_size = mesh.cpu_vertex_buffer.format().size();
+        let shadow_vertex_format = trekant::VertexFormat::builder()
+            .add_attribute(trekant::util::Format::FLOAT3) // pos
+            .skip(vertex_format_size - trekant::util::Format::FLOAT3.size())
+            .build();
 
-            // TODO: Cleanup error handling
-            let directional_pipeline = {
-                let desc = depth_shadow_pipeline_desc(
-                    &shader_compiler,
-                    &mut *shader_cache,
-                    shadow_vertex_format.clone(),
-                )
-                .unwrap();
-                renderer
-                    .create_gfx_pipeline(desc, &frame_data.shadow.directional_light_render_pass)
-                    .unwrap()
-            };
+        // TODO: Cleanup error handling
+        let directional_pipeline = {
+            let desc = depth_shadow_pipeline_desc(
+                &shader_compiler,
+                &mut *shader_cache,
+                shadow_vertex_format.clone(),
+            )
+            .unwrap();
+            renderer
+                .create_gfx_pipeline(desc, &frame_data.shadow.directional_light_render_pass)
+                .unwrap()
+        };
 
-            let spotlight_pipeline = {
-                let desc = depth_shadow_pipeline_desc(
-                    &shader_compiler,
-                    &mut *shader_cache,
-                    shadow_vertex_format.clone(),
-                )
-                .unwrap();
-                renderer
-                    .create_gfx_pipeline(desc, &frame_data.shadow.spotlight_render_pass)
-                    .unwrap()
-            };
+        let spotlight_pipeline = {
+            let desc = depth_shadow_pipeline_desc(
+                &shader_compiler,
+                &mut *shader_cache,
+                shadow_vertex_format.clone(),
+            )
+            .unwrap();
+            renderer
+                .create_gfx_pipeline(desc, &frame_data.shadow.spotlight_render_pass)
+                .unwrap()
+        };
 
-            let pointlight_pipeline = {
-                let desc = pointlight_shadow_pipeline_desc(
-                    &shader_compiler,
-                    &mut *shader_cache,
-                    shadow_vertex_format.clone(),
-                )
-                .unwrap();
-                renderer
-                    .create_gfx_pipeline(desc, &frame_data.shadow.pointlight_render_pass)
-                    .unwrap()
-            };
+        let pointlight_pipeline = {
+            let desc = pointlight_shadow_pipeline_desc(
+                &shader_compiler,
+                &mut *shader_cache,
+                shadow_vertex_format.clone(),
+            )
+            .unwrap();
+            renderer
+                .create_gfx_pipeline(desc, &frame_data.shadow.pointlight_render_pass)
+                .unwrap()
+        };
 
-            if let Err(e) = renderables.insert(
-                entity,
-                ShadowPipeline {
-                    spotlight: spotlight_pipeline,
-                    directional: directional_pipeline,
-                    pointlight: pointlight_pipeline,
-                },
-            ) {
-                log::error!("Failed to insert shadow pipeline for {entity:?} due to {e}");
-            }
+        if let Err(e) = renderables.insert(
+            entity,
+            ShadowPipeline {
+                spotlight: spotlight_pipeline,
+                directional: directional_pipeline,
+                pointlight: pointlight_pipeline,
+            },
+        ) {
+            log::error!("Failed to insert shadow pipeline for {entity:?} due to {e}");
         }
     }
 }
@@ -1214,7 +1212,7 @@ pub fn draw_entities_shadow(
     let mut prev_handle: Option<Handle<GraphicsPipeline>> = None;
 
     for (mesh, pipeline, mtx) in (&meshes, &pipelines, &model_matrices).join() {
-        let (super::GpuResource::Available(vbuf), super::GpuResource::Available(ibuf)) =
+        let (Some(super::GpuBuffer::Available(vbuf)), Some(super::GpuBuffer::Available(ibuf))) =
             (&mesh.gpu_vertex_buffer, &mesh.gpu_index_buffer)
         else {
             continue;

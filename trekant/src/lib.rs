@@ -1,7 +1,5 @@
 pub use ash::vk;
 
-mod buffer;
-mod loader;
 pub mod pipeline;
 pub mod pipeline_resource;
 pub mod resource;
@@ -11,24 +9,31 @@ pub mod util;
 pub mod vertex;
 
 mod backend;
+mod buffer;
 mod common;
 mod descriptor;
 mod error;
+mod loader;
 mod render_pass;
 mod render_target;
 mod texture;
 
 pub use backend::command::CommandBuffer;
 pub use buffer::{
-    AsyncBufferHandle, BufferDescriptor, BufferHandle, BufferLayout, BufferMutability, BufferType,
-    BufferTypeTrait, DeviceBuffer, IndexBufferType, IndexInt, StorageBufferType, UniformBufferType,
+    BufferDescriptor, BufferHandle, BufferLayout, BufferMutability, BufferType, BufferTypeTrait,
+    DeviceBuffer, IndexBufferType, IndexInt, StorageBufferType, UniformBufferType,
     VertexBufferType,
 };
 pub use descriptor::DescriptorData;
 pub use error::RenderError;
 pub use error::ResizeReason;
-pub use loader::{HandleMapping, Loader, LoaderError};
-pub use pipeline::{GraphicsPipeline, GraphicsPipelineDescriptor, PipelineError, ShaderStage};
+pub use loader::{
+    HandleMapping, LoadId, Loader, LoaderError, PendingBufferHandle, PendingTextureHandle,
+};
+pub use pipeline::{
+    GraphicsPipeline, GraphicsPipelineDescriptor, PipelineError, PolygonMode, ShaderDescriptor,
+    ShaderStage,
+};
 pub use pipeline_resource::PipelineResourceSet;
 pub use render_pass::{RenderPass, RenderPassEncoder};
 pub use render_target::RenderTarget;
@@ -40,7 +45,7 @@ pub use texture::{
 };
 pub use traits::{PushConstant, Uniform};
 pub use trekant_derive::Std140;
-pub use util::{ByteBuffer, Extent2D, Format};
+pub use util::{ByteBuffer, Extent2D, Extent3D, Format};
 pub use vertex::{VertexDefinition, VertexFormat};
 
 use crate::backend::image::ImageDescriptor;
@@ -899,7 +904,11 @@ impl Renderer {
                 .textures
                 .get_mut(handle)
                 .ok_or_else(|| RenderError::InvalidHandle(handle.id()))?;
-            log::trace!("Generating mipmap for {:p}", texture.vk_image());
+            log::trace!(
+                "Generating mipmap for image {:?}, image view: {:?}",
+                texture.vk_image(),
+                texture.full_image_view()
+            );
             let extent = texture.extent();
             let format = texture.format();
             let mip_levels = texture::mip_levels_for(extent);
@@ -949,7 +958,15 @@ impl Renderer {
                 texture.sampler().descriptor(),
             )
             .expect("Failed to create mipmapped texture");
-            old_textures.push(std::mem::replace(texture, new));
+            log::trace!(
+                "Mipmap generation: Replaced image {:?}, image view {:?} with image {:?}, image view {:?}",
+                texture.vk_image(),
+                texture.full_image_view(),
+                new.vk_image(),
+                new.full_image_view()
+            );
+            let old = std::mem::replace(texture, new);
+            old_textures.push(old);
         }
 
         let done = self.submit_command_buffer(cmd_buf);

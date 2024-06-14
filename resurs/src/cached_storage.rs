@@ -4,8 +4,8 @@ use super::cache::*;
 use super::storage::*;
 use super::Handle;
 
-#[derive(Clone, Debug, Default)]
-struct Stats {
+#[derive(Clone, Copy, Debug, Default)]
+pub struct Stats {
     pub hits: usize,
     pub misses: usize,
 }
@@ -82,6 +82,16 @@ where
             .iter()
             .zip(self.storage.iter_mut())
             .map(|((desc, _handle), resource)| (desc, resource))
+    }
+
+    pub fn stats(&self) -> &Stats {
+        &self.stats
+    }
+
+    pub fn flush_stats(&mut self) -> Stats {
+        let stats = self.stats;
+        self.stats = Stats::default();
+        stats
     }
 }
 

@@ -5,7 +5,7 @@ use trekant::pipeline::{
 };
 use trekant::pipeline_resource::PipelineResourceSet;
 use trekant::util::{cast_transparent_slice, Extent2D, Format, Offset2D, Rect2D, Viewport};
-use trekant::vertex::{VertexDefinition, VertexFormat};
+use trekant::{VertexDefinition, VertexFormat};
 use trekant::BufferMutability;
 use trekant::Frame;
 use trekant::RenderPassEncoder;

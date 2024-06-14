@@ -27,7 +27,7 @@ pub enum TextureError {
     ImageView(#[from] ImageViewError),
 }
 
-pub fn load_image<P: AsRef<Path>>(p: &P) -> Result<image::RgbaImage, image::ImageError> {
+fn load_image<P: AsRef<Path>>(p: &P) -> Result<image::RgbaImage, image::ImageError> {
     let path = p.as_ref();
 
     log::trace!("Trying to load image from {}", path.display());
@@ -107,6 +107,7 @@ pub enum TextureDescriptor<'a> {
         data: DescriptorData<'a>,
         extent: Extent2D,
         format: util::Format,
+        // TODO: Can this be removed?
         mipmaps: MipMaps,
         ty: TextureType,
     },
@@ -159,6 +160,7 @@ impl<'a> TextureDescriptor<'a> {
                 mipmaps,
                 ty,
             } => {
+                log::debug!("Loading image at {}", path.display());
                 let image = load_image(&path)?;
                 let extent = Extent2D {
                     width: image.width(),
@@ -540,21 +542,24 @@ impl Texture {
             desc.array_layers,
         )?;
 
-        let sub_image_views = (0..desc.array_layers)
-            .map(|i| {
-                ImageView::new(
-                    device,
-                    image.vk_image(),
-                    desc.format,
-                    aspect,
-                    desc.mip_levels,
-                    vk::ImageViewType::TYPE_2D,
-                    i,
-                    1,
-                )
-            })
-            .collect::<Result<Vec<_>, _>>()?;
-
+        let sub_image_views = if desc.array_layers > 1 {
+            (0..desc.array_layers)
+                .map(|i| {
+                    ImageView::new(
+                        device,
+                        image.vk_image(),
+                        desc.format,
+                        aspect,
+                        desc.mip_levels,
+                        vk::ImageViewType::TYPE_2D,
+                        i,
+                        1,
+                    )
+                })
+                .collect::<Result<Vec<_>, _>>()?
+        } else {
+            vec![]
+        };
         let sampler = Sampler::new(device, sampler_descriptor)?;
 
         Ok(Self {
@@ -627,20 +632,6 @@ impl<T> TextureStorage<T> {
         self.storage.add(t)
     }
 }
-impl TextureStorage<Async<Texture>> {
-    pub fn allocate(&mut self) -> Handle<Async<Texture>> {
-        self.storage.add(Async::Pending)
-    }
-
-    pub fn drain_available(&mut self) -> DrainIterator<'_> {
-        self.storage
-            .drain_filter(|x: &mut Async<Texture>| std::matches!(x, Async::Available(_)))
-    }
-}
-
-pub type DrainIterator<'a> =
-    resurs::DrainFilter<'a, fn(&mut Async<Texture>) -> bool, Async<Texture>>;
-
 impl<T> Default for TextureStorage<T> {
     fn default() -> Self {
         Self::new()
@@ -648,5 +639,3 @@ impl<T> Default for TextureStorage<T> {
 }
 
 pub type Textures = TextureStorage<Texture>;
-use crate::resource::Async;
-pub type AsyncTextures = TextureStorage<Async<Texture>>;

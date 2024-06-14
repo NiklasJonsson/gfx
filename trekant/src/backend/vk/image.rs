@@ -22,6 +22,14 @@ pub struct ImageView {
     vk_device: VkDeviceHandle,
 }
 
+impl std::fmt::Debug for ImageView {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("ImageView")
+            .field("image_view", &self.vk_image_view)
+            .finish()
+    }
+}
+
 impl std::ops::Drop for ImageView {
     fn drop(&mut self) {
         unsafe {
@@ -71,6 +79,8 @@ impl ImageView {
                 .create_image_view(&info, None)
                 .map_err(ImageViewError::Creation)?
         };
+
+        log::trace!("Created image view {vk_image_view:?}");
 
         Ok(Self {
             vk_image_view,
@@ -159,7 +169,7 @@ pub fn generate_mipmaps(
     mip_levels: u32,
 ) {
     log::trace!(
-        "Generating mipmaps for {:p}. extent = {}. mip_levels = {}",
+        "Generating mipmaps for {:?}. extent = {}. mip_levels = {}",
         image.vk_image(),
         extent,
         mip_levels
@@ -330,7 +340,7 @@ impl Image {
         let (vk_image, allocation) =
             unsafe { allocator.create_image(&info, &allocation_create_info) }
                 .map_err(MemoryError::ImageCreation)?;
-        log::trace!("Created image {vk_image:p}");
+        log::trace!("Created image {vk_image:?}");
 
         Ok(Self {
             allocator: AllocatorHandle::clone(allocator),
