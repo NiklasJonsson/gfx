@@ -148,6 +148,19 @@ impl<'a> TextureDescriptor<'a> {
     }
 }
 
+static IMG_RECORDER: std::sync::Mutex<Vec<std::path::PathBuf>> = std::sync::Mutex::new(Vec::new());
+
+fn record_image_load(path: &std::path::Path) {
+    let mut recorder = IMG_RECORDER.lock().unwrap();
+    for p in &*recorder {
+        if p == path {
+            log::debug!("Image {} was already loaded", path.display());
+            return;
+        }
+    }
+    recorder.push(path.to_path_buf());
+}
+
 impl<'a> TextureDescriptor<'a> {
     pub(crate) fn split_desc_data(
         self,
@@ -159,6 +172,8 @@ impl<'a> TextureDescriptor<'a> {
                 mipmaps,
                 ty,
             } => {
+                log::debug!("Loading image at {}", path.display());
+                record_image_load(&path);
                 let image = load_image(&path)?;
                 let extent = Extent2D {
                     width: image.width(),

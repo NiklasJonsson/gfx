@@ -547,6 +547,8 @@ and handling includes.
 
 ### WIP: Startup speedup
 
+START HERE:
+
 Sponza is slow to load. How can this be improved?
 
 Look into texture loading, jpeg decoding.
@@ -556,6 +558,25 @@ Look into texture loading, jpeg decoding.
 1. Look into caching?
 2. Parallel loads
 3. Pipelining?
+
+##### Findings
+
+* Loading the gltf file takes abit more than one second:
+    [2024-06-14T03:22:39Z TRACE ram::asset::gltf] gltf import took 1336.0782 ms
+* There is no caching for images, we load duplicate images several times.
+* Its not convenient to add caching on the async texture storage layer as the texture descriptor can contain raw data.
+* It might be time to move the file-support out of trekant::TextureDescriptor and move out the dep on `image`.
+* The material loading API in ram is not great as you can put a TextureDescriptor with raw data in a component.
+
+  * Need to figure out the correct component to be in the asset-agnostic layer and work from there.
+  * There likely needs to be a way for components to have a handle to raw CPU texture-data. Use `resurs`?
+  * This is probably what the component should actually contain.
+  * Consider splitting all the components or not at all, not the current mix of some being enums and others
+    not. Might lead to some duplication but we'll see.
+
+* gltf loading needs to be moved to another thread to not block the main one.
+  Spawning a new thread is probably fine for now but ideally, we had a long-task threadpool that systems could use.
+* There needs to be a caching layer for file to raw data conversion.
 
 ## Future work
 
@@ -600,5 +621,3 @@ this internally in the renderer and panic if it is not done correctly. In additi
 * Directional lights improvements: Try to reproduce the scene bounds in the opengl or sascha willems examples for
   directional light shadows and see if the issues with pixelated examples can be reproduced.
 * Implement cascaded shadow maps for directional lights.
-
-### Reloads do not affect all shaders, only PBR/unlit
