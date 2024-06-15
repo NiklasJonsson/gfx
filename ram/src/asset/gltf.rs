@@ -14,7 +14,7 @@ use crate::common::Name;
 use crate::graph::sys as graph;
 use crate::math::*;
 use crate::render;
-use crate::render::material::{PhysicallyBased, TextureUse2};
+use crate::render::material::PhysicallyBased;
 use crate::render::mesh::Mesh;
 
 fn load_texture(

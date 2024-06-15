@@ -987,7 +987,7 @@ impl<'a> System<'a> for GpuUpload {
 }
 
 pub fn register_systems(builder: ExecutorBuilder) -> ExecutorBuilder {
-    register_module_systems!(builder, debug, geometry).with(GpuUpload, GpuUpload::ID, &[])
+    register_module_systems!(builder, debug, geometry, material).with(GpuUpload, GpuUpload::ID, &[])
 }
 
 pub fn register_components(world: &mut World) {
