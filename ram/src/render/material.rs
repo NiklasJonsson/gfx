@@ -11,6 +11,35 @@ use trekant::resource::Async;
 
 use super::GpuBuffer;
 
+struct CpuTexture;
+
+#[derive(Clone, PartialOrd, PartialEq, Eq, Ord, Hash, Debug)]
+pub struct TextureHandle(resurs::Handle<CpuTexture>);
+
+#[derive(Clone, PartialOrd, PartialEq, Eq, Ord, Hash, Debug)]
+struct TextureCacheKey {
+    key: std::path::PathBuf,
+}
+
+struct TextureAssetLoadError;
+
+#[derive(Clone, PartialOrd, PartialEq, Eq, Ord, Hash, Debug)]
+struct TextureAsset(std::path::PathBuf);
+
+pub struct TextureAssetLoader {
+    storage: resurs::CachedStorage<TextureAsset, CpuTexture>,
+}
+
+impl TextureAssetLoader {
+    fn load(
+        &mut self,
+        asset: TextureAsset,
+        debug_name: &str,
+    ) -> Result<TextureHandle, TextureAssetLoadError> {
+        todo!()
+    }
+}
+
 #[derive(Debug, Clone, Component, Visitable)]
 pub struct Unlit {
     pub color: Rgba,

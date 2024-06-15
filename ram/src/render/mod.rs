@@ -245,7 +245,7 @@ fn get_pipeline_for(
             };
 
             let (vert, frag) =
-                shader::pbr_gltf::compile(&shader_compiler, &mut *shader_cache, &def)?;
+                shader::pbr_gltf::compile(&shader_compiler, &mut shader_cache, &def)?;
 
             let vert = ShaderDescriptor {
                 debug_name: Some("pbr-vert".to_owned()),
@@ -267,7 +267,7 @@ fn get_pipeline_for(
         material::GpuMaterial::Unlit { polygon_mode, .. } => {
             let desc = unlit_pipeline_desc(
                 &shader_compiler,
-                &mut *shader_cache,
+                &mut shader_cache,
                 vertex_format,
                 *polygon_mode,
             )?;

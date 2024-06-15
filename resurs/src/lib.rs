@@ -42,6 +42,18 @@ impl<T> std::hash::Hash for Handle<T> {
     }
 }
 
+impl<T> std::cmp::Ord for Handle<T> {
+    fn cmp(&self, other: &Self) -> std::cmp::Ordering {
+        self.id.cmp(&other.id)
+    }
+}
+
+impl<T> std::cmp::PartialOrd for Handle<T> {
+    fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
+        Some(self.cmp(other))
+    }
+}
+
 impl<T> Handle<T> {
     fn new(id: ID) -> Self {
         Handle::<T> {
