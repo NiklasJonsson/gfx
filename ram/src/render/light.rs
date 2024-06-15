@@ -1214,7 +1214,7 @@ pub fn draw_entities_shadow(
     let mut prev_handle: Option<Handle<GraphicsPipeline>> = None;
 
     for (mesh, pipeline, mtx) in (&meshes, &pipelines, &model_matrices).join() {
-        let (super::GpuResource::Available(vbuf), super::GpuResource::Available(ibuf)) =
+        let (super::GpuBuffer::Available(vbuf), super::GpuBuffer::Available(ibuf)) =
             (&mesh.gpu_vertex_buffer, &mesh.gpu_index_buffer)
         else {
             continue;

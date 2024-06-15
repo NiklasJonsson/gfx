@@ -12,7 +12,9 @@ use trekant::resource::Async;
 use super::GpuBuffer;
 
 pub struct HostTexture {
-    data: image::RgbaImage,
+    data: Vec<u8>,
+    format: trekant::Format,
+    extent: trekant::Extent2D,
     debug_name: String,
 }
 
@@ -37,8 +39,11 @@ pub struct AsyncDeviceTextureHandle {
 
 pub struct TextureAssetLoadError;
 
-#[derive(Clone, PartialOrd, PartialEq, Eq, Ord, Hash, Debug)]
-pub struct TextureAsset(std::path::PathBuf);
+#[derive(Clone, PartialEq, Eq, Hash, Debug)]
+pub struct TextureAsset {
+    path: std::path::PathBuf,
+    format: trekant::Format,
+}
 
 #[derive(Default)]
 pub struct TextureAssetLoader {
@@ -71,14 +76,22 @@ impl TextureAssetLoader {
         asset: TextureAsset,
         debug_name: &str,
     ) -> Result<Handle<HostTexture>, TextureAssetLoadError> {
-        log::trace!("load_blocking texture for {}", asset.0.display());
+        log::trace!("load_blocking texture for {}", asset.path.display());
         let mut cache_hit = true;
         let result: Result<Handle<HostTexture>, image::ImageError> =
             self.storage.get_or_add(asset, |asset| {
                 cache_hit = false;
-                let image = load_image(&asset.0)?;
+
+                let image = load_image(&asset.path)?;
+                let extent = trekant::Extent2D {
+                    width: image.width(),
+                    height: image.height(),
+                };
+                let raw_image_data = image.into_raw();
                 Ok(HostTexture {
-                    data: image,
+                    data: raw_image_data,
+                    extent,
+                    format: asset.format,
                     debug_name: debug_name.to_owned(),
                 })
             });
@@ -98,12 +111,6 @@ impl TextureAssetLoader {
     fn get(&self, handle: Handle<HostTexture>) -> Option<&HostTexture> {
         self.storage.get(&handle)
     }
-}
-
-#[derive(Debug, Clone, Component, Visitable)]
-pub struct Unlit {
-    pub color: Rgba,
-    pub polygon_mode: PolygonMode,
 }
 
 #[derive(Debug, Component, Visitable)]
@@ -214,8 +221,6 @@ impl PendingMaterial {
 pub use pbr::PhysicallyBased;
 
 mod pbr {
-    use std::future::pending;
-
     use super::*;
 
     /// Attach this to an entity for it to have a lit material that is rendered with a
@@ -250,11 +255,16 @@ mod pbr {
         has_vertex_colors: bool,
     }
 
-    pub struct Upload;
+    pub struct StartLoad;
 
-    impl<'a> System<'a> for Upload {
+    impl StartLoad {
+        pub const ID: &'static str = "UnlitMaterialPipelineStartLoad";
+    }
+
+    impl<'a> System<'a> for StartLoad {
         type SystemData = (
             WriteExpect<'a, trekant::Loader>,
+            WriteExpect<'a, TextureAssetLoader>,
             WriteStorage<'a, PhysicallyBased>,
             WriteStorage<'a, PendingMaterial>,
             WriteStorage<'a, GpuMaterial>,
@@ -262,11 +272,21 @@ mod pbr {
         );
 
         fn run(&mut self, data: Self::SystemData) {
-            let (loader, materials, mut pending_materials, done_materials, entities) = data;
+            let (
+                loader,
+                texture_loader,
+                materials,
+                mut pending_materials,
+                done_materials,
+                entities,
+            ) = data;
 
-            // Physically based
+            // TODO: Consider rewriting this to collected:
+            // 1. Entity
+            // 2. PBRMaterialData
+            // 3. Textures to be loaded
+            // Iterate over these in the second loop
             let mut ubuf_pbr = Vec::new();
-            let mut textures
             for (pb_mat, _, _) in (&materials, !&pending_materials, !&done_materials).join() {
                 ubuf_pbr.push(crate::render::uniform::PBRMaterialData {
                     base_color_factor: pb_mat.base_color_factor.into_array(),
@@ -277,25 +297,36 @@ mod pbr {
                 });
             }
 
-            let map_tex = |inp: &Option<material::TextureUse2>| -> Option<
-                Pending<
-                    material::TextureUse<resurs::Async<trekant::Texture>>,
-                    material::TextureUse<trekant::Texture>,
-                >,
-            > {
-                inp.as_ref().map(|tex| {
+            let map_tex = |inp: &Option<HostTextureHandle>| -> PendingTextureUse {
+                if let Some(tex) = inp {
+                    let cpu_texture = texture_loader
+                        .get(tex.handle)
+                        .unwrap_or_else(|| panic!("Missing texture for handle {:?}", tex.handle));
+
+                    // TODO: No clone. Use Arc instead.
+                    let data = trekant::DescriptorData::from_vec(cpu_texture.data.clone());
+                    let mipmaps = todo!("Figure out mipmaps");
+
                     let handle = loader
-                        .load_texture(tex.desc.clone())
+                        .load_texture(TextureDescriptor::Raw {
+                            data,
+                            extent: cpu_texture.extent,
+                            format: cpu_texture.format,
+                            mipmaps,
+                            ty: trekant::TextureType::Tex2D,
+                        })
                         .expect("Failed to load texture");
-                    Pending::Pending(material::TextureUse {
-                        coord_set: tex.coord_set,
+                    PendingTextureUse::Pending(AsyncDeviceTextureHandle {
                         handle,
+                        coord_set: tex.coord_set,
                     })
-                })
+                } else {
+                    PendingTextureUse::None
+                }
             };
 
             if !ubuf_pbr.is_empty() {
-                let async_handle = loader
+                let async_uniform_buffer = loader
                     .load_buffer(trekant::BufferDescriptor::uniform_buffer(
                         ubuf_pbr,
                         trekant::BufferMutability::Immutable,
@@ -303,17 +334,18 @@ mod pbr {
                     ))
                     .expect("Failed to load uniform buffer");
                 for (i, (ent, pb_mat, _)) in
-                    (&entities, &physically_based_materials, !&gpu_materials)
-                        .join()
-                        .enumerate()
+                    (&entities, &materials, !&done_materials).join().enumerate()
                 {
-                    if let StorageEntry::Vacant(entry) = pending_mats.entry(ent).unwrap() {
+                    if let StorageEntry::Vacant(entry) = pending_materials.entry(ent).unwrap() {
                         entry.insert(PendingMaterial::PBR {
-                            material_uniforms: GpuBuffer::InFlight(AsyncBufferHandle::sub_buffer(
-                                async_handle,
-                                i as u32,
-                                1,
-                            )),
+                            material_uniforms: GpuBuffer::InFlight(
+                                // TODO: Take first?
+                                crate::render::AsyncBufferHandle::sub_buffer(
+                                    async_uniform_buffer,
+                                    i as u32,
+                                    1,
+                                ),
+                            ),
                             normal_map: map_tex(&pb_mat.normal_map),
                             base_color_texture: map_tex(&pb_mat.base_color_texture),
                             metallic_roughness_texture: map_tex(&pb_mat.metallic_roughness_texture),
@@ -326,6 +358,87 @@ mod pbr {
     }
 }
 
+pub use unlit::Unlit;
+
+mod unlit {
+    use super::*;
+
+    #[derive(Debug, Clone, Component, Visitable)]
+    pub struct Unlit {
+        pub color: Rgba,
+        pub polygon_mode: PolygonMode,
+    }
+
+    #[derive(Debug, Component, Visitable)]
+    pub struct Done {
+        color_uniform: BufferHandle,
+        polygon_mode: PolygonMode,
+    }
+
+    #[derive(Debug, Component, Visitable)]
+    struct Pending {
+        color_uniform: GpuBuffer,
+        polygon_mode: PolygonMode,
+    }
+
+    pub struct StartLoad;
+
+    impl StartLoad {
+        pub const ID: &'static str = "UnlitMaterialPipelineStartLoad";
+    }
+
+    impl<'a> System<'a> for StartLoad {
+        type SystemData = (
+            WriteExpect<'a, trekant::Loader>,
+            WriteStorage<'a, Unlit>,
+            WriteStorage<'a, Pending>,
+            WriteStorage<'a, Done>,
+            Entities<'a>,
+        );
+
+        fn run(&mut self, data: Self::SystemData) {
+            let (loader, materials, mut pending_materials, done_materials, entities) = data;
+
+            let mut ubuf = Vec::new();
+            for (unlit, _, _) in (&materials, !&done_materials, !&pending_materials).join() {
+                ubuf.push(crate::render::uniform::UnlitUniformData {
+                    color: unlit.color.into_array(),
+                });
+            }
+
+            if !ubuf.is_empty() {
+                let async_handle = loader
+                    .load_buffer(trekant::BufferDescriptor::uniform_buffer(
+                        ubuf,
+                        trekant::BufferMutability::Immutable,
+                        trekant::BufferLayout::MinBufferOffset,
+                    ))
+                    .expect("Failed to load uniform buffer");
+                for (i, (ent, unlit, _)) in
+                    (&entities, &materials, !&done_materials).join().enumerate()
+                {
+                    if let StorageEntry::Vacant(entry) = pending_materials.entry(ent).unwrap() {
+                        entry.insert(Pending {
+                            color_uniform: GpuBuffer::InFlight(
+                                crate::render::AsyncBufferHandle::sub_buffer(
+                                    async_handle,
+                                    i as u32,
+                                    1,
+                                ),
+                            ),
+                            polygon_mode: unlit.polygon_mode,
+                        });
+                    }
+                }
+            }
+        }
+    }
+}
+
 pub fn register_systems(builder: ExecutorBuilder) -> ExecutorBuilder {
-    builder.with(pbr::Upload, "PBMaterialPipelineUpload", &[])
+    builder.with(pbr::StartLoad, pbr::StartLoad::ID, &[]).with(
+        unlit::StartLoad,
+        unlit::StartLoad::ID,
+        &[],
+    )
 }

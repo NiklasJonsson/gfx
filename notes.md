@@ -576,15 +576,12 @@ and handling includes.
 
 Start sketching out a TextureAssetLoader that contains the storage and cache for file -> raw image data.
 
-TODO:
-
-1. Use it in the gltf loading code
-2. Make the `PhysicallyBased` component use a CpuTextureHandle instead.
-3. Profile!
-
 START HERE:
 
-1. There are several instances of material components: PhysicallyBased, Pending, Gpu and Renderable. Can they be re-structured?
+The code is in the middle of changing texture loading. The problem is that the current Loader API - that there can only be one
+instance, means that there is only one place where pending resources can be resolved. When they are flushed to the
+renderer. IIRC, this was to simplify the code to not send too much data around but instead, it would be good if mapping
+does not have to take effect immediately but instead be done in individual systems.
 
 ## Future work
 
@@ -604,11 +601,6 @@ fragment shader just like learnopengl.com for this.
 
 Instead of passing around the World, consider extracting all rendering info from it in one or several passes over the world.
 These structures would then be used in the rest of the rendering rather than storing intermediate data in the world.
-
-### Loader API
-
-Maybe we can allow users to create several loader _one per thread/system_ and contain the resource flushing to that system.
-Should loaders always be used and have blocking functions?
 
 ### Frame API
 
