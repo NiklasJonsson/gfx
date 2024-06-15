@@ -545,21 +545,15 @@ The file reading for shaders is not showing up in the profile so it doesn't seem
 to hash the filenames instead of the contents. This would also introduce the complexity of timestamps/checksums
 and handling includes.
 
-### WIP: Startup speedup
+## WIP: Startup speedup due to texture/jpeg loading
 
-START HERE:
-
-Sponza is slow to load. How can this be improved?
-
-Look into texture loading, jpeg decoding.
-
-#### Textures
+### Textures
 
 1. Look into caching?
 2. Parallel loads
 3. Pipelining?
 
-##### Findings
+### Findings
 
 * Loading the gltf file takes abit more than one second:
     [2024-06-14T03:22:39Z TRACE ram::asset::gltf] gltf import took 1336.0782 ms
@@ -577,6 +571,17 @@ Look into texture loading, jpeg decoding.
 * gltf loading needs to be moved to another thread to not block the main one.
   Spawning a new thread is probably fine for now but ideally, we had a long-task threadpool that systems could use.
 * There needs to be a caching layer for file to raw data conversion.
+
+#### Caching file -> raw image data
+
+Start sketching out a TextureAssetLoader that contains the storage and cache for file -> raw image data.
+
+TODO:
+
+1. Put this in the world as a resource
+2. Use it in the gltf loading code
+3. Make the `PhysicallyBased` component use a CpuTextureHandle instead.
+4. Profile!
 
 ## Future work
 

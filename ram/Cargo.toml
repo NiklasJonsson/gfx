@@ -23,6 +23,7 @@ num-traits = "0.2.8"
 
 # Resources/Assets
 gltf = "0.14.0"
+image = "0.25.1"
 
 # Util
 log = "0.4.8"

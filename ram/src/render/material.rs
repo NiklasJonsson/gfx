@@ -11,32 +11,69 @@ use trekant::resource::Async;
 
 use super::GpuBuffer;
 
-struct CpuTexture;
+pub struct CpuTexture {
+    data: image::RgbaImage,
+    debug_name: String,
+}
 
 #[derive(Clone, PartialOrd, PartialEq, Eq, Ord, Hash, Debug)]
 pub struct TextureHandle(resurs::Handle<CpuTexture>);
 
-#[derive(Clone, PartialOrd, PartialEq, Eq, Ord, Hash, Debug)]
-struct TextureCacheKey {
-    key: std::path::PathBuf,
-}
-
-struct TextureAssetLoadError;
+pub struct TextureAssetLoadError;
 
 #[derive(Clone, PartialOrd, PartialEq, Eq, Ord, Hash, Debug)]
-struct TextureAsset(std::path::PathBuf);
+pub struct TextureAsset(std::path::PathBuf);
 
 pub struct TextureAssetLoader {
     storage: resurs::CachedStorage<TextureAsset, CpuTexture>,
 }
 
+pub fn load_image(path: &std::path::Path) -> Result<image::RgbaImage, image::ImageError> {
+    log::trace!("Trying to load image from {}", path.display());
+    let image = image::open(path)?.to_rgba8();
+
+    log::trace!(
+        "Loaded RGBA image with dimensions: {:?}",
+        image.dimensions()
+    );
+
+    Ok(image)
+}
+
 impl TextureAssetLoader {
-    fn load(
+    /// Load a texture from an asset.
+    /// NOTE: This caches based on the filename so reloads of the same file will not get new content if it was changed in-between.
+    pub fn load(
         &mut self,
         asset: TextureAsset,
         debug_name: &str,
     ) -> Result<TextureHandle, TextureAssetLoadError> {
-        todo!()
+        log::trace!("load_blocking texture for {}", asset.0.display());
+        let mut cache_hit = true;
+        let result: Result<Handle<CpuTexture>, image::ImageError> =
+            self.storage.get_or_add(asset, |asset| {
+                cache_hit = false;
+                let image = load_image(&asset.0)?;
+                Ok(CpuTexture {
+                    data: image,
+                    debug_name: debug_name.to_owned(),
+                })
+            });
+        let handle = match result {
+            Ok(h) => TextureHandle(h),
+            // TODO: Map it
+            Err(_) => return Err(TextureAssetLoadError),
+        };
+        if cache_hit {
+            log::trace!("Hit cache");
+        } else {
+            log::trace!("Did not hit cache");
+        }
+        Ok(handle)
+    }
+
+    fn get(&self, handle: TextureHandle) -> Option<&CpuTexture> {
+        self.storage.get(&handle.0)
     }
 }
 

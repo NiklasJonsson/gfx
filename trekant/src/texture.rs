@@ -27,7 +27,7 @@ pub enum TextureError {
     ImageView(#[from] ImageViewError),
 }
 
-pub fn load_image<P: AsRef<Path>>(p: &P) -> Result<image::RgbaImage, image::ImageError> {
+fn load_image<P: AsRef<Path>>(p: &P) -> Result<image::RgbaImage, image::ImageError> {
     let path = p.as_ref();
 
     log::trace!("Trying to load image from {}", path.display());
