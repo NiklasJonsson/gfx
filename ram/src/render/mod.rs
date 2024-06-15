@@ -27,6 +27,7 @@ pub mod uniform;
 
 pub use geometry::Shape;
 pub use light::Light;
+pub use material::TextureAssetLoader;
 pub use mesh::{HostBuffer, HostIndexBuffer, HostVertexBuffer};
 
 use mesh::Mesh;
@@ -720,6 +721,7 @@ pub fn setup_resources(world: &mut World, renderer: &mut Renderer) {
     world.insert(debug::OneShotDebugUI::new());
     world.insert(renderer.loader().unwrap());
     world.insert(frame_resources);
+    world.insert(material::TextureAssetLoader::new());
     log::trace!("Done");
 }
 

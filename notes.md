@@ -578,10 +578,13 @@ Start sketching out a TextureAssetLoader that contains the storage and cache for
 
 TODO:
 
-1. Put this in the world as a resource
-2. Use it in the gltf loading code
-3. Make the `PhysicallyBased` component use a CpuTextureHandle instead.
-4. Profile!
+1. Use it in the gltf loading code
+2. Make the `PhysicallyBased` component use a CpuTextureHandle instead.
+3. Profile!
+
+START HERE:
+
+1. There are several instances of material components: PhysicallyBased, Pending, Gpu and Renderable. Can they be re-structured?
 
 ## Future work
 

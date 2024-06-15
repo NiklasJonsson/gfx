@@ -1,4 +1,4 @@
-use trekant::{pipeline::PolygonMode, Texture, TextureDescriptor};
+use trekant::{pipeline::PolygonMode, TextureDescriptor};
 use trekant::{BufferHandle, Handle};
 
 use crate::math::Rgba;
@@ -11,24 +11,33 @@ use trekant::resource::Async;
 
 use super::GpuBuffer;
 
-pub struct CpuTexture {
+pub struct HostTexture {
     data: image::RgbaImage,
     debug_name: String,
 }
 
 #[derive(Clone, PartialOrd, PartialEq, Eq, Ord, Hash, Debug)]
-pub struct TextureHandle(resurs::Handle<CpuTexture>);
+pub struct HostTextureHandle(resurs::Handle<HostTexture>);
+#[derive(Clone, PartialOrd, PartialEq, Eq, Ord, Hash, Debug)]
+pub struct DeviceTextureHandle(resurs::Handle<trekant::Texture>);
 
 pub struct TextureAssetLoadError;
 
 #[derive(Clone, PartialOrd, PartialEq, Eq, Ord, Hash, Debug)]
 pub struct TextureAsset(std::path::PathBuf);
 
+#[derive(Default)]
 pub struct TextureAssetLoader {
-    storage: resurs::CachedStorage<TextureAsset, CpuTexture>,
+    storage: resurs::CachedStorage<TextureAsset, HostTexture>,
 }
 
-pub fn load_image(path: &std::path::Path) -> Result<image::RgbaImage, image::ImageError> {
+impl TextureAssetLoader {
+    pub fn new() -> Self {
+        Self::default()
+    }
+}
+
+fn load_image(path: &std::path::Path) -> Result<image::RgbaImage, image::ImageError> {
     log::trace!("Trying to load image from {}", path.display());
     let image = image::open(path)?.to_rgba8();
 
@@ -47,20 +56,20 @@ impl TextureAssetLoader {
         &mut self,
         asset: TextureAsset,
         debug_name: &str,
-    ) -> Result<TextureHandle, TextureAssetLoadError> {
+    ) -> Result<HostTextureHandle, TextureAssetLoadError> {
         log::trace!("load_blocking texture for {}", asset.0.display());
         let mut cache_hit = true;
-        let result: Result<Handle<CpuTexture>, image::ImageError> =
+        let result: Result<Handle<HostTexture>, image::ImageError> =
             self.storage.get_or_add(asset, |asset| {
                 cache_hit = false;
                 let image = load_image(&asset.0)?;
-                Ok(CpuTexture {
+                Ok(HostTexture {
                     data: image,
                     debug_name: debug_name.to_owned(),
                 })
             });
         let handle = match result {
-            Ok(h) => TextureHandle(h),
+            Ok(h) => HostTextureHandle(h),
             // TODO: Map it
             Err(_) => return Err(TextureAssetLoadError),
         };
@@ -72,7 +81,7 @@ impl TextureAssetLoader {
         Ok(handle)
     }
 
-    fn get(&self, handle: TextureHandle) -> Option<&CpuTexture> {
+    fn get(&self, handle: HostTextureHandle) -> Option<&HostTexture> {
         self.storage.get(&handle.0)
     }
 }
@@ -83,10 +92,14 @@ pub struct Unlit {
     pub polygon_mode: PolygonMode,
 }
 
-#[derive(Debug, Visitable)]
-pub struct TextureUse2 {
-    pub desc: TextureDescriptor<'static>,
-    pub coord_set: u32,
+#[derive(Debug, Default, Visitable)]
+pub enum TextureUse<Tex> {
+    #[default]
+    None,
+    Texture {
+        t: Tex,
+        coord_set: u32,
+    },
 }
 
 #[derive(Debug, Component, Default, Visitable)]
@@ -95,16 +108,10 @@ pub struct PhysicallyBased {
     pub metallic_factor: f32,
     pub roughness_factor: f32,
     pub normal_scale: f32,
-    pub normal_map: Option<TextureUse2>,
-    pub base_color_texture: Option<TextureUse2>,
-    pub metallic_roughness_texture: Option<TextureUse2>,
+    pub normal_map: TextureUse<HostTextureHandle>,
+    pub base_color_texture: TextureUse<HostTextureHandle>,
+    pub metallic_roughness_texture: TextureUse<HostTextureHandle>,
     pub has_vertex_colors: bool,
-}
-
-#[derive(Debug, Clone, Visitable, PartialEq, Eq)]
-pub struct TextureUse<T> {
-    pub handle: Handle<T>,
-    pub coord_set: u32,
 }
 
 #[derive(Debug, Component, Visitable)]
@@ -115,9 +122,9 @@ pub enum GpuMaterial {
     },
     PBR {
         material_uniforms: BufferHandle,
-        normal_map: Option<TextureUse<Texture>>,
-        base_color_texture: Option<TextureUse<Texture>>,
-        metallic_roughness_texture: Option<TextureUse<Texture>>,
+        normal_map: TextureUse<DeviceTextureHandle>,
+        base_color_texture: TextureUse<DeviceTextureHandle>,
+        metallic_roughness_texture: TextureUse<DeviceTextureHandle>,
         has_vertex_colors: bool,
     },
 }
