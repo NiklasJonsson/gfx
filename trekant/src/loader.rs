@@ -282,6 +282,8 @@ impl Loader {
         todo!()
     }
 
+    pub fn flush(&self, request_id: &RequestId) {}
+
     pub fn transfer_2<'mutex, 'loader: 'mutex, 'renderer>(
         &'loader self,
         renderer: &'renderer mut Renderer,

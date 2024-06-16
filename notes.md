@@ -583,6 +583,21 @@ instance, means that there is only one place where pending resources can be reso
 renderer. IIRC, this was to simplify the code to not send too much data around but instead, it would be good if mapping
 does not have to take effect immediately but instead be done in individual systems.
 
+Loader API:
+
+Start sketching an API where the loader accepts a RequesterId.
+
+Later, a function, `Loader::flush(RequestedId) -> impl Iterator` can be called to see which of the load requests have finished.
+The iterator returns proper handles that can be used in the renderer.
+Could also consider `flush_buffers` and `flush_textures`.
+
+Internally, we'll need to keep these mappings:
+
+Request ID -> Pending handles
+Pending handles -> Request ID
+
+Make sure to reconsider the current AsyncResources class - it might not be needed.
+
 ## Future work
 
 ### Shadow improvements
