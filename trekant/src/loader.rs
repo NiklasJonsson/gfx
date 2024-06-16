@@ -19,6 +19,7 @@ use backend::device::Device;
 // TODO: Don't use vk directly here
 use ash::vk;
 
+use std::collections::HashMap;
 use std::sync::{Mutex, MutexGuard};
 
 use thiserror::Error;
@@ -35,7 +36,7 @@ pub enum LoaderError {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash, PartialOrd, Ord)]
-pub struct RequestId(String);
+pub struct RequestId(&'static str);
 
 #[derive(Default)]
 struct AsyncResources {
@@ -80,6 +81,7 @@ struct NonSync {
     queue: Queue,
     command_pool: CommandPool,
     pending_resource_jobs: Vec<PendingResourceJob>,
+    done_resource_jobs: HashMap<RequestId, Vec<HandleMapping>>,
     resources: AsyncResources,
 }
 
@@ -175,6 +177,7 @@ impl Loader {
             queue,
             command_pool,
             pending_resource_jobs: Vec::with_capacity(16),
+            done_resource_jobs: HashMap::with_capacity(16),
             resources: AsyncResources::default(),
         });
         Self {
@@ -260,7 +263,7 @@ impl Loader {
     pub fn load_buffer_2(
         &self,
         descriptor: BufferDescriptor<'static>,
-        request_id: &RequestId,
+        request_id: RequestId,
     ) -> Result<AsyncBufferHandle, LoaderError> {
         log::trace!("Loading buffer with descriptor {descriptor:?}");
         assert!(!descriptor.is_empty());
@@ -276,13 +279,18 @@ impl Loader {
         let mut request_map: std::collections::HashMap<RequestId, Requests> =
             std::collections::HashMap::new();
 
-        let requests = request_map.entry(request_id.clone()).or_default();
+        let requests = request_map.entry(request_id).or_default();
         requests.buffers.push(handle);
 
         todo!()
     }
 
-    pub fn flush(&self, request_id: &RequestId) {}
+    pub fn flush(&self, request_id: RequestId) -> Vec<HandleMapping> {
+        let mut done_map: std::collections::HashMap<RequestId, Vec<HandleMapping>> =
+            std::collections::HashMap::new();
+
+        done_map.remove(&request_id).unwrap_or_default()
+    }
 
     pub fn transfer_2<'mutex, 'loader: 'mutex, 'renderer>(
         &'loader self,
