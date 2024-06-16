@@ -26,6 +26,7 @@ pub struct BufferDescriptor<'a> {
     buffer_type: BufferType,
 }
 
+// TODO: Super-trait of Deref<Target = [T]>?
 pub trait BufferData<'a> {
     type T;
     fn n_elems(&self) -> u32;
@@ -241,6 +242,10 @@ impl<'a> BufferDescriptor<'a> {
 
     pub fn n_elems(&self) -> u32 {
         self.n_elems
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.n_elems == 0
     }
 
     pub fn data(&self) -> &[u8] {

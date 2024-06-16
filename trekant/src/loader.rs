@@ -5,7 +5,9 @@ use crate::buffer::{
     DrainIterator as BufferDrainIterator,
 };
 use crate::resource::{Async, Handle, Resources};
-use crate::texture::{DrainIterator as TextureDrainIterator, Texture, TextureDescriptor};
+use crate::texture::{
+    AsyncTextures, DrainIterator as TextureDrainIterator, Texture, TextureDescriptor,
+};
 use crate::Renderer;
 use crate::{
     backend::{AllocatorHandle, CommandPool, Fence, HasVkDevice, Queue, VkDeviceHandle},
@@ -31,6 +33,9 @@ pub enum LoaderError {
     InvalidDescriptor(String),
     Mutex,
 }
+
+#[derive(Debug, Clone, PartialEq, Eq, Hash, PartialOrd, Ord)]
+pub struct RequestId(String);
 
 #[derive(Default)]
 struct AsyncResources {
@@ -179,7 +184,7 @@ impl Loader {
         }
     }
 
-    pub fn poll(&self) {
+    fn progress_pending(&self) {
         // Query finished
         // TODO: Use drain_filter here when not nightly
         let mut guard = self.locked.lock().expect("Failed to unlock");
@@ -224,7 +229,7 @@ impl Loader {
         &'loader self,
         renderer: &'renderer mut Renderer,
     ) -> TransferGuard<'mutex, 'renderer> {
-        self.poll();
+        self.progress_pending();
         let guard = self.locked.lock().expect("Failed to lock mutex");
         let resources = renderer.resources_mut();
         TransferGuard { guard, resources }
@@ -252,12 +257,48 @@ impl Loader {
 }
 
 impl Loader {
+    pub fn load_buffer_2(
+        &self,
+        descriptor: BufferDescriptor<'static>,
+        request_id: &RequestId,
+    ) -> Result<AsyncBufferHandle, LoaderError> {
+        log::trace!("Loading buffer with descriptor {descriptor:?}");
+        assert!(!descriptor.is_empty());
+
+        let mut guard = self.locked.lock().map_err(|_| LoaderError::Mutex)?;
+        let handle = guard.resources.buffers.allocate(&descriptor);
+
+        #[derive(Debug, Default)]
+        struct Requests {
+            buffers: Vec<AsyncBufferHandle>,
+            textures: Vec<Handle<Async<Texture>>>,
+        }
+        let mut request_map: std::collections::HashMap<RequestId, Requests> =
+            std::collections::HashMap::new();
+
+        let requests = request_map.entry(request_id.clone()).or_default();
+        requests.buffers.push(handle);
+
+        todo!()
+    }
+
+    pub fn transfer_2<'mutex, 'loader: 'mutex, 'renderer>(
+        &'loader self,
+        renderer: &'renderer mut Renderer,
+    ) -> TransferGuard<'mutex, 'renderer> {
+        self.progress_pending();
+        let guard = self.locked.lock().expect("Failed to lock mutex");
+        let resources = renderer.resources_mut();
+        TransferGuard { guard, resources }
+    }
+}
+impl Loader {
     pub fn load_buffer(
         &self,
         descriptor: BufferDescriptor<'static>,
     ) -> Result<AsyncBufferHandle, LoaderError> {
         log::trace!("Loading buffer with descriptor {descriptor:?}");
-        assert!(descriptor.n_elems() != 0);
+        assert!(!descriptor.is_empty());
 
         let mut guard = self.locked.lock().map_err(|_| LoaderError::Mutex)?;
 
