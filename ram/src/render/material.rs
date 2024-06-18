@@ -16,13 +16,13 @@ pub struct HostTexture {
     debug_name: String,
 }
 
-#[derive(Clone, PartialEq, Eq, Hash, Debug, Visitable)]
+#[derive(Clone, Copy, PartialEq, Eq, Hash, Debug, Visitable)]
 pub struct HostTextureHandle {
     handle: resurs::Handle<HostTexture>,
     coord_set: u32,
 }
 
-#[derive(Clone, PartialEq, Eq, Hash, Debug, Visitable)]
+#[derive(Clone, Copy, PartialEq, Eq, Hash, Debug, Visitable)]
 pub struct DeviceTextureHandle {
     handle: resurs::Handle<trekant::Texture>,
     coord_set: u32,
@@ -219,6 +219,8 @@ impl PendingMaterial {
 pub use pbr::PhysicallyBased;
 
 mod pbr {
+    use crate::visit::Visitable;
+
     use super::*;
 
     /// Attach this to an entity for it to have a lit material that is rendered with a
@@ -266,8 +268,8 @@ mod pbr {
             WriteExpect<'a, trekant::Loader>,
             WriteExpect<'a, TextureAssetLoader>,
             WriteStorage<'a, PhysicallyBased>,
-            WriteStorage<'a, PendingMaterial>,
-            WriteStorage<'a, GpuMaterial>,
+            WriteStorage<'a, Pending>,
+            WriteStorage<'a, Done>,
             Entities<'a>,
         );
 
@@ -329,7 +331,7 @@ mod pbr {
             };
 
             if !ubuf_pbr.is_empty() {
-                let async_uniform_buffer = loader
+                let full_buffer = loader
                     .load_buffer(
                         trekant::BufferDescriptor::uniform_buffer(
                             ubuf_pbr,
@@ -343,14 +345,9 @@ mod pbr {
                     (&entities, &materials, !&done_materials).join().enumerate()
                 {
                     if let StorageEntry::Vacant(entry) = pending_materials.entry(ent).unwrap() {
-                        entry.insert(PendingMaterial::PBR {
+                        entry.insert(Pending {
                             material_uniforms: GpuBuffer::InFlight(
-                                // TODO: Take first?
-                                trekant::PendingBufferHandle::sub_buffer(
-                                    async_uniform_buffer,
-                                    i as u32,
-                                    1,
-                                ),
+                                trekant::PendingBufferHandle::sub_buffer(full_buffer, i as u32, 1),
                             ),
                             normal_map: map_tex(&pb_mat.normal_map),
                             base_color_texture: map_tex(&pb_mat.base_color_texture),
@@ -363,7 +360,83 @@ mod pbr {
         }
     }
 
-    // TODO: Finish load system
+    #[derive(Default)]
+    pub struct PBRPendingHandles {
+        buffers: std::collections::HashMap<trekant::PendingBufferHandle, Vec<Entity>>,
+        textures: std::collections::HashMap<trekant::PendingTextureHandle, Vec<Entity>>,
+    }
+
+    pub struct FinishLoad;
+
+    impl FinishLoad {
+        pub const ID: &'static str = "PhysicallyBasedMaterialPipelineFinishLoad";
+    }
+    impl<'a> System<'a> for FinishLoad {
+        type SystemData = (
+            WriteExpect<'a, trekant::Loader>,
+            WriteStorage<'a, Pending>,
+            WriteStorage<'a, Done>,
+            Write<'a, PBRPendingHandles>,
+        );
+
+        fn run(&mut self, data: Self::SystemData) {
+            let (loader, mut pending_materials, mut done_materials, mut handles) = data;
+
+            for handle_mapping in loader.flush(LOAD_ID) {
+                match handle_mapping {
+                    trekant::HandleMapping::Buffer { old, new } => {
+                        let entities = handles
+                            .buffers
+                            .remove(&old)
+                            .expect("Got a buffer handle that was not requested");
+                        for entity in entities {
+                            let Some(pending) = pending_materials.get_mut(entity) else {
+                                log::debug!("Entity {entity:?} had a pending buffer load for pbr uniform data but was destroyed while the buffer was loading");
+                                continue;
+                            };
+                            assert!(old.same_base_buffer(
+                                pending.material_uniforms.get_available().unwrap()
+                            ));
+
+                            pending.material_uniforms = GpuBuffer::Available(new);
+                        }
+                    }
+                    trekant::HandleMapping::Texture { old, new } => {
+                        let entities = handles
+                            .textures
+                            .remove(&old)
+                            .expect("Got a texture handle that was not requested");
+                        for entity in entities {
+                            let Some(pending) = pending_materials.get_mut(entity) else {
+                                log::debug!("Entity {entity:?} had a pending buffer load for pbr uniform data but was destroyed while the buffer was loading");
+                                continue;
+                            };
+
+                            for tex in [
+                                &mut pending.base_color_texture,
+                                &mut pending.metallic_roughness_texture,
+                                &mut pending.normal_map,
+                            ] {
+                                // TODO: Cleanup here
+                                let mut correct = false;
+                                if let PendingTextureUse::Pending(pending_use) = tex {
+                                    correct = pending_use.handle == old;
+                                }
+                                if correct {
+                                    *tex = PendingTextureUse::Available(DeviceTextureHandle {
+                                        handle: new,
+                                        coord_set: todo!(),
+                                    });
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+
+            todo!("mipmaps");
+        }
+    }
 }
 
 pub use unlit::Unlit;
@@ -396,7 +469,7 @@ mod unlit {
     pub struct StartLoad;
 
     #[derive(Default)]
-    pub struct UnlitPendingHandles(std::collections::HashMap<PendingBufferHandle, Entity>);
+    pub struct UnlitPendingHandles(std::collections::HashMap<PendingBufferHandle, Vec<Entity>>);
 
     impl StartLoad {
         pub const ID: &'static str = "UnlitMaterialPipelineStartLoad";
@@ -408,11 +481,19 @@ mod unlit {
             WriteStorage<'a, Unlit>,
             WriteStorage<'a, Pending>,
             WriteStorage<'a, Done>,
+            Write<'a, UnlitPendingHandles>,
             Entities<'a>,
         );
 
         fn run(&mut self, data: Self::SystemData) {
-            let (loader, materials, mut pending_materials, done_materials, entities) = data;
+            let (
+                loader,
+                materials,
+                mut pending_materials,
+                done_materials,
+                mut pending_handles,
+                entities,
+            ) = data;
 
             let mut ubuf = Vec::new();
             for (unlit, _, _) in (&materials, !&done_materials, !&pending_materials).join() {
@@ -436,6 +517,7 @@ mod unlit {
                     (&entities, &materials, !&done_materials).join().enumerate()
                 {
                     if let StorageEntry::Vacant(entry) = pending_materials.entry(ent).unwrap() {
+                        pending_handles.0.entry(async_handle).or_default().push(ent);
                         entry.insert(Pending {
                             color_uniform: GpuBuffer::InFlight(
                                 trekant::PendingBufferHandle::sub_buffer(async_handle, i as u32, 1),
@@ -465,30 +547,30 @@ mod unlit {
             let (loader, mut pending_materials, mut done_materials, mut handles) = data;
 
             for handle_mapping in loader.flush(LOAD_ID) {
-                match handle_mapping {
-                    HandleMapping::Buffer { old, new } => {
-                        let entity = handles
-                            .0
-                            .remove(&old)
-                            .expect("Got a buffer handle that was not requested");
-                        if let Some(pending) = pending_materials.remove(entity) {
-                            let result = done_materials.insert(
-                                entity,
-                                Done {
-                                    color_uniform: new,
-                                    polygon_mode: pending.polygon_mode,
-                                },
+                let HandleMapping::Buffer { old, new } = handle_mapping else {
+                    panic!("Unlit pipeline has no textures");
+                };
+                let entities = handles
+                    .0
+                    .remove(&old)
+                    .expect("Got a buffer handle that was not requested");
+                for entity in entities {
+                    if let Some(pending) = pending_materials.remove(entity) {
+                        let result = done_materials.insert(
+                            entity,
+                            Done {
+                                color_uniform: new,
+                                polygon_mode: pending.polygon_mode,
+                            },
+                        );
+                        if let Err(e) = result {
+                            log::error!(
+                                "Failed to finalize unlit material load for entity {entity:?}: {e}"
                             );
-                            if let Err(e) = result {
-                                log::error!(
-                                    "Failed to finalize unlit material load for entity {entity:?}: {e}"
-                                );
-                            }
-                        } else {
-                            log::debug!("Entity {entity:?} had a pending buffer load for unlit uniform data but was destroyed while the buffer was loading");
                         }
+                    } else {
+                        log::debug!("Entity {entity:?} had a pending buffer load for unlit uniform data but was destroyed while the buffer was loading");
                     }
-                    _ => panic!("Unlit pipeline has no textures"),
                 }
             }
         }

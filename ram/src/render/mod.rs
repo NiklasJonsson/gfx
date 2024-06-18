@@ -48,6 +48,15 @@ pub enum GpuBuffer {
     Available(BufferHandle),
 }
 
+impl GpuBuffer {
+    fn get_available(&self) -> Option<BufferHandle> {
+        match self {
+            Self::Available(a) => Some(*a),
+            _ => None,
+        }
+    }
+}
+
 pub fn camera_pos(world: &World) -> Vec3 {
     let camera_entity = ecs::get_singleton_entity::<MainRenderCamera>(world);
     let transforms = world.read_storage::<Transform>();
