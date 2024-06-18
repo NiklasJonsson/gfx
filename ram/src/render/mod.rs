@@ -44,7 +44,7 @@ pub struct GlobalShaderCache(std::sync::Mutex<shader::ShaderCache>);
 #[derive(Debug, Clone, Visitable)]
 pub enum GpuBuffer {
     None,
-    InFlight(AsyncBufferHandle),
+    InFlight(trekant::PendingBufferHandle),
     Available(BufferHandle),
 }
 
@@ -754,7 +754,7 @@ fn resolve_pending(world: &mut World, renderer: &mut Renderer) {
     let mut pending_materials = world.write_storage::<PendingMaterial>();
     let mut materials = world.write_storage::<GpuMaterial>();
     let mut meshes = world.write_storage::<Mesh>();
-    let mut transfer_guard = loader.transfer(renderer);
+    let mut transfer_guard = loader.progress(renderer);
     let mut generate_mipmaps = Vec::new();
     for mapping in transfer_guard.iter() {
         match mapping {

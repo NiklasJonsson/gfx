@@ -2,12 +2,10 @@ use trekant::{pipeline::PolygonMode, TextureDescriptor};
 use trekant::{BufferHandle, Handle};
 
 use crate::math::Rgba;
-use crate::render::Pending;
 
 use crate::ecs::prelude::*;
 
 use ram_derive::Visitable;
-use trekant::resource::Async;
 
 use super::GpuBuffer;
 
@@ -18,22 +16,22 @@ pub struct HostTexture {
     debug_name: String,
 }
 
-#[derive(Clone, PartialOrd, PartialEq, Eq, Ord, Hash, Debug, Visitable)]
+#[derive(Clone, PartialEq, Eq, Hash, Debug, Visitable)]
 pub struct HostTextureHandle {
     handle: resurs::Handle<HostTexture>,
     coord_set: u32,
 }
 
-#[derive(Clone, PartialOrd, PartialEq, Eq, Ord, Hash, Debug, Visitable)]
+#[derive(Clone, PartialEq, Eq, Hash, Debug, Visitable)]
 pub struct DeviceTextureHandle {
     handle: resurs::Handle<trekant::Texture>,
     coord_set: u32,
 }
 
-#[derive(Clone, PartialOrd, PartialEq, Eq, Ord, Hash, Debug, Visitable)]
+#[derive(Clone, PartialEq, Eq, Hash, Debug, Visitable)]
 
-pub struct AsyncDeviceTextureHandle {
-    handle: resurs::Handle<Async<trekant::Texture>>,
+pub struct PendingDeviceTextureHandle {
+    handle: trekant::PendingTextureHandle,
     coord_set: u32,
 }
 
@@ -131,7 +129,7 @@ pub enum GpuMaterial {
 #[derive(Debug, Visitable)]
 enum PendingTextureUse {
     None,
-    Pending(AsyncDeviceTextureHandle),
+    Pending(PendingDeviceTextureHandle),
     Available(DeviceTextureHandle),
 }
 
@@ -255,6 +253,8 @@ mod pbr {
         has_vertex_colors: bool,
     }
 
+    const LOAD_ID: trekant::LoadId = trekant::LoadId("pbr-pipeline");
+
     pub struct StartLoad;
 
     impl StartLoad {
@@ -308,15 +308,18 @@ mod pbr {
                     let mipmaps = todo!("Figure out mipmaps");
 
                     let handle = loader
-                        .load_texture(TextureDescriptor::Raw {
-                            data,
-                            extent: cpu_texture.extent,
-                            format: cpu_texture.format,
-                            mipmaps,
-                            ty: trekant::TextureType::Tex2D,
-                        })
+                        .load_texture(
+                            TextureDescriptor::Raw {
+                                data,
+                                extent: cpu_texture.extent,
+                                format: cpu_texture.format,
+                                mipmaps,
+                                ty: trekant::TextureType::Tex2D,
+                            },
+                            LOAD_ID,
+                        )
                         .expect("Failed to load texture");
-                    PendingTextureUse::Pending(AsyncDeviceTextureHandle {
+                    PendingTextureUse::Pending(PendingDeviceTextureHandle {
                         handle,
                         coord_set: tex.coord_set,
                     })
@@ -327,11 +330,14 @@ mod pbr {
 
             if !ubuf_pbr.is_empty() {
                 let async_uniform_buffer = loader
-                    .load_buffer(trekant::BufferDescriptor::uniform_buffer(
-                        ubuf_pbr,
-                        trekant::BufferMutability::Immutable,
-                        trekant::BufferLayout::MinBufferOffset,
-                    ))
+                    .load_buffer(
+                        trekant::BufferDescriptor::uniform_buffer(
+                            ubuf_pbr,
+                            trekant::BufferMutability::Immutable,
+                            trekant::BufferLayout::MinBufferOffset,
+                        ),
+                        LOAD_ID,
+                    )
                     .expect("Failed to load uniform buffer");
                 for (i, (ent, pb_mat, _)) in
                     (&entities, &materials, !&done_materials).join().enumerate()
@@ -361,7 +367,11 @@ mod pbr {
 pub use unlit::Unlit;
 
 mod unlit {
+    use trekant::{HandleMapping, PendingBufferHandle};
+
     use super::*;
+
+    const LOAD_ID: trekant::LoadId = trekant::LoadId("unlit-pipeline");
 
     #[derive(Debug, Clone, Component, Visitable)]
     pub struct Unlit {
@@ -382,6 +392,9 @@ mod unlit {
     }
 
     pub struct StartLoad;
+
+    #[derive(Default)]
+    pub struct UnlitPendingHandles(std::collections::HashMap<PendingBufferHandle, Entity>);
 
     impl StartLoad {
         pub const ID: &'static str = "UnlitMaterialPipelineStartLoad";
@@ -408,11 +421,14 @@ mod unlit {
 
             if !ubuf.is_empty() {
                 let async_handle = loader
-                    .load_buffer(trekant::BufferDescriptor::uniform_buffer(
-                        ubuf,
-                        trekant::BufferMutability::Immutable,
-                        trekant::BufferLayout::MinBufferOffset,
-                    ))
+                    .load_buffer(
+                        trekant::BufferDescriptor::uniform_buffer(
+                            ubuf,
+                            trekant::BufferMutability::Immutable,
+                            trekant::BufferLayout::MinBufferOffset,
+                        ),
+                        LOAD_ID,
+                    )
                     .expect("Failed to load uniform buffer");
                 for (i, (ent, unlit, _)) in
                     (&entities, &materials, !&done_materials).join().enumerate()
@@ -420,11 +436,7 @@ mod unlit {
                     if let StorageEntry::Vacant(entry) = pending_materials.entry(ent).unwrap() {
                         entry.insert(Pending {
                             color_uniform: GpuBuffer::InFlight(
-                                crate::render::AsyncBufferHandle::sub_buffer(
-                                    async_handle,
-                                    i as u32,
-                                    1,
-                                ),
+                                trekant::PendingBufferHandle::sub_buffer(async_handle, i as u32, 1),
                             ),
                             polygon_mode: unlit.polygon_mode,
                         });
@@ -433,12 +445,61 @@ mod unlit {
             }
         }
     }
+
+    pub struct FinishLoad;
+
+    impl FinishLoad {
+        pub const ID: &'static str = "UnlitMaterialPipelineFinishLoad";
+    }
+    impl<'a> System<'a> for FinishLoad {
+        type SystemData = (
+            WriteExpect<'a, trekant::Loader>,
+            WriteStorage<'a, Pending>,
+            WriteStorage<'a, Done>,
+            Write<'a, UnlitPendingHandles>,
+        );
+
+        fn run(&mut self, data: Self::SystemData) {
+            let (loader, mut pending_materials, mut done_materials, mut handles) = data;
+
+            for handle_mapping in loader.flush(LOAD_ID) {
+                match handle_mapping {
+                    HandleMapping::Buffer { old, new } => {
+                        let entity = handles
+                            .0
+                            .remove(&old)
+                            .expect("Got a buffer handle that was not requested");
+                        if let Some(pending) = pending_materials.remove(entity) {
+                            let result = done_materials.insert(
+                                entity,
+                                Done {
+                                    color_uniform: new,
+                                    polygon_mode: pending.polygon_mode,
+                                },
+                            );
+                            if let Err(e) = result {
+                                log::error!(
+                                    "Failed to finalize unlit material load for entity {entity:?}: {e}"
+                                );
+                            }
+                        } else {
+                            log::debug!("Entity {entity:?} had a pending buffer load for unlit uniform data but was destroyed while the buffer was loading");
+                        }
+                    }
+                    _ => panic!("Unlit pipeline has no textures"),
+                }
+            }
+        }
+    }
 }
 
 pub fn register_systems(builder: ExecutorBuilder) -> ExecutorBuilder {
-    builder.with(pbr::StartLoad, pbr::StartLoad::ID, &[]).with(
-        unlit::StartLoad,
-        unlit::StartLoad::ID,
-        &[],
-    )
+    builder
+        .with(pbr::StartLoad, pbr::StartLoad::ID, &[])
+        .with(unlit::StartLoad, unlit::StartLoad::ID, &[])
+        .with(
+            unlit::FinishLoad,
+            unlit::FinishLoad::ID,
+            &[unlit::StartLoad::ID],
+        )
 }

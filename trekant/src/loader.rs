@@ -1,7 +1,7 @@
 use crate::backend;
 
 use crate::buffer::{
-    AsyncBufferHandle, BufferDescriptor, BufferHandle, DeviceBuffer,
+    AsyncBufferHandle, BufferDescriptor, BufferHandle, BufferTypeId, DeviceBuffer,
     DrainIterator as BufferDrainIterator,
 };
 use crate::resource::{Async, Handle, Resources};
@@ -20,6 +20,7 @@ use backend::device::Device;
 use ash::vk;
 
 use std::collections::HashMap;
+use std::num::Wrapping;
 use std::sync::{Mutex, MutexGuard};
 
 use thiserror::Error;
@@ -36,13 +37,7 @@ pub enum LoaderError {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash, PartialOrd, Ord)]
-pub struct RequestId(&'static str);
-
-#[derive(Default)]
-struct AsyncResources {
-    pub buffers: crate::buffer::AsyncBuffers,
-    pub textures: crate::texture::AsyncTextures,
-}
+pub struct LoadId(pub &'static str);
 
 impl std::fmt::Display for LoaderError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -50,17 +45,88 @@ impl std::fmt::Display for LoaderError {
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub struct PendingBufferHandle {
+    handle: u64,
+    mutability: BufferMutability,
+    idx: u32,
+    n_elems: u32,
+    ty: BufferTypeId,
+}
+
+impl PendingBufferHandle {
+    pub fn sub_buffer(h: Self, idx: u32, n_elems: u32) -> Self {
+        assert!((idx + n_elems) <= (h.idx + h.n_elems));
+        Self { idx, n_elems, ..h }
+    }
+
+    pub fn same_base_buffer(&self, other: &Self) -> bool {
+        self.handle == other.handle
+    }
+
+    /// # Safety
+    /// The handle must refer to a valid buffer resource. idx + n_elems must be less than or equal to the number of elements the buffer that the handle refers to was created with.
+    pub unsafe fn from_buffer(
+        handle: u64,
+        idx: u32,
+        n_elems: u32,
+        mutability: BufferMutability,
+        ty: BufferTypeId,
+    ) -> Self {
+        Self {
+            handle,
+            mutability,
+            idx,
+            n_elems,
+            ty,
+        }
+    }
+
+    pub fn idx(&self) -> u32 {
+        self.idx
+    }
+
+    pub fn n_elems(&self) -> u32 {
+        self.n_elems
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub struct PendingTextureHandle(u64);
+
+#[derive(Debug, Default)]
+struct HandleGenerator {
+    counter: Wrapping<u64>,
+}
+
+impl HandleGenerator {
+    fn new_handle(&mut self) -> u64 {
+        let out = self.counter.0;
+        self.counter += 1;
+        out
+    }
+
+    fn new_buffer(&mut self) -> u64 {
+        self.new_handle()
+    }
+
+    fn new_texture(&mut self) -> u64 {
+        self.new_handle()
+    }
+}
+
 #[allow(clippy::enum_variant_names)]
 enum PendingResourceCommand {
     CreateBuffer {
-        descriptor: BufferDescriptor<'static>,
-        handle: AsyncBufferHandle,
+        // TODO: Do we need to keep this around?
+        _descriptor: BufferDescriptor<'static>,
+        handle: PendingBufferHandle,
         buffer0: DeviceBuffer,
         buffer1: Option<DeviceBuffer>, // For double buffering
-        transients: [Option<Buffer>; 2],
+        _transients: [Option<Buffer>; 2],
     },
     CreateTexture {
-        handle: Handle<Async<Texture>>,
+        handle: PendingTextureHandle,
         texture: Texture,
         _transients: Buffer,
     },
@@ -68,11 +134,11 @@ enum PendingResourceCommand {
 
 pub enum HandleMapping {
     Buffer {
-        old: AsyncBufferHandle,
+        old: PendingBufferHandle,
         new: BufferHandle,
     },
     Texture {
-        old: Handle<Async<Texture>>,
+        old: PendingTextureHandle,
         new: Handle<Texture>,
     },
 }
@@ -81,87 +147,33 @@ struct NonSync {
     queue: Queue,
     command_pool: CommandPool,
     pending_resource_jobs: Vec<PendingResourceJob>,
-    done_resource_jobs: HashMap<RequestId, Vec<HandleMapping>>,
-    resources: AsyncResources,
+    done_resource_jobs: HashMap<LoadId, Vec<HandleMapping>>,
+    handle_generator: HandleGenerator,
 }
 
+/// Asynchronous loading of GPU resources.
+///
+/// The general loop is:
+/// 1. Request to load something with one of the load_* functions. These take a load id that identifies a set of load requests.
+/// 2. The main loop of the application should call `Loader::progress` periodically (once per frame makes sense).
+/// 3. Call `Loader::flush` with the same load id as was used for the request.
+///
 pub struct Loader {
     allocator: AllocatorHandle,
     vk_device: VkDeviceHandle,
     locked: Mutex<NonSync>,
 }
 
+impl PendingResourceJob {
+    fn is_done(&self) -> bool {
+        self.done.is_signaled().expect("Failed to query fence")
+    }
+}
+
 struct PendingResourceJob {
     command: PendingResourceCommand,
+    load_id: LoadId,
     done: Fence,
-}
-
-// Good reads for mutex + iterating over contents
-// https://users.rust-lang.org/t/creating-an-iterator-over-mutex-contents-cannot-infer-an-appropriate-lifetime/24458/7
-// https://www.reddit.com/r/rust/comments/7l97u0/iterator_struct_of_an_iterable_inside_a_lock_from/
-
-impl AsyncResources {
-    fn drain_available<'i, 's: 'i, 'r: 'i>(
-        &'s mut self,
-        resources: &'r mut Resources,
-    ) -> impl Iterator<Item = HandleMapping> + 'i {
-        let bufs = self
-            .buffers
-            .drain_available()
-            .map(IntermediateIteratorItem::Buffer);
-
-        let textures = self
-            .textures
-            .drain_available()
-            .map(IntermediateIteratorItem::Texture);
-
-        bufs.chain(textures).map(move |item| match item {
-            IntermediateIteratorItem::Buffer(buf) => {
-                let (h, b0, b1) = buf;
-                let b0 = b0.expect("should be avail");
-                let ty = b0.buffer_type().ty();
-                let n_elems = b0.n_elems();
-                let mutability = if b1.is_some() {
-                    BufferMutability::Mutable
-                } else {
-                    BufferMutability::Immutable
-                };
-                let new = resources
-                    .buffers
-                    .add(b0, b1.map(|b| b.expect("should be avail")));
-                let (old, new) = unsafe {
-                    (
-                        AsyncBufferHandle::from_buffer(h, 0, n_elems, mutability, ty),
-                        BufferHandle::from_buffer(new, 0, n_elems, mutability, ty),
-                    )
-                };
-                HandleMapping::Buffer { old, new }
-            }
-            IntermediateIteratorItem::Texture((handle, tex)) => {
-                let new_handle = resources.textures.add(tex.expect("Should be available"));
-                HandleMapping::Texture {
-                    old: handle,
-                    new: new_handle,
-                }
-            }
-        })
-    }
-}
-
-pub struct TransferGuard<'mutex, 'renderer> {
-    guard: MutexGuard<'mutex, NonSync>,
-    resources: &'renderer mut Resources,
-}
-
-enum IntermediateIteratorItem {
-    Buffer(<BufferDrainIterator<'static, DeviceBuffer> as Iterator>::Item),
-    Texture(<TextureDrainIterator<'static> as Iterator>::Item),
-}
-
-impl<'m, 'r> TransferGuard<'m, 'r> {
-    pub fn iter(&mut self) -> impl Iterator<Item = HandleMapping> + '_ {
-        self.guard.resources.drain_available(self.resources)
-    }
 }
 
 impl Loader {
@@ -178,64 +190,13 @@ impl Loader {
             command_pool,
             pending_resource_jobs: Vec::with_capacity(16),
             done_resource_jobs: HashMap::with_capacity(16),
-            resources: AsyncResources::default(),
+            handle_generator: HandleGenerator::default(),
         });
         Self {
             vk_device,
             allocator,
             locked,
         }
-    }
-
-    fn progress_pending(&self) {
-        // Query finished
-        // TODO: Use drain_filter here when not nightly
-        let mut guard = self.locked.lock().expect("Failed to unlock");
-        let mut i = 0;
-        while i < guard.pending_resource_jobs.len() {
-            if guard.pending_resource_jobs[i]
-                .done
-                .is_signaled()
-                .expect("Failed to check fence")
-            {
-                let PendingResourceJob {
-                    command,
-                    done: _done,
-                } = guard.pending_resource_jobs.remove(i);
-
-                match command {
-                    PendingResourceCommand::CreateBuffer {
-                        handle,
-                        buffer0,
-                        buffer1,
-                        transients: _transients,
-                        descriptor: _descriptor,
-                    } => guard.resources.buffers.insert(handle, buffer0, buffer1),
-                    PendingResourceCommand::CreateTexture {
-                        handle, texture, ..
-                    } => {
-                        let loc = guard
-                            .resources
-                            .textures
-                            .get_mut(&handle)
-                            .expect("This should exist");
-                        *loc = Async::Available(texture);
-                    }
-                }
-            } else {
-                i += 1;
-            }
-        }
-    }
-
-    pub fn transfer<'mutex, 'loader: 'mutex, 'renderer>(
-        &'loader self,
-        renderer: &'renderer mut Renderer,
-    ) -> TransferGuard<'mutex, 'renderer> {
-        self.progress_pending();
-        let guard = self.locked.lock().expect("Failed to lock mutex");
-        let resources = renderer.resources_mut();
-        TransferGuard { guard, resources }
     }
 }
 
@@ -260,59 +221,25 @@ impl Loader {
 }
 
 impl Loader {
-    pub fn load_buffer_2(
-        &self,
-        descriptor: BufferDescriptor<'static>,
-        request_id: RequestId,
-    ) -> Result<AsyncBufferHandle, LoaderError> {
-        log::trace!("Loading buffer with descriptor {descriptor:?}");
-        assert!(!descriptor.is_empty());
-
-        let mut guard = self.locked.lock().map_err(|_| LoaderError::Mutex)?;
-        let handle = guard.resources.buffers.allocate(&descriptor);
-
-        #[derive(Debug, Default)]
-        struct Requests {
-            buffers: Vec<AsyncBufferHandle>,
-            textures: Vec<Handle<Async<Texture>>>,
-        }
-        let mut request_map: std::collections::HashMap<RequestId, Requests> =
-            std::collections::HashMap::new();
-
-        let requests = request_map.entry(request_id).or_default();
-        requests.buffers.push(handle);
-
-        todo!()
-    }
-
-    pub fn flush(&self, request_id: RequestId) -> Vec<HandleMapping> {
-        let mut done_map: std::collections::HashMap<RequestId, Vec<HandleMapping>> =
-            std::collections::HashMap::new();
-
-        done_map.remove(&request_id).unwrap_or_default()
-    }
-
-    pub fn transfer_2<'mutex, 'loader: 'mutex, 'renderer>(
-        &'loader self,
-        renderer: &'renderer mut Renderer,
-    ) -> TransferGuard<'mutex, 'renderer> {
-        self.progress_pending();
-        let guard = self.locked.lock().expect("Failed to lock mutex");
-        let resources = renderer.resources_mut();
-        TransferGuard { guard, resources }
-    }
-}
-impl Loader {
     pub fn load_buffer(
         &self,
         descriptor: BufferDescriptor<'static>,
-    ) -> Result<AsyncBufferHandle, LoaderError> {
+        load_id: LoadId,
+    ) -> Result<PendingBufferHandle, LoaderError> {
         log::trace!("Loading buffer with descriptor {descriptor:?}");
         assert!(!descriptor.is_empty());
 
         let mut guard = self.locked.lock().map_err(|_| LoaderError::Mutex)?;
 
-        let handle = guard.resources.buffers.allocate(&descriptor);
+        let raw_handle = guard.handle_generator.new_buffer();
+        let handle = PendingBufferHandle {
+            handle: raw_handle,
+            idx: 0,
+            n_elems: descriptor.n_elems(),
+            mutability: descriptor.mutability(),
+            ty: descriptor.buffer_type().ty(),
+        };
+
         let (result, done) = Loader::submit_commands(&self.vk_device, &guard, |cmd_buf| {
             descriptor.enqueue(&self.allocator, cmd_buf)
         })
@@ -330,12 +257,13 @@ impl Loader {
         let transients = [buf0.transient, transient1];
         let job = PendingResourceJob {
             command: PendingResourceCommand::CreateBuffer {
-                descriptor,
+                _descriptor: descriptor,
                 handle,
                 buffer0,
                 buffer1,
-                transients,
+                _transients: transients,
             },
+            load_id,
             done,
         };
         guard.pending_resource_jobs.push(job);
@@ -346,7 +274,8 @@ impl Loader {
     pub fn load_texture(
         &self,
         descriptor: TextureDescriptor<'static>,
-    ) -> Result<Handle<Async<Texture>>, LoaderError> {
+        load_id: LoadId,
+    ) -> Result<PendingTextureHandle, LoaderError> {
         log::trace!("Loading texture with descriptor {descriptor:?}");
         if descriptor.mipmaps() == crate::texture::MipMaps::Generate {
             return Err(LoaderError::InvalidDescriptor(String::from(
@@ -363,7 +292,7 @@ impl Loader {
         };
 
         let mut guard = self.locked.lock().map_err(|_| LoaderError::Mutex)?;
-        let handle = guard.resources.textures.allocate();
+        let handle = PendingTextureHandle(guard.handle_generator.new_texture());
         let (result, done) = Loader::submit_commands(&self.vk_device, &guard, |command_buffer| {
             crate::texture::load_texture_from_data(
                 &self.vk_device,
@@ -383,9 +312,80 @@ impl Loader {
                 _transients: buf,
             },
             done,
+            load_id,
         };
 
         guard.pending_resource_jobs.push(job);
         Ok(handle)
+    }
+
+    pub fn flush(&self, load_id: LoadId) -> Vec<HandleMapping> {
+        let mut guard = self.locked.lock().expect("Mutex poison");
+        guard
+            .done_resource_jobs
+            .remove(&load_id)
+            .unwrap_or_default()
+    }
+
+    /// Progresses the loader.
+    /// This checks all pending jobs that have been queued to the loader and if they are done,
+    /// resources are inserted into the renderer.
+    pub fn progress(&self, renderer: &mut Renderer) {
+        let mut guard = self.locked.lock().expect("Failed to unlock");
+        let mut i = 0;
+        while i < guard.pending_resource_jobs.len() {
+            if guard.pending_resource_jobs[i].is_done() {
+                let PendingResourceJob {
+                    command,
+                    load_id: request_id,
+                    ..
+                } = guard.pending_resource_jobs.remove(i);
+
+                let mapping: HandleMapping = match command {
+                    PendingResourceCommand::CreateBuffer {
+                        handle,
+                        buffer0,
+                        buffer1,
+                        ..
+                    } => {
+                        let mutability = if buffer1.is_some() {
+                            BufferMutability::Mutable
+                        } else {
+                            BufferMutability::Immutable
+                        };
+                        let ty = buffer0.buffer_type().ty();
+                        let n_elems = buffer0.n_elems();
+
+                        let raw_handle: Handle<DeviceBuffer> =
+                            renderer.resources.buffers.add(buffer0, buffer1);
+                        let new_handle = unsafe {
+                            BufferHandle::from_buffer(raw_handle, 0, n_elems, mutability, ty)
+                        };
+
+                        HandleMapping::Buffer {
+                            old: handle,
+                            new: new_handle,
+                        }
+                    }
+                    PendingResourceCommand::CreateTexture {
+                        handle, texture, ..
+                    } => {
+                        let new_handle = renderer.resources.textures.add(texture);
+                        HandleMapping::Texture {
+                            old: handle,
+                            new: new_handle,
+                        }
+                    }
+                };
+
+                guard
+                    .done_resource_jobs
+                    .entry(request_id)
+                    .or_default()
+                    .push(mapping);
+            } else {
+                i += 1;
+            }
+        }
     }
 }

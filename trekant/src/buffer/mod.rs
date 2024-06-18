@@ -142,7 +142,7 @@ impl AsyncBufferHandle {
 
     /// # Safety
     /// The handle must refer to a valid buffer resource. idx + n_elems must be less than or equal to the number of elements the buffer that the handle refers to was created with.
-    pub unsafe fn from_buffer(
+    pub(crate) unsafe fn from_buffer(
         handle: Handle<resurs::Async<DeviceBuffer>>,
         idx: u32,
         n_elems: u32,

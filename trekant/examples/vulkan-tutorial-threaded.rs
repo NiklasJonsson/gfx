@@ -8,11 +8,12 @@ use winit::{
 use nalgebra_glm as glm;
 use resurs::{Async, Handle};
 
-use trekant::pipeline::{
-    GraphicsPipeline, GraphicsPipelineDescriptor, ShaderDescriptor, ShaderStage,
-};
 use trekant::util;
 use trekant::vertex::{VertexDefinition, VertexFormat};
+use trekant::{
+    pipeline::{GraphicsPipeline, GraphicsPipelineDescriptor, ShaderDescriptor, ShaderStage},
+    PendingTextureHandle,
+};
 use trekant::{AsyncBufferHandle, BufferDescriptor, BufferHandle, BufferMutability};
 
 use trekant::Std140;
@@ -24,7 +25,7 @@ use std::time::{Duration, Instant};
 
 const WINDOW_HEIGHT: u32 = 300;
 const WINDOW_WIDTH: u32 = 300;
-const WINDOW_TITLE: &str = "Trekanten Vulkan Tutoria";
+const WINDOW_TITLE: &str = "Trekanten Vulkan Tutorial";
 
 struct State {
     pub window: winit::window::Window,
@@ -248,10 +249,9 @@ fn get_next_mvp(start: &std::time::Instant, aspect_ratio: f32) -> UniformBufferO
     ubo
 }
 
-fn create_texture(
-    loader: Arc<Loader>,
-    texture_sender: mpsc::Sender<Handle<Async<trekant::Texture>>>,
-) {
+const LOAD_ID: trekant::LoadId = trekant::LoadId("vk-tutorial");
+
+fn create_texture(loader: Arc<Loader>, texture_sender: mpsc::Sender<PendingTextureHandle>) {
     let _ = load_url("textures", TEX_URL);
     let tex_path = get_fname("textures", TEX_URL);
     let descriptor = trekant::TextureDescriptor::File {
@@ -262,15 +262,15 @@ fn create_texture(
     };
 
     let texture = loader
-        .load_texture(descriptor)
+        .load_texture(descriptor, LOAD_ID)
         .expect("Failed to load texture");
     texture_sender.send(texture).expect("Failed to send");
 }
 
 #[derive(Clone, Copy)]
 struct PendingMesh {
-    vertex_buffer: AsyncBufferHandle,
-    index_buffer: AsyncBufferHandle,
+    vertex_buffer: trekant::PendingBufferHandle,
+    index_buffer: trekant::PendingBufferHandle,
 }
 
 fn create_mesh(loader: Arc<Loader>, mesh_sender: mpsc::Sender<PendingMesh>) {
@@ -280,13 +280,13 @@ fn create_mesh(loader: Arc<Loader>, mesh_sender: mpsc::Sender<PendingMesh>) {
         BufferDescriptor::vertex_buffer(vertices, BufferMutability::Immutable);
 
     let vertex_buffer = loader
-        .load_buffer(vertex_buffer_descriptor)
+        .load_buffer(vertex_buffer_descriptor, LOAD_ID)
         .expect("Failed to load vertex buffer");
 
     let index_buffer_descriptor =
         BufferDescriptor::index_buffer(indices, BufferMutability::Immutable);
     let index_buffer = loader
-        .load_buffer(index_buffer_descriptor)
+        .load_buffer(index_buffer_descriptor, LOAD_ID)
         .expect("Failed to load index buffer");
 
     mesh_sender
@@ -365,7 +365,7 @@ fn main() {
     // After that, we still might need to wait for the gpu resource upload. When that is done, we will get
     // the final handle back with the transfer() call, ready to to be used when rendering.
     let mut pending_mesh: Option<PendingMesh> = None;
-    let mut pending_tex: Option<Handle<Async<Texture>>> = None;
+    let mut pending_tex: Option<PendingTextureHandle> = None;
 
     // The final handles used for rendering
     let mut vbuf: Option<BufferHandle> = None;
@@ -385,6 +385,11 @@ fn main() {
             } => *control_flow = ControlFlow::Exit,
             Event::MainEventsCleared => {
                 state.start_frame();
+
+                // Always runs this in some part of the frame
+                // to make sure the loader progresses.
+                loader.progress(&mut renderer);
+
                 // Query the manually spawned threads
                 pending_mesh = pending_mesh.or_else(|| mesh_receiver.try_recv().ok());
                 pending_tex = pending_tex.or_else(|| texture_receiver.try_recv().ok());
@@ -394,8 +399,7 @@ fn main() {
                 // we only have one handle of each type, but in the general case, we need to have the async handles to map the incoming ones to.
                 // We still want to wait for them though, because we need to have exclusive ownership
                 if let (Some(pending_mesh), Some(pending_tex)) = (pending_mesh, pending_tex) {
-                    let mut guard = loader.transfer(&mut renderer);
-                    for mapping in guard.iter() {
+                    for mapping in loader.flush(LOAD_ID) {
                         use trekant::HandleMapping;
 
                         match mapping {

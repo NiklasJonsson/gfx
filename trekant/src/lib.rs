@@ -27,7 +27,9 @@ pub use buffer::{
 pub use descriptor::DescriptorData;
 pub use error::RenderError;
 pub use error::ResizeReason;
-pub use loader::{HandleMapping, Loader, LoaderError};
+pub use loader::{
+    HandleMapping, LoadId, Loader, LoaderError, PendingBufferHandle, PendingTextureHandle,
+};
 pub use pipeline::{GraphicsPipeline, GraphicsPipelineDescriptor, PipelineError, ShaderStage};
 pub use pipeline_resource::PipelineResourceSet;
 pub use render_pass::{RenderPass, RenderPassEncoder};
