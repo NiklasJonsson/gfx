@@ -1,13 +1,8 @@
 use crate::backend;
 
-use crate::buffer::{
-    AsyncBufferHandle, BufferDescriptor, BufferHandle, BufferTypeId, DeviceBuffer,
-    DrainIterator as BufferDrainIterator,
-};
-use crate::resource::{Async, Handle, Resources};
-use crate::texture::{
-    AsyncTextures, DrainIterator as TextureDrainIterator, Texture, TextureDescriptor,
-};
+use crate::buffer::{BufferDescriptor, BufferHandle, BufferTypeId, DeviceBuffer};
+use crate::resource::Handle;
+use crate::texture::{Texture, TextureDescriptor};
 use crate::Renderer;
 use crate::{
     backend::{AllocatorHandle, CommandPool, Fence, HasVkDevice, Queue, VkDeviceHandle},
@@ -39,6 +34,9 @@ pub enum LoaderError {
 #[derive(Debug, Clone, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub struct LoadId(pub &'static str);
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
+struct PendingResourceHandle(pub(crate) u64);
+
 impl std::fmt::Display for LoaderError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(f, "{:?}", self)
@@ -47,7 +45,7 @@ impl std::fmt::Display for LoaderError {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct PendingBufferHandle {
-    handle: u64,
+    handle: PendingResourceHandle,
     mutability: BufferMutability,
     idx: u32,
     n_elems: u32,
@@ -64,24 +62,6 @@ impl PendingBufferHandle {
         self.handle == other.handle
     }
 
-    /// # Safety
-    /// The handle must refer to a valid buffer resource. idx + n_elems must be less than or equal to the number of elements the buffer that the handle refers to was created with.
-    pub unsafe fn from_buffer(
-        handle: u64,
-        idx: u32,
-        n_elems: u32,
-        mutability: BufferMutability,
-        ty: BufferTypeId,
-    ) -> Self {
-        Self {
-            handle,
-            mutability,
-            idx,
-            n_elems,
-            ty,
-        }
-    }
-
     pub fn idx(&self) -> u32 {
         self.idx
     }
@@ -92,7 +72,7 @@ impl PendingBufferHandle {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub struct PendingTextureHandle(u64);
+pub struct PendingTextureHandle(PendingResourceHandle);
 
 #[derive(Debug, Default)]
 struct HandleGenerator {
@@ -100,17 +80,17 @@ struct HandleGenerator {
 }
 
 impl HandleGenerator {
-    fn new_handle(&mut self) -> u64 {
+    fn new_handle(&mut self) -> PendingResourceHandle {
         let out = self.counter.0;
         self.counter += 1;
-        out
+        PendingResourceHandle(out)
     }
 
-    fn new_buffer(&mut self) -> u64 {
+    fn new_buffer(&mut self) -> PendingResourceHandle {
         self.new_handle()
     }
 
-    fn new_texture(&mut self) -> u64 {
+    fn new_texture(&mut self) -> PendingResourceHandle {
         self.new_handle()
     }
 }

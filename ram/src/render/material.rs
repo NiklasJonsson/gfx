@@ -258,7 +258,7 @@ mod pbr {
     pub struct StartLoad;
 
     impl StartLoad {
-        pub const ID: &'static str = "UnlitMaterialPipelineStartLoad";
+        pub const ID: &'static str = "PhysicallyBasedMaterialPipelineStartLoad";
     }
 
     impl<'a> System<'a> for StartLoad {
@@ -346,7 +346,7 @@ mod pbr {
                         entry.insert(PendingMaterial::PBR {
                             material_uniforms: GpuBuffer::InFlight(
                                 // TODO: Take first?
-                                crate::render::AsyncBufferHandle::sub_buffer(
+                                trekant::PendingBufferHandle::sub_buffer(
                                     async_uniform_buffer,
                                     i as u32,
                                     1,
@@ -362,6 +362,8 @@ mod pbr {
             }
         }
     }
+
+    // TODO: Finish load system
 }
 
 pub use unlit::Unlit;
