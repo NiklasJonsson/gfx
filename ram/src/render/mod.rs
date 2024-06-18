@@ -55,6 +55,15 @@ impl GpuBuffer {
             _ => None,
         }
     }
+
+    fn try_take(&mut self, old: trekant::PendingBufferHandle, new: trekant::BufferHandle) -> bool {
+        match self {
+            Self::InFlight(pending) if pending.same_base_buffer(old) => {
+                // TODO: Finish tthis
+                // Share impl with Texture
+            }
+        }
+    }
 }
 
 pub fn camera_pos(world: &World) -> Vec3 {

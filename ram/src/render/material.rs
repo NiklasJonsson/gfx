@@ -140,6 +140,23 @@ impl PendingTextureUse {
             _ => true,
         }
     }
+
+    fn try_take(
+        &mut self,
+        old: trekant::PendingTextureHandle,
+        new: trekant::Handle<trekant::Texture>,
+    ) -> bool {
+        match self {
+            Self::Pending(pending) if pending.handle == old => {
+                *self = Self::Available(DeviceTextureHandle {
+                    handle: new,
+                    coord_set: pending.coord_set,
+                });
+                true
+            }
+            _ => false,
+        }
+    }
 }
 
 #[derive(Debug, Component, Visitable)]
@@ -283,7 +300,7 @@ mod pbr {
                 entities,
             ) = data;
 
-            // TODO: Consider rewriting this to collected:
+            // TODO: Consider rewriting this to collectd:
             // 1. Entity
             // 2. PBRMaterialData
             // 3. Textures to be loaded
@@ -417,17 +434,7 @@ mod pbr {
                                 &mut pending.metallic_roughness_texture,
                                 &mut pending.normal_map,
                             ] {
-                                // TODO: Cleanup here
-                                let mut correct = false;
-                                if let PendingTextureUse::Pending(pending_use) = tex {
-                                    correct = pending_use.handle == old;
-                                }
-                                if correct {
-                                    *tex = PendingTextureUse::Available(DeviceTextureHandle {
-                                        handle: new,
-                                        coord_set: todo!(),
-                                    });
-                                }
+                                tex.try_take(old, new);
                             }
                         }
                     }
