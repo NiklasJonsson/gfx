@@ -598,6 +598,14 @@ Pending handles -> Request ID
 
 Make sure to reconsider the current AsyncResources class - it might not be needed.
 
+TODO:
+
+* Remove AsyncResources
+* Write an helper struct to work with handle mappings, entities and flushing
+* Figure out how to map both of the Done structs to the RenderableMaterial
+* Implement mip-map generation
+* Arc in TextureLoader?
+
 ## Future work
 
 ### Shadow improvements

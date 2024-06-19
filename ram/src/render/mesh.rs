@@ -106,12 +106,12 @@ impl Mesh {
         let vbuf_desc = host_buffer_to_desc(&self.cpu_vertex_buffer, BufferMutability::Immutable);
         let ibuf_desc = host_buffer_to_desc(&self.cpu_index_buffer, BufferMutability::Immutable);
 
-        self.gpu_vertex_buffer = GpuBuffer::InFlight(
+        self.gpu_vertex_buffer = GpuBuffer::Pending(
             loader
                 .load_buffer(vbuf_desc)
                 .expect("Failed to load vertex buffer"),
         );
-        self.gpu_index_buffer = GpuBuffer::InFlight(
+        self.gpu_index_buffer = GpuBuffer::Pending(
             loader
                 .load_buffer(ibuf_desc)
                 .expect("Failed to load index buffer"),
@@ -128,7 +128,7 @@ impl Mesh {
     }
 
     pub fn is_pending_gpu(&self) -> bool {
-        std::matches!(&self.gpu_vertex_buffer, GpuBuffer::InFlight(_))
-            || std::matches!(&self.gpu_index_buffer, GpuBuffer::InFlight(_))
+        std::matches!(&self.gpu_vertex_buffer, GpuBuffer::Pending(_))
+            || std::matches!(&self.gpu_index_buffer, GpuBuffer::Pending(_))
     }
 }

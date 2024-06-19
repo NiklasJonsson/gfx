@@ -58,7 +58,7 @@ impl PendingBufferHandle {
         Self { idx, n_elems, ..h }
     }
 
-    pub fn same_base_buffer(&self, other: &Self) -> bool {
+    pub fn is_same_resource(&self, other: &Self) -> bool {
         self.handle == other.handle
     }
 

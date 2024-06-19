@@ -134,10 +134,10 @@ enum PendingTextureUse {
 }
 
 impl PendingTextureUse {
-    fn is_done(&self) -> bool {
+    fn is_pending_gpu(&self) -> bool {
         match self {
-            Self::Pending(_) => false,
-            _ => true,
+            Self::Pending(_) => true,
+            _ => false,
         }
     }
 
@@ -236,6 +236,8 @@ impl PendingMaterial {
 pub use pbr::PhysicallyBased;
 
 mod pbr {
+    use std::future::pending;
+
     use crate::visit::Visitable;
 
     use super::*;
@@ -261,6 +263,19 @@ mod pbr {
         base_color_texture: PendingTextureUse,
         metallic_roughness_texture: PendingTextureUse,
         has_vertex_colors: bool,
+    }
+
+    impl Pending {
+        fn is_pending_gpu(&self) -> bool {
+            self.material_uniforms.is_pending_gpu()
+                || self.normal_map.is_pending_gpu()
+                || self.base_color_texture.is_pending_gpu()
+                || self.metallic_roughness_texture.is_pending_gpu()
+        }
+
+        fn try_finish(&self) -> Option<Done> {
+            todo!()
+        }
     }
 
     #[derive(Debug, Component, Visitable)]
@@ -300,7 +315,7 @@ mod pbr {
                 entities,
             ) = data;
 
-            // TODO: Consider rewriting this to collectd:
+            // TODO: Consider rewriting this to collect:
             // 1. Entity
             // 2. PBRMaterialData
             // 3. Textures to be loaded
@@ -363,7 +378,7 @@ mod pbr {
                 {
                     if let StorageEntry::Vacant(entry) = pending_materials.entry(ent).unwrap() {
                         entry.insert(Pending {
-                            material_uniforms: GpuBuffer::InFlight(
+                            material_uniforms: GpuBuffer::Pending(
                                 trekant::PendingBufferHandle::sub_buffer(full_buffer, i as u32, 1),
                             ),
                             normal_map: map_tex(&pb_mat.normal_map),
@@ -394,10 +409,11 @@ mod pbr {
             WriteStorage<'a, Pending>,
             WriteStorage<'a, Done>,
             Write<'a, PBRPendingHandles>,
+            Entities<'a>,
         );
 
         fn run(&mut self, data: Self::SystemData) {
-            let (loader, mut pending_materials, mut done_materials, mut handles) = data;
+            let (loader, mut pending_materials, mut done_materials, mut handles, entities) = data;
 
             for handle_mapping in loader.flush(LOAD_ID) {
                 match handle_mapping {
@@ -411,11 +427,9 @@ mod pbr {
                                 log::debug!("Entity {entity:?} had a pending buffer load for pbr uniform data but was destroyed while the buffer was loading");
                                 continue;
                             };
-                            assert!(old.same_base_buffer(
-                                pending.material_uniforms.get_available().unwrap()
-                            ));
 
-                            pending.material_uniforms = GpuBuffer::Available(new);
+                            let success = pending.material_uniforms.try_take(old, new);
+                            assert!(success, "There is only one buffer that this could match");
                         }
                     }
                     trekant::HandleMapping::Texture { old, new } => {
@@ -434,11 +448,24 @@ mod pbr {
                                 &mut pending.metallic_roughness_texture,
                                 &mut pending.normal_map,
                             ] {
+                                // NOTE: Not breaking after a success allows multiple texture uses to match an uploaded one.
                                 tex.try_take(old, new);
                             }
                         }
                     }
                 }
+            }
+
+            let mut done_entities = Vec::new();
+            for (entity, pending) in (&entities, &pending_materials).join() {
+                if let Some(done) = pending.try_finish() {
+                    done_materials.insert(entity, done).unwrap();
+                    done_entities.push(entity);
+                }
+            }
+
+            for entity in done_entities {
+                pending_materials.remove(entity).unwrap();
             }
 
             todo!("mipmaps");
@@ -526,7 +553,7 @@ mod unlit {
                     if let StorageEntry::Vacant(entry) = pending_materials.entry(ent).unwrap() {
                         pending_handles.0.entry(async_handle).or_default().push(ent);
                         entry.insert(Pending {
-                            color_uniform: GpuBuffer::InFlight(
+                            color_uniform: GpuBuffer::Pending(
                                 trekant::PendingBufferHandle::sub_buffer(async_handle, i as u32, 1),
                             ),
                             polygon_mode: unlit.polygon_mode,

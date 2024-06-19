@@ -44,7 +44,7 @@ pub struct GlobalShaderCache(std::sync::Mutex<shader::ShaderCache>);
 #[derive(Debug, Clone, Visitable)]
 pub enum GpuBuffer {
     None,
-    InFlight(trekant::PendingBufferHandle),
+    Pending(trekant::PendingBufferHandle),
     Available(BufferHandle),
 }
 
@@ -58,11 +58,16 @@ impl GpuBuffer {
 
     fn try_take(&mut self, old: trekant::PendingBufferHandle, new: trekant::BufferHandle) -> bool {
         match self {
-            Self::InFlight(pending) if pending.same_base_buffer(old) => {
-                // TODO: Finish tthis
-                // Share impl with Texture
+            Self::Pending(pending) if pending.is_same_resource(&old) => {
+                *self = Self::Available(new);
+                true
             }
+            _ => false,
         }
+    }
+
+    fn is_pending_gpu(&self) -> bool {
+        std::matches!(self, Self::Pending(_))
     }
 }
 
@@ -756,7 +761,7 @@ impl MeshLoad {
 use self::shader::ShaderCompiler;
 fn map_buffer_handle(h: &mut GpuBuffer, old: AsyncBufferHandle, new: BufferHandle) -> bool {
     match h {
-        GpuBuffer::InFlight(cur) if cur.base_buffer() == old.base_buffer() => {
+        GpuBuffer::Pending(cur) if cur.base_buffer() == old.base_buffer() => {
             *h = GpuBuffer::Available(BufferHandle::sub_buffer(new, cur.idx(), cur.n_elems()));
             true
         }
