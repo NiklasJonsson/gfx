@@ -107,6 +107,7 @@ pub enum TextureDescriptor<'a> {
         data: DescriptorData<'a>,
         extent: Extent2D,
         format: util::Format,
+        // TODO: Can this be removed?
         mipmaps: MipMaps,
         ty: TextureType,
     },

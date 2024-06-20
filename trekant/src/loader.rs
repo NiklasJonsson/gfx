@@ -31,6 +31,8 @@ pub enum LoaderError {
     Mutex,
 }
 
+// TODO: Global member is not great but there are no invariants to uphold. For example,
+// an empty string is technically okay to use in a hashmap.
 #[derive(Debug, Clone, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub struct LoadId(pub &'static str);
 

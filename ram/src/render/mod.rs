@@ -10,11 +10,11 @@ use trekant::pipeline::{
 };
 use trekant::pipeline_resource::PipelineResourceSet;
 use trekant::resource::Handle;
+use trekant::util;
 use trekant::vertex::VertexFormat;
 use trekant::BufferHandle;
 use trekant::RenderPassEncoder;
 use trekant::Renderer;
-use trekant::{util, AsyncBufferHandle};
 
 pub mod debug;
 pub mod geometry;
@@ -35,7 +35,7 @@ use mesh::Mesh;
 use crate::camera::*;
 use crate::ecs;
 use crate::math::{Mat4, ModelMatrix, Transform, Vec3};
-use material::{GpuMaterial, PendingMaterial};
+use material::GpuMaterial;
 use ram_derive::Visitable;
 
 pub struct GlobalShaderCache(std::sync::Mutex<shader::ShaderCache>);
@@ -43,23 +43,30 @@ pub struct GlobalShaderCache(std::sync::Mutex<shader::ShaderCache>);
 /// Utility for working with asynchronously uploaded gpu resources
 #[derive(Debug, Clone, Visitable)]
 pub enum GpuBuffer {
-    None,
     Pending(trekant::PendingBufferHandle),
     Available(BufferHandle),
 }
 
 impl GpuBuffer {
+    /// Return the buffer if it is available.
+    /// Nested option is a bit weird but it means:
+    /// If GpuBuffer is None
+    // TODO: Should GpuBuffer really contain the inner None as well?
     fn get_available(&self) -> Option<BufferHandle> {
         match self {
             Self::Available(a) => Some(*a),
-            _ => None,
+            Self::Pending(_) => None,
         }
     }
 
     fn try_take(&mut self, old: trekant::PendingBufferHandle, new: trekant::BufferHandle) -> bool {
         match self {
             Self::Pending(pending) if pending.is_same_resource(&old) => {
-                *self = Self::Available(new);
+                *self = Self::Available(trekant::BufferHandle::sub_buffer(
+                    new,
+                    pending.idx(),
+                    pending.n_elems(),
+                ));
                 true
             }
             _ => false,
@@ -115,64 +122,6 @@ pub struct ReloadMaterial;
 pub struct RenderableMaterial {
     gfx_pipeline: Handle<GraphicsPipeline>,
     material_descriptor_set: Handle<PipelineResourceSet>,
-}
-
-// TODO: Bindings here need to match with shader
-fn create_material_descriptor_set(
-    renderer: &mut Renderer,
-    material: &GpuMaterial,
-) -> Handle<PipelineResourceSet> {
-    match material {
-        material::GpuMaterial::PBR {
-            material_uniforms,
-            normal_map,
-            base_color_texture,
-            metallic_roughness_texture,
-            ..
-        } => {
-            let mut desc_set_builder = PipelineResourceSet::builder(renderer);
-
-            desc_set_builder = desc_set_builder.add_buffer(
-                *material_uniforms,
-                0,
-                trekant::pipeline::ShaderStage::FRAGMENT,
-            );
-
-            if let Some(bct) = &base_color_texture {
-                desc_set_builder = desc_set_builder.add_texture(
-                    bct.handle,
-                    1,
-                    trekant::pipeline::ShaderStage::FRAGMENT,
-                    false,
-                );
-            }
-
-            if let Some(mrt) = &metallic_roughness_texture {
-                desc_set_builder = desc_set_builder.add_texture(
-                    mrt.handle,
-                    2,
-                    trekant::pipeline::ShaderStage::FRAGMENT,
-                    false,
-                );
-            }
-
-            if let Some(nm) = &normal_map {
-                desc_set_builder = desc_set_builder.add_texture(
-                    nm.handle,
-                    3,
-                    trekant::pipeline::ShaderStage::FRAGMENT,
-                    false,
-                );
-            }
-
-            desc_set_builder.build()
-        }
-        material::GpuMaterial::Unlit { color_uniform, .. } => {
-            PipelineResourceSet::builder(renderer)
-                .add_buffer(*color_uniform, 0, trekant::pipeline::ShaderStage::FRAGMENT)
-                .build()
-        }
-    }
 }
 
 #[derive(Debug, Error)]
@@ -302,53 +251,73 @@ fn get_pipeline_for(
 }
 
 #[profiling::function]
-fn create_renderables(renderer: &mut Renderer, world: &mut World) {
-    use specs::storage::StorageEntry;
-
+fn create_renderables_pbr(renderer: &mut Renderer, world: &mut World) {
     let meshes = world.read_storage::<Mesh>();
-    let materials = world.read_storage::<GpuMaterial>();
-    let mut should_reload = world.write_storage::<ReloadMaterial>();
+    let materials = world.read_storage::<material::pbr::Done>();
+    let frame_resources = world.read_resource::<FrameResources>();
+    let shader_compiler = world.read_resource::<ShaderCompiler>();
+    let shader_cache = world.read_resource::<GlobalShaderCache>();
     let mut renderables = world.write_storage::<RenderableMaterial>();
+    let mut shader_cache = shader_cache.0.lock().unwrap();
     let entities = world.entities();
 
-    if !should_reload.is_empty() {
-        log::info!(
-            "Reloading shaders, {} entities have the ReloadMaterial tag",
-            should_reload.count()
+    for (ent, mesh, mat, _) in (&entities, &meshes, &materials, !&renderables.mask().clone()).join()
+    {
+        log::trace!("No Renderable found, creating new");
+        log::trace!("Creating renderable: {:?}", mat);
+        let material_descriptor_set = material::pbr::create_pipeline_resource_set(renderer, mat);
+        let gfx_pipeline = material::pbr::get_pipeline(
+            renderer,
+            mesh.cpu_vertex_buffer.format(),
+            &shader_compiler,
+            &mut shader_cache,
+            frame_resources.main_render_pass,
+            mat,
+        )
+        .expect("Failed to create renderable material for PBR");
+
+        renderables.insert(
+            ent,
+            RenderableMaterial {
+                gfx_pipeline,
+                material_descriptor_set,
+            },
         );
     }
+}
 
-    for (ent, mesh, mat) in (&entities, &meshes, &materials).join() {
-        let entry = renderables.entry(ent).expect("Failed to get entry!");
-        match entry {
-            StorageEntry::Occupied(mut entry) => {
-                log::trace!("Using existing Renderable");
-                if should_reload.contains(ent) {
-                    log::trace!("Reloading shader for {:?}", ent);
-                    // TODO: Destroy the previous pipeline
-                    match get_pipeline_for(renderer, world, mesh, mat) {
-                        Ok(pipeline) => entry.get_mut().gfx_pipeline = pipeline,
-                        Err(e) => log::error!("Failed to compile pipeline: {}", e),
-                    }
-                }
-            }
-            StorageEntry::Vacant(entry) => {
-                log::trace!("No Renderable found, creating new");
-                log::trace!("Creating renderable: {:?}", mat);
-                let material_descriptor_set = create_material_descriptor_set(renderer, mat);
-                let gfx_pipeline =
-                    get_pipeline_for(renderer, world, mesh, mat).expect("Failed to get pipeline");
+#[profiling::function]
+fn create_renderables_unlit(renderer: &mut Renderer, world: &mut World) {
+    let meshes = world.read_storage::<Mesh>();
+    let materials = world.read_storage::<material::unlit::Done>();
+    let frame_resources = world.read_resource::<FrameResources>();
+    let shader_compiler = world.read_resource::<ShaderCompiler>();
+    let shader_cache = world.read_resource::<GlobalShaderCache>();
+    let mut renderables = world.write_storage::<RenderableMaterial>();
+    let mut shader_cache = shader_cache.0.lock().unwrap();
+    let entities = world.entities();
 
-                let rend = RenderableMaterial {
-                    gfx_pipeline,
-                    material_descriptor_set,
-                };
-                entry.insert(rend);
-            }
-        }
+    for (ent, mesh, mat, _) in (&entities, &meshes, &materials, !&renderables.mask().clone()).join()
+    {
+        log::trace!("No Renderable found, creating new");
+        log::trace!("Creating renderable: {:?}", mat);
+        let material_descriptor_set = material::unlit::create_pipeline_resource_set(renderer, mat);
+        let gfx_pipeline = material::unlit::get_pipeline(
+            renderer,
+            mesh.cpu_vertex_buffer.format(),
+            &shader_compiler,
+            &mut shader_cache,
+            frame_resources.main_render_pass,
+            mat,
+        )
+        .expect("Failed to create pipeline for unlit material");
+
+        let rend = RenderableMaterial {
+            gfx_pipeline,
+            material_descriptor_set,
+        };
+        renderables.insert(ent, rend);
     }
-
-    should_reload.clear();
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -379,7 +348,7 @@ fn draw_entities(world: &World, cmd_buf: &mut RenderPassEncoder<'_>, draw_mode: 
     {
         let (vertex_buffer, index_buffer) = match (&mesh.gpu_vertex_buffer, &mesh.gpu_index_buffer)
         {
-            (GpuBuffer::Available(vbuf), GpuBuffer::Available(ibuf)) => (vbuf, ibuf),
+            (Some(GpuBuffer::Available(vbuf)), Some(GpuBuffer::Available(ibuf))) => (vbuf, ibuf),
             _ => continue,
         };
 
@@ -416,8 +385,14 @@ pub fn draw_frame(world: &mut World, ui: &mut imgui::UIContext, renderer: &mut R
         Some(e) => e,
     };
 
-    resolve_pending(world, renderer);
-    create_renderables(renderer, world);
+    {
+        let loader = world.write_resource::<trekant::Loader>();
+        loader.progress(renderer);
+    }
+    material::pre_frame(world, renderer);
+    // TODO: Move these into material::pre_frame?
+    create_renderables_pbr(renderer, world);
+    create_renderables_unlit(renderer, world);
     light::prepare_entities(world, renderer);
 
     let main_window_extents = world.read_resource::<crate::io::MainWindow>().extents();
@@ -747,151 +722,10 @@ pub fn setup_resources(world: &mut World, renderer: &mut Renderer) {
     log::trace!("Done");
 }
 
-#[derive(Debug, Clone, Visitable)]
-pub enum Pending<T1, T2> {
-    Pending(T1),
-    Available(T2),
-}
-
-struct MeshLoad;
-impl MeshLoad {
-    pub const ID: &'static str = "MeshLoad";
-}
-
 use self::shader::ShaderCompiler;
-fn map_buffer_handle(h: &mut GpuBuffer, old: AsyncBufferHandle, new: BufferHandle) -> bool {
-    match h {
-        GpuBuffer::Pending(cur) if cur.base_buffer() == old.base_buffer() => {
-            *h = GpuBuffer::Available(BufferHandle::sub_buffer(new, cur.idx(), cur.n_elems()));
-            true
-        }
-        _ => false,
-    }
-}
-
-// TODO: Re-impl Loader interface. Each pipeline should be able to flush the loader mappings independently.
-#[profiling::function]
-fn resolve_pending(world: &mut World, renderer: &mut Renderer) {
-    use trekant::HandleMapping;
-    let loader = world.write_resource::<trekant::Loader>();
-    let mut pending_materials = world.write_storage::<PendingMaterial>();
-    let mut materials = world.write_storage::<GpuMaterial>();
-    let mut meshes = world.write_storage::<Mesh>();
-    let mut transfer_guard = loader.progress(renderer);
-    let mut generate_mipmaps = Vec::new();
-    for mapping in transfer_guard.iter() {
-        match mapping {
-            HandleMapping::Buffer { old, new } => {
-                for (ent, _) in (&world.entities(), &pending_materials.mask().clone()).join() {
-                    if let Some(pending) = pending_materials.get_mut(ent) {
-                        let handle = match pending {
-                            PendingMaterial::Unlit { color_uniform, .. } => color_uniform,
-                            PendingMaterial::PBR {
-                                material_uniforms, ..
-                            } => material_uniforms,
-                        };
-                        map_buffer_handle(handle, old, new);
-
-                        if !pending.is_done() {
-                            continue;
-                        }
-
-                        let material = pending_materials
-                            .remove(ent)
-                            .expect("This is alive")
-                            .finish();
-
-                        materials.insert(ent, material).expect("This is alive");
-                    }
-                }
-
-                for mesh in (&mut meshes).join() {
-                    if !mesh.is_pending_gpu() {
-                        continue;
-                    }
-
-                    map_buffer_handle(&mut mesh.gpu_vertex_buffer, old, new);
-                    map_buffer_handle(&mut mesh.gpu_index_buffer, old, new);
-                }
-            }
-            HandleMapping::Texture { old, new } => {
-                for (ent, _) in (&world.entities(), &pending_materials.mask().clone()).join() {
-                    if let Some(pending) = pending_materials.get_mut(ent) {
-                        match pending {
-                            PendingMaterial::PBR {
-                                normal_map,
-                                base_color_texture,
-                                metallic_roughness_texture,
-                                ..
-                            } => {
-                                for tex in &mut [
-                                    normal_map,
-                                    base_color_texture,
-                                    metallic_roughness_texture,
-                                ] {
-                                    match tex {
-                                        Some(Pending::Pending(tex_inner))
-                                            if tex_inner.handle == old =>
-                                        {
-                                            generate_mipmaps.push(new);
-                                            **tex =
-                                                Some(Pending::Available(material::TextureUse {
-                                                    handle: new,
-                                                    coord_set: tex_inner.coord_set,
-                                                }));
-                                        }
-                                        _ => (),
-                                    }
-                                }
-                            }
-                            PendingMaterial::Unlit { .. } => {
-                                unreachable!("Can't have pending textures for this variant")
-                            }
-                        };
-
-                        if !pending.is_done() {
-                            continue;
-                        }
-
-                        let material = pending_materials
-                            .remove(ent)
-                            .expect("This is alive")
-                            .finish();
-
-                        materials.insert(ent, material).expect("This is alive");
-                    }
-                }
-            }
-        }
-    }
-
-    renderer
-        .generate_mipmaps(&generate_mipmaps)
-        .expect("Failed to generate mipmaps");
-}
-
-// TODO: Move to mesh module
-impl<'a> System<'a> for MeshLoad {
-    type SystemData = (
-        WriteExpect<'a, trekant::Loader>,
-        WriteStorage<'a, mesh::Mesh>,
-    );
-
-    fn run(&mut self, data: Self::SystemData) {
-        let (loader, mut meshes) = data;
-
-        for mesh in (&mut meshes).join() {
-            if mesh.is_available_gpu() || mesh.is_pending_gpu() {
-                continue;
-            }
-
-            mesh.load_gpu(&loader);
-        }
-    }
-}
 
 pub fn register_systems(builder: ExecutorBuilder) -> ExecutorBuilder {
-    register_module_systems!(builder, debug, geometry, material).with(MeshLoad, MeshLoad::ID, &[])
+    register_module_systems!(builder, debug, geometry, material, mesh)
 }
 
 pub fn register_components(world: &mut World) {
@@ -899,7 +733,6 @@ pub fn register_components(world: &mut World) {
 
     world.register::<RenderableMaterial>();
     world.register::<material::GpuMaterial>();
-    world.register::<material::PendingMaterial>();
     world.register::<material::PhysicallyBased>();
     world.register::<material::Unlit>();
 

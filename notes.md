@@ -602,9 +602,8 @@ TODO:
 
 * Remove AsyncResources
 * Write an helper struct to work with handle mappings, entities and flushing
-* Figure out how to map both of the Done structs to the RenderableMaterial
-* Implement mip-map generation
 * Arc in TextureLoader?
+* Fix shader reloads.
 
 ## Future work
 

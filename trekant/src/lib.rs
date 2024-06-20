@@ -30,7 +30,9 @@ pub use error::ResizeReason;
 pub use loader::{
     HandleMapping, LoadId, Loader, LoaderError, PendingBufferHandle, PendingTextureHandle,
 };
-pub use pipeline::{GraphicsPipeline, GraphicsPipelineDescriptor, PipelineError, ShaderStage};
+pub use pipeline::{
+    GraphicsPipeline, GraphicsPipelineDescriptor, PipelineError, ShaderDescriptor, ShaderStage,
+};
 pub use pipeline_resource::PipelineResourceSet;
 pub use render_pass::{RenderPass, RenderPassEncoder};
 pub use render_target::RenderTarget;

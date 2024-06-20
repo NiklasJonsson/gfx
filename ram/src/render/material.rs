@@ -1,5 +1,5 @@
 use trekant::{pipeline::PolygonMode, TextureDescriptor};
-use trekant::{BufferHandle, Handle};
+use trekant::{BufferHandle, Handle, Renderer};
 
 use crate::math::Rgba;
 
@@ -53,6 +53,8 @@ impl TextureAssetLoader {
         Self::default()
     }
 }
+#[derive(Default, Debug)]
+struct MipMapQueue(Vec<trekant::Handle<trekant::Texture>>);
 
 fn load_image(path: &std::path::Path) -> Result<image::RgbaImage, image::ImageError> {
     log::trace!("Trying to load image from {}", path.display());
@@ -128,7 +130,6 @@ pub enum GpuMaterial {
 
 #[derive(Debug, Visitable)]
 enum PendingTextureUse {
-    None,
     Pending(PendingDeviceTextureHandle),
     Available(DeviceTextureHandle),
 }
@@ -138,6 +139,13 @@ impl PendingTextureUse {
         match self {
             Self::Pending(_) => true,
             _ => false,
+        }
+    }
+
+    fn get_available(&self) -> Option<DeviceTextureHandle> {
+        match self {
+            Self::Available(a) => Some(*a),
+            Self::Pending(_) => None,
         }
     }
 
@@ -159,87 +167,9 @@ impl PendingTextureUse {
     }
 }
 
-#[derive(Debug, Component, Visitable)]
-pub enum PendingMaterial {
-    Unlit {
-        color_uniform: GpuBuffer,
-        polygon_mode: PolygonMode,
-    },
-    PBR {
-        material_uniforms: GpuBuffer,
-        normal_map: PendingTextureUse,
-        base_color_texture: PendingTextureUse,
-        metallic_roughness_texture: PendingTextureUse,
-        has_vertex_colors: bool,
-    },
-}
-
-// TODO: Try finish instead of is_done/finish
-impl PendingMaterial {
-    pub fn is_done(&self) -> bool {
-        match self {
-            PendingMaterial::Unlit {
-                color_uniform: GpuBuffer::Available(_),
-                ..
-            } => true,
-            PendingMaterial::PBR {
-                material_uniforms: GpuBuffer::Available(_),
-                normal_map: PendingTextureUse::Available(_) | PendingTextureUse::None,
-                base_color_texture: PendingTextureUse::Available(_) | PendingTextureUse::None,
-                metallic_roughness_texture:
-                    PendingTextureUse::Available(_) | PendingTextureUse::None,
-                ..
-            } => true,
-            _ => false,
-        }
-    }
-
-    pub fn finish(self) -> GpuMaterial {
-        match self {
-            PendingMaterial::Unlit {
-                color_uniform: GpuBuffer::Available(color_uniform),
-                polygon_mode,
-            } => GpuMaterial::Unlit {
-                color_uniform,
-                polygon_mode,
-            },
-            PendingMaterial::PBR {
-                material_uniforms: GpuBuffer::Available(material_uniforms),
-                normal_map,
-                base_color_texture,
-                metallic_roughness_texture,
-                has_vertex_colors,
-            } => {
-                let map_tex = |pend_tex: PendingTextureUse| -> Option<DeviceTextureHandle> {
-                    match pend_tex {
-                        PendingTextureUse::None => None,
-                        PendingTextureUse::Available(handle) => Some(handle),
-                        PendingTextureUse::Pending(_) => {
-                            panic!("Don't call this function if `is_done` returns false");
-                        }
-                    }
-                };
-
-                GpuMaterial::PBR {
-                    material_uniforms,
-                    normal_map: map_tex(normal_map),
-                    base_color_texture: map_tex(base_color_texture),
-                    metallic_roughness_texture: map_tex(metallic_roughness_texture),
-                    has_vertex_colors,
-                }
-            }
-            _ => unreachable!("Should be done by now"),
-        }
-    }
-}
-
 pub use pbr::PhysicallyBased;
 
-mod pbr {
-    use std::future::pending;
-
-    use crate::visit::Visitable;
-
+pub mod pbr {
     use super::*;
 
     /// Attach this to an entity for it to have a lit material that is rendered with a
@@ -259,22 +189,58 @@ mod pbr {
     #[derive(Debug, Component, Visitable)]
     pub struct Pending {
         material_uniforms: GpuBuffer,
-        normal_map: PendingTextureUse,
-        base_color_texture: PendingTextureUse,
-        metallic_roughness_texture: PendingTextureUse,
+        normal_map: Option<PendingTextureUse>,
+        base_color_texture: Option<PendingTextureUse>,
+        metallic_roughness_texture: Option<PendingTextureUse>,
         has_vertex_colors: bool,
     }
 
     impl Pending {
         fn is_pending_gpu(&self) -> bool {
             self.material_uniforms.is_pending_gpu()
-                || self.normal_map.is_pending_gpu()
-                || self.base_color_texture.is_pending_gpu()
-                || self.metallic_roughness_texture.is_pending_gpu()
+                || self
+                    .normal_map
+                    .as_ref()
+                    .map(|x| x.is_pending_gpu())
+                    .unwrap_or(false)
+                || self
+                    .base_color_texture
+                    .as_ref()
+                    .map(|x| x.is_pending_gpu())
+                    .unwrap_or(false)
+                || self
+                    .metallic_roughness_texture
+                    .as_ref()
+                    .map(|x| x.is_pending_gpu())
+                    .unwrap_or(false)
         }
 
         fn try_finish(&self) -> Option<Done> {
-            todo!()
+            let material_uniforms = self.material_uniforms.get_available()?;
+            // TODO: Clean this up
+            let normal_map = match self.normal_map {
+                None => None,
+                Some(PendingTextureUse::Available(x)) => Some(x),
+                Some(PendingTextureUse::Pending(_)) => return None,
+            };
+            let base_color_texture = match self.base_color_texture {
+                None => None,
+                Some(PendingTextureUse::Available(x)) => Some(x),
+                Some(PendingTextureUse::Pending(_)) => return None,
+            };
+            let metallic_roughness_texture = match self.metallic_roughness_texture {
+                None => None,
+                Some(PendingTextureUse::Available(x)) => Some(x),
+                Some(PendingTextureUse::Pending(_)) => return None,
+            };
+
+            Some(Done {
+                material_uniforms,
+                normal_map,
+                base_color_texture,
+                metallic_roughness_texture,
+                has_vertex_colors: self.has_vertex_colors,
+            })
         }
     }
 
@@ -289,19 +255,21 @@ mod pbr {
 
     const LOAD_ID: trekant::LoadId = trekant::LoadId("pbr-pipeline");
 
-    pub struct StartLoad;
+    pub struct PBRMaterialLoad;
 
-    impl StartLoad {
-        pub const ID: &'static str = "PhysicallyBasedMaterialPipelineStartLoad";
+    impl PBRMaterialLoad {
+        pub const ID: &'static str = "PBRMaterialLoad";
     }
 
-    impl<'a> System<'a> for StartLoad {
+    impl<'a> System<'a> for PBRMaterialLoad {
         type SystemData = (
             WriteExpect<'a, trekant::Loader>,
             WriteExpect<'a, TextureAssetLoader>,
             WriteStorage<'a, PhysicallyBased>,
             WriteStorage<'a, Pending>,
             WriteStorage<'a, Done>,
+            Write<'a, PBRPendingHandles>,
+            Write<'a, MipMapQueue>,
             Entities<'a>,
         );
 
@@ -311,7 +279,9 @@ mod pbr {
                 texture_loader,
                 materials,
                 mut pending_materials,
-                done_materials,
+                mut done_materials,
+                mut handles,
+                mut mipmaps,
                 entities,
             ) = data;
 
@@ -331,35 +301,34 @@ mod pbr {
                 });
             }
 
-            let map_tex = |inp: &Option<HostTextureHandle>| -> PendingTextureUse {
-                if let Some(tex) = inp {
-                    let cpu_texture = texture_loader
-                        .get(tex.handle)
-                        .unwrap_or_else(|| panic!("Missing texture for handle {:?}", tex.handle));
+            let map_tex = |tex: HostTextureHandle,
+                           handles: &mut PBRPendingHandles,
+                           entity: Entity|
+             -> PendingTextureUse {
+                let cpu_texture = texture_loader
+                    .get(tex.handle)
+                    .unwrap_or_else(|| panic!("Missing texture for handle {:?}", tex.handle));
 
-                    // TODO: No clone. Use Arc instead.
-                    let data = trekant::DescriptorData::from_vec(cpu_texture.data.clone());
-                    let mipmaps = todo!("Figure out mipmaps");
+                // TODO: No clone. Use Arc instead.
+                let data = trekant::DescriptorData::from_vec(cpu_texture.data.clone());
+                let handle = loader
+                    .load_texture(
+                        TextureDescriptor::Raw {
+                            data,
+                            extent: cpu_texture.extent,
+                            format: cpu_texture.format,
+                            mipmaps: trekant::MipMaps::None,
+                            ty: trekant::TextureType::Tex2D,
+                        },
+                        LOAD_ID,
+                    )
+                    .expect("Failed to load texture");
+                handles.textures.entry(handle).or_default().push(entity);
 
-                    let handle = loader
-                        .load_texture(
-                            TextureDescriptor::Raw {
-                                data,
-                                extent: cpu_texture.extent,
-                                format: cpu_texture.format,
-                                mipmaps,
-                                ty: trekant::TextureType::Tex2D,
-                            },
-                            LOAD_ID,
-                        )
-                        .expect("Failed to load texture");
-                    PendingTextureUse::Pending(PendingDeviceTextureHandle {
-                        handle,
-                        coord_set: tex.coord_set,
-                    })
-                } else {
-                    PendingTextureUse::None
-                }
+                PendingTextureUse::Pending(PendingDeviceTextureHandle {
+                    handle,
+                    coord_set: tex.coord_set,
+                })
             };
 
             if !ubuf_pbr.is_empty() {
@@ -381,39 +350,18 @@ mod pbr {
                             material_uniforms: GpuBuffer::Pending(
                                 trekant::PendingBufferHandle::sub_buffer(full_buffer, i as u32, 1),
                             ),
-                            normal_map: map_tex(&pb_mat.normal_map),
-                            base_color_texture: map_tex(&pb_mat.base_color_texture),
-                            metallic_roughness_texture: map_tex(&pb_mat.metallic_roughness_texture),
+                            normal_map: pb_mat.normal_map.map(|t| map_tex(t, &mut *handles, ent)),
+                            base_color_texture: pb_mat
+                                .base_color_texture
+                                .map(|t| map_tex(t, &mut *handles, ent)),
+                            metallic_roughness_texture: pb_mat
+                                .metallic_roughness_texture
+                                .map(|t| map_tex(t, &mut *handles, ent)),
                             has_vertex_colors: pb_mat.has_vertex_colors,
                         });
                     }
                 }
             }
-        }
-    }
-
-    #[derive(Default)]
-    pub struct PBRPendingHandles {
-        buffers: std::collections::HashMap<trekant::PendingBufferHandle, Vec<Entity>>,
-        textures: std::collections::HashMap<trekant::PendingTextureHandle, Vec<Entity>>,
-    }
-
-    pub struct FinishLoad;
-
-    impl FinishLoad {
-        pub const ID: &'static str = "PhysicallyBasedMaterialPipelineFinishLoad";
-    }
-    impl<'a> System<'a> for FinishLoad {
-        type SystemData = (
-            WriteExpect<'a, trekant::Loader>,
-            WriteStorage<'a, Pending>,
-            WriteStorage<'a, Done>,
-            Write<'a, PBRPendingHandles>,
-            Entities<'a>,
-        );
-
-        fn run(&mut self, data: Self::SystemData) {
-            let (loader, mut pending_materials, mut done_materials, mut handles, entities) = data;
 
             for handle_mapping in loader.flush(LOAD_ID) {
                 match handle_mapping {
@@ -443,14 +391,22 @@ mod pbr {
                                 continue;
                             };
 
+                            let mut any_success = false;
                             for tex in [
                                 &mut pending.base_color_texture,
                                 &mut pending.metallic_roughness_texture,
                                 &mut pending.normal_map,
                             ] {
                                 // NOTE: Not breaking after a success allows multiple texture uses to match an uploaded one.
-                                tex.try_take(old, new);
+                                if let Some(tex) = tex {
+                                    let success = tex.try_take(old, new);
+                                    any_success = any_success || success;
+                                    if success {
+                                        mipmaps.0.push(new);
+                                    }
+                                }
                             }
+                            assert!(any_success, "Entity had a queued texture load but none of its PBR textures matched the handle");
                         }
                     }
                 }
@@ -467,15 +423,103 @@ mod pbr {
             for entity in done_entities {
                 pending_materials.remove(entity).unwrap();
             }
-
-            todo!("mipmaps");
         }
+    }
+
+    #[derive(Default)]
+    pub struct PBRPendingHandles {
+        buffers: std::collections::HashMap<trekant::PendingBufferHandle, Vec<Entity>>,
+        textures: std::collections::HashMap<trekant::PendingTextureHandle, Vec<Entity>>,
+    }
+
+    pub fn create_pipeline_resource_set(
+        renderer: &mut trekant::Renderer,
+        mat: &Done,
+    ) -> Handle<trekant::PipelineResourceSet> {
+        let mut desc_set_builder = trekant::PipelineResourceSet::builder(renderer);
+
+        desc_set_builder = desc_set_builder.add_buffer(
+            mat.material_uniforms,
+            0,
+            trekant::pipeline::ShaderStage::FRAGMENT,
+        );
+
+        if let Some(bct) = &mat.base_color_texture {
+            desc_set_builder = desc_set_builder.add_texture(
+                bct.handle,
+                1,
+                trekant::pipeline::ShaderStage::FRAGMENT,
+                false,
+            );
+        }
+
+        if let Some(mrt) = &mat.metallic_roughness_texture {
+            desc_set_builder = desc_set_builder.add_texture(
+                mrt.handle,
+                2,
+                trekant::pipeline::ShaderStage::FRAGMENT,
+                false,
+            );
+        }
+
+        if let Some(nm) = &mat.normal_map {
+            desc_set_builder = desc_set_builder.add_texture(
+                nm.handle,
+                3,
+                trekant::pipeline::ShaderStage::FRAGMENT,
+                false,
+            );
+        }
+
+        desc_set_builder.build()
+    }
+
+    pub fn get_pipeline(
+        renderer: &mut trekant::Renderer,
+        vertex_format: &trekant::VertexFormat,
+        shader_compiler: &crate::render::ShaderCompiler,
+        shader_cache: &mut crate::render::ShaderCache,
+        render_pass: Handle<trekant::RenderPass>,
+        mat: &Done,
+    ) -> Result<Handle<trekant::GraphicsPipeline>, crate::render::MaterialError> {
+        // TODO: Normal map does not infer tangents at all times
+        let has_nm = mat.normal_map.is_some();
+        let has_bc = mat.base_color_texture.is_some();
+        let has_mr = mat.metallic_roughness_texture.is_some();
+        let def = crate::render::shader::pbr_gltf::ShaderDefinition {
+            has_tex_coords: has_nm || has_bc || has_mr,
+            has_vertex_colors: mat.has_vertex_colors,
+            has_tangents: has_nm,
+            has_base_color_texture: has_bc,
+            has_metallic_roughness_texture: has_mr,
+            has_normal_map: has_nm,
+        };
+
+        let (vert, frag) =
+            crate::render::shader::pbr_gltf::compile(shader_compiler, shader_cache, &def)?;
+
+        let vert = trekant::ShaderDescriptor {
+            debug_name: Some("pbr-vert".to_owned()),
+            spirv_code: vert.data(),
+        };
+        let frag = trekant::ShaderDescriptor {
+            debug_name: Some("pbr-frag".to_owned()),
+            spirv_code: frag.data(),
+        };
+        let desc = trekant::GraphicsPipelineDescriptor::builder()
+            .vert(vert)
+            .frag(frag)
+            .vertex_format(vertex_format.clone())
+            .polygon_mode(trekant::pipeline::PolygonMode::Fill)
+            .build()?;
+
+        Ok(renderer.create_gfx_pipeline(desc, &render_pass)?)
     }
 }
 
 pub use unlit::Unlit;
 
-mod unlit {
+pub mod unlit {
     use trekant::{HandleMapping, PendingBufferHandle};
 
     use super::*;
@@ -500,16 +544,16 @@ mod unlit {
         polygon_mode: PolygonMode,
     }
 
-    pub struct StartLoad;
+    pub struct UnlitMaterialLoad;
 
     #[derive(Default)]
     pub struct UnlitPendingHandles(std::collections::HashMap<PendingBufferHandle, Vec<Entity>>);
 
-    impl StartLoad {
-        pub const ID: &'static str = "UnlitMaterialPipelineStartLoad";
+    impl UnlitMaterialLoad {
+        pub const ID: &'static str = "UnlitMaterialLoad";
     }
 
-    impl<'a> System<'a> for StartLoad {
+    impl<'a> System<'a> for UnlitMaterialLoad {
         type SystemData = (
             WriteExpect<'a, trekant::Loader>,
             WriteStorage<'a, Unlit>,
@@ -524,8 +568,8 @@ mod unlit {
                 loader,
                 materials,
                 mut pending_materials,
-                done_materials,
-                mut pending_handles,
+                mut done_materials,
+                mut handles,
                 entities,
             ) = data;
 
@@ -537,7 +581,7 @@ mod unlit {
             }
 
             if !ubuf.is_empty() {
-                let async_handle = loader
+                let full_buffer = loader
                     .load_buffer(
                         trekant::BufferDescriptor::uniform_buffer(
                             ubuf,
@@ -551,34 +595,16 @@ mod unlit {
                     (&entities, &materials, !&done_materials).join().enumerate()
                 {
                     if let StorageEntry::Vacant(entry) = pending_materials.entry(ent).unwrap() {
-                        pending_handles.0.entry(async_handle).or_default().push(ent);
+                        handles.0.entry(full_buffer).or_default().push(ent);
                         entry.insert(Pending {
                             color_uniform: GpuBuffer::Pending(
-                                trekant::PendingBufferHandle::sub_buffer(async_handle, i as u32, 1),
+                                trekant::PendingBufferHandle::sub_buffer(full_buffer, i as u32, 1),
                             ),
                             polygon_mode: unlit.polygon_mode,
                         });
                     }
                 }
             }
-        }
-    }
-
-    pub struct FinishLoad;
-
-    impl FinishLoad {
-        pub const ID: &'static str = "UnlitMaterialPipelineFinishLoad";
-    }
-    impl<'a> System<'a> for FinishLoad {
-        type SystemData = (
-            WriteExpect<'a, trekant::Loader>,
-            WriteStorage<'a, Pending>,
-            WriteStorage<'a, Done>,
-            Write<'a, UnlitPendingHandles>,
-        );
-
-        fn run(&mut self, data: Self::SystemData) {
-            let (loader, mut pending_materials, mut done_materials, mut handles) = data;
 
             for handle_mapping in loader.flush(LOAD_ID) {
                 let HandleMapping::Buffer { old, new } = handle_mapping else {
@@ -589,35 +615,64 @@ mod unlit {
                     .remove(&old)
                     .expect("Got a buffer handle that was not requested");
                 for entity in entities {
-                    if let Some(pending) = pending_materials.remove(entity) {
-                        let result = done_materials.insert(
-                            entity,
-                            Done {
-                                color_uniform: new,
-                                polygon_mode: pending.polygon_mode,
-                            },
-                        );
-                        if let Err(e) = result {
-                            log::error!(
-                                "Failed to finalize unlit material load for entity {entity:?}: {e}"
-                            );
-                        }
-                    } else {
+                    let Some(pending) = pending_materials.remove(entity) else {
                         log::debug!("Entity {entity:?} had a pending buffer load for unlit uniform data but was destroyed while the buffer was loading");
+                        continue;
+                    };
+                    let result = done_materials.insert(
+                        entity,
+                        Done {
+                            color_uniform: new,
+                            polygon_mode: pending.polygon_mode,
+                        },
+                    );
+                    if let Err(e) = result {
+                        log::error!(
+                            "Failed to finalize unlit material load for entity {entity:?}: {e}"
+                        );
                     }
                 }
             }
         }
     }
+
+    pub fn create_pipeline_resource_set(
+        renderer: &mut Renderer,
+        mat: &Done,
+    ) -> Handle<trekant::PipelineResourceSet> {
+        trekant::PipelineResourceSet::builder(renderer)
+            .add_buffer(
+                mat.color_uniform,
+                0,
+                trekant::pipeline::ShaderStage::FRAGMENT,
+            )
+            .build()
+    }
+
+    pub fn get_pipeline(
+        renderer: &mut trekant::Renderer,
+        vertex_format: &trekant::VertexFormat,
+        shader_compiler: &crate::render::ShaderCompiler,
+        shader_cache: &mut crate::render::ShaderCache,
+        render_pass: Handle<trekant::RenderPass>,
+        mat: &Done,
+    ) -> Result<Handle<trekant::GraphicsPipeline>, crate::render::MaterialError> {
+        todo!()
+    }
+}
+
+pub fn pre_frame(world: &World, renderer: &mut Renderer) {
+    {
+        let mipmaps = world.write_resource::<MipMapQueue>();
+        renderer
+            .generate_mipmaps(&mipmaps.0)
+            .expect("Failed to generate mipmaps");
+    }
+    todo!("Create renderable material");
 }
 
 pub fn register_systems(builder: ExecutorBuilder) -> ExecutorBuilder {
     builder
-        .with(pbr::StartLoad, pbr::StartLoad::ID, &[])
-        .with(unlit::StartLoad, unlit::StartLoad::ID, &[])
-        .with(
-            unlit::FinishLoad,
-            unlit::FinishLoad::ID,
-            &[unlit::StartLoad::ID],
-        )
+        .with(unlit::UnlitMaterialLoad, unlit::UnlitMaterialLoad::ID, &[])
+        .with(pbr::PBRMaterialLoad, pbr::PBRMaterialLoad::ID, &[])
 }
