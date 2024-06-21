@@ -28,7 +28,7 @@ pub mod prelude {
     pub use specs::{Read, ReadExpect, ReadStorage, Write, WriteExpect, WriteStorage};
 
     pub use super::WorldUtil as _;
-    pub use specs::{Builder as _, Join as _, LendJoin as _, SystemData as _, WorldExt as _};
+    pub use specs::{Builder as _, Join as _, SystemData as _, WorldExt as _};
 
     pub use super::Component;
     pub use specs::world::Component;

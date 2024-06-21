@@ -2,7 +2,6 @@ use crate::ecs::prelude::*;
 use crate::visit::{Meta, MetaOrigin, Visitable, Visitor};
 
 use std::borrow::Cow;
-use std::collections::HashMap;
 
 use crate::render::imgui::UiFrame;
 
@@ -31,7 +30,7 @@ type InspectorCallback = for<'a> fn(&mut ImguiVisitor<'a>, &World, Entity);
 
 #[derive(Default)]
 pub struct Inspector {
-    components: HashMap<std::any::TypeId, InspectorCallback>,
+    components: Vec<InspectorCallback>,
 }
 
 pub trait ImguiVisitableComponent<'a>: Visitable<ImguiVisitor<'a>> + Component + 'static {}
@@ -43,13 +42,13 @@ where
 {
     let type_name = std::any::type_name::<C>();
     let size = std::mem::size_of::<C>();
-
-    // Why do I need 3 function calls to get a &mut reference?! :(
     let mut storage = world.write_component::<C>();
-    let Some(mut component) = storage.get_mut(e) else {
+
+    let component = if let Some(component) = storage.get_mut(e) {
+        component
+    } else {
         return;
     };
-    let component: &mut C = component.access_mut();
 
     if size == 0 {
         let _open = imgui::CollapsingHeader::new(&imgui::ImString::from(String::from(type_name)))
@@ -71,40 +70,12 @@ impl Inspector {
     where
         for<'a> C: ImguiVisitableComponent<'a>,
     {
-        self.components
-            .insert(std::any::TypeId::of::<C>(), inspect_component::<C>);
+        self.components.push(inspect_component::<C>);
     }
 
     pub fn inspect_components(&self, v: &mut ImguiVisitor<'_>, w: &World, e: Entity) {
-        // We can't call the inspector callback while in the visit function
-        // becuase the visit function borrows all the storages.
-        // TODO: Maybe better to have it return/write a vector? DATA IS THE BEST?! :D
-        enum Component<'a> {
-            Callback(&'a InspectorCallback),
-            NameOnly(&'static str),
-        }
-        let mut components: Vec<Component> = Vec::new();
-
-        let visit = |info: &specs::ComponentInfo| {
-            components.push(
-                self.components
-                    .get(&info.type_id)
-                    .map(Component::Callback)
-                    .unwrap_or(Component::NameOnly(info.type_name)),
-            );
-        };
-        w.visit(e, visit).expect("Entity is not alive");
-
-        for c in components {
-            match c {
-                Component::Callback(c) => c(v, w, e),
-                Component::NameOnly(name) => {
-                    let _open =
-                        imgui::CollapsingHeader::new(&imgui::ImString::from(String::from(name)))
-                            .leaf(true)
-                            .build(v.ui.inner());
-                }
-            }
+        for comp in &self.components {
+            comp(v, w, e);
         }
     }
 }
@@ -385,7 +356,6 @@ macro_rules! impl_visit_todo_generic {
 }
 
 use resurs::Async;
-use specs::storage::AccessMut;
 use trekant::Texture;
 impl_visit_todo_generic!(Async);
 impl_visit_todo!(Texture);
