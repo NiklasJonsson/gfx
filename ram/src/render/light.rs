@@ -283,7 +283,7 @@ pub fn prepare_entities(world: &World, renderer: &mut Renderer) {
         (&meshes, &entities, &!renderables.mask().clone(), &materials).join()
     {
         let vertex_format_size = mesh.cpu_vertex_buffer.format().size();
-        let shadow_vertex_format = trekant::vertex::VertexFormat::builder()
+        let shadow_vertex_format = trekant::VertexFormat::builder()
             .add_attribute(trekant::util::Format::FLOAT3) // pos
             .skip(vertex_format_size - trekant::util::Format::FLOAT3.size())
             .build();

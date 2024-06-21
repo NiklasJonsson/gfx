@@ -1,7 +1,5 @@
 pub use ash::vk;
 
-mod buffer;
-mod loader;
 pub mod pipeline;
 pub mod pipeline_resource;
 pub mod resource;
@@ -11,17 +9,19 @@ pub mod util;
 pub mod vertex;
 
 mod backend;
+mod buffer;
 mod common;
 mod descriptor;
 mod error;
+mod loader;
 mod render_pass;
 mod render_target;
 mod texture;
 
 pub use backend::command::CommandBuffer;
 pub use buffer::{
-    AsyncBufferHandle, BufferDescriptor, BufferHandle, BufferLayout, BufferMutability, BufferType,
-    BufferTypeTrait, DeviceBuffer, IndexBufferType, IndexInt, StorageBufferType, UniformBufferType,
+    BufferDescriptor, BufferHandle, BufferLayout, BufferMutability, BufferType, BufferTypeTrait,
+    DeviceBuffer, IndexBufferType, IndexInt, StorageBufferType, UniformBufferType,
     VertexBufferType,
 };
 pub use descriptor::DescriptorData;
@@ -31,7 +31,8 @@ pub use loader::{
     HandleMapping, LoadId, Loader, LoaderError, PendingBufferHandle, PendingTextureHandle,
 };
 pub use pipeline::{
-    GraphicsPipeline, GraphicsPipelineDescriptor, PipelineError, ShaderDescriptor, ShaderStage,
+    GraphicsPipeline, GraphicsPipelineDescriptor, PipelineError, PolygonMode, ShaderDescriptor,
+    ShaderStage,
 };
 pub use pipeline_resource::PipelineResourceSet;
 pub use render_pass::{RenderPass, RenderPassEncoder};
@@ -44,7 +45,7 @@ pub use texture::{
 };
 pub use traits::{PushConstant, Uniform};
 pub use trekant_derive::Std140;
-pub use util::{ByteBuffer, Extent2D, Format};
+pub use util::{ByteBuffer, Extent2D, Extent3D, Format};
 pub use vertex::{VertexDefinition, VertexFormat};
 
 use crate::backend::image::ImageDescriptor;

@@ -600,8 +600,6 @@ Make sure to reconsider the current AsyncResources class - it might not be neede
 
 TODO:
 
-* Remove AsyncResources
-* Write an helper struct to work with handle mappings, entities and flushing
 * Arc in TextureLoader?
 * Fix shader reloads.
 

@@ -8,6 +8,7 @@ use crate::ecs::prelude::*;
 use ram_derive::Visitable;
 
 use super::GpuBuffer;
+use super::{PendingEntityBuffers, PendingEntityTextures};
 
 pub struct HostTexture {
     data: Vec<u8>,
@@ -18,29 +19,30 @@ pub struct HostTexture {
 
 #[derive(Clone, Copy, PartialEq, Eq, Hash, Debug, Visitable)]
 pub struct HostTextureHandle {
-    handle: resurs::Handle<HostTexture>,
-    coord_set: u32,
+    pub handle: resurs::Handle<HostTexture>,
+    pub coord_set: u32,
 }
 
 #[derive(Clone, Copy, PartialEq, Eq, Hash, Debug, Visitable)]
 pub struct DeviceTextureHandle {
-    handle: resurs::Handle<trekant::Texture>,
-    coord_set: u32,
+    pub handle: resurs::Handle<trekant::Texture>,
+    pub coord_set: u32,
 }
 
 #[derive(Clone, PartialEq, Eq, Hash, Debug, Visitable)]
 
 pub struct PendingDeviceTextureHandle {
-    handle: trekant::PendingTextureHandle,
-    coord_set: u32,
+    pub handle: trekant::PendingTextureHandle,
+    pub coord_set: u32,
 }
 
+#[derive(Debug)]
 pub struct TextureAssetLoadError;
 
 #[derive(Clone, PartialEq, Eq, Hash, Debug)]
 pub struct TextureAsset {
-    path: std::path::PathBuf,
-    format: trekant::Format,
+    pub path: std::path::PathBuf,
+    pub format: trekant::Format,
 }
 
 #[derive(Default)]
@@ -54,7 +56,7 @@ impl TextureAssetLoader {
     }
 }
 #[derive(Default, Debug)]
-struct MipMapQueue(Vec<trekant::Handle<trekant::Texture>>);
+pub struct MipMapQueue(Vec<trekant::Handle<trekant::Texture>>);
 
 fn load_image(path: &std::path::Path) -> Result<image::RgbaImage, image::ImageError> {
     log::trace!("Trying to load image from {}", path.display());
@@ -135,20 +137,6 @@ enum PendingTextureUse {
 }
 
 impl PendingTextureUse {
-    fn is_pending_gpu(&self) -> bool {
-        match self {
-            Self::Pending(_) => true,
-            _ => false,
-        }
-    }
-
-    fn get_available(&self) -> Option<DeviceTextureHandle> {
-        match self {
-            Self::Available(a) => Some(*a),
-            Self::Pending(_) => None,
-        }
-    }
-
     fn try_take(
         &mut self,
         old: trekant::PendingTextureHandle,
@@ -196,25 +184,6 @@ pub mod pbr {
     }
 
     impl Pending {
-        fn is_pending_gpu(&self) -> bool {
-            self.material_uniforms.is_pending_gpu()
-                || self
-                    .normal_map
-                    .as_ref()
-                    .map(|x| x.is_pending_gpu())
-                    .unwrap_or(false)
-                || self
-                    .base_color_texture
-                    .as_ref()
-                    .map(|x| x.is_pending_gpu())
-                    .unwrap_or(false)
-                || self
-                    .metallic_roughness_texture
-                    .as_ref()
-                    .map(|x| x.is_pending_gpu())
-                    .unwrap_or(false)
-        }
-
         fn try_finish(&self) -> Option<Done> {
             let material_uniforms = self.material_uniforms.get_available()?;
             // TODO: Clean this up
@@ -323,7 +292,7 @@ pub mod pbr {
                         LOAD_ID,
                     )
                     .expect("Failed to load texture");
-                handles.textures.entry(handle).or_default().push(entity);
+                handles.textures.push(handle, entity);
 
                 PendingTextureUse::Pending(PendingDeviceTextureHandle {
                     handle,
@@ -346,6 +315,7 @@ pub mod pbr {
                     (&entities, &materials, !&done_materials).join().enumerate()
                 {
                     if let StorageEntry::Vacant(entry) = pending_materials.entry(ent).unwrap() {
+                        handles.buffers.push(full_buffer, ent);
                         entry.insert(Pending {
                             material_uniforms: GpuBuffer::Pending(
                                 trekant::PendingBufferHandle::sub_buffer(full_buffer, i as u32, 1),
@@ -366,11 +336,7 @@ pub mod pbr {
             for handle_mapping in loader.flush(LOAD_ID) {
                 match handle_mapping {
                     trekant::HandleMapping::Buffer { old, new } => {
-                        let entities = handles
-                            .buffers
-                            .remove(&old)
-                            .expect("Got a buffer handle that was not requested");
-                        for entity in entities {
+                        for entity in handles.buffers.flush(old) {
                             let Some(pending) = pending_materials.get_mut(entity) else {
                                 log::debug!("Entity {entity:?} had a pending buffer load for pbr uniform data but was destroyed while the buffer was loading");
                                 continue;
@@ -381,11 +347,7 @@ pub mod pbr {
                         }
                     }
                     trekant::HandleMapping::Texture { old, new } => {
-                        let entities = handles
-                            .textures
-                            .remove(&old)
-                            .expect("Got a texture handle that was not requested");
-                        for entity in entities {
+                        for entity in handles.textures.flush(old) {
                             let Some(pending) = pending_materials.get_mut(entity) else {
                                 log::debug!("Entity {entity:?} had a pending buffer load for pbr uniform data but was destroyed while the buffer was loading");
                                 continue;
@@ -396,14 +358,14 @@ pub mod pbr {
                                 &mut pending.base_color_texture,
                                 &mut pending.metallic_roughness_texture,
                                 &mut pending.normal_map,
-                            ] {
-                                // NOTE: Not breaking after a success allows multiple texture uses to match an uploaded one.
-                                if let Some(tex) = tex {
-                                    let success = tex.try_take(old, new);
-                                    any_success = any_success || success;
-                                    if success {
-                                        mipmaps.0.push(new);
-                                    }
+                            ]
+                            .into_iter()
+                            .flatten()
+                            {
+                                let success = tex.try_take(old, new);
+                                any_success = any_success || success;
+                                if success {
+                                    mipmaps.0.push(new);
                                 }
                             }
                             assert!(any_success, "Entity had a queued texture load but none of its PBR textures matched the handle");
@@ -428,8 +390,8 @@ pub mod pbr {
 
     #[derive(Default)]
     pub struct PBRPendingHandles {
-        buffers: std::collections::HashMap<trekant::PendingBufferHandle, Vec<Entity>>,
-        textures: std::collections::HashMap<trekant::PendingTextureHandle, Vec<Entity>>,
+        buffers: PendingEntityBuffers,
+        textures: PendingEntityTextures,
     }
 
     pub fn create_pipeline_resource_set(
@@ -520,9 +482,8 @@ pub mod pbr {
 pub use unlit::Unlit;
 
 pub mod unlit {
-    use trekant::{HandleMapping, PendingBufferHandle};
-
     use super::*;
+    use trekant::HandleMapping;
 
     const LOAD_ID: trekant::LoadId = trekant::LoadId("unlit-pipeline");
 
@@ -534,12 +495,12 @@ pub mod unlit {
 
     #[derive(Debug, Component, Visitable)]
     pub struct Done {
-        color_uniform: BufferHandle,
-        polygon_mode: PolygonMode,
+        pub color_uniform: BufferHandle,
+        pub polygon_mode: PolygonMode,
     }
 
     #[derive(Debug, Component, Visitable)]
-    struct Pending {
+    pub struct Pending {
         color_uniform: GpuBuffer,
         polygon_mode: PolygonMode,
     }
@@ -547,7 +508,7 @@ pub mod unlit {
     pub struct UnlitMaterialLoad;
 
     #[derive(Default)]
-    pub struct UnlitPendingHandles(std::collections::HashMap<PendingBufferHandle, Vec<Entity>>);
+    pub struct UnlitPendingHandles(crate::render::PendingEntityBuffers);
 
     impl UnlitMaterialLoad {
         pub const ID: &'static str = "UnlitMaterialLoad";
@@ -595,7 +556,7 @@ pub mod unlit {
                     (&entities, &materials, !&done_materials).join().enumerate()
                 {
                     if let StorageEntry::Vacant(entry) = pending_materials.entry(ent).unwrap() {
-                        handles.0.entry(full_buffer).or_default().push(ent);
+                        handles.0.push(full_buffer, ent);
                         entry.insert(Pending {
                             color_uniform: GpuBuffer::Pending(
                                 trekant::PendingBufferHandle::sub_buffer(full_buffer, i as u32, 1),
@@ -610,11 +571,7 @@ pub mod unlit {
                 let HandleMapping::Buffer { old, new } = handle_mapping else {
                     panic!("Unlit pipeline has no textures");
                 };
-                let entities = handles
-                    .0
-                    .remove(&old)
-                    .expect("Got a buffer handle that was not requested");
-                for entity in entities {
+                for entity in handles.0.flush(old) {
                     let Some(pending) = pending_materials.remove(entity) else {
                         log::debug!("Entity {entity:?} had a pending buffer load for unlit uniform data but was destroyed while the buffer was loading");
                         continue;
@@ -655,9 +612,40 @@ pub mod unlit {
         shader_compiler: &crate::render::ShaderCompiler,
         shader_cache: &mut crate::render::ShaderCache,
         render_pass: Handle<trekant::RenderPass>,
-        mat: &Done,
+        polygon_mode: PolygonMode,
     ) -> Result<Handle<trekant::GraphicsPipeline>, crate::render::MaterialError> {
-        todo!()
+        use crate::render::shader;
+        use crate::render::shader_path;
+
+        let vert = shader_compiler.compile(
+            &shader_path(&["unlit", "vert.glsl"]),
+            &shader::Defines::empty(),
+            shader::ShaderType::Vertex,
+            Some(shader_cache),
+        )?;
+        let frag = shader_compiler.compile(
+            &shader_path(&["unlit", "frag.glsl"]),
+            &shader::Defines::empty(),
+            shader::ShaderType::Fragment,
+            Some(shader_cache),
+        )?;
+
+        let vert = trekant::ShaderDescriptor {
+            debug_name: Some("unlit-vert".to_owned()),
+            spirv_code: vert.data(),
+        };
+        let frag = trekant::ShaderDescriptor {
+            debug_name: Some("unlit-frag".to_owned()),
+            spirv_code: frag.data(),
+        };
+        let desc = trekant::GraphicsPipelineDescriptor::builder()
+            .vert(vert)
+            .frag(frag)
+            .vertex_format(vertex_format.clone())
+            .culling(trekant::pipeline::TriangleCulling::None)
+            .polygon_mode(polygon_mode)
+            .build()?;
+        Ok(renderer.create_gfx_pipeline(desc, &render_pass)?)
     }
 }
 
@@ -668,7 +656,6 @@ pub fn pre_frame(world: &World, renderer: &mut Renderer) {
             .generate_mipmaps(&mipmaps.0)
             .expect("Failed to generate mipmaps");
     }
-    todo!("Create renderable material");
 }
 
 pub fn register_systems(builder: ExecutorBuilder) -> ExecutorBuilder {

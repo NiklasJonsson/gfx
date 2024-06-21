@@ -2,7 +2,6 @@ use crate::ecs::prelude::*;
 use crate::render::GpuBuffer;
 
 use trekant::ByteBuffer;
-use trekant::PendingBufferHandle;
 use trekant::{
     BufferDescriptor, BufferMutability, IndexBufferType, IndexInt, VertexBufferType,
     VertexDefinition, VertexFormat,
@@ -110,7 +109,7 @@ impl MeshLoad {
 const MESH_LOAD_ID: trekant::LoadId = trekant::LoadId("MeshLoad");
 
 #[derive(Default)]
-struct PendingBuffers(std::collections::HashMap<PendingBufferHandle, Vec<Entity>>);
+struct PendingBuffers(crate::render::PendingEntityBuffers);
 
 impl<'a> System<'a> for MeshLoad {
     type SystemData = (
@@ -137,7 +136,7 @@ impl<'a> System<'a> for MeshLoad {
                     .expect("Failed to load index buffer");
 
                 for buf in [ibuf, vbuf] {
-                    pending_buffers.0.entry(buf).or_default().push(entity);
+                    pending_buffers.0.push(buf, entity);
                 }
                 mesh.gpu_vertex_buffer = Some(GpuBuffer::Pending(vbuf));
                 mesh.gpu_index_buffer = Some(GpuBuffer::Pending(ibuf));
@@ -149,11 +148,7 @@ impl<'a> System<'a> for MeshLoad {
             let HandleMapping::Buffer { old, new } = mapping else {
                 panic!("Mesh pipeline has no textures");
             };
-            let entities = pending_buffers
-                .0
-                .remove(&old)
-                .expect("Got a buffer handle that was not expected");
-            for entity in entities {
+            for entity in pending_buffers.0.flush(old) {
                 let Some(mesh) = meshes.get_mut(entity) else {
                     log::debug!("Entity {entity:?} had a pending buffer load for mesh data but was destroyed while the buffer was loading");
                     continue;

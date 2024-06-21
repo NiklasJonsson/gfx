@@ -643,20 +643,6 @@ impl<T> TextureStorage<T> {
         self.storage.add(t)
     }
 }
-impl TextureStorage<Async<Texture>> {
-    pub fn allocate(&mut self) -> Handle<Async<Texture>> {
-        self.storage.add(Async::Pending)
-    }
-
-    pub fn drain_available(&mut self) -> DrainIterator<'_> {
-        self.storage
-            .drain_filter(|x: &mut Async<Texture>| std::matches!(x, Async::Available(_)))
-    }
-}
-
-pub type DrainIterator<'a> =
-    resurs::DrainFilter<'a, fn(&mut Async<Texture>) -> bool, Async<Texture>>;
-
 impl<T> Default for TextureStorage<T> {
     fn default() -> Self {
         Self::new()
@@ -664,5 +650,3 @@ impl<T> Default for TextureStorage<T> {
 }
 
 pub type Textures = TextureStorage<Texture>;
-use crate::resource::Async;
-pub type AsyncTextures = TextureStorage<Async<Texture>>;

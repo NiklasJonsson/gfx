@@ -4,8 +4,7 @@ use std::path::{Path, PathBuf};
 
 use crate::render::{HostIndexBuffer, HostVertexBuffer, TextureAssetLoader};
 use trekant::util;
-use trekant::{MipMaps, TextureDescriptor};
-use trekant::{VertexBufferType, VertexFormat};
+use trekant::{Format, VertexBufferType, VertexFormat};
 
 use ram_derive::Visitable;
 
@@ -14,15 +13,17 @@ use crate::common::Name;
 use crate::graph::sys as graph;
 use crate::math::*;
 use crate::render;
-use crate::render::material::PhysicallyBased;
+use crate::render::material::{HostTextureHandle, PhysicallyBased, TextureAsset};
 use crate::render::mesh::Mesh;
 
+use specs::shred;
+
 fn load_texture(
-    ctx: &RecGltfCtx,
+    ctx: &mut RecGltfCtx,
     texture: &gltf::texture::Texture,
     coord_set: u32,
-    format: util::Format,
-) -> TextureUse2 {
+    format: Format,
+) -> HostTextureHandle {
     assert_eq!(coord_set, 0, "Not implemented!");
     assert_eq!(
         texture.sampler().wrap_s(),
@@ -46,15 +47,19 @@ fn load_texture(
         x => unimplemented!("Unsupported image source {:?}", x),
     };
 
-    TextureUse2 {
-        coord_set,
-        desc: TextureDescriptor::File {
-            path: image_path,
-            format,
-            mipmaps: MipMaps::None,
-            ty: trekant::TextureType::Tex2D,
-        },
-    }
+    let handle = ctx
+        .data
+        .texture_loader
+        .load(
+            TextureAsset {
+                path: image_path,
+                format,
+            },
+            texture.name().unwrap_or("N/A"),
+        )
+        .expect("Failed to load gltf texture");
+
+    HostTextureHandle { coord_set, handle }
 }
 
 fn check_supported(primitive: &gltf::Primitive<'_>) {
@@ -82,23 +87,23 @@ fn interleave_vertex_buffer(
     let normals = reader.read_normals().expect("Found no normals");
 
     let mut format = VertexFormat::builder()
-        .add_attribute(util::Format::FLOAT3) // position
-        .add_attribute(util::Format::FLOAT3); // normal
+        .add_attribute(Format::FLOAT3) // position
+        .add_attribute(Format::FLOAT3); // normal
 
     let tangents = reader.read_tangents();
     let tex_coords = reader.read_tex_coords(0);
     let colors = reader.read_colors(0);
 
     if tex_coords.is_some() {
-        format = format.add_attribute(util::Format::FLOAT2);
+        format = format.add_attribute(Format::FLOAT2);
     }
 
     if colors.is_some() {
-        format = format.add_attribute(util::Format::FLOAT4);
+        format = format.add_attribute(Format::FLOAT4);
     }
 
     if tangents.is_some() {
-        format = format.add_attribute(util::Format::FLOAT4);
+        format = format.add_attribute(Format::FLOAT4);
     }
 
     let format = format.build();

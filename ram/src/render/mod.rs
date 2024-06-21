@@ -11,10 +11,10 @@ use trekant::pipeline::{
 use trekant::pipeline_resource::PipelineResourceSet;
 use trekant::resource::Handle;
 use trekant::util;
-use trekant::vertex::VertexFormat;
 use trekant::BufferHandle;
 use trekant::RenderPassEncoder;
 use trekant::Renderer;
+use trekant::VertexFormat;
 
 pub mod debug;
 pub mod geometry;
@@ -30,13 +30,58 @@ pub use light::Light;
 pub use material::TextureAssetLoader;
 pub use mesh::{HostBuffer, HostIndexBuffer, HostVertexBuffer};
 
-use mesh::Mesh;
+pub use mesh::Mesh;
 
 use crate::camera::*;
 use crate::ecs;
 use crate::math::{Mat4, ModelMatrix, Transform, Vec3};
 use material::GpuMaterial;
 use ram_derive::Visitable;
+
+pub struct PendingEntityResources<H> {
+    map: std::collections::HashMap<H, Vec<Entity>>,
+}
+
+impl<T> Default for PendingEntityResources<T> {
+    fn default() -> Self {
+        Self {
+            map: Default::default(),
+        }
+    }
+}
+
+type PendingEntityBuffers = PendingEntityResources<trekant::PendingBufferHandle>;
+type PendingEntityTextures = PendingEntityResources<trekant::PendingTextureHandle>;
+
+#[derive(Debug, Clone)]
+pub struct DoneEntities(Vec<Entity>);
+
+impl IntoIterator for DoneEntities {
+    type IntoIter = std::vec::IntoIter<Entity>;
+    type Item = Entity;
+
+    fn into_iter(self) -> Self::IntoIter {
+        self.0.into_iter()
+    }
+}
+
+impl<H> PendingEntityResources<H>
+where
+    H: std::hash::Hash + std::cmp::Eq,
+{
+    pub fn flush(&mut self, handle: H) -> DoneEntities {
+        self.try_flush(handle)
+            .expect("Tried to flush the entities for a handle that is pending")
+    }
+
+    pub fn try_flush(&mut self, handle: H) -> Option<DoneEntities> {
+        self.map.remove(&handle).map(DoneEntities)
+    }
+
+    pub fn push(&mut self, handle: H, entity: Entity) {
+        self.map.entry(handle).or_default().push(entity)
+    }
+}
 
 pub struct GlobalShaderCache(std::sync::Mutex<shader::ShaderCache>);
 
@@ -48,10 +93,6 @@ pub enum GpuBuffer {
 }
 
 impl GpuBuffer {
-    /// Return the buffer if it is available.
-    /// Nested option is a bit weird but it means:
-    /// If GpuBuffer is None
-    // TODO: Should GpuBuffer really contain the inner None as well?
     fn get_available(&self) -> Option<BufferHandle> {
         match self {
             Self::Available(a) => Some(*a),
@@ -71,10 +112,6 @@ impl GpuBuffer {
             }
             _ => false,
         }
-    }
-
-    fn is_pending_gpu(&self) -> bool {
-        std::matches!(self, Self::Pending(_))
     }
 }
 
@@ -146,110 +183,6 @@ where
     ShaderLocation::search(path)
 }
 
-fn unlit_pipeline_desc(
-    shader_compiler: &shader::ShaderCompiler,
-    shader_cache: &mut shader::ShaderCache,
-    vertex_format: VertexFormat,
-    polygon_mode: trekant::pipeline::PolygonMode,
-) -> Result<GraphicsPipelineDescriptor, MaterialError> {
-    let vert = shader_compiler.compile(
-        &shader_path(&["unlit", "vert.glsl"]),
-        &shader::Defines::empty(),
-        shader::ShaderType::Vertex,
-        Some(shader_cache),
-    )?;
-    let frag = shader_compiler.compile(
-        &shader_path(&["unlit", "frag.glsl"]),
-        &shader::Defines::empty(),
-        shader::ShaderType::Fragment,
-        Some(shader_cache),
-    )?;
-
-    let vert = ShaderDescriptor {
-        debug_name: Some("unlit-vert".to_owned()),
-        spirv_code: vert.data(),
-    };
-    let frag = ShaderDescriptor {
-        debug_name: Some("unlit-frag".to_owned()),
-        spirv_code: frag.data(),
-    };
-    Ok(GraphicsPipelineDescriptor::builder()
-        .vert(vert)
-        .frag(frag)
-        .vertex_format(vertex_format)
-        .culling(trekant::pipeline::TriangleCulling::None)
-        .polygon_mode(polygon_mode)
-        .build()?)
-}
-
-fn get_pipeline_for(
-    renderer: &mut Renderer,
-    world: &World,
-    mesh: &Mesh,
-    mat: &material::GpuMaterial,
-) -> Result<Handle<GraphicsPipeline>, MaterialError> {
-    let vertex_format = mesh.cpu_vertex_buffer.format().clone();
-
-    let frame_data = world.read_resource::<FrameResources>();
-    let shader_compiler = world.read_resource::<shader::ShaderCompiler>();
-    let shader_cache = world.write_resource::<GlobalShaderCache>();
-    let mut shader_cache = shader_cache.0.lock().expect("Mutex is poisoned");
-
-    let pipe = match mat {
-        material::GpuMaterial::PBR {
-            normal_map,
-            base_color_texture,
-            metallic_roughness_texture,
-            has_vertex_colors,
-            ..
-        } => {
-            // TODO: Normal map does not infer tangents at all times
-            let has_nm = normal_map.is_some();
-            let has_bc = base_color_texture.is_some();
-            let has_mr = metallic_roughness_texture.is_some();
-            let def = shader::pbr_gltf::ShaderDefinition {
-                has_tex_coords: has_nm || has_bc || has_mr,
-                has_vertex_colors: *has_vertex_colors,
-                has_tangents: has_nm,
-                has_base_color_texture: has_bc,
-                has_metallic_roughness_texture: has_mr,
-                has_normal_map: has_nm,
-            };
-
-            let (vert, frag) =
-                shader::pbr_gltf::compile(&shader_compiler, &mut shader_cache, &def)?;
-
-            let vert = ShaderDescriptor {
-                debug_name: Some("pbr-vert".to_owned()),
-                spirv_code: vert.data(),
-            };
-            let frag = ShaderDescriptor {
-                debug_name: Some("pbr-frag".to_owned()),
-                spirv_code: frag.data(),
-            };
-            let desc = GraphicsPipelineDescriptor::builder()
-                .vert(vert)
-                .frag(frag)
-                .vertex_format(vertex_format)
-                .polygon_mode(trekant::pipeline::PolygonMode::Fill)
-                .build()?;
-
-            renderer.create_gfx_pipeline(desc, &frame_data.main_render_pass)?
-        }
-        material::GpuMaterial::Unlit { polygon_mode, .. } => {
-            let desc = unlit_pipeline_desc(
-                &shader_compiler,
-                &mut shader_cache,
-                vertex_format,
-                *polygon_mode,
-            )?;
-            renderer.create_gfx_pipeline(desc, &frame_data.main_render_pass)?
-        }
-    };
-
-    Ok(pipe)
-}
-
 #[profiling::function]
 fn create_renderables_pbr(renderer: &mut Renderer, world: &mut World) {
     let meshes = world.read_storage::<Mesh>();
@@ -276,13 +209,15 @@ fn create_renderables_pbr(renderer: &mut Renderer, world: &mut World) {
         )
         .expect("Failed to create renderable material for PBR");
 
-        renderables.insert(
-            ent,
-            RenderableMaterial {
-                gfx_pipeline,
-                material_descriptor_set,
-            },
-        );
+        renderables
+            .insert(
+                ent,
+                RenderableMaterial {
+                    gfx_pipeline,
+                    material_descriptor_set,
+                },
+            )
+            .unwrap();
     }
 }
 
@@ -308,7 +243,7 @@ fn create_renderables_unlit(renderer: &mut Renderer, world: &mut World) {
             &shader_compiler,
             &mut shader_cache,
             frame_resources.main_render_pass,
-            mat,
+            mat.polygon_mode,
         )
         .expect("Failed to create pipeline for unlit material");
 
@@ -316,7 +251,7 @@ fn create_renderables_unlit(renderer: &mut Renderer, world: &mut World) {
             gfx_pipeline,
             material_descriptor_set,
         };
-        renderables.insert(ent, rend);
+        renderables.insert(ent, rend).unwrap();
     }
 }
 
@@ -390,7 +325,6 @@ pub fn draw_frame(world: &mut World, ui: &mut imgui::UIContext, renderer: &mut R
         loader.progress(renderer);
     }
     material::pre_frame(world, renderer);
-    // TODO: Move these into material::pre_frame?
     create_renderables_pbr(renderer, world);
     create_renderables_unlit(renderer, world);
     light::prepare_entities(world, renderer);
@@ -632,17 +566,15 @@ pub fn create_frame_resources(
 
     let unlit_resources = {
         let vertex_format = VertexFormat::from(util::Format::FLOAT3);
-        let desc = unlit_pipeline_desc(
+        let dummy_pipeline = material::unlit::get_pipeline(
+            renderer,
+            &vertex_format,
             shader_compiler,
             shader_cache,
-            vertex_format,
-            trekant::pipeline::PolygonMode::Line,
+            main_render_pass,
+            trekant::PolygonMode::Line,
         )
         .expect("Failed to create descriptor for unlit dummy pipeline");
-        let dummy_pipeline = renderer
-            .create_gfx_pipeline(desc, &main_render_pass)
-            .expect("Failed to create unlit dummy pipeline");
-
         UnlitPassResources { dummy_pipeline }
     };
 

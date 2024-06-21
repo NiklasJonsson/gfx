@@ -6,7 +6,7 @@ use winit::{
 };
 
 use nalgebra_glm as glm;
-use resurs::{Async, Handle};
+use resurs::Handle;
 
 use trekant::util;
 use trekant::vertex::{VertexDefinition, VertexFormat};
@@ -14,7 +14,7 @@ use trekant::{
     pipeline::{GraphicsPipeline, GraphicsPipelineDescriptor, ShaderDescriptor, ShaderStage},
     PendingTextureHandle,
 };
-use trekant::{AsyncBufferHandle, BufferDescriptor, BufferHandle, BufferMutability};
+use trekant::{BufferDescriptor, BufferHandle, BufferMutability};
 
 use trekant::Std140;
 use trekant::{Loader, RenderPass, Renderer, Texture};

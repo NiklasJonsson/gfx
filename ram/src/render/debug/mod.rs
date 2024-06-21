@@ -4,9 +4,9 @@ use crate::math::{Rgba, Vec3};
 
 use trekant::pipeline::GraphicsPipeline;
 use trekant::pipeline_resource::PipelineResourceSet;
-use trekant::vertex::{VertexDefinition, VertexFormat};
 use trekant::{BufferDescriptor, BufferHandle, BufferMutability, Handle, PushConstant};
 use trekant::{RenderPass, RenderPassEncoder};
+use trekant::{VertexDefinition, VertexFormat};
 
 use std::sync::Mutex;
 

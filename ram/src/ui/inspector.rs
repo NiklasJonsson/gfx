@@ -2,6 +2,7 @@ use crate::ecs::prelude::*;
 use crate::visit::{Meta, MetaOrigin, Visitable, Visitor};
 
 use std::borrow::Cow;
+use std::collections::HashMap;
 
 use crate::render::imgui::UiFrame;
 
@@ -30,7 +31,7 @@ type InspectorCallback = for<'a> fn(&mut ImguiVisitor<'a>, &World, Entity);
 
 #[derive(Default)]
 pub struct Inspector {
-    components: Vec<InspectorCallback>,
+    components: HashMap<std::any::TypeId, InspectorCallback>,
 }
 
 pub trait ImguiVisitableComponent<'a>: Visitable<ImguiVisitor<'a>> + Component + 'static {}
@@ -42,13 +43,13 @@ where
 {
     let type_name = std::any::type_name::<C>();
     let size = std::mem::size_of::<C>();
-    let mut storage = world.write_component::<C>();
 
-    let component = if let Some(component) = storage.get_mut(e) {
-        component
-    } else {
+    // Why do I need 3 function calls to get a &mut reference?! :(
+    let mut storage = world.write_component::<C>();
+    let Some(mut component) = storage.get_mut(e) else {
         return;
     };
+    let component: &mut C = component.access_mut();
 
     if size == 0 {
         let _open = imgui::CollapsingHeader::new(&imgui::ImString::from(String::from(type_name)))
@@ -70,13 +71,23 @@ impl Inspector {
     where
         for<'a> C: ImguiVisitableComponent<'a>,
     {
-        self.components.push(inspect_component::<C>);
+        self.components
+            .insert(std::any::TypeId::of::<C>(), inspect_component::<C>);
     }
 
     pub fn inspect_components(&self, v: &mut ImguiVisitor<'_>, w: &World, e: Entity) {
-        for comp in &self.components {
-            comp(v, w, e);
-        }
+        let visit = |info: &specs::ComponentInfo| {
+            if let Some(callback) = self.components.get(&info.type_id) {
+                callback(v, w, e);
+            } else {
+                let _open = imgui::CollapsingHeader::new(&imgui::ImString::from(String::from(
+                    info.type_name,
+                )))
+                .leaf(true)
+                .build(v.ui.inner());
+            }
+        };
+        w.visit(e, visit).expect("Entity is not alive");
     }
 }
 
@@ -356,6 +367,7 @@ macro_rules! impl_visit_todo_generic {
 }
 
 use resurs::Async;
+use specs::storage::AccessMut;
 use trekant::Texture;
 impl_visit_todo_generic!(Async);
 impl_visit_todo!(Texture);
