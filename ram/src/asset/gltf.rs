@@ -16,8 +16,6 @@ use crate::render;
 use crate::render::material::{HostTextureHandle, PhysicallyBased, TextureAsset};
 use crate::render::mesh::Mesh;
 
-use specs::shred;
-
 fn load_texture(
     ctx: &mut RecGltfCtx,
     texture: &gltf::texture::Texture,
