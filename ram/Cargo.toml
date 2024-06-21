@@ -8,10 +8,9 @@ edition = "2021"
 ram-derive = { path = "../ram-derive" }
 
 # ECS
-specs = { git = "https://github.com/NiklasJonsson/specs.git", features = [
-    "derive",
-    "serde",
-], branch = "introspection" }
+# specs = { git = "https://github.com/NiklasJonsson/specs.git", features = [
+specs = { path = "../../specs", features = ["derive", "serde"] }
+#, branch = "introspection" }
 
 # Rendering/Graphics
 imgui = { version = "0.11.0", features = ["tables-api"] }

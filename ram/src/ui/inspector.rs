@@ -76,18 +76,36 @@ impl Inspector {
     }
 
     pub fn inspect_components(&self, v: &mut ImguiVisitor<'_>, w: &World, e: Entity) {
+        // We can't call the inspector callback while in the visit function
+        // becuase the visit function borrows all the storages.
+        // TODO: Maybe better to have it return/write a vector? DATA IS THE BEST?! :D
+        enum Component<'a> {
+            Callback(&'a InspectorCallback),
+            NameOnly(&'static str),
+        }
+        let mut components: Vec<Component> = Vec::new();
+
         let visit = |info: &specs::ComponentInfo| {
-            if let Some(callback) = self.components.get(&info.type_id) {
-                callback(v, w, e);
-            } else {
-                let _open = imgui::CollapsingHeader::new(&imgui::ImString::from(String::from(
-                    info.type_name,
-                )))
-                .leaf(true)
-                .build(v.ui.inner());
-            }
+            components.push(
+                self.components
+                    .get(&info.type_id)
+                    .map(Component::Callback)
+                    .unwrap_or(Component::NameOnly(info.type_name)),
+            );
         };
         w.visit(e, visit).expect("Entity is not alive");
+
+        for c in components {
+            match c {
+                Component::Callback(c) => c(v, w, e),
+                Component::NameOnly(name) => {
+                    let _open =
+                        imgui::CollapsingHeader::new(&imgui::ImString::from(String::from(name)))
+                            .leaf(true)
+                            .build(v.ui.inner());
+                }
+            }
+        }
     }
 }
 
