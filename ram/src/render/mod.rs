@@ -35,7 +35,6 @@ pub use mesh::Mesh;
 use crate::camera::*;
 use crate::ecs;
 use crate::math::{Mat4, ModelMatrix, Transform, Vec3};
-use material::GpuMaterial;
 use ram_derive::Visitable;
 
 pub struct PendingEntityResources<H> {
@@ -255,18 +254,12 @@ fn create_renderables_unlit(renderer: &mut Renderer, world: &mut World) {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum DrawMode {
-    Lit,
-    Unlit,
-}
-
 #[profiling::function]
-fn draw_entities(world: &World, cmd_buf: &mut RenderPassEncoder<'_>, draw_mode: DrawMode) {
+fn draw_entities<MaterialComponent: Component>(world: &World, cmd_buf: &mut RenderPassEncoder<'_>) {
     let model_matrices = world.read_storage::<ModelMatrix>();
     let meshes = world.read_storage::<Mesh>();
     let renderables = world.read_storage::<RenderableMaterial>();
-    let materials = world.read_storage::<material::GpuMaterial>();
+    let materials = world.read_storage::<MaterialComponent>();
     use trekant::pipeline::ShaderStage;
 
     let mut prev_handle: Option<Handle<GraphicsPipeline>> = None;
@@ -279,19 +272,12 @@ fn draw_entities(world: &World, cmd_buf: &mut RenderPassEncoder<'_>, draw_mode: 
         }
     };
 
-    for (mesh, renderable, mtx, mat) in (&meshes, &renderables, &model_matrices, &materials).join()
-    {
+    for (mesh, renderable, mtx, _) in (&meshes, &renderables, &model_matrices, &materials).join() {
         let (vertex_buffer, index_buffer) = match (&mesh.gpu_vertex_buffer, &mesh.gpu_index_buffer)
         {
             (Some(GpuBuffer::Available(vbuf)), Some(GpuBuffer::Available(ibuf))) => (vbuf, ibuf),
             _ => continue,
         };
-
-        match (mat, draw_mode) {
-            (GpuMaterial::PBR { .. }, DrawMode::Lit) => (),
-            (GpuMaterial::Unlit { .. }, DrawMode::Unlit) => (),
-            _ => continue,
-        }
 
         let tfm = uniform::Model {
             model: mtx.0.into_col_array(),
@@ -413,7 +399,7 @@ pub fn draw_frame(world: &mut World, ui: &mut imgui::UIContext, renderer: &mut R
                     &engine_shader_resources.desc_set,
                     dummy_pipeline,
                 );
-            draw_entities(world, &mut main_rp, DrawMode::Lit);
+            draw_entities::<material::PhysicallyBased>(world, &mut main_rp);
         }
 
         {
@@ -426,7 +412,7 @@ pub fn draw_frame(world: &mut World, ui: &mut imgui::UIContext, renderer: &mut R
                     &engine_shader_resources.desc_set,
                     dummy_pipeline,
                 );
-            draw_entities(world, &mut main_rp, DrawMode::Unlit);
+            draw_entities::<material::Unlit>(world, &mut main_rp);
         }
 
         if let Some(ui_draw_commands) = ui_draw_commands {
@@ -664,7 +650,6 @@ pub fn register_components(world: &mut World) {
     world.register::<geometry::Shape>();
 
     world.register::<RenderableMaterial>();
-    world.register::<material::GpuMaterial>();
     world.register::<material::PhysicallyBased>();
     world.register::<material::Unlit>();
 

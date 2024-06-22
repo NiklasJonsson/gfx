@@ -189,10 +189,10 @@
                 }
             },
             "args": [
-                // "--gltf-file",
-                // "../glTF-Sample-Models/2.0/Sponza/glTF/Sponza.gltf",
-                "--spawn-plane",
-                "--spotlight-test",
+                "--gltf-file",
+                "../glTF-Sample-Models/2.0/Sponza/glTF/Sponza.gltf",
+                // "--spawn-plane",
+                // "--spotlight-test",
                 // "--sun-simulation",
                 "--ambient-light",
             ],

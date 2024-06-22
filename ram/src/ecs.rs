@@ -132,6 +132,7 @@ impl Executor {
 }
 
 pub struct ExecutorBuilder {
+    systems: Vec<String>,
     builder: specs::DispatcherBuilder<'static, 'static>,
 }
 
@@ -140,7 +141,7 @@ impl ExecutorBuilder {
     where
         S: for<'a> System<'a> + Send + 'static,
     {
-        self.builder.add(SpecsSystem::new(s), id, deps);
+        self.add(s, id, deps);
         self
     }
 
@@ -148,6 +149,7 @@ impl ExecutorBuilder {
     where
         S: for<'a> System<'a> + Send + 'static,
     {
+        self.systems.push(id.to_string());
         self.builder.add(SpecsSystem::new(s), id, deps);
     }
 
@@ -169,7 +171,12 @@ impl ExecutorBuilder {
     pub fn new() -> Self {
         Self {
             builder: specs::DispatcherBuilder::new(),
+            systems: Vec::new(),
         }
+    }
+
+    pub fn systems(&self) -> &[String] {
+        &self.systems
     }
 }
 

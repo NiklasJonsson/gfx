@@ -115,21 +115,6 @@ impl TextureAssetLoader {
     }
 }
 
-#[derive(Debug, Component, Visitable)]
-pub enum GpuMaterial {
-    Unlit {
-        color_uniform: BufferHandle,
-        polygon_mode: PolygonMode,
-    },
-    PBR {
-        material_uniforms: BufferHandle,
-        normal_map: Option<DeviceTextureHandle>,
-        base_color_texture: Option<DeviceTextureHandle>,
-        metallic_roughness_texture: Option<DeviceTextureHandle>,
-        has_vertex_colors: bool,
-    },
-}
-
 #[derive(Debug, Visitable)]
 enum PendingTextureUse {
     Pending(PendingDeviceTextureHandle),
@@ -379,6 +364,7 @@ pub mod pbr {
                 if let Some(done) = pending.try_finish() {
                     done_materials.insert(entity, done).unwrap();
                     done_entities.push(entity);
+                    log::debug!("Entity {entity:?} is done");
                 }
             }
 
