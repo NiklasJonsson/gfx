@@ -635,13 +635,91 @@ pub mod unlit {
     }
 }
 
-pub fn pre_frame(world: &World, renderer: &mut Renderer) {
+fn create_renderables_pbr(renderer: &mut Renderer, world: &World) {
+    let materials = world.read_storage::<pbr::Done>();
+    let meshes = world.read_storage::<super::Mesh>();
+    let frame_resources = world.read_resource::<super::FrameResources>();
+    let shader_compiler = world.read_resource::<super::ShaderCompiler>();
+    let shader_cache = world.read_resource::<super::GlobalShaderCache>();
+    let mut renderables = world.write_storage::<super::RenderableMaterial>();
+    let mut shader_cache = shader_cache.0.lock().unwrap();
+    let entities = world.entities();
+
+    for (ent, mesh, mat, _) in (&entities, &meshes, &materials, !&renderables.mask().clone()).join()
     {
-        let mipmaps = world.write_resource::<MipMapQueue>();
+        log::trace!("No Renderable found, creating new");
+        log::trace!("Creating renderable: {:?}", mat);
+        let material_descriptor_set = pbr::create_pipeline_resource_set(renderer, mat);
+        let gfx_pipeline = pbr::get_pipeline(
+            renderer,
+            mesh.cpu_vertex_buffer.format(),
+            &shader_compiler,
+            &mut shader_cache,
+            frame_resources.main_render_pass,
+            mat,
+        )
+        .expect("Failed to create renderable material for PBR");
+
+        renderables
+            .insert(
+                ent,
+                super::RenderableMaterial {
+                    gfx_pipeline,
+                    material_descriptor_set,
+                },
+            )
+            .unwrap();
+    }
+}
+
+#[profiling::function]
+fn create_renderables_unlit(renderer: &mut Renderer, world: &World) {
+    let materials = world.read_storage::<unlit::Done>();
+    let meshes = world.read_storage::<super::Mesh>();
+    let frame_resources = world.read_resource::<super::FrameResources>();
+    let shader_compiler = world.read_resource::<super::ShaderCompiler>();
+    let shader_cache = world.read_resource::<super::GlobalShaderCache>();
+    let mut renderables = world.write_storage::<super::RenderableMaterial>();
+    let mut shader_cache = shader_cache.0.lock().unwrap();
+    let entities = world.entities();
+
+    for (ent, mesh, mat, _) in (&entities, &meshes, &materials, !&renderables.mask().clone()).join()
+    {
+        log::trace!("No Renderable found, creating new");
+        log::trace!("Creating renderable: {:?}", mat);
+        let material_descriptor_set = unlit::create_pipeline_resource_set(renderer, mat);
+        let gfx_pipeline = unlit::get_pipeline(
+            renderer,
+            mesh.cpu_vertex_buffer.format(),
+            &shader_compiler,
+            &mut shader_cache,
+            frame_resources.main_render_pass,
+            mat.polygon_mode,
+        )
+        .expect("Failed to create pipeline for unlit material");
+
+        let rend = super::RenderableMaterial {
+            gfx_pipeline,
+            material_descriptor_set,
+        };
+        renderables.insert(ent, rend).unwrap();
+    }
+}
+
+pub fn pre_frame(world: &World, renderer: &mut Renderer) {
+    // HACK: Mipmap generation needs to run before renderable creation,
+    // because the vk image view that is used for the descriptor set
+    // is replaced when the mipmap is loaded.
+    // TODO: Handle this better.
+    {
+        let mut mipmaps = world.write_resource::<MipMapQueue>();
         renderer
             .generate_mipmaps(&mipmaps.0)
             .expect("Failed to generate mipmaps");
+        mipmaps.0.clear();
     }
+    create_renderables_pbr(renderer, world);
+    create_renderables_unlit(renderer, world);
 }
 
 pub fn register_systems(builder: ExecutorBuilder) -> ExecutorBuilder {

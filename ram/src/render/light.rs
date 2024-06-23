@@ -269,7 +269,7 @@ pub struct ShadowResources {
     pub pointlight_dummy_pipeline: Handle<GraphicsPipeline>,
 }
 
-pub fn prepare_entities(world: &World, renderer: &mut Renderer) {
+pub fn pre_frame(world: &World, renderer: &mut Renderer) {
     let shader_compiler = world.read_resource::<super::shader::ShaderCompiler>();
     let shader_cache = world.write_resource::<super::GlobalShaderCache>();
     let mut shader_cache = shader_cache.0.lock().expect("mutex poison");

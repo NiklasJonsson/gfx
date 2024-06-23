@@ -183,83 +183,14 @@ where
 }
 
 #[profiling::function]
-fn create_renderables_pbr(renderer: &mut Renderer, world: &mut World) {
-    let meshes = world.read_storage::<Mesh>();
-    let materials = world.read_storage::<material::pbr::Done>();
-    let frame_resources = world.read_resource::<FrameResources>();
-    let shader_compiler = world.read_resource::<ShaderCompiler>();
-    let shader_cache = world.read_resource::<GlobalShaderCache>();
-    let mut renderables = world.write_storage::<RenderableMaterial>();
-    let mut shader_cache = shader_cache.0.lock().unwrap();
-    let entities = world.entities();
-
-    for (ent, mesh, mat, _) in (&entities, &meshes, &materials, !&renderables.mask().clone()).join()
-    {
-        log::trace!("No Renderable found, creating new");
-        log::trace!("Creating renderable: {:?}", mat);
-        let material_descriptor_set = material::pbr::create_pipeline_resource_set(renderer, mat);
-        let gfx_pipeline = material::pbr::get_pipeline(
-            renderer,
-            mesh.cpu_vertex_buffer.format(),
-            &shader_compiler,
-            &mut shader_cache,
-            frame_resources.main_render_pass,
-            mat,
-        )
-        .expect("Failed to create renderable material for PBR");
-
-        renderables
-            .insert(
-                ent,
-                RenderableMaterial {
-                    gfx_pipeline,
-                    material_descriptor_set,
-                },
-            )
-            .unwrap();
-    }
-}
-
-#[profiling::function]
-fn create_renderables_unlit(renderer: &mut Renderer, world: &mut World) {
-    let meshes = world.read_storage::<Mesh>();
-    let materials = world.read_storage::<material::unlit::Done>();
-    let frame_resources = world.read_resource::<FrameResources>();
-    let shader_compiler = world.read_resource::<ShaderCompiler>();
-    let shader_cache = world.read_resource::<GlobalShaderCache>();
-    let mut renderables = world.write_storage::<RenderableMaterial>();
-    let mut shader_cache = shader_cache.0.lock().unwrap();
-    let entities = world.entities();
-
-    for (ent, mesh, mat, _) in (&entities, &meshes, &materials, !&renderables.mask().clone()).join()
-    {
-        log::trace!("No Renderable found, creating new");
-        log::trace!("Creating renderable: {:?}", mat);
-        let material_descriptor_set = material::unlit::create_pipeline_resource_set(renderer, mat);
-        let gfx_pipeline = material::unlit::get_pipeline(
-            renderer,
-            mesh.cpu_vertex_buffer.format(),
-            &shader_compiler,
-            &mut shader_cache,
-            frame_resources.main_render_pass,
-            mat.polygon_mode,
-        )
-        .expect("Failed to create pipeline for unlit material");
-
-        let rend = RenderableMaterial {
-            gfx_pipeline,
-            material_descriptor_set,
-        };
-        renderables.insert(ent, rend).unwrap();
-    }
-}
-
-#[profiling::function]
-fn draw_entities<MaterialComponent: Component>(world: &World, cmd_buf: &mut RenderPassEncoder<'_>) {
+fn draw_entities<MaterialFilterComponent: Component>(
+    world: &World,
+    cmd_buf: &mut RenderPassEncoder<'_>,
+) {
     let model_matrices = world.read_storage::<ModelMatrix>();
     let meshes = world.read_storage::<Mesh>();
     let renderables = world.read_storage::<RenderableMaterial>();
-    let materials = world.read_storage::<MaterialComponent>();
+    let materials = world.read_storage::<MaterialFilterComponent>();
     use trekant::pipeline::ShaderStage;
 
     let mut prev_handle: Option<Handle<GraphicsPipeline>> = None;
@@ -307,13 +238,11 @@ pub fn draw_frame(world: &mut World, ui: &mut imgui::UIContext, renderer: &mut R
     };
 
     {
-        let loader = world.write_resource::<trekant::Loader>();
+        let loader = world.read_resource::<trekant::Loader>();
         loader.progress(renderer);
     }
     material::pre_frame(world, renderer);
-    create_renderables_pbr(renderer, world);
-    create_renderables_unlit(renderer, world);
-    light::prepare_entities(world, renderer);
+    light::pre_frame(world, renderer);
 
     let main_window_extents = world.read_resource::<crate::io::MainWindow>().extents();
 

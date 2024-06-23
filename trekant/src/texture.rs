@@ -556,21 +556,24 @@ impl Texture {
             desc.array_layers,
         )?;
 
-        let sub_image_views = (0..desc.array_layers)
-            .map(|i| {
-                ImageView::new(
-                    device,
-                    image.vk_image(),
-                    desc.format,
-                    aspect,
-                    desc.mip_levels,
-                    vk::ImageViewType::TYPE_2D,
-                    i,
-                    1,
-                )
-            })
-            .collect::<Result<Vec<_>, _>>()?;
-
+        let sub_image_views = if desc.array_layers > 1 {
+            (0..desc.array_layers)
+                .map(|i| {
+                    ImageView::new(
+                        device,
+                        image.vk_image(),
+                        desc.format,
+                        aspect,
+                        desc.mip_levels,
+                        vk::ImageViewType::TYPE_2D,
+                        i,
+                        1,
+                    )
+                })
+                .collect::<Result<Vec<_>, _>>()?
+        } else {
+            vec![]
+        };
         let sampler = Sampler::new(device, sampler_descriptor)?;
 
         Ok(Self {
