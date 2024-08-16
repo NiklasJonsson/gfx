@@ -1,10 +1,8 @@
-pub mod async_storage;
 pub mod buffered_storage;
 pub mod cache;
 pub mod cached_storage;
 pub mod storage;
 
-pub use async_storage::Async;
 pub use buffered_storage::BufferedStorage;
 pub use cache::Cache;
 pub use cached_storage::CachedStorage;

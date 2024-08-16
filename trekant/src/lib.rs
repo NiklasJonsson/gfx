@@ -37,7 +37,7 @@ pub use pipeline::{
 pub use pipeline_resource::PipelineResourceSet;
 pub use render_pass::{RenderPass, RenderPassEncoder};
 pub use render_target::RenderTarget;
-pub use resource::{Async, Handle};
+pub use resource::Handle;
 pub use std140::{Std140, Std140Struct};
 pub use texture::{
     BorderColor, Filter, MipMaps, SamplerAddressMode, SamplerDescriptor, Texture,

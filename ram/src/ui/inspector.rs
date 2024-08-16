@@ -339,35 +339,17 @@ macro_rules! impl_visit_todo {
     };
 }
 
-macro_rules! impl_visit_todo_generic {
-    ($ty:ident) => {
-        #[allow(dead_code)]
-        impl<'a, T> Visitor<$ty<T>> for ImguiVisitor<'a> {
-            #[allow(unused)]
-            fn visit(&mut self, t: &$ty<T>, m: &Meta<$ty<T>>) {
-                self.ui.inner().text("TODO");
-            }
-
-            fn visit_mut(&mut self, t: &mut $ty<T>, m: &Meta<$ty<T>>) {
-                self.visit(t, m);
-            }
-        }
-    };
-}
-
-use resurs::Async;
 use trekant::Texture;
-impl_visit_todo_generic!(Async);
 impl_visit_todo!(Texture);
 
 impl<'a> Visitor<bool> for ImguiVisitor<'a> {
     fn visit(&mut self, t: &bool, m: &Meta<bool>) {
         let mut tmp = *t;
-        self.ui.inner().checkbox(&label(m), &mut tmp);
+        self.ui.inner().checkbox(label(m), &mut tmp);
     }
 
     fn visit_mut(&mut self, t: &mut bool, m: &Meta<bool>) {
-        self.ui.inner().checkbox(&label(m), t);
+        self.ui.inner().checkbox(label(m), t);
     }
 }
 
