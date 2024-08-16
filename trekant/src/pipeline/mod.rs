@@ -285,7 +285,7 @@ impl GraphicsPipeline {
         })
     }
 
-    fn create<D: HasVkDevice>(
+    pub(crate) fn create<D: HasVkDevice>(
         device: &D,
         render_pass: &RenderPass,
         desc: &GraphicsPipelineDescriptor,
@@ -533,14 +533,6 @@ impl GraphicsPipelineDescriptorBuilder {
 impl GraphicsPipelineDescriptor {
     pub fn builder() -> GraphicsPipelineDescriptorBuilder {
         GraphicsPipelineDescriptorBuilder::default()
-    }
-
-    pub fn create<D: HasVkDevice>(
-        &self,
-        device: &D,
-        render_pass: &RenderPass,
-    ) -> Result<GraphicsPipeline, PipelineError> {
-        GraphicsPipeline::create(device, render_pass, self)
     }
 }
 

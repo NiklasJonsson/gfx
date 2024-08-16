@@ -847,7 +847,9 @@ impl Renderer {
         let handle = self
             .resources
             .graphics_pipelines
-            .get_or_add(descriptor, |d| d.create(device, &render_pass.0))?;
+            .get_or_add(descriptor, |d| {
+                GraphicsPipeline::create(device, &render_pass.0, d)
+            })?;
 
         Ok(handle)
     }
