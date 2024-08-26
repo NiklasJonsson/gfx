@@ -48,7 +48,7 @@ where
                 self.stats.misses += 1;
                 let resource = create(&descriptor)?;
                 let h = self.storage.add(resource);
-                self.cache.add(descriptor, h);
+                self.cache.insert(descriptor, h);
                 h
             }
         };
@@ -62,9 +62,25 @@ where
 
     pub fn add(&mut self, descriptor: ResourceDescriptor, r: Resource) -> Handle<Resource> {
         let h = self.storage.add(r);
-        self.cache.add(descriptor, h);
+        self.cache.insert(descriptor, h);
 
         h
+    }
+
+    pub fn overwrite(
+        &mut self,
+        handle: &Handle<Resource>,
+        descriptor: ResourceDescriptor,
+        r: Resource,
+    ) -> bool {
+        match self.storage.get_mut(handle) {
+            Some(existing) => {
+                *existing = r;
+                self.cache.insert(descriptor, *handle);
+                true
+            }
+            None => false,
+        }
     }
 
     pub fn has(&self, h: &Handle<Resource>) -> bool {

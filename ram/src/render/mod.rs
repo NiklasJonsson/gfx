@@ -3,7 +3,7 @@ use thiserror::Error;
 
 use crate::ecs::prelude::*;
 
-use trekant::{BufferDescriptor, BufferMutability};
+use trekant::{BufferDescriptor, BufferMutability, RenderPass};
 
 use trekant::pipeline::{
     GraphicsPipeline, GraphicsPipelineDescriptor, PipelineError, ShaderDescriptor,
@@ -224,6 +224,21 @@ fn draw_entities<MaterialFilterComponent: Component>(
             .bind_shader_resource_group(1, material_descriptor_set, gfx_pipeline)
             .bind_push_constant(gfx_pipeline, ShaderStage::VERTEX, &tfm)
             .draw_mesh(*vertex_buffer, *index_buffer);
+    }
+}
+
+fn recreate_pipelines(renderer: &mut Renderer, world: &mut World) {
+    let pipeline_service = world.write_resource::<shader::PipelineService>();
+
+    for recreate_pipeline in pipeline_service.flush_recreate() {
+        let result = renderer.recreate_gfx_pipeline(
+            recreate_pipeline.descriptor,
+            recreate_pipeline.render_pass,
+            recreate_pipeline.pipeline,
+        );
+        if let Err(e) = &result {
+            log::error!("Pipeline re-creation failed: {}", e);
+        }
     }
 }
 

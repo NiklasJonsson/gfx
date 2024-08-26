@@ -1,9 +1,10 @@
-use std::hash::Hash;
-use std::path::{Path, PathBuf};
 use thiserror::Error;
 
-use std::sync::Arc;
-use std::sync::Mutex;
+use std::fmt::Write;
+use std::path::{Path, PathBuf};
+use std::sync::{Arc, Mutex};
+
+use super::ShaderAbsPath;
 
 #[derive(Debug, Clone, Default)]
 pub struct Defines {
@@ -28,131 +29,9 @@ impl<'a> IntoIterator for &'a Defines {
     }
 }
 
-pub mod pbr_gltf {
-    use super::*;
-
-    #[derive(Debug, Clone, PartialEq, Eq, Hash, Default)]
-    pub struct ShaderDefinition {
-        pub has_tex_coords: bool,
-        pub has_vertex_colors: bool,
-        pub has_tangents: bool,
-        pub has_base_color_texture: bool,
-        pub has_metallic_roughness_texture: bool,
-        pub has_normal_map: bool,
-    }
-
-    impl ShaderDefinition {
-        const fn empty() -> Self {
-            Self {
-                has_tex_coords: false,
-                has_vertex_colors: false,
-                has_tangents: false,
-                has_base_color_texture: false,
-                has_metallic_roughness_texture: false,
-                has_normal_map: false,
-            }
-        }
-        fn iter(&self) -> impl Iterator<Item = bool> {
-            use std::iter::once;
-            once(self.has_tex_coords)
-                .chain(once(self.has_vertex_colors))
-                .chain(once(self.has_tangents))
-                .chain(once(self.has_base_color_texture))
-                .chain(once(self.has_metallic_roughness_texture))
-                .chain(once(self.has_normal_map))
-        }
-
-        fn defines(&self) -> Defines {
-            let mut defines = Defines::default();
-
-            let mut attribute_count = 2; // Positions and normals are assumed to exist
-
-            let all_defines = [
-                ("HAS_TEX_COORDS", vec!["TEX_COORDS_LOC"]),
-                ("HAS_VERTEX_COLOR", vec!["VCOL_LOC"]),
-                ("HAS_TANGENTS", vec!["TAN_LOC", "BITAN_LOC"]),
-                ("HAS_BASE_COLOR_TEXTURE", vec![]),
-                ("HAS_METALLIC_ROUGHNESS_TEXTURE", vec![]),
-                ("HAS_NORMAL_MAP", vec![]),
-            ];
-
-            for (_cond, (has_define, loc_defines)) in self
-                .iter()
-                .zip(all_defines.iter())
-                .filter(|(cond, _define)| *cond)
-            {
-                defines.push((String::from(*has_define), String::from("1")));
-                for &loc_define in loc_defines.iter() {
-                    defines.push((String::from(loc_define), format!("{}", attribute_count)));
-                    attribute_count += 1;
-                }
-            }
-
-            defines
-        }
-
-        fn is_valid(&self) -> bool {
-            let uses_tex = self.has_normal_map
-                || self.has_base_color_texture
-                || self.has_metallic_roughness_texture;
-            if uses_tex && !self.has_tex_coords {
-                return false;
-            }
-
-            if self.has_normal_map && !self.has_tangents {
-                return false;
-            }
-
-            true
-        }
-    }
-
-    pub fn compile(
-        compiler: &ShaderCompiler,
-        cache: &mut ShaderCache,
-        def: &ShaderDefinition,
-    ) -> Result<(SpvBinary, SpvBinary), CompilerError> {
-        assert!(def.is_valid());
-        let defines = def.defines();
-
-        let vert = compiler.compile(
-            &ShaderLocation::search(PathBuf::from_iter([
-                "render",
-                "shaders",
-                "pbr",
-                "vert.glsl",
-            ])),
-            &defines,
-            ShaderType::Vertex,
-            Some(cache),
-        )?;
-        let frag = compiler.compile(
-            &ShaderLocation::search(PathBuf::from_iter([
-                "render",
-                "shaders",
-                "pbr",
-                "frag.glsl",
-            ])),
-            &defines,
-            ShaderType::Fragment,
-            Some(cache),
-        )?;
-
-        Ok((vert, frag))
-    }
-
-    pub fn compile_default(
-        compiler: &ShaderCompiler,
-        cache: &mut ShaderCache,
-    ) -> Result<(SpvBinary, SpvBinary), CompilerError> {
-        compile(compiler, cache, &ShaderDefinition::empty())
-    }
-}
-
 #[derive(Clone)]
 pub struct SpvBinary {
     data: Vec<u32>,
-    _ty: ShaderType,
 }
 
 impl SpvBinary {
@@ -162,6 +41,7 @@ impl SpvBinary {
 }
 
 pub struct ShaderCompiler {
+    // TODO: Upgrade shaderc, latest version seems to be thread-safe
     compiler: Arc<Mutex<shaderc::Compiler>>,
     shader_paths: Vec<PathBuf>,
     include_paths: Vec<PathBuf>,
@@ -225,17 +105,21 @@ fn log_compilation(defines: &Defines, loc: &ShaderLocation, ty: ShaderType) {
     }
 }
 
-enum FindFileError {
-    NotFound(PathBuf),
-    Found(PathBuf, std::io::Error),
+#[derive(Debug)]
+struct FileNotFound {
+    pub path: std::path::PathBuf,
 }
 
-struct FoundFile(PathBuf, String);
+impl std::fmt::Display for FileNotFound {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "Failed to find shader file '{}'", self.path.display())
+    }
+}
 
 fn find_file_in(
     file_relpath: &Path,
     search_directories: &[PathBuf],
-) -> Result<FoundFile, FindFileError> {
+) -> Result<std::path::PathBuf, FileNotFound> {
     for search_directory in search_directories {
         log::debug!(
             "Searching for '{}' in '{}'",
@@ -245,19 +129,17 @@ fn find_file_in(
         let abspath = search_directory.join(file_relpath);
         if abspath.is_file() {
             let abspath = std::fs::canonicalize(abspath).unwrap();
-
-            match std::fs::read_to_string(&abspath) {
-                Ok(c) => return Ok(FoundFile(abspath, c)),
-                Err(e) => return Err(FindFileError::Found(abspath, e)),
-            }
+            return Ok(abspath);
         }
     }
     log::debug!("Failed to find {}", file_relpath.display());
-    Err(FindFileError::NotFound(file_relpath.to_path_buf()))
+    Err(FileNotFound {
+        path: file_relpath.to_path_buf(),
+    })
 }
 
 fn include_callback(
-    search_paths: &[PathBuf],
+    search_directories: &[PathBuf],
     include_request: &str,
     ty: shaderc::IncludeType,
     include_source: &str,
@@ -267,42 +149,50 @@ fn include_callback(
         return Err(format!("Tried to '#include \"{include_request}\" in {include_source} but *relative* imports are not supported (yet)!"));
     }
 
-    match find_file_in(Path::new(include_request), search_paths) {
-        Ok(FoundFile(path, content)) => {
+    match find_file_in(Path::new(include_request), search_directories) {
+        Ok(path) => {
             log::debug!(
                 "Resolved include {include_request} to {}",
-                std::fs::canonicalize(path)
+                std::fs::canonicalize(&path)
                     .expect("Failed to canonicalize file path")
                     .display()
             );
 
+            let content = match std::fs::read_to_string(&path) {
+                Ok(content) => content,
+                Err(e) => {
+                    return Err(format!(
+                        "Found include file at '{}' but couldn't read it due to {e}",
+                        path.display()
+                    ));
+                }
+            };
             let display_path = format!("include/{include_request}");
             Ok(shaderc::ResolvedInclude {
                 resolved_name: display_path,
                 content,
             })
         }
-        Err(FindFileError::Found(path, e)) => Err(format!(
-            "Found include file at '{}' but couldn't read it due to {e}",
-            path.display()
-        )),
-        Err(FindFileError::NotFound(path)) => Err(format!(
+        Err(FileNotFound { path }) => Err(format!(
             "Failed to find include '{p}', requested from {include_source}",
             p = path.display()
         )),
     }
 }
 
+// TODO: no pub
 #[derive(Clone, Debug)]
-enum ShaderLocationContents {
+pub enum ShaderLocationContents {
     Absolute(PathBuf),
+    Absolute2(super::ShaderAbsPath),
     /// Search relative to one of the shader search paths in the shader compiler.
     Search(PathBuf),
 }
 
 #[derive(Clone, Debug)]
 pub struct ShaderLocation {
-    contents: ShaderLocationContents,
+    // TODO: Remove pub
+    pub contents: ShaderLocationContents,
 }
 
 impl ShaderLocation {
@@ -333,6 +223,14 @@ impl ShaderLocation {
     }
 }
 
+impl From<super::ShaderAbsPath> for ShaderLocation {
+    fn from(value: super::ShaderAbsPath) -> Self {
+        Self {
+            contents: ShaderLocationContents::Absolute2(value),
+        }
+    }
+}
+
 impl std::fmt::Display for ShaderLocation {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match &self.contents {
@@ -342,7 +240,10 @@ impl std::fmt::Display for ShaderLocation {
     }
 }
 
-fn read_shader(search_paths: &[PathBuf], loc: &ShaderLocation) -> Result<FoundFile, FindFileError> {
+fn find_shader(
+    search_directories: &[PathBuf],
+    loc: &ShaderLocation,
+) -> Result<std::path::PathBuf, FileNotFound> {
     match &loc.contents {
         ShaderLocationContents::Absolute(path) => {
             assert!(
@@ -350,12 +251,35 @@ fn read_shader(search_paths: &[PathBuf], loc: &ShaderLocation) -> Result<FoundFi
                 "Expected {} to be absolute",
                 path.display()
             );
-            let contents =
-                std::fs::read_to_string(path).map_err(|e| FindFileError::Found(path.clone(), e))?;
-            Ok(FoundFile(path.clone(), contents))
+            Ok(path.clone())
         }
-        ShaderLocationContents::Search(path) => find_file_in(path, search_paths),
+        ShaderLocationContents::Search(path) => find_file_in(path, search_directories),
     }
+}
+
+struct FoundShader {
+    path: PathBuf,
+    contents: String,
+}
+
+#[derive(Debug)]
+enum ReadShaderError {
+    NotFound(PathBuf),
+    Found(PathBuf, std::io::Error),
+}
+
+fn read_shader(
+    search_directories: &[PathBuf],
+    loc: &ShaderLocation,
+) -> Result<FoundShader, ReadShaderError> {
+    let path = match find_shader(search_directories, loc) {
+        Ok(path) => path,
+        Err(FileNotFound { path }) => return Err(ReadShaderError::NotFound(path)),
+    };
+
+    let contents =
+        std::fs::read_to_string(&path).map_err(|e| ReadShaderError::Found(path.clone(), e))?;
+    return Ok(FoundShader { path, contents });
 }
 
 impl ShaderCompiler {
@@ -394,14 +318,14 @@ impl ShaderCompiler {
         cache: Option<&mut ShaderCache>,
     ) -> Result<SpvBinary, CompilerError> {
         let (path, source) = match read_shader(&self.shader_paths, shader) {
-            Ok(FoundFile(path, contents)) => {
+            Ok(FoundShader { path, contents }) => {
                 log::debug!("Resolved {shader} to {}", path.display());
                 (path, contents)
             }
-            Err(FindFileError::Found(path, err)) => {
+            Err(ReadShaderError::Found(path, err)) => {
                 return Err(CompilerError::FailedToRead { path, err });
             }
-            Err(FindFileError::NotFound(path)) => {
+            Err(ReadShaderError::NotFound(path)) => {
                 return Err(CompilerError::NotFound { path });
             }
         };
@@ -470,7 +394,6 @@ impl ShaderCompiler {
                 });
             }
             Ok(bin) => SpvBinary {
-                _ty: ty,
                 data: Vec::from(bin.as_binary()),
             },
         };

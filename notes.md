@@ -570,8 +570,6 @@ and handling includes.
 
 Start sketching out a TextureAssetLoader that contains the storage and cache for file -> raw image data.
 
-START HERE:
-
 The code is in the middle of changing texture loading. The problem is that the current Loader API - that there can only be one
 instance, means that there is only one place where pending resources can be resolved. When they are flushed to the
 renderer. IIRC, this was to simplify the code to not send too much data around but instead, it would be good if mapping
@@ -638,18 +636,51 @@ graph TD
     ModelMatrix --> render_entity
 ```
 
+## Shader live reloads
+
+### Problem
+
+During the startup time improvements, part of the code for reloading shaders with 'R' was deleted. Specifically,
+the check for `ReloadMaterial` was removed. This should be replaced with a reload of all pipeline handles that
+are in use. The problem is that there is no way to know how to recreate them properly.
+
+The ideal solution would be to have:
+
+1. An event should trigger a recompile of the glsl shader to spirv. This could be a file-watcher or a key press.
+2. The spirv shader is used to recreate the pipeline.
+3. The event should support 1 shader, N shaders or ALL shaders.
+
+Some additional constraints:
+
+1. Changing an include file should recompile all uses as well.
+2. Preferably, shader compilation should be async and parallel.
+3. Support compiling from inline source?
+
+### Investigation
+
+The solution to this is not immediately clear to me because the current code has glsl -> spirv compilation separate from
+pipeline creation. `ShaderCompiler::compile` is used to compile the glsl files to spirv. There is no record kept of the source
+code of a compiled shader so it's not possible to ask it to recompile all shaders as it doesn't know that. In addition, the
+code to do this is spread all over the codebase so there is no centralized location there either.
+
+The pipeline creation is also spread out in imperative code, where the glsl -> spirv compilation is usually followed by
+a call to `Renderer::create_gfx_pipeline`.
+
+Fundamentally, when a shader is recompiled, all pipeline objects with that shader need to be recreated.
+
+Assume the event to recompile shaders should support: 1 shader, N shaders, all shaders.
+
+These parts are needed:
+
+1. A system to register files to watch.
+2. A systems that collects recompilation events and recompiles shaders.
+
 ## Future work
 
 ### Fix hack with mipmap generation dependency
 
 There is a todo in `material.rs` for fixing this. The problem is that we shouldn't create the descriptor set
 before the mipmaps are generated.
-
-### Fix shader reloads
-
-During the startup time improvements, part of the code for reloading shaders with 'R' was deleted. Specifically,
-the check for `ReloadMaterial` was removed. This should be replaced with a reload of all pipeline handles that
-are in use. The problem is that there is no way to know how to recreate them properly.
 
 ### Improve the imgui ECS debugger
 

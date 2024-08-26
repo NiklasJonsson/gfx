@@ -31,8 +31,9 @@ pub use loader::{
     HandleMapping, LoadId, Loader, LoaderError, PendingBufferHandle, PendingTextureHandle,
 };
 pub use pipeline::{
-    GraphicsPipeline, GraphicsPipelineDescriptor, PipelineError, PolygonMode, ShaderDescriptor,
-    ShaderStage,
+    BlendState, DepthTest, GraphicsPipeline, GraphicsPipelineDescriptor, PipelineError,
+    PolygonMode, PrimitiveTopology, ShaderDescriptor, ShaderStage, TriangleCulling,
+    TriangleWinding,
 };
 pub use pipeline_resource::PipelineResourceSet;
 pub use render_pass::{RenderPass, RenderPassEncoder};
@@ -836,6 +837,7 @@ impl Renderer {
     pub fn create_gfx_pipeline(
         &mut self,
         descriptor: GraphicsPipelineDescriptor,
+        // TODO: Remove ref
         render_pass: &Handle<RenderPass>,
     ) -> Result<Handle<GraphicsPipeline>, PipelineError> {
         let device = &self.device;
@@ -851,6 +853,25 @@ impl Renderer {
                 GraphicsPipeline::create(device, &render_pass.0, d)
             })?;
 
+        Ok(handle)
+    }
+
+    pub fn recreate_gfx_pipeline(
+        &mut self,
+        descriptor: GraphicsPipelineDescriptor,
+        render_pass: Handle<RenderPass>,
+        handle: Handle<GraphicsPipeline>,
+    ) -> Result<Handle<GraphicsPipeline>, PipelineError> {
+        let device = &self.device;
+        let render_pass = self
+            .resources
+            .render_passes
+            .get(&render_pass)
+            .expect("No such pass");
+        let pipeline = GraphicsPipeline::create(device, &render_pass.0, &descriptor)?;
+        self.resources
+            .graphics_pipelines
+            .overwrite(&handle, descriptor, pipeline);
         Ok(handle)
     }
 }

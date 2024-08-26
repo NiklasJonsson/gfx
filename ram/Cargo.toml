@@ -33,6 +33,7 @@ resurs = { path = "../resurs" }
 serde = "1.0"
 polymap = "0.3.0"
 bytemuck = { version = "1.15", features = ["derive"] }
+notify = "6.1.1"
 
 # Threading
 crossbeam = "0.7.3"

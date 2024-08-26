@@ -20,7 +20,7 @@ impl<D: Hash + Eq, T> Cache<D, T> {
         self.cache.get(desc)
     }
 
-    pub fn add(&mut self, desc: D, h: Handle<T>) {
+    pub fn insert(&mut self, desc: D, h: Handle<T>) {
         self.cache.insert(desc, h);
     }
 

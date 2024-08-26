@@ -5,13 +5,13 @@ use trekant::pipeline::{
 };
 use trekant::pipeline_resource::PipelineResourceSet;
 use trekant::util::{cast_transparent_slice, Extent2D, Format, Offset2D, Rect2D, Viewport};
-use trekant::{VertexDefinition, VertexFormat};
 use trekant::BufferMutability;
 use trekant::Frame;
 use trekant::RenderPassEncoder;
 use trekant::Renderer;
 use trekant::{BufferDescriptor, BufferHandle, Handle, Std140};
 use trekant::{MipMaps, Texture, TextureDescriptor};
+use trekant::{VertexDefinition, VertexFormat};
 
 use crate::common::Name;
 use crate::io::input;
@@ -319,7 +319,7 @@ impl UIContext {
 
         let (vert, frag) = {
             let compiler = world.read_resource::<ShaderCompiler>();
-            let defines = Defines::default();
+            let defines = Defines::empty();
             let vert = compiler
                 .compile(
                     &super::shader_path(&["imgui", "vert.glsl"]),
