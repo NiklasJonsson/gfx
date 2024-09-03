@@ -675,6 +675,39 @@ These parts are needed:
 1. A system to register files to watch.
 2. A systems that collects recompilation events and recompiles shaders.
 
+### Design
+
+#### `PipelineService`
+
+This is the top user-facing type. It exposes an API to create trekant pipelines.
+
+This API comes in both blocking and non-blocking flavours. Either, one can pass
+the pipeline input, a render pass and a renderer object directly to it. This will
+create the pipeline and store the information on how to recreate it. The pipeline inputs are:
+
+* Vertex shader. GLSL source path, defines for the compilation.
+* Fragment shader. GLSL source path, defines for the compilation.
+* PipelineSettings. E.g. winding order.
+
+Or, one can use the async API, where a shader is queued for recompilation and then the pipeline
+service is polled every frame to complete the pending graphics pipelines that need to be because
+their shader inputs have changed. The changed graphics pipelines are overwrite the old ones so that
+all uses of a handle are updated to use the new one.
+
+TODO: What synchronization is required here with regards to command buffers etc. waitDeviceIdle?
+
+Internally, the pipeline service uses the `ShaderCompilationService`.
+
+#### `ShaderCompilationService`
+
+This implements multi-threaded async shader compilation.
+
+START HERE: Figure out how to signal from a work thread that the shader compilation is done.
+
+If using the `PipelineService` blocking API, we want a caller-specific signal so that we don't get the
+issue of multiple requests for the same path affecting each other. But for the async API, we want to put
+the done shaders somewhere to wait for the flush.
+
 ## Future work
 
 ### Fix hack with mipmap generation dependency

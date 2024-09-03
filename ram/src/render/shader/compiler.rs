@@ -1,6 +1,6 @@
 use thiserror::Error;
 
-use std::fmt::Write;
+use std::borrow::Borrow;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 
@@ -106,7 +106,7 @@ fn log_compilation(defines: &Defines, loc: &ShaderLocation, ty: ShaderType) {
 }
 
 #[derive(Debug)]
-struct FileNotFound {
+pub struct FileNotFound {
     pub path: std::path::PathBuf,
 }
 
@@ -184,7 +184,8 @@ fn include_callback(
 #[derive(Clone, Debug)]
 pub enum ShaderLocationContents {
     Absolute(PathBuf),
-    Absolute2(super::ShaderAbsPath),
+    // TODO: Remove
+    Absolute2(ShaderAbsPath),
     /// Search relative to one of the shader search paths in the shader compiler.
     Search(PathBuf),
 }
@@ -235,6 +236,7 @@ impl std::fmt::Display for ShaderLocation {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match &self.contents {
             ShaderLocationContents::Absolute(p) => write!(f, "{p}", p = p.display()),
+            ShaderLocationContents::Absolute2(p) => write!(f, "{p}", p = p.display()),
             ShaderLocationContents::Search(p) => write!(f, "<SHADER_PATH>/{p}", p = p.display()),
         }
     }
@@ -252,6 +254,10 @@ fn find_shader(
                 path.display()
             );
             Ok(path.clone())
+        }
+        ShaderLocationContents::Absolute2(path) => {
+            let path: &Path = path.borrow();
+            Ok(path.to_path_buf())
         }
         ShaderLocationContents::Search(path) => find_file_in(path, search_directories),
     }
@@ -308,6 +314,10 @@ impl ShaderCompiler {
         P: Into<PathBuf>,
     {
         self.include_paths.insert(0, path.into());
+    }
+
+    pub fn find(&self, loc: &ShaderLocation) -> Result<ShaderAbsPath, FileNotFound> {
+        find_shader(&self.shader_paths, loc).map(ShaderAbsPath::from_abspath)
     }
 
     pub fn compile(
