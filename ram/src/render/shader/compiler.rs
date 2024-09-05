@@ -2,7 +2,6 @@ use thiserror::Error;
 
 use std::borrow::Borrow;
 use std::path::{Path, PathBuf};
-use std::sync::{Arc, Mutex};
 
 use super::ShaderAbsPath;
 
@@ -41,14 +40,10 @@ impl SpvBinary {
 }
 
 pub struct ShaderCompiler {
-    // TODO: Upgrade shaderc, latest version seems to be thread-safe
-    compiler: Arc<Mutex<shaderc::Compiler>>,
+    compiler: shaderc::Compiler,
     shader_paths: Vec<PathBuf>,
     include_paths: Vec<PathBuf>,
 }
-
-unsafe impl Send for ShaderCompiler {}
-unsafe impl Sync for ShaderCompiler {}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum ShaderType {
@@ -71,8 +66,6 @@ pub enum CompilerError {
         loc: ShaderLocation,
         path: PathBuf,
     },
-    #[error("Compiler mutex has been posioned")]
-    Sync,
 }
 
 #[derive(Clone, PartialEq, Eq, Hash)]
@@ -94,6 +87,10 @@ pub struct ShaderCache {
 impl ShaderCache {
     pub fn new() -> Self {
         Self::default()
+    }
+
+    pub fn insert(&mut self, key: ShaderCacheKey, binary: SpvBinary) {
+        self.cache.insert(key, binary);
     }
 }
 
@@ -290,9 +287,7 @@ fn read_shader(
 
 impl ShaderCompiler {
     pub fn new() -> Result<Self, CompilerError> {
-        let compiler = Arc::new(Mutex::new(
-            shaderc::Compiler::new().ok_or(CompilerError::Init)?,
-        ));
+        let compiler = shaderc::Compiler::new().ok_or(CompilerError::Init)?;
         let shader_paths = Vec::new();
         let include_paths = Vec::new();
         Ok(Self {
@@ -368,8 +363,11 @@ impl ShaderCompiler {
         };
 
         options.set_include_callback(callback);
-        let mut compiler = self.compiler.lock().map_err(|_| CompilerError::Sync)?;
+        let compiler = &self.compiler;
 
+        // Caching has to be done after preprocessing as there is no model of dependencies on headers
+        // for a shader source file. Therefore, we cannot map a file path to a spirv binary. An include
+        // might have changed so even if the file itself has not changed, we need to compile it.
         let source = match compiler.preprocess(&source, &shader.to_string(), "main", Some(&options))
         {
             Ok(artifact) => artifact.as_text(),
@@ -413,5 +411,14 @@ impl ShaderCompiler {
             cache.cache.insert(key, binary.clone());
         }
         Ok(binary)
+    }
+
+    pub fn compile2(
+        &self,
+        shader: &ShaderAbsPath,
+        defines: &Defines,
+        ty: ShaderType,
+    ) -> Result<(SpvBinary, ShaderCacheKey), CompilerError> {
+        todo!()
     }
 }
