@@ -1,32 +1,122 @@
 mod compiler;
-mod recompile;
+mod service;
 
 use std::borrow::Borrow;
 use std::collections::HashMap;
+use std::hash::Hash;
 use std::path::PathBuf;
-use std::sync::atomic::AtomicU64;
-use std::sync::mpsc::{Receiver, Sender};
-use std::sync::{Arc, Condvar, Mutex};
-use std::{collections::HashSet, hash::Hash};
+use std::sync::{atomic::AtomicU64, Arc, Mutex};
 
-use bytemuck::Contiguous;
-use compiler::FileNotFound;
+use compiler::CompilerResult;
 use trekant::{
     BlendState, DepthTest, GraphicsPipeline, GraphicsPipelineDescriptor, Handle, PipelineError,
     PolygonMode, PrimitiveTopology, RenderPass, Renderer, ShaderDescriptor, TriangleCulling,
     TriangleWinding, VertexFormat,
 };
 
-pub use compiler::{
-    CompilerError, Defines, ShaderCache, ShaderCompiler, ShaderLocation, ShaderType, SpvBinary,
-};
+pub use compiler::{CompilerError, ShaderCompiler};
+
+use service::{ShaderCompilationService, ShaderCompilationServiceConfig, UserId};
+
+const ASYNC_USER_ID: UserId = UserId(0);
+
+struct UserIdGenerator {
+    counter: AtomicU64,
+}
+
+impl UserIdGenerator {
+    fn new() -> Self {
+        Self {
+            counter: AtomicU64::new(0),
+        }
+    }
+    fn next(&self) -> UserId {
+        let prev = self
+            .counter
+            .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        let id = if prev == std::u64::MAX { 1 } else { prev + 1 };
+        UserId(id)
+    }
+}
 
 #[derive(Clone, Debug)]
-pub struct PipelineId(u32);
+enum ShaderLocationContents {
+    /// Absolute path to a shader
+    Absolute(ShaderAbsPath),
+    /// Search relative to one of the shader search paths in the shader compiler.
+    Search(PathBuf),
+}
 
-pub struct Pipeline;
+#[derive(Clone, Debug)]
+pub struct ShaderLocation(ShaderLocationContents);
 
-struct PipelineServiceState {}
+impl ShaderLocation {
+    pub fn abs<P>(p: P) -> Self
+    where
+        P: Into<PathBuf>,
+    {
+        let path = ShaderAbsPath::from_abspath(p.into());
+        Self(ShaderLocationContents::Absolute(path))
+    }
+
+    /// Search relative to one of the shader search paths in the shader compiler.
+    pub fn search<P>(p: P) -> Self
+    where
+        P: Into<PathBuf>,
+    {
+        let pathbuf: PathBuf = p.into();
+        Self(ShaderLocationContents::Search(pathbuf))
+    }
+}
+
+impl std::fmt::Display for ShaderLocation {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match &self.0 {
+            ShaderLocationContents::Absolute(p) => write!(f, "{p}", p = p.display()),
+            ShaderLocationContents::Search(p) => write!(f, "<SHADER_PATH>/{p}", p = p.display()),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq, Hash)]
+pub struct Defines {
+    vals: Vec<(String, String)>,
+}
+
+impl Defines {
+    pub fn push(&mut self, v: (String, String)) {
+        self.vals.push(v);
+    }
+
+    pub fn empty() -> Self {
+        Self { vals: Vec::new() }
+    }
+}
+
+impl<'a> IntoIterator for &'a Defines {
+    type IntoIter = std::slice::Iter<'a, (String, String)>;
+    type Item = &'a (String, String);
+    fn into_iter(self) -> Self::IntoIter {
+        self.vals.as_slice().iter()
+    }
+}
+
+#[derive(Clone)]
+pub struct SpvBinary {
+    data: Vec<u32>,
+}
+
+impl SpvBinary {
+    pub fn data(self) -> Vec<u32> {
+        self.data
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum ShaderType {
+    Vertex,
+    Fragment,
+}
 
 /// The absolute path to a shader.
 ///
@@ -49,6 +139,12 @@ impl std::ops::Deref for ShaderAbsPath {
     }
 }
 
+impl AsRef<std::path::Path> for ShaderAbsPath {
+    fn as_ref(&self) -> &std::path::Path {
+        &self.0
+    }
+}
+
 impl ShaderAbsPath {
     fn from_abspath(abspath: std::path::PathBuf) -> Self {
         assert!(
@@ -58,265 +154,17 @@ impl ShaderAbsPath {
         );
         Self(Arc::from(abspath.as_path()))
     }
-
-    fn as_shader_location(&self) -> ShaderLocation {
-        ShaderLocation {
-            contents: compiler::ShaderLocationContents::Absolute2(self.clone()),
-        }
-    }
 }
 
-struct ShaderRecompileComms {
-    new_shader_tx: Sender<ShaderAbsPath>,
-    shader_done_rx: Receiver<(ShaderAbsPath, SpvBinary)>,
-}
-
-struct ShaderWatcher {
-    files: HashSet<ShaderAbsPath>,
-    register_new_file: Receiver<ShaderAbsPath>,
-    file_modified_tx: Sender<ShaderAbsPath>,
-}
-
-impl ShaderWatcher {
-    fn handle_event(&mut self, res: notify::Result<notify::Event>) {
-        match res {
-            Ok(event) if event.kind.is_modify() || event.kind.is_create() => {
-                for path in event.paths {
-                    assert!(path.is_absolute());
-                    if let Some(shader_path) = self.files.get(path.as_path()) {
-                        self.file_modified_tx.send(shader_path.clone());
-                    }
-                }
-            }
-            Err(e) => {
-                log::error!("Error from file watcher: {e}");
-            }
-            _ => (),
-        }
-    }
-}
-
-type RecompilerResult = Result<SpvBinary, CompilerError>;
-
-#[derive(Debug, Clone)]
-struct ShaderCompilationInfo {
-    defines: Defines,
-    ty: ShaderType,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum ShaderWorkItemState {
-    None,
-    Queued,
-    InProgress,
-    Done,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-struct ShaderWorkInfo {
-    state: ShaderWorkItemState,
-    request_count: usize,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-struct RequestIdx(u64);
-
-struct ThreadState {
-    work_queue: Vec<(RequestIdx, ShaderAbsPath)>,
-    done_shaders: HashMap<RequestIdx, Result<SpvBinary, CompilerError>>,
-    shader_compilation_info: HashMap<ShaderAbsPath, ShaderCompilationInfo>,
-    shader_cache: ShaderCache,
-}
-
-struct ThreadContext {
-    compiler: ShaderCompiler,
-    has_work: std::sync::Condvar,
-    has_done: std::sync::Condvar,
-    shared_state: Mutex<ThreadState>,
-}
-
-struct ShaderCompilationService {
-    thread_context: Arc<ThreadContext>,
-    threads: Vec<std::thread::JoinHandle<()>>,
-    request_counter: AtomicU64,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-struct RequestId {
-    start: RequestIdx,
-    len: u64,
-}
-
-impl ShaderCompilationService {
-    fn thread_work(ctx: &ThreadContext) -> RecompilerResult {
-        loop {
-            let path: ShaderAbsPath;
-            let shader_info: ShaderCompilationInfo;
-            let request_idx: RequestIdx;
-
-            // Don't do compilation within the lock window
-            {
-                let state = ctx.shared_state.lock().expect("Mutex poison");
-                let mut state = ctx.has_work.wait(state).expect("Mutex poison");
-                if state.work_queue.is_empty() {
-                    continue;
-                }
-
-                let (idx, item) = state.work_queue.remove(0);
-                let Some(si) = state.shader_compilation_info.get(&item) else {
-                    log::error!("Internal error: 'The shader {p} doesn't have any compilation info stored so it cannot be compiled.", p = item.display());
-                    continue;
-                };
-
-                // TODO: This is a string allocation/copy clone. Consider changing to Arc<CompilationInfo> to make it read-only and cheap-copy.
-                shader_info = si.clone();
-                path = item;
-                request_idx = idx;
-            }
-
-            let result = ctx
-                .compiler
-                .compile2(&path, &shader_info.defines, shader_info.ty);
-
-            {
-                let mut state = ctx.shared_state.lock().expect("Mutex poison");
-                match result {
-                    Ok((spv, key)) => {
-                        state.shader_cache.insert(key, spv.clone());
-                        state.done_shaders.insert(request_idx, Ok(spv));
-                    }
-                    Err(e) => {
-                        state.done_shaders.insert(request_idx, Err(e));
-                    }
-                }
-            }
-        }
-    }
-}
-
-#[derive(Debug, Clone, Copy)]
-struct RecompilerConfig {
-    n_threads: std::num::NonZero<u8>,
-}
-
-impl ShaderCompilationService {
-    pub fn new(shader_compiler: ShaderCompiler, config: RecompilerConfig) -> Self {
-        let n_threads = config.n_threads.into_integer();
-        let thread_context = Arc::new(ThreadContext {
-            compiler: shader_compiler,
-            has_work: Condvar::new(),
-            has_done: Condvar::new(),
-            shared_state: Mutex::new(ThreadState {
-                work_queue: Vec::with_capacity(16),
-                done_shaders: HashMap::default(),
-                shader_compilation_info: HashMap::default(),
-                shader_cache: ShaderCache::new(),
-            }),
-        });
-        let mut r = Self {
-            thread_context: Arc::clone(&thread_context),
-            threads: Vec::with_capacity(n_threads as usize),
-            request_counter: AtomicU64::new(0),
-        };
-
-        for i in 0..n_threads {
-            let ctx = Arc::clone(&thread_context);
-            r.threads.push(std::thread::spawn(move || {
-                log::info!("Starting shader compilation thread {i}");
-                ShaderCompilationService::thread_work(&ctx);
-            }));
-        }
-
-        r
-    }
-
-    pub fn register(
-        &self,
-        loc: ShaderLocation,
-        defines: Defines,
-        ty: ShaderType,
-    ) -> Result<ShaderAbsPath, compiler::FileNotFound> {
-        // TODO: defer file search? But what to use on the caller side to identify the shader?
-        let abspath = self.thread_context.compiler.find(&loc)?;
-        let mut guard = self
-            .thread_context
-            .shared_state
-            .lock()
-            .expect("Mutex poison");
-        guard
-            .shader_compilation_info
-            .insert(abspath.clone(), ShaderCompilationInfo { defines, ty });
-        Ok(abspath)
-    }
-
-    pub fn queue(&self, paths: &[ShaderAbsPath]) -> RequestId {
-        let len = paths
-            .len()
-            .try_into()
-            .expect("The amount of shaders doesn't fit");
-        let start = self
-            .request_counter
-            .fetch_add(len, std::sync::atomic::Ordering::Relaxed);
-        let rid = RequestId {
-            start: RequestIdx(start),
-            len,
-        };
-        {
-            let mut state = self
-                .thread_context
-                .shared_state
-                .lock()
-                .expect("Mutex poison");
-            state.work_queue.reserve(paths.len());
-            for (i, p) in paths.into_iter().enumerate() {
-                state
-                    .work_queue
-                    .push((RequestIdx(start + i as u64), p.clone()));
-            }
-        }
-        self.thread_context.has_work.notify_all();
-        rid
-    }
-
-    pub fn queue_loc(&self, loc: &ShaderLocation) -> Result<RequestId, FileNotFound> {
-        let path = self.thread_context.compiler.find(loc)?;
-        let rid = self.queue(&[path]);
-        Ok(rid)
-    }
-
-    pub fn wait(&self, requests: &[RequestId], results: &mut Vec<RecompilerResult>) {
-        assert_eq!(requests.len(), results.len());
-        for rid in requests.into_iter() {
-            for ridx in rid.start.0..rid.start.0 + rid.len {
-                let result = {
-                    let mut state = self
-                        .thread_context
-                        .shared_state
-                        .lock()
-                        .expect("Mutex poison");
-                    state.done_shaders.remove(&RequestIdx(ridx))
-                };
-                if let Some(result) = result {
-                    results.push(result);
-                }
-            }
-        }
-    }
-}
-
-fn file_notify_callback(
-    rc: &ShaderCompilationService,
-    event: notify::Result<notify::Event>,
-    buf: &mut Vec<ShaderAbsPath>,
-) {
+fn file_notify_callback(service: &ShaderCompilationService, event: notify::Result<notify::Event>) {
     match event {
         Ok(event) if event.kind.is_create() || event.kind.is_modify() => {
-            buf.clear();
             for path in event.paths {
-                let abspath = ShaderAbsPath::from_abspath(path);
-                buf.push(abspath);
+                let loc = ShaderLocation::abs(path);
+                if let Err(e) = service.queue(&loc, ASYNC_USER_ID) {
+                    log::error!("Got event that {loc} was changed but failed to queue it for recompilation: {e}");
+                }
             }
-            rc.queue(&buf);
         }
         Ok(_) => (),
         Err(e) => {
@@ -327,7 +175,6 @@ fn file_notify_callback(
 
 #[derive(Clone, Debug)]
 pub struct RecreatePipeline {
-    pub id: PipelineId,
     pub pipeline: Handle<GraphicsPipeline>,
     pub descriptor: GraphicsPipelineDescriptor,
     pub render_pass: Handle<RenderPass>,
@@ -362,6 +209,7 @@ pub struct PipelineServiceConfig {
 #[derive(Debug)]
 pub enum Error {
     Compilation(CompilerError),
+    PipelineCreation(trekant::PipelineError),
 }
 
 impl std::fmt::Display for Error {
@@ -370,35 +218,75 @@ impl std::fmt::Display for Error {
     }
 }
 
+struct PipelineInfo {
+    vert: SpvBinary,
+    frag: Option<SpvBinary>,
+    settings: PipelineSettings,
+    render_pass: Handle<RenderPass>,
+    cur: Handle<GraphicsPipeline>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+struct ShaderPermutation {
+    path: ShaderAbsPath,
+    defines: Defines,
+    ty: ShaderType,
+}
+
+#[derive(Default)]
+struct PipelineServiceState {
+    pipelines_infos: resurs::Storage<PipelineInfo>,
+    shader_pipelines: HashMap<ShaderPermutation, Vec<Handle<PipelineInfo>>>,
+}
+
 pub struct PipelineService {
+    // TODO: Does this still need to be an arc?
     shader_service: Arc<ShaderCompilationService>,
-    watcher: Option<Box<dyn notify::Watcher>>,
+    watcher: Option<Box<dyn notify::Watcher + Send + Sync>>,
+    state: Mutex<PipelineServiceState>,
+    id_generator: UserIdGenerator,
 }
 
-struct ShaderPromise {
-    value: Arc<Mutex<Result<SpvBinary, Error>>>,
-    arrived: Condvar,
-}
+// TODO testing:
+// * Include paths lookup:
+// 1. Setup the include paths as: [a/, b/].
+// 2. Create two files, a/x/y and b/x/y, with different contents.
+// 3. Create a pipeline with a relpath x/y.
+// 4. Delete a/x/y
+// 5. Queue recompile of x/y
+// 6. It should use the contents of b/x/y and the pipeline should be replaced.
+// *
 
+/// A service to create graphics pipeline (descriptors).
+///
+/// It exposes a blocking API with `create()` which is intended to be used
+/// the first time a pipeline is created. After that, the async API can be
+/// used to recreate the pipeline in case the shaders have changed.
+///
+/// The async API is made up of two functions, queue_recompile and flush_recreate. The former
+/// sends a signal to the service to recompile a particular shader and once that is
+/// done, a graphics pipeline descriptor will be created and later flushed with
+/// `flush_recreate` which is intended to be called every frame and the returned
+/// GraphicsPipelineDescriptor can be used to recreate the graphics pipeline appropriately.
+///
 impl PipelineService {
     pub fn new(config: PipelineServiceConfig) -> Self {
         let shader_service = ShaderCompilationService::new(
             ShaderCompiler::new().unwrap(),
-            RecompilerConfig {
+            ShaderCompilationServiceConfig {
                 n_threads: config.n_threads,
             },
         );
         let shader_service = Arc::new(shader_service);
 
         let watcher = if config.live_recompile {
-            let mut buf = Vec::new();
-            let rc = Arc::clone(&shader_service);
+            let shader_service = Arc::clone(&shader_service);
             Some(Box::new(
                 notify::recommended_watcher(move |event| {
-                    file_notify_callback(&rc, event, &mut buf)
+                    file_notify_callback(&shader_service, event)
                 })
                 .expect("Failed to launch shader file watcher"),
-            ) as Box<dyn notify::Watcher>)
+            ) as Box<dyn notify::Watcher + Send + Sync>)
         } else {
             None
         };
@@ -406,238 +294,175 @@ impl PipelineService {
         Self {
             shader_service,
             watcher,
+            state: Mutex::new(PipelineServiceState {
+                shader_pipelines: HashMap::new(),
+                pipelines_infos: resurs::Storage::new(),
+            }),
+            id_generator: UserIdGenerator::new(),
         }
     }
 
-    pub fn flush_recreate(&self) -> impl Iterator<Item = RecreatePipeline> {
-        // For each shader that is done,
-        // Fetch its graphics pipeline creation info
-        // Recreate it and return
-        todo!();
-        std::iter::empty()
+    pub fn flush(&self, renderer: &mut Renderer) {
+        // START HERE:
+        // 1. Improve shader_Service.flush() to return the Done struct instead
+        // 2. Update the rest of 'ram'
+        // 3. Test
+        // 4. Cleanup TODOs in this code
+        // 5. Consider renaming the module to `pipeline`?
+        struct Done {
+            path: ShaderAbsPath,
+            defines: Defines,
+            ty: ShaderType,
+            result: CompilerResult<SpvBinary>,
+        }
+
+        // This loop will contain both shaders that we got from the watcher and
+        // shaders we got from manual queueing. Therefore, they have to only contain
+        // ShaderAbsPath.
+
+        let done_shaders: Vec<Done> = todo!();
+        let mut state = self.state.lock().unwrap();
+        for done_shader in done_shaders {
+            let spv = match done_shader.result {
+                Err(e) => {
+                    log::error!(
+                        "Failed to recompile shader '{}' due to:\n{}",
+                        done_shader.path.display(),
+                        e
+                    );
+                    continue;
+                }
+                Ok(spv) => spv,
+            };
+
+            let shader_permutation = ShaderPermutation {
+                path: done_shader.path,
+                defines: done_shader.defines,
+                ty: done_shader.ty,
+            };
+
+            // TODO perf: tmp alloc
+            let pipelines = state
+                .shader_pipelines
+                .get(&shader_permutation)
+                .unwrap()
+                .clone();
+            for pipeline_handle in pipelines {
+                let pipeline_info = state
+                    .pipelines_infos
+                    .get_mut(&pipeline_handle)
+                    .expect("Pipeline info was removed but hash map was not cleaned up");
+                if shader_permutation.ty == ShaderType::Vertex {
+                    pipeline_info.vert = spv.clone();
+                } else {
+                    pipeline_info.frag = Some(spv.clone());
+                }
+
+                // TODO: Debug name
+                let vert = ShaderDescriptor {
+                    spirv_code: pipeline_info.vert.clone().data(),
+                    debug_name: None,
+                };
+
+                let frag: Option<ShaderDescriptor> =
+                    pipeline_info.frag.as_ref().map(|x| ShaderDescriptor {
+                        spirv_code: x.clone().data(),
+                        debug_name: None,
+                    });
+                let settings = &pipeline_info.settings;
+                let descriptor = GraphicsPipelineDescriptor {
+                    vert,
+                    frag,
+                    vertex_format: settings.vertex_format.clone(),
+                    culling: settings.culling,
+                    winding: settings.winding,
+                    blend_state: settings.blend_state,
+                    depth_testing: settings.depth_testing,
+                    polygon_mode: settings.polygon_mode,
+                    primitive_topology: settings.primitive_topology,
+                };
+
+                renderer
+                    .recreate_gfx_pipeline(descriptor, pipeline_info.render_pass, pipeline_info.cur)
+                    .unwrap();
+            }
+        }
     }
 
     pub fn queue_recompile(&self, shader: &ShaderLocation) {
         // TODO: Error handling
-        // TODO: Cache eviction
-        self.shader_service
-            .queue_loc(shader)
-            .expect("Failed to find path");
+        self.shader_service.queue(shader, ASYNC_USER_ID).unwrap();
     }
 
     pub fn create(
         &mut self,
         shaders: Shaders,
         settings: PipelineSettings,
-    ) -> Result<GraphicsPipelineDescriptor, Error> {
+        render_pass: Handle<trekant::RenderPass>,
+        renderer: &mut Renderer,
+    ) -> Result<Handle<GraphicsPipeline>, Error> {
         // We want to:
         // 1. Compile vertex and fragment shaders in parallel, async.
         // 2. Register the shader path so that it can be recompiled.
-        // 3. Store information so that the pipeline can be re-created
+        // 3. TODO: Store information so that the pipeline can be re-created
         // 4. Create the pipeline
 
-        // TODO perf: tmp alloc
-        let mut shader_paths = Vec::new();
         let shaders = [
             Some((shaders.vert, ShaderType::Vertex)),
             shaders.frag.map(|f| (f, ShaderType::Fragment)),
         ];
+        let id = self.id_generator.next();
+        // TODO: Loop doesn't look to great, try with a lambda
         for shader in shaders.into_iter().flatten() {
             let (Shader { loc, defines, .. }, ty) = shader;
 
             let abspath = self
                 .shader_service
-                .register(loc, defines, ty)
+                .add_new_permutation(&loc, defines, ty, id)
                 .map_err(|e| Error::Compilation(CompilerError::NotFound { path: e.path }))?;
 
-            let rid = self.shader_service.queue(&[abspath.clone()]);
-
+            // TODO: Verify what happens if a path is registered multiple times
             if let Some(watcher) = &mut self.watcher {
                 watcher.watch(&abspath, notify::RecursiveMode::NonRecursive);
             }
-
-            shader_paths.push(rid);
         }
 
         // TODO perf: tmp alloc
-        let mut results = Vec::with_capacity(shader_paths.len());
-        self.shader_service.wait(&shader_paths, &mut results);
+        let mut results = Vec::with_capacity(2);
+        self.shader_service.wait(&[id], &mut results);
 
-        for r in results {}
-        todo!()
+        let vert: SpvBinary = results.remove(0).map_err(Error::Compilation)?;
+        let frag: Option<SpvBinary> = match results.pop() {
+            Some(Ok(x)) => Some(x),
+            Some(Err(e)) => return Err(Error::Compilation(e)),
+            None => None,
+        };
 
-        // let (vert, frag): (ShaderDescriptor, Option<ShaderDescriptor>) = {
-        //     let vert = {
-        //         let vert = shaders.vert;
-        //         let spv_binary = self
-        //             .shader_compiler
-        //             .compile(
-        //                 &vert.loc,
-        //                 &vert.defines,
-        //                 vert.ty,
-        //                 Some(&mut self.shader_cache),
-        //             )
-        //             .map_err(Error::Compilation)?;
+        // TODO: Forward debug name
+        let vert = ShaderDescriptor {
+            spirv_code: vert.data(),
+            debug_name: None,
+        };
 
-        //     };
+        let frag: Option<ShaderDescriptor> = frag.map(|x| ShaderDescriptor {
+            spirv_code: x.data(),
+            debug_name: None,
+        });
+        let descriptor = GraphicsPipelineDescriptor {
+            vert,
+            frag,
+            vertex_format: settings.vertex_format,
+            culling: settings.culling,
+            winding: settings.winding,
+            blend_state: settings.blend_state,
+            depth_testing: settings.depth_testing,
+            polygon_mode: settings.polygon_mode,
+            primitive_topology: settings.primitive_topology,
+        };
 
-        //     let frag = if let Some(frag) = shaders.frag {
-        //         let spv_binary = self
-        //             .shader_compiler
-        //             .compile(
-        //                 &frag.loc,
-        //                 &frag.defines,
-        //                 frag.ty,
-        //                 Some(&mut self.shader_cache),
-        //             )
-        //             .map_err(Error::Compilation)?;
-
-        //         Some(ShaderDescriptor {
-        //             spirv_code: spv_binary.data(),
-        //             debug_name: frag.debug_name,
-        //         })
-        //     } else {
-        //         None
-        //     };
-
-        //     (vert, frag)
-        // };
-        // let descriptor = GraphicsPipelineDescriptor {
-        //     vert,
-        //     frag,
-        //     vertex_format: settings.vertex_format,
-        //     culling: settings.culling,
-        //     winding: settings.winding,
-        //     blend_state: settings.blend_state,
-        //     depth_testing: settings.depth_testing,
-        //     polygon_mode: settings.polygon_mode,
-        //     primitive_topology: settings.primitive_topology,
-        // };
-
-        // renderer
-        //     .create_gfx_pipeline(descriptor, &render_pass)
-        //     .map_err(Error::PipelineCreation)
-    }
-}
-
-// TODO: Move to material.rs?
-pub mod pbr_gltf {
-    use super::*;
-
-    #[derive(Debug, Clone, PartialEq, Eq, Hash, Default)]
-    pub struct ShaderDefinition {
-        pub has_tex_coords: bool,
-        pub has_vertex_colors: bool,
-        pub has_tangents: bool,
-        pub has_base_color_texture: bool,
-        pub has_metallic_roughness_texture: bool,
-        pub has_normal_map: bool,
-    }
-
-    impl ShaderDefinition {
-        const fn empty() -> Self {
-            Self {
-                has_tex_coords: false,
-                has_vertex_colors: false,
-                has_tangents: false,
-                has_base_color_texture: false,
-                has_metallic_roughness_texture: false,
-                has_normal_map: false,
-            }
-        }
-        fn iter(&self) -> impl Iterator<Item = bool> {
-            use std::iter::once;
-            once(self.has_tex_coords)
-                .chain(once(self.has_vertex_colors))
-                .chain(once(self.has_tangents))
-                .chain(once(self.has_base_color_texture))
-                .chain(once(self.has_metallic_roughness_texture))
-                .chain(once(self.has_normal_map))
-        }
-
-        fn defines(&self) -> Defines {
-            let mut defines = Defines::default();
-
-            let mut attribute_count = 2; // Positions and normals are assumed to exist
-
-            let all_defines = [
-                ("HAS_TEX_COORDS", vec!["TEX_COORDS_LOC"]),
-                ("HAS_VERTEX_COLOR", vec!["VCOL_LOC"]),
-                ("HAS_TANGENTS", vec!["TAN_LOC", "BITAN_LOC"]),
-                ("HAS_BASE_COLOR_TEXTURE", vec![]),
-                ("HAS_METALLIC_ROUGHNESS_TEXTURE", vec![]),
-                ("HAS_NORMAL_MAP", vec![]),
-            ];
-
-            for (_cond, (has_define, loc_defines)) in self
-                .iter()
-                .zip(all_defines.iter())
-                .filter(|(cond, _define)| *cond)
-            {
-                defines.push((String::from(*has_define), String::from("1")));
-                for &loc_define in loc_defines.iter() {
-                    defines.push((String::from(loc_define), format!("{}", attribute_count)));
-                    attribute_count += 1;
-                }
-            }
-
-            defines
-        }
-
-        fn is_valid(&self) -> bool {
-            let uses_tex = self.has_normal_map
-                || self.has_base_color_texture
-                || self.has_metallic_roughness_texture;
-            if uses_tex && !self.has_tex_coords {
-                return false;
-            }
-
-            if self.has_normal_map && !self.has_tangents {
-                return false;
-            }
-
-            true
-        }
-    }
-
-    pub fn compile(
-        compiler: &ShaderCompiler,
-        cache: &mut ShaderCache,
-        def: &ShaderDefinition,
-    ) -> Result<(SpvBinary, SpvBinary), CompilerError> {
-        assert!(def.is_valid());
-        let defines = def.defines();
-
-        let vert = compiler.compile(
-            &ShaderLocation::search(PathBuf::from_iter([
-                "render",
-                "shaders",
-                "pbr",
-                "vert.glsl",
-            ])),
-            &defines,
-            ShaderType::Vertex,
-            Some(cache),
-        )?;
-        let frag = compiler.compile(
-            &ShaderLocation::search(PathBuf::from_iter([
-                "render",
-                "shaders",
-                "pbr",
-                "frag.glsl",
-            ])),
-            &defines,
-            ShaderType::Fragment,
-            Some(cache),
-        )?;
-
-        Ok((vert, frag))
-    }
-
-    pub fn compile_default(
-        compiler: &ShaderCompiler,
-        cache: &mut ShaderCache,
-    ) -> Result<(SpvBinary, SpvBinary), CompilerError> {
-        compile(compiler, cache, &ShaderDefinition::empty())
+        let pipeline = renderer
+            .create_gfx_pipeline(descriptor, &render_pass)
+            .map_err(Error::PipelineCreation)?;
+        Ok(pipeline)
     }
 }

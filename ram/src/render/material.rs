@@ -149,6 +149,128 @@ pub use pbr::PhysicallyBased;
 pub mod pbr {
     use super::*;
 
+    // TODO:
+    pub mod pbr_gltf {
+        use super::*;
+
+        #[derive(Debug, Clone, PartialEq, Eq, Hash, Default)]
+        pub struct ShaderDefinition {
+            pub has_tex_coords: bool,
+            pub has_vertex_colors: bool,
+            pub has_tangents: bool,
+            pub has_base_color_texture: bool,
+            pub has_metallic_roughness_texture: bool,
+            pub has_normal_map: bool,
+        }
+
+        impl ShaderDefinition {
+            const fn empty() -> Self {
+                Self {
+                    has_tex_coords: false,
+                    has_vertex_colors: false,
+                    has_tangents: false,
+                    has_base_color_texture: false,
+                    has_metallic_roughness_texture: false,
+                    has_normal_map: false,
+                }
+            }
+            fn iter(&self) -> impl Iterator<Item = bool> {
+                use std::iter::once;
+                once(self.has_tex_coords)
+                    .chain(once(self.has_vertex_colors))
+                    .chain(once(self.has_tangents))
+                    .chain(once(self.has_base_color_texture))
+                    .chain(once(self.has_metallic_roughness_texture))
+                    .chain(once(self.has_normal_map))
+            }
+
+            fn defines(&self) -> Defines {
+                let mut defines = Defines::default();
+
+                let mut attribute_count = 2; // Positions and normals are assumed to exist
+
+                let all_defines = [
+                    ("HAS_TEX_COORDS", vec!["TEX_COORDS_LOC"]),
+                    ("HAS_VERTEX_COLOR", vec!["VCOL_LOC"]),
+                    ("HAS_TANGENTS", vec!["TAN_LOC", "BITAN_LOC"]),
+                    ("HAS_BASE_COLOR_TEXTURE", vec![]),
+                    ("HAS_METALLIC_ROUGHNESS_TEXTURE", vec![]),
+                    ("HAS_NORMAL_MAP", vec![]),
+                ];
+
+                for (_cond, (has_define, loc_defines)) in self
+                    .iter()
+                    .zip(all_defines.iter())
+                    .filter(|(cond, _define)| *cond)
+                {
+                    defines.push((String::from(*has_define), String::from("1")));
+                    for &loc_define in loc_defines.iter() {
+                        defines.push((String::from(loc_define), format!("{}", attribute_count)));
+                        attribute_count += 1;
+                    }
+                }
+
+                defines
+            }
+
+            fn is_valid(&self) -> bool {
+                let uses_tex = self.has_normal_map
+                    || self.has_base_color_texture
+                    || self.has_metallic_roughness_texture;
+                if uses_tex && !self.has_tex_coords {
+                    return false;
+                }
+
+                if self.has_normal_map && !self.has_tangents {
+                    return false;
+                }
+
+                true
+            }
+        }
+
+        pub fn compile(
+            compiler: &ShaderCompiler,
+            cache: &mut ShaderCache,
+            def: &ShaderDefinition,
+        ) -> Result<(SpvBinary, SpvBinary), CompilerError> {
+            assert!(def.is_valid());
+            let defines = def.defines();
+
+            let vert = compiler.compile(
+                &ShaderLocation::search(PathBuf::from_iter([
+                    "render",
+                    "shaders",
+                    "pbr",
+                    "vert.glsl",
+                ])),
+                &defines,
+                ShaderType::Vertex,
+                Some(cache),
+            )?;
+            let frag = compiler.compile(
+                &ShaderLocation::search(PathBuf::from_iter([
+                    "render",
+                    "shaders",
+                    "pbr",
+                    "frag.glsl",
+                ])),
+                &defines,
+                ShaderType::Fragment,
+                Some(cache),
+            )?;
+
+            Ok((vert, frag))
+        }
+
+        pub fn compile_default(
+            compiler: &ShaderCompiler,
+            cache: &mut ShaderCache,
+        ) -> Result<(SpvBinary, SpvBinary), CompilerError> {
+            compile(compiler, cache, &ShaderDefinition::empty())
+        }
+    }
+
     /// Attach this to an entity for it to have a lit material that is rendered with a
     /// "physically-based" model.
     #[derive(Debug, Component, Default, Visitable)]

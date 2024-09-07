@@ -228,18 +228,8 @@ fn draw_entities<MaterialFilterComponent: Component>(
 }
 
 fn recreate_pipelines(renderer: &mut Renderer, world: &mut World) {
-    let pipeline_service = world.write_resource::<shader::PipelineService>();
-
-    for recreate_pipeline in pipeline_service.flush_recreate() {
-        let result = renderer.recreate_gfx_pipeline(
-            recreate_pipeline.descriptor,
-            recreate_pipeline.render_pass,
-            recreate_pipeline.pipeline,
-        );
-        if let Err(e) = &result {
-            log::error!("Pipeline re-creation failed: {}", e);
-        }
-    }
+    let pipeline_service = world.read_resource::<shader::PipelineService>();
+    pipeline_service.flush(renderer);
 }
 
 #[profiling::function]

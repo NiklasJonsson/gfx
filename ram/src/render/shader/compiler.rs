@@ -3,52 +3,17 @@ use thiserror::Error;
 use std::borrow::Borrow;
 use std::path::{Path, PathBuf};
 
-use super::ShaderAbsPath;
+use super::{
+    Defines, ShaderAbsPath, ShaderLocation, ShaderLocationContents, ShaderType, SpvBinary,
+};
 
-#[derive(Debug, Clone, Default)]
-pub struct Defines {
-    vals: Vec<(String, String)>,
-}
-
-impl Defines {
-    pub fn push(&mut self, v: (String, String)) {
-        self.vals.push(v);
-    }
-
-    pub fn empty() -> Self {
-        Self { vals: Vec::new() }
-    }
-}
-
-impl<'a> IntoIterator for &'a Defines {
-    type IntoIter = std::slice::Iter<'a, (String, String)>;
-    type Item = &'a (String, String);
-    fn into_iter(self) -> Self::IntoIter {
-        self.vals.as_slice().iter()
-    }
-}
-
-#[derive(Clone)]
-pub struct SpvBinary {
-    data: Vec<u32>,
-}
-
-impl SpvBinary {
-    pub fn data(self) -> Vec<u32> {
-        self.data
-    }
-}
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+pub struct ShaderSource(pub String);
 
 pub struct ShaderCompiler {
     compiler: shaderc::Compiler,
     shader_paths: Vec<PathBuf>,
     include_paths: Vec<PathBuf>,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub enum ShaderType {
-    Vertex,
-    Fragment,
 }
 
 #[derive(Debug, Error)]
@@ -59,43 +24,14 @@ pub enum CompilerError {
     FailedToRead { path: PathBuf, err: std::io::Error },
     #[error("Failed to find shader '{p}'", p = path.display())]
     NotFound { path: PathBuf },
-
-    #[error("Failed to compile shader {loc} (resolved to {p}), due to: {source}", p=path.display())]
-    ShaderC {
-        source: shaderc::Error,
-        loc: ShaderLocation,
-        path: PathBuf,
-    },
+    #[error("Failed to compile shader:\n{error}")]
+    ShaderC { error: shaderc::Error },
 }
 
-#[derive(Clone, PartialEq, Eq, Hash)]
-struct ShaderCacheKey {
-    source: String,
-}
+pub type CompilerResult<T> = Result<T, CompilerError>;
 
-impl ShaderCacheKey {
-    fn new(source: String) -> Self {
-        Self { source }
-    }
-}
-
-#[derive(Default)]
-pub struct ShaderCache {
-    cache: std::collections::HashMap<ShaderCacheKey, SpvBinary>,
-}
-
-impl ShaderCache {
-    pub fn new() -> Self {
-        Self::default()
-    }
-
-    pub fn insert(&mut self, key: ShaderCacheKey, binary: SpvBinary) {
-        self.cache.insert(key, binary);
-    }
-}
-
-fn log_compilation(defines: &Defines, loc: &ShaderLocation, ty: ShaderType) {
-    log::trace!("Compiling {loc} as {ty:?}");
+fn log_compilation(defines: &Defines, path: &ShaderAbsPath, ty: ShaderType) {
+    log::trace!("Compiling {p} as {ty:?}", p = path.display());
     log::trace!("With defines:");
     for d in defines {
         log::trace!("{} = {}", d.0, d.1);
@@ -177,82 +113,12 @@ fn include_callback(
     }
 }
 
-// TODO: no pub
-#[derive(Clone, Debug)]
-pub enum ShaderLocationContents {
-    Absolute(PathBuf),
-    // TODO: Remove
-    Absolute2(ShaderAbsPath),
-    /// Search relative to one of the shader search paths in the shader compiler.
-    Search(PathBuf),
-}
-
-#[derive(Clone, Debug)]
-pub struct ShaderLocation {
-    // TODO: Remove pub
-    pub contents: ShaderLocationContents,
-}
-
-impl ShaderLocation {
-    pub fn abs<P>(p: P) -> Self
-    where
-        P: Into<PathBuf>,
-    {
-        let pathbuf: PathBuf = p.into();
-        assert!(
-            pathbuf.is_absolute(),
-            "Tried to create a shader location referring to an absolute path but {p} is not absolute",
-            p = pathbuf.display()
-        );
-        Self {
-            contents: ShaderLocationContents::Absolute(pathbuf),
-        }
-    }
-
-    /// Search relative to one of the shader search paths in the shader compiler.
-    pub fn search<P>(p: P) -> Self
-    where
-        P: Into<PathBuf>,
-    {
-        let pathbuf: PathBuf = p.into();
-        Self {
-            contents: ShaderLocationContents::Search(pathbuf),
-        }
-    }
-}
-
-impl From<super::ShaderAbsPath> for ShaderLocation {
-    fn from(value: super::ShaderAbsPath) -> Self {
-        Self {
-            contents: ShaderLocationContents::Absolute2(value),
-        }
-    }
-}
-
-impl std::fmt::Display for ShaderLocation {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match &self.contents {
-            ShaderLocationContents::Absolute(p) => write!(f, "{p}", p = p.display()),
-            ShaderLocationContents::Absolute2(p) => write!(f, "{p}", p = p.display()),
-            ShaderLocationContents::Search(p) => write!(f, "<SHADER_PATH>/{p}", p = p.display()),
-        }
-    }
-}
-
 fn find_shader(
     search_directories: &[PathBuf],
     loc: &ShaderLocation,
 ) -> Result<std::path::PathBuf, FileNotFound> {
-    match &loc.contents {
+    match &loc.0 {
         ShaderLocationContents::Absolute(path) => {
-            assert!(
-                path.is_absolute(),
-                "Expected {} to be absolute",
-                path.display()
-            );
-            Ok(path.clone())
-        }
-        ShaderLocationContents::Absolute2(path) => {
             let path: &Path = path.borrow();
             Ok(path.to_path_buf())
         }
@@ -312,7 +178,11 @@ impl ShaderCompiler {
     }
 
     pub fn find(&self, loc: &ShaderLocation) -> Result<ShaderAbsPath, FileNotFound> {
-        find_shader(&self.shader_paths, loc).map(ShaderAbsPath::from_abspath)
+        let result = find_shader(&self.shader_paths, loc).map(ShaderAbsPath::from_abspath);
+        if let Ok(path) = &result {
+            log::debug!("Resolved '{loc}' to '{p}'", p = path.display());
+        }
+        result
     }
 
     pub fn compile(
@@ -320,27 +190,49 @@ impl ShaderCompiler {
         shader: &ShaderLocation,
         defines: &Defines,
         ty: ShaderType,
-        cache: Option<&mut ShaderCache>,
-    ) -> Result<SpvBinary, CompilerError> {
-        let (path, source) = match read_shader(&self.shader_paths, shader) {
-            Ok(FoundShader { path, contents }) => {
-                log::debug!("Resolved {shader} to {}", path.display());
-                (path, contents)
-            }
-            Err(ReadShaderError::Found(path, err)) => {
-                return Err(CompilerError::FailedToRead { path, err });
-            }
-            Err(ReadShaderError::NotFound(path)) => {
-                return Err(CompilerError::NotFound { path });
-            }
-        };
+        cache: Option<&mut super::service::ShaderCache>,
+    ) -> CompilerResult<SpvBinary> {
+        todo!()
+    }
 
-        log::debug!("Running preprocess for {shader}");
-
+    pub fn compile_source(
+        &self,
+        source: &ShaderSource,
+        ty: ShaderType,
+        input_file_name: &str,
+    ) -> CompilerResult<SpvBinary> {
         let stage = match ty {
             ShaderType::Fragment => shaderc::ShaderKind::Fragment,
             ShaderType::Vertex => shaderc::ShaderKind::Vertex,
         };
+
+        let binary_result =
+            self.compiler
+                .compile_into_spirv(&source.0, stage, input_file_name, "main", None);
+
+        let binary = match binary_result {
+            Err(e) => {
+                return Err(CompilerError::ShaderC { error: e });
+            }
+            Ok(bin) => SpvBinary {
+                data: Vec::from(bin.as_binary()),
+            },
+        };
+
+        Ok(binary)
+    }
+
+    pub fn preprocess(
+        &self,
+        shader: &ShaderAbsPath,
+        defines: &Defines,
+    ) -> CompilerResult<ShaderSource> {
+        let source = std::fs::read_to_string(shader).map_err(|e| CompilerError::FailedToRead {
+            path: shader.to_path_buf(),
+            err: e,
+        })?;
+
+        log::debug!("Running preprocess for {p}", p = shader.display());
 
         let mut options =
             shaderc::CompileOptions::new().expect("Failed to create compiler options");
@@ -365,60 +257,14 @@ impl ShaderCompiler {
         options.set_include_callback(callback);
         let compiler = &self.compiler;
 
-        // Caching has to be done after preprocessing as there is no model of dependencies on headers
-        // for a shader source file. Therefore, we cannot map a file path to a spirv binary. An include
-        // might have changed so even if the file itself has not changed, we need to compile it.
-        let source = match compiler.preprocess(&source, &shader.to_string(), "main", Some(&options))
-        {
-            Ok(artifact) => artifact.as_text(),
-            Err(e) => {
-                return Err(CompilerError::ShaderC {
-                    source: e,
-                    loc: shader.clone(),
-                    path,
-                });
-            }
-        };
-
-        if let Some(cache) = &cache {
-            // TODO: Can we use a non-owning cache key here?
-            let key = ShaderCacheKey::new(source.clone());
-            if let Some(binary) = cache.cache.get(&key) {
-                log::debug!("Hit cache for {shader}");
-                return Ok(binary.clone());
-            }
-        }
-
-        log_compilation(defines, shader, ty);
-        let binary_result =
-            compiler.compile_into_spirv(&source, stage, &shader.to_string(), "main", None);
-
-        let binary = match binary_result {
-            Err(e) => {
-                return Err(CompilerError::ShaderC {
-                    source: e,
-                    loc: shader.clone(),
-                    path,
-                });
-            }
-            Ok(bin) => SpvBinary {
-                data: Vec::from(bin.as_binary()),
-            },
-        };
-
-        if let Some(cache) = cache {
-            let key = ShaderCacheKey::new(source.clone());
-            cache.cache.insert(key, binary.clone());
-        }
-        Ok(binary)
-    }
-
-    pub fn compile2(
-        &self,
-        shader: &ShaderAbsPath,
-        defines: &Defines,
-        ty: ShaderType,
-    ) -> Result<(SpvBinary, ShaderCacheKey), CompilerError> {
-        todo!()
+        let path_as_str = shader.0.display().to_string();
+        let source =
+            match compiler.preprocess(&source, &path_as_str.to_string(), "main", Some(&options)) {
+                Ok(artifact) => artifact.as_text(),
+                Err(e) => {
+                    return Err(CompilerError::ShaderC { error: e });
+                }
+            };
+        Ok(ShaderSource(source))
     }
 }
