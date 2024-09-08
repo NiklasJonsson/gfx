@@ -1,3 +1,5 @@
+use std::num::NonZeroU8;
+
 use shader::{ShaderCache, ShaderLocation};
 use thiserror::Error;
 
@@ -82,8 +84,6 @@ where
     }
 }
 
-pub struct GlobalShaderCache(std::sync::Mutex<shader::ShaderCache>);
-
 /// Utility for working with asynchronously uploaded gpu resources
 #[derive(Debug, Clone, Visitable)]
 pub enum GpuBuffer {
@@ -163,15 +163,17 @@ pub struct RenderableMaterial {
 #[derive(Debug, Error)]
 pub enum MaterialError {
     #[error("Pipeline error: {0}")]
-    Pipeline(#[from] PipelineError),
+    Pipeline(#[from] shader::Error),
     #[error("GLSL compiler error: {0}")]
     GlslCompiler(#[from] shader::CompilerError),
 }
 
-pub(crate) fn shader_path<P>(shader_path: &[P]) -> shader::ShaderLocation
+pub(crate) fn shader_path<P>(shader_path: P) -> shader::ShaderLocation
 where
     P: AsRef<std::path::Path>,
 {
+    let shader_path: &std::path::Path = shader_path.as_ref();
+
     let mut path = std::path::PathBuf::new();
     path.push("render");
     path.push("shaders");
@@ -380,8 +382,7 @@ pub fn draw_frame(world: &mut World, ui: &mut imgui::UIContext, renderer: &mut R
 
 pub fn create_frame_resources(
     renderer: &mut Renderer,
-    shader_compiler: &ShaderCompiler,
-    shader_cache: &mut ShaderCache,
+    pipeline_service: &shader::PipelineService,
 ) -> FrameResources {
     use trekant::pipeline::ShaderStage;
 
@@ -485,16 +486,8 @@ pub fn create_frame_resources(
     };
 
     let unlit_resources = {
-        let vertex_format = VertexFormat::from(util::Format::FLOAT3);
-        let dummy_pipeline = material::unlit::get_pipeline(
-            renderer,
-            &vertex_format,
-            shader_compiler,
-            shader_cache,
-            main_render_pass,
-            trekant::PolygonMode::Line,
-        )
-        .expect("Failed to create descriptor for unlit dummy pipeline");
+        let dummy_pipeline =
+            material::unlit::get_default_pipeline(renderer, pipeline_service, render_pass);
         UnlitPassResources { dummy_pipeline }
     };
 
@@ -515,7 +508,6 @@ pub fn create_frame_resources(
 pub fn setup_resources(world: &mut World, renderer: &mut Renderer) {
     let mut shader_compiler =
         shader::ShaderCompiler::new().expect("Failed to create shader compiler");
-    let mut shader_cache = shader::ShaderCache::default();
 
     let include_path_rel = std::path::PathBuf::from_iter(["render", "shaders", "include"]);
     let mut roots = Vec::with_capacity(3);
@@ -555,6 +547,10 @@ pub fn setup_resources(world: &mut World, renderer: &mut Renderer) {
         shader_compiler.add_include_path(root.as_path().join(&include_path_rel));
     }
 
+    let mut pipeline_service = shader::PipelineService::new(shader::PipelineServiceConfig {
+        live_recompile: true,
+        n_threads: NonZeroU8::new(std::thread::available_parallelism().unwrap_or(2) as u8).unwrap(),
+    });
     let frame_resources = create_frame_resources(renderer, &shader_compiler, &mut shader_cache);
 
     let debug_renderer = debug::DebugRenderer::new(

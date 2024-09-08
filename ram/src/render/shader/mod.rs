@@ -7,16 +7,15 @@ use std::hash::Hash;
 use std::path::PathBuf;
 use std::sync::{atomic::AtomicU64, Arc, Mutex};
 
-use compiler::CompilerResult;
 use trekant::{
     BlendState, DepthTest, GraphicsPipeline, GraphicsPipelineDescriptor, Handle, PipelineError,
     PolygonMode, PrimitiveTopology, RenderPass, Renderer, ShaderDescriptor, TriangleCulling,
     TriangleWinding, VertexFormat,
 };
 
-pub use compiler::{CompilerError, ShaderCompiler};
+pub use compiler::{CompilerError, CompilerResult, ShaderCompiler};
 
-use service::{ShaderCompilationService, ShaderCompilationServiceConfig, UserId};
+use service::{CompiledShader, ShaderCompilationService, ShaderCompilationServiceConfig, UserId};
 
 const ASYNC_USER_ID: UserId = UserId(0);
 
@@ -191,6 +190,7 @@ pub struct Shaders {
     pub frag: Option<Shader>,
 }
 
+#[derive(Default)]
 pub struct PipelineSettings {
     pub vertex_format: VertexFormat,
     pub culling: TriangleCulling,
@@ -212,9 +212,14 @@ pub enum Error {
     PipelineCreation(trekant::PipelineError),
 }
 
+impl std::error::Error for Error {}
+
 impl std::fmt::Display for Error {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        todo!()
+        match self {
+            Self::Compilation(e) => write!(f, "Failed to compile: {}", e),
+            Self::PipelineCreation(e) => write!(f, "Failed to create pipeline: {}", e),
+        }
     }
 }
 
@@ -229,20 +234,18 @@ struct PipelineInfo {
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 struct ShaderPermutation {
     path: ShaderAbsPath,
-    defines: Defines,
-    ty: ShaderType,
+    compilation_info: Arc<service::ShaderCompilationInfo>,
 }
 
 #[derive(Default)]
 struct PipelineServiceState {
     pipelines_infos: resurs::Storage<PipelineInfo>,
     shader_pipelines: HashMap<ShaderPermutation, Vec<Handle<PipelineInfo>>>,
+    watcher: Option<Box<dyn notify::Watcher + Send>>,
 }
 
 pub struct PipelineService {
-    // TODO: Does this still need to be an arc?
     shader_service: Arc<ShaderCompilationService>,
-    watcher: Option<Box<dyn notify::Watcher + Send + Sync>>,
     state: Mutex<PipelineServiceState>,
     id_generator: UserIdGenerator,
 }
@@ -286,17 +289,17 @@ impl PipelineService {
                     file_notify_callback(&shader_service, event)
                 })
                 .expect("Failed to launch shader file watcher"),
-            ) as Box<dyn notify::Watcher + Send + Sync>)
+            ) as Box<dyn notify::Watcher + Send>)
         } else {
             None
         };
 
         Self {
             shader_service,
-            watcher,
             state: Mutex::new(PipelineServiceState {
                 shader_pipelines: HashMap::new(),
                 pipelines_infos: resurs::Storage::new(),
+                watcher,
             }),
             id_generator: UserIdGenerator::new(),
         }
@@ -304,23 +307,16 @@ impl PipelineService {
 
     pub fn flush(&self, renderer: &mut Renderer) {
         // START HERE:
-        // 1. Improve shader_Service.flush() to return the Done struct instead
         // 2. Update the rest of 'ram'
         // 3. Test
         // 4. Cleanup TODOs in this code
         // 5. Consider renaming the module to `pipeline`?
-        struct Done {
-            path: ShaderAbsPath,
-            defines: Defines,
-            ty: ShaderType,
-            result: CompilerResult<SpvBinary>,
-        }
 
         // This loop will contain both shaders that we got from the watcher and
         // shaders we got from manual queueing. Therefore, they have to only contain
         // ShaderAbsPath.
 
-        let done_shaders: Vec<Done> = todo!();
+        let done_shaders: Vec<CompiledShader> = Vec::new();
         let mut state = self.state.lock().unwrap();
         for done_shader in done_shaders {
             let spv = match done_shader.result {
@@ -335,14 +331,14 @@ impl PipelineService {
                 Ok(spv) => spv,
             };
 
+            let shader_type = done_shader.compilation_info.ty;
             let shader_permutation = ShaderPermutation {
                 path: done_shader.path,
-                defines: done_shader.defines,
-                ty: done_shader.ty,
+                compilation_info: done_shader.compilation_info,
             };
 
             // TODO perf: tmp alloc
-            let pipelines = state
+            let pipelines: Vec<Handle<PipelineInfo>> = state
                 .shader_pipelines
                 .get(&shader_permutation)
                 .unwrap()
@@ -352,9 +348,10 @@ impl PipelineService {
                     .pipelines_infos
                     .get_mut(&pipeline_handle)
                     .expect("Pipeline info was removed but hash map was not cleaned up");
-                if shader_permutation.ty == ShaderType::Vertex {
+                if shader_type == ShaderType::Vertex {
                     pipeline_info.vert = spv.clone();
                 } else {
+                    assert_eq!(shader_type, ShaderType::Fragment);
                     pipeline_info.frag = Some(spv.clone());
                 }
 
@@ -395,7 +392,7 @@ impl PipelineService {
     }
 
     pub fn create(
-        &mut self,
+        &self,
         shaders: Shaders,
         settings: PipelineSettings,
         render_pass: Handle<trekant::RenderPass>,
@@ -421,8 +418,8 @@ impl PipelineService {
                 .add_new_permutation(&loc, defines, ty, id)
                 .map_err(|e| Error::Compilation(CompilerError::NotFound { path: e.path }))?;
 
-            // TODO: Verify what happens if a path is registered multiple times
-            if let Some(watcher) = &mut self.watcher {
+            let mut state = self.state.lock().unwrap();
+            if let Some(watcher) = &mut state.watcher {
                 watcher.watch(&abspath, notify::RecursiveMode::NonRecursive);
             }
         }
@@ -431,10 +428,12 @@ impl PipelineService {
         let mut results = Vec::with_capacity(2);
         self.shader_service.wait(&[id], &mut results);
 
-        let vert: SpvBinary = results.remove(0).map_err(Error::Compilation)?;
+        let vert: SpvBinary = results.remove(0).result.map_err(Error::Compilation)?;
         let frag: Option<SpvBinary> = match results.pop() {
-            Some(Ok(x)) => Some(x),
-            Some(Err(e)) => return Err(Error::Compilation(e)),
+            Some(CompiledShader {
+                result: Ok(spv), ..
+            }) => Some(spv),
+            Some(CompiledShader { result: Err(e), .. }) => return Err(Error::Compilation(e)),
             None => None,
         };
 

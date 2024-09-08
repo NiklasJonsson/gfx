@@ -2,7 +2,7 @@ use crate::util;
 use ash::vk;
 use std::hash::{Hash, Hasher};
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Default)]
 pub struct VertexFormat {
     binding_description: Vec<vk::VertexInputBindingDescription>,
     attribute_description: Vec<vk::VertexInputAttributeDescription>,

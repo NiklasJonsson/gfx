@@ -1,12 +1,9 @@
-use crate::render::uniform::PBRMaterialData;
-
 use super::{Defines, ShaderAbsPath, ShaderLocation, ShaderType, SpvBinary};
 
-use super::compiler::{CompilerError, CompilerResult, FileNotFound, ShaderCompiler, ShaderSource};
+use super::compiler::{CompilerResult, FileNotFound, ShaderCompiler, ShaderSource};
 
 use std::collections::HashMap;
-use std::sync::atomic::AtomicU64;
-use std::sync::{Arc, Condvar, Mutex, MutexGuard};
+use std::sync::{Arc, Condvar, Mutex};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ShaderCachePolicy {
@@ -33,10 +30,16 @@ impl ShaderCache {
     }
 }
 
-#[derive(Debug, Clone)]
-struct ShaderCompilationInfo {
-    defines: Defines,
-    ty: ShaderType,
+pub struct CompiledShader {
+    pub path: ShaderAbsPath,
+    pub compilation_info: Arc<ShaderCompilationInfo>,
+    pub result: CompilerResult<SpvBinary>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub struct ShaderCompilationInfo {
+    pub defines: Defines,
+    pub ty: ShaderType,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -65,18 +68,18 @@ struct WorkItem {
 
 struct UserJobs {
     expected: usize,
-    results: Vec<CompilerResult<SpvBinary>>,
+    completed: Vec<CompiledShader>,
 }
 
 impl UserJobs {
     pub fn is_done(&self) -> bool {
-        self.expected == self.results.len()
+        self.expected == self.completed.len()
     }
 
-    pub fn take(&mut self, out: &mut Vec<CompilerResult<SpvBinary>>) {
-        assert!(self.expected >= self.results.len());
-        self.expected -= self.results.len();
-        out.append(&mut self.results);
+    pub fn take(&mut self, out: &mut Vec<CompiledShader>) {
+        assert!(self.expected >= self.completed.len());
+        self.expected -= self.completed.len();
+        out.append(&mut self.completed);
     }
 }
 
@@ -126,18 +129,9 @@ fn thread_work(ctx: &ThreadContext) {
             compilation_info,
         } = work_item;
 
-        let result = ctx.compiler.preprocess(&path, &compilation_info.defines);
-
-        let write_result = |state: &mut MutexGuard<'_, SharedThreadState>,
-                            request_id: UserId,
-                            result: CompilerResult<SpvBinary>| {
-            let jobs = state.jobs.get_mut(&request_id).unwrap_or_else(|| {
-                panic!("Finished a shader for user id {request_id:?} but there is no jobs entry")
-            });
-            jobs.results.push(result);
-        };
-
-        match result {
+        let preprocess_result = ctx.compiler.preprocess(&path, &compilation_info.defines);
+        let compilation_result: CompilerResult<SpvBinary>;
+        match preprocess_result {
             Ok(src) => {
                 let mut result = None;
                 {
@@ -154,13 +148,23 @@ fn thread_work(ctx: &ThreadContext) {
                             .compile_source(&src, compilation_info.ty, "TODO"),
                     );
                 }
-                let mut state = ctx.shared_state.lock().unwrap();
-                write_result(&mut state, request_id, result.unwrap());
+                compilation_result = result.unwrap();
             }
             Err(e) => {
-                let mut state = ctx.shared_state.lock().unwrap();
-                write_result(&mut state, request_id, Err(e));
+                compilation_result = Err(e);
             }
+        }
+
+        {
+            let mut state = ctx.shared_state.lock().unwrap();
+            let jobs = state.jobs.get_mut(&request_id).unwrap_or_else(|| {
+                panic!("Finished a shader for user id {request_id:?} but there is no jobs entry")
+            });
+            jobs.completed.push(CompiledShader {
+                path,
+                compilation_info: compilation_info.clone(),
+                result: compilation_result,
+            });
         }
         ctx.has_done.notify_all();
     }
@@ -264,7 +268,7 @@ impl ShaderCompilationService {
         Ok(())
     }
 
-    pub fn flush(&self, id: UserId, results: &mut Vec<CompilerResult<SpvBinary>>) {
+    pub fn flush(&self, id: UserId, results: &mut Vec<CompiledShader>) {
         let mut state = self.thread_context.shared_state.lock().unwrap();
 
         if let Some(jobs) = state.jobs.get_mut(&id) {
@@ -272,7 +276,7 @@ impl ShaderCompilationService {
         }
     }
 
-    pub fn wait(&self, ids: &[UserId], results: &mut Vec<CompilerResult<SpvBinary>>) {
+    pub fn wait(&self, ids: &[UserId], results: &mut Vec<CompiledShader>) {
         for id in ids {
             let mut state = self.thread_context.shared_state.lock().unwrap();
 

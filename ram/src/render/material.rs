@@ -148,126 +148,81 @@ pub use pbr::PhysicallyBased;
 
 pub mod pbr {
     use super::*;
+    use crate::render::shader::Defines;
 
-    // TODO:
-    pub mod pbr_gltf {
-        use super::*;
+    #[derive(Debug, Clone, PartialEq, Eq, Hash, Default)]
+    pub struct ShaderDefinition {
+        pub has_tex_coords: bool,
+        pub has_vertex_colors: bool,
+        pub has_tangents: bool,
+        pub has_base_color_texture: bool,
+        pub has_metallic_roughness_texture: bool,
+        pub has_normal_map: bool,
+    }
 
-        #[derive(Debug, Clone, PartialEq, Eq, Hash, Default)]
-        pub struct ShaderDefinition {
-            pub has_tex_coords: bool,
-            pub has_vertex_colors: bool,
-            pub has_tangents: bool,
-            pub has_base_color_texture: bool,
-            pub has_metallic_roughness_texture: bool,
-            pub has_normal_map: bool,
-        }
-
-        impl ShaderDefinition {
-            const fn empty() -> Self {
-                Self {
-                    has_tex_coords: false,
-                    has_vertex_colors: false,
-                    has_tangents: false,
-                    has_base_color_texture: false,
-                    has_metallic_roughness_texture: false,
-                    has_normal_map: false,
-                }
-            }
-            fn iter(&self) -> impl Iterator<Item = bool> {
-                use std::iter::once;
-                once(self.has_tex_coords)
-                    .chain(once(self.has_vertex_colors))
-                    .chain(once(self.has_tangents))
-                    .chain(once(self.has_base_color_texture))
-                    .chain(once(self.has_metallic_roughness_texture))
-                    .chain(once(self.has_normal_map))
-            }
-
-            fn defines(&self) -> Defines {
-                let mut defines = Defines::default();
-
-                let mut attribute_count = 2; // Positions and normals are assumed to exist
-
-                let all_defines = [
-                    ("HAS_TEX_COORDS", vec!["TEX_COORDS_LOC"]),
-                    ("HAS_VERTEX_COLOR", vec!["VCOL_LOC"]),
-                    ("HAS_TANGENTS", vec!["TAN_LOC", "BITAN_LOC"]),
-                    ("HAS_BASE_COLOR_TEXTURE", vec![]),
-                    ("HAS_METALLIC_ROUGHNESS_TEXTURE", vec![]),
-                    ("HAS_NORMAL_MAP", vec![]),
-                ];
-
-                for (_cond, (has_define, loc_defines)) in self
-                    .iter()
-                    .zip(all_defines.iter())
-                    .filter(|(cond, _define)| *cond)
-                {
-                    defines.push((String::from(*has_define), String::from("1")));
-                    for &loc_define in loc_defines.iter() {
-                        defines.push((String::from(loc_define), format!("{}", attribute_count)));
-                        attribute_count += 1;
-                    }
-                }
-
-                defines
-            }
-
-            fn is_valid(&self) -> bool {
-                let uses_tex = self.has_normal_map
-                    || self.has_base_color_texture
-                    || self.has_metallic_roughness_texture;
-                if uses_tex && !self.has_tex_coords {
-                    return false;
-                }
-
-                if self.has_normal_map && !self.has_tangents {
-                    return false;
-                }
-
-                true
+    impl ShaderDefinition {
+        const fn empty() -> Self {
+            Self {
+                has_tex_coords: false,
+                has_vertex_colors: false,
+                has_tangents: false,
+                has_base_color_texture: false,
+                has_metallic_roughness_texture: false,
+                has_normal_map: false,
             }
         }
-
-        pub fn compile(
-            compiler: &ShaderCompiler,
-            cache: &mut ShaderCache,
-            def: &ShaderDefinition,
-        ) -> Result<(SpvBinary, SpvBinary), CompilerError> {
-            assert!(def.is_valid());
-            let defines = def.defines();
-
-            let vert = compiler.compile(
-                &ShaderLocation::search(PathBuf::from_iter([
-                    "render",
-                    "shaders",
-                    "pbr",
-                    "vert.glsl",
-                ])),
-                &defines,
-                ShaderType::Vertex,
-                Some(cache),
-            )?;
-            let frag = compiler.compile(
-                &ShaderLocation::search(PathBuf::from_iter([
-                    "render",
-                    "shaders",
-                    "pbr",
-                    "frag.glsl",
-                ])),
-                &defines,
-                ShaderType::Fragment,
-                Some(cache),
-            )?;
-
-            Ok((vert, frag))
+        fn iter(&self) -> impl Iterator<Item = bool> {
+            use std::iter::once;
+            once(self.has_tex_coords)
+                .chain(once(self.has_vertex_colors))
+                .chain(once(self.has_tangents))
+                .chain(once(self.has_base_color_texture))
+                .chain(once(self.has_metallic_roughness_texture))
+                .chain(once(self.has_normal_map))
         }
 
-        pub fn compile_default(
-            compiler: &ShaderCompiler,
-            cache: &mut ShaderCache,
-        ) -> Result<(SpvBinary, SpvBinary), CompilerError> {
-            compile(compiler, cache, &ShaderDefinition::empty())
+        fn defines(&self) -> Defines {
+            let mut defines = Defines::default();
+
+            let mut attribute_count = 2; // Positions and normals are assumed to exist
+
+            let all_defines = [
+                ("HAS_TEX_COORDS", vec!["TEX_COORDS_LOC"]),
+                ("HAS_VERTEX_COLOR", vec!["VCOL_LOC"]),
+                ("HAS_TANGENTS", vec!["TAN_LOC", "BITAN_LOC"]),
+                ("HAS_BASE_COLOR_TEXTURE", vec![]),
+                ("HAS_METALLIC_ROUGHNESS_TEXTURE", vec![]),
+                ("HAS_NORMAL_MAP", vec![]),
+            ];
+
+            for (has_define, loc_defines) in self
+                .iter()
+                .zip(all_defines.iter())
+                .filter_map(|(cond, define)| cond.then_some(define))
+            {
+                defines.push((String::from(*has_define), String::from("1")));
+                for &loc_define in loc_defines.iter() {
+                    defines.push((String::from(loc_define), format!("{}", attribute_count)));
+                    attribute_count += 1;
+                }
+            }
+
+            defines
+        }
+
+        fn is_valid(&self) -> bool {
+            let uses_tex = self.has_normal_map
+                || self.has_base_color_texture
+                || self.has_metallic_roughness_texture;
+            if uses_tex && !self.has_tex_coords {
+                return false;
+            }
+
+            if self.has_normal_map && !self.has_tangents {
+                return false;
+            }
+
+            true
         }
     }
 
@@ -550,16 +505,17 @@ pub mod pbr {
     pub fn get_pipeline(
         renderer: &mut trekant::Renderer,
         vertex_format: &trekant::VertexFormat,
-        shader_compiler: &crate::render::ShaderCompiler,
-        shader_cache: &mut crate::render::ShaderCache,
+        pipeline_service: &crate::render::shader::PipelineService,
         render_pass: Handle<trekant::RenderPass>,
         mat: &Done,
     ) -> Result<Handle<trekant::GraphicsPipeline>, crate::render::MaterialError> {
+        use crate::render::shader;
+
         // TODO: Normal map does not infer tangents at all times
         let has_nm = mat.normal_map.is_some();
         let has_bc = mat.base_color_texture.is_some();
         let has_mr = mat.metallic_roughness_texture.is_some();
-        let def = crate::render::shader::pbr_gltf::ShaderDefinition {
+        let def = ShaderDefinition {
             has_tex_coords: has_nm || has_bc || has_mr,
             has_vertex_colors: mat.has_vertex_colors,
             has_tangents: has_nm,
@@ -567,26 +523,51 @@ pub mod pbr {
             has_metallic_roughness_texture: has_mr,
             has_normal_map: has_nm,
         };
+        assert!(def.is_valid());
 
-        let (vert, frag) =
-            crate::render::shader::pbr_gltf::compile(shader_compiler, shader_cache, &def)?;
+        let defines = def.defines();
 
-        let vert = trekant::ShaderDescriptor {
+        let vert = shader::Shader {
+            loc: crate::render::shader_path("pbr/vert.glsl"),
+            defines: defines.clone(),
             debug_name: Some("pbr-vert".to_owned()),
-            spirv_code: vert.data(),
         };
-        let frag = trekant::ShaderDescriptor {
-            debug_name: Some("pbr-frag".to_owned()),
-            spirv_code: frag.data(),
-        };
-        let desc = trekant::GraphicsPipelineDescriptor::builder()
-            .vert(vert)
-            .frag(frag)
-            .vertex_format(vertex_format.clone())
-            .polygon_mode(trekant::pipeline::PolygonMode::Fill)
-            .build()?;
 
-        Ok(renderer.create_gfx_pipeline(desc, &render_pass)?)
+        let frag = shader::Shader {
+            loc: crate::render::shader_path("pbr/frag.glsl"),
+            defines,
+            debug_name: Some("pbr-frag".to_owned()),
+        };
+
+        let shaders = shader::Shaders {
+            vert,
+            frag: Some(frag),
+        };
+
+        let settings = shader::PipelineSettings {
+            vertex_format: vertex_format.clone(),
+            polygon_mode: trekant::pipeline::PolygonMode::Fill,
+            ..Default::default()
+        };
+
+        let pipeline = pipeline_service.create(shaders, settings, render_pass, renderer)?;
+        Ok(pipeline)
+    }
+
+    pub fn get_default_pipeline(
+        renderer: &mut Renderer,
+        pipeline_service: &crate::render::shader::PipelineService,
+        render_pass: Handle<trekant::RenderPass>,
+    ) -> Result<Handle<trekant::GraphicsPipeline>, crate::render::MaterialError> {
+        let vertex_format = trekant::VertexFormat::from(trekant::Format::FLOAT3);
+        let polygon_mode = trekant::PolygonMode::Line;
+        get_pipeline(
+            renderer,
+            &vertex_format,
+            pipeline_service,
+            render_pass,
+            polygon_mode,
+        )
     }
 }
 
@@ -720,43 +701,55 @@ pub mod unlit {
     pub fn get_pipeline(
         renderer: &mut trekant::Renderer,
         vertex_format: &trekant::VertexFormat,
-        shader_compiler: &crate::render::ShaderCompiler,
-        shader_cache: &mut crate::render::ShaderCache,
+        pipeline_service: &crate::render::shader::PipelineService,
         render_pass: Handle<trekant::RenderPass>,
         polygon_mode: PolygonMode,
     ) -> Result<Handle<trekant::GraphicsPipeline>, crate::render::MaterialError> {
         use crate::render::shader;
         use crate::render::shader_path;
 
-        let vert = shader_compiler.compile(
-            &shader_path(&["unlit", "vert.glsl"]),
-            &shader::Defines::empty(),
-            shader::ShaderType::Vertex,
-            Some(shader_cache),
-        )?;
-        let frag = shader_compiler.compile(
-            &shader_path(&["unlit", "frag.glsl"]),
-            &shader::Defines::empty(),
-            shader::ShaderType::Fragment,
-            Some(shader_cache),
-        )?;
-
-        let vert = trekant::ShaderDescriptor {
+        let vert = shader::Shader {
+            loc: shader_path("unlit/vert.glsl"),
+            defines: shader::Defines::empty(),
             debug_name: Some("unlit-vert".to_owned()),
-            spirv_code: vert.data(),
         };
-        let frag = trekant::ShaderDescriptor {
+        let frag = shader::Shader {
+            loc: shader_path("unlit/frag.glsl"),
+            defines: shader::Defines::empty(),
             debug_name: Some("unlit-frag".to_owned()),
-            spirv_code: frag.data(),
         };
-        let desc = trekant::GraphicsPipelineDescriptor::builder()
-            .vert(vert)
-            .frag(frag)
-            .vertex_format(vertex_format.clone())
-            .culling(trekant::pipeline::TriangleCulling::None)
-            .polygon_mode(polygon_mode)
-            .build()?;
-        Ok(renderer.create_gfx_pipeline(desc, &render_pass)?)
+
+        let shaders = shader::Shaders {
+            vert,
+            frag: Some(frag),
+        };
+
+        let settings = shader::PipelineSettings {
+            vertex_format: vertex_format.clone(),
+            culling: trekant::pipeline::TriangleCulling::None,
+            polygon_mode,
+            ..Default::default()
+        };
+
+        let pipeline = pipeline_service.create(shaders, settings, render_pass, renderer)?;
+
+        Ok(pipeline)
+    }
+
+    pub fn get_default_pipeline(
+        renderer: &mut Renderer,
+        pipeline_service: &crate::render::shader::PipelineService,
+        render_pass: Handle<trekant::RenderPass>,
+    ) -> Result<Handle<trekant::GraphicsPipeline>, crate::render::MaterialError> {
+        let vertex_format = trekant::VertexFormat::from(trekant::Format::FLOAT3);
+        let polygon_mode = trekant::PolygonMode::Line;
+        get_pipeline(
+            renderer,
+            &vertex_format,
+            pipeline_service,
+            render_pass,
+            polygon_mode,
+        )
     }
 }
 
@@ -764,10 +757,8 @@ fn create_renderables_pbr(renderer: &mut Renderer, world: &World) {
     let materials = world.read_storage::<pbr::Done>();
     let meshes = world.read_storage::<super::Mesh>();
     let frame_resources = world.read_resource::<super::FrameResources>();
-    let shader_compiler = world.read_resource::<super::ShaderCompiler>();
-    let shader_cache = world.read_resource::<super::GlobalShaderCache>();
+    let pipeline_service = world.read_resource::<super::shader::PipelineService>();
     let mut renderables = world.write_storage::<super::RenderableMaterial>();
-    let mut shader_cache = shader_cache.0.lock().unwrap();
     let entities = world.entities();
 
     for (ent, mesh, mat, _) in (&entities, &meshes, &materials, !&renderables.mask().clone()).join()
@@ -778,8 +769,7 @@ fn create_renderables_pbr(renderer: &mut Renderer, world: &World) {
         let gfx_pipeline = pbr::get_pipeline(
             renderer,
             mesh.cpu_vertex_buffer.format(),
-            &shader_compiler,
-            &mut shader_cache,
+            &pipeline_service,
             frame_resources.main_render_pass,
             mat,
         )
@@ -802,10 +792,8 @@ fn create_renderables_unlit(renderer: &mut Renderer, world: &World) {
     let materials = world.read_storage::<unlit::Done>();
     let meshes = world.read_storage::<super::Mesh>();
     let frame_resources = world.read_resource::<super::FrameResources>();
-    let shader_compiler = world.read_resource::<super::ShaderCompiler>();
-    let shader_cache = world.read_resource::<super::GlobalShaderCache>();
+    let pipeline_service = world.read_resource::<super::shader::PipelineService>();
     let mut renderables = world.write_storage::<super::RenderableMaterial>();
-    let mut shader_cache = shader_cache.0.lock().unwrap();
     let entities = world.entities();
 
     for (ent, mesh, mat, _) in (&entities, &meshes, &materials, !&renderables.mask().clone()).join()
@@ -816,8 +804,7 @@ fn create_renderables_unlit(renderer: &mut Renderer, world: &World) {
         let gfx_pipeline = unlit::get_pipeline(
             renderer,
             mesh.cpu_vertex_buffer.format(),
-            &shader_compiler,
-            &mut shader_cache,
+            &pipeline_service,
             frame_resources.main_render_pass,
             mat.polygon_mode,
         )
