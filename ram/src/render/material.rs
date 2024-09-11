@@ -1,3 +1,4 @@
+use pbr::ShaderDefinition;
 use trekant::{pipeline::PolygonMode, TextureDescriptor};
 use trekant::{BufferHandle, ByteBuffer, Handle, Renderer};
 
@@ -223,6 +224,24 @@ pub mod pbr {
             }
 
             true
+        }
+    }
+
+    impl From<&Done> for ShaderDefinition {
+        fn from(value: &Done) -> Self {
+            let has_nm = value.normal_map.is_some();
+            let has_bc = value.base_color_texture.is_some();
+            let has_mr = value.metallic_roughness_texture.is_some();
+            let def = Self {
+                has_tex_coords: has_nm || has_bc || has_mr,
+                has_vertex_colors: value.has_vertex_colors,
+                has_tangents: has_nm,
+                has_base_color_texture: has_bc,
+                has_metallic_roughness_texture: has_mr,
+                has_normal_map: has_nm,
+            };
+            assert!(def.is_valid());
+            def
         }
     }
 
@@ -507,25 +526,10 @@ pub mod pbr {
         vertex_format: &trekant::VertexFormat,
         pipeline_service: &crate::render::shader::PipelineService,
         render_pass: Handle<trekant::RenderPass>,
-        mat: &Done,
+        shader_definition: ShaderDefinition,
     ) -> Result<Handle<trekant::GraphicsPipeline>, crate::render::MaterialError> {
         use crate::render::shader;
-
-        // TODO: Normal map does not infer tangents at all times
-        let has_nm = mat.normal_map.is_some();
-        let has_bc = mat.base_color_texture.is_some();
-        let has_mr = mat.metallic_roughness_texture.is_some();
-        let def = ShaderDefinition {
-            has_tex_coords: has_nm || has_bc || has_mr,
-            has_vertex_colors: mat.has_vertex_colors,
-            has_tangents: has_nm,
-            has_base_color_texture: has_bc,
-            has_metallic_roughness_texture: has_mr,
-            has_normal_map: has_nm,
-        };
-        assert!(def.is_valid());
-
-        let defines = def.defines();
+        let defines = shader_definition.defines();
 
         let vert = shader::Shader {
             loc: crate::render::shader_path("pbr/vert.glsl"),
@@ -566,7 +570,7 @@ pub mod pbr {
             &vertex_format,
             pipeline_service,
             render_pass,
-            polygon_mode,
+            ShaderDefinition::empty(),
         )
     }
 }
@@ -766,12 +770,13 @@ fn create_renderables_pbr(renderer: &mut Renderer, world: &World) {
         log::trace!("No Renderable found, creating new");
         log::trace!("Creating renderable: {:?}", mat);
         let material_descriptor_set = pbr::create_pipeline_resource_set(renderer, mat);
+        let sdef: ShaderDefinition = mat.into();
         let gfx_pipeline = pbr::get_pipeline(
             renderer,
             mesh.cpu_vertex_buffer.format(),
             &pipeline_service,
             frame_resources.main_render_pass,
-            mat,
+            sdef,
         )
         .expect("Failed to create renderable material for PBR");
 

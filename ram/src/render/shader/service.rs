@@ -172,7 +172,7 @@ fn thread_work(ctx: &ThreadContext) {
 
 #[derive(Debug, Clone, Copy)]
 pub struct ShaderCompilationServiceConfig {
-    pub n_threads: std::num::NonZero<u8>,
+    pub n_threads: std::num::NonZero<usize>,
 }
 
 impl ShaderCompilationService {

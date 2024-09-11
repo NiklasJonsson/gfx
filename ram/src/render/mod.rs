@@ -1,6 +1,4 @@
-use std::num::NonZeroU8;
-
-use shader::{ShaderCache, ShaderLocation};
+use shader::ShaderLocation;
 use thiserror::Error;
 
 use crate::ecs::prelude::*;
@@ -407,7 +405,7 @@ pub fn create_frame_resources(
             .expect("Failed to create view data uniform buffer")
     };
 
-    let shadow_resources = light::setup_shadow_resources(shader_compiler, shader_cache, renderer);
+    let shadow_resources = light::setup_shadow_resources(pipeline_service, renderer);
 
     let lighting_data = {
         let lighting_data = uniform::LightingData {
@@ -459,35 +457,17 @@ pub fn create_frame_resources(
         .build();
 
     let pbr_resources = {
-        // TODO: Share this code with get_pipeline_for?
-        let vertex_format = VertexFormat::from([util::Format::FLOAT3; 2]);
-        let (vert, frag) = shader::pbr_gltf::compile_default(shader_compiler, shader_cache)
-            .expect("Failed to compile default PBR shaders");
-        let vert = ShaderDescriptor {
-            debug_name: Some("dummy-pbr-vert".to_owned()),
-            spirv_code: vert.data(),
-        };
-        let frag = ShaderDescriptor {
-            debug_name: Some("dummy-pbr-frag".to_owned()),
-            spirv_code: frag.data(),
-        };
-
-        let desc = GraphicsPipelineDescriptor::builder()
-            .vert(vert)
-            .frag(frag)
-            .vertex_format(vertex_format)
-            .build()
-            .expect("Failed to build graphics pipeline descriptor");
-        let dummy_pipeline = renderer
-            .create_gfx_pipeline(desc, &main_render_pass)
-            .expect("FAIL");
+        let dummy_pipeline =
+            material::pbr::get_default_pipeline(renderer, pipeline_service, main_render_pass)
+                .expect("Failed to create dummy render pass");
 
         PBRPassResources { dummy_pipeline }
     };
 
     let unlit_resources = {
         let dummy_pipeline =
-            material::unlit::get_default_pipeline(renderer, pipeline_service, render_pass);
+            material::unlit::get_default_pipeline(renderer, pipeline_service, main_render_pass)
+                .expect("Failed to create dummy render pass");
         UnlitPassResources { dummy_pipeline }
     };
 
@@ -549,9 +529,10 @@ pub fn setup_resources(world: &mut World, renderer: &mut Renderer) {
 
     let mut pipeline_service = shader::PipelineService::new(shader::PipelineServiceConfig {
         live_recompile: true,
-        n_threads: NonZeroU8::new(std::thread::available_parallelism().unwrap_or(2) as u8).unwrap(),
+        n_threads: std::thread::available_parallelism()
+            .unwrap_or(std::num::NonZero::<usize>::new(2).unwrap()),
     });
-    let frame_resources = create_frame_resources(renderer, &shader_compiler, &mut shader_cache);
+    let frame_resources = create_frame_resources(renderer, &pipeline_service);
 
     let debug_renderer = debug::DebugRenderer::new(
         &shader_compiler,
@@ -560,8 +541,7 @@ pub fn setup_resources(world: &mut World, renderer: &mut Renderer) {
         renderer,
     );
 
-    world.insert(shader_compiler);
-    world.insert(GlobalShaderCache(std::sync::Mutex::new(shader_cache)));
+    world.insert(pipeline_service);
     world.insert(debug_renderer);
     world.insert(debug::OneShotDebugUI::new());
     world.insert(renderer.loader().unwrap());
@@ -569,8 +549,6 @@ pub fn setup_resources(world: &mut World, renderer: &mut Renderer) {
     world.insert(material::TextureAssetLoader::new());
     log::trace!("Done");
 }
-
-use self::shader::ShaderCompiler;
 
 pub fn register_systems(builder: ExecutorBuilder) -> ExecutorBuilder {
     register_module_systems!(builder, debug, geometry, material, mesh)

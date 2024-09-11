@@ -203,7 +203,7 @@ pub struct PipelineSettings {
 
 pub struct PipelineServiceConfig {
     pub live_recompile: bool,
-    pub n_threads: std::num::NonZero<u8>,
+    pub n_threads: std::num::NonZero<usize>,
 }
 
 #[derive(Debug)]
