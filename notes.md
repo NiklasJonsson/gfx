@@ -705,6 +705,7 @@ This implements multi-threaded async shader compilation.
 TODO:
 
 1. Validation layers fail, shaders doesn't seem to be correctly compiled.
+  `check-shaders` fails as well, start looking there. Might be due to the upgrade of shaderc and vulkan sdk.
 2. Imgui UI for inspecting the pipeline service:
     1. Compile times
     2. List all shaders, pipelines etc.
@@ -716,6 +717,10 @@ TODO:
 
 There is a todo in `material.rs` for fixing this. The problem is that we shouldn't create the descriptor set
 before the mipmaps are generated.
+
+### Logging in imgui UI
+
+Would be nice to get logs in the imgui UI.
 
 ### Improve the imgui ECS debugger
 
