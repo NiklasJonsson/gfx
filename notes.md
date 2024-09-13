@@ -702,11 +702,13 @@ Internally, the pipeline service uses the `ShaderCompilationService`.
 
 This implements multi-threaded async shader compilation.
 
-START HERE: Figure out how to signal from a work thread that the shader compilation is done.
+TODO:
 
-If using the `PipelineService` blocking API, we want a caller-specific signal so that we don't get the
-issue of multiple requests for the same path affecting each other. But for the async API, we want to put
-the done shaders somewhere to wait for the flush.
+1. Validation layers fail, shaders doesn't seem to be correctly compiled.
+2. Imgui UI for inspecting the pipeline service:
+    1. Compile times
+    2. List all shaders, pipelines etc.
+    3. Table of lights for thread work?
 
 ## Future work
 

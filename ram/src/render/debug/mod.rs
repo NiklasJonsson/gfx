@@ -8,6 +8,8 @@ use trekant::{BufferDescriptor, BufferHandle, BufferMutability, Handle, PushCons
 use trekant::{RenderPass, RenderPassEncoder};
 use trekant::{VertexDefinition, VertexFormat};
 
+use crate::render::shader::{Defines, PipelineService, PipelineSettings, Shader, Shaders};
+
 use std::sync::Mutex;
 
 pub mod bounding_box;
@@ -121,15 +123,12 @@ impl DebugRenderer {
 /// Renderer interaction
 impl DebugRenderer {
     pub fn new(
-        shader_compiler: &shader::ShaderCompiler,
-        render_pass: &Handle<RenderPass>,
+        pipeline_service: &PipelineService,
+        render_pass: Handle<RenderPass>,
         view_data_buf: BufferHandle,
         renderer: &mut trekant::Renderer,
     ) -> Self {
-        use trekant::pipeline::{
-            GraphicsPipelineDescriptor, PolygonMode, PrimitiveTopology, ShaderDescriptor,
-            ShaderStage, TriangleCulling,
-        };
+        use trekant::pipeline::{PolygonMode, PrimitiveTopology, ShaderStage, TriangleCulling};
 
         let shader_resource_group = PipelineResourceSet::builder(renderer)
             .add_buffer(view_data_buf, 0, ShaderStage::VERTEX)
@@ -137,46 +136,34 @@ impl DebugRenderer {
 
         let vertex_format = Vertex::format();
 
-        let vert = shader_compiler
-            .compile(
-                &super::shader_path(&["world_pos_only_vert.glsl"]),
-                &shader::Defines::empty(),
-                shader::ShaderType::Vertex,
-                None,
-            )
-            .expect("Failed to compile vert shader for debug renderer");
-
-        let frag = shader_compiler
-            .compile(
-                &super::shader_path(&["push_constant_color_frag.glsl"]),
-                &shader::Defines::empty(),
-                shader::ShaderType::Fragment,
-                None,
-            )
-            .expect("Failed to compile frag shader for debug renderer");
-
-        let vert = ShaderDescriptor {
+        let vert = Shader {
+            loc: super::shader_path("world_pos_only_vert.glsl"),
+            defines: Defines::empty(),
             debug_name: Some("debug-lines-vert".to_owned()),
-            spirv_code: vert.data(),
         };
-        let frag = ShaderDescriptor {
+
+        let frag = Shader {
+            loc: super::shader_path("push_constant_color_frag.glsl"),
+            defines: shader::Defines::empty(),
             debug_name: Some("debug-lines-frag".to_owned()),
-            spirv_code: frag.data(),
         };
 
-        let pipeline_desc = GraphicsPipelineDescriptor::builder()
-            .vert(vert)
-            .frag(frag)
-            .vertex_format(vertex_format)
-            .culling(TriangleCulling::None)
-            .polygon_mode(PolygonMode::Line)
-            .primitive_topology(PrimitiveTopology::LineStrip)
-            .build()
-            .expect("Failed to build pipeline descriptor for debug renderer");
+        let shaders = Shaders {
+            vert,
+            frag: Some(frag),
+        };
 
-        let pipeline = renderer
-            .create_gfx_pipeline(pipeline_desc, render_pass)
-            .expect("Failed to create pipeline for shadow");
+        let settings = PipelineSettings {
+            vertex_format,
+            culling: TriangleCulling::None,
+            polygon_mode: PolygonMode::Line,
+            primitive_topology: PrimitiveTopology::LineStrip,
+            ..Default::default()
+        };
+
+        let pipeline = pipeline_service
+            .create(shaders, settings, render_pass, renderer)
+            .expect("Failed to create pipeline for debug renderer");
 
         Self {
             draw_buffer: Mutex::new(DebugRendererDrawBuffer {

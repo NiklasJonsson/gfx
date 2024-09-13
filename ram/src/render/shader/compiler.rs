@@ -30,14 +30,6 @@ pub enum CompilerError {
 
 pub type CompilerResult<T> = Result<T, CompilerError>;
 
-fn log_compilation(defines: &Defines, path: &ShaderAbsPath, ty: ShaderType) {
-    log::trace!("Compiling {p} as {ty:?}", p = path.display());
-    log::trace!("With defines:");
-    for d in defines {
-        log::trace!("{} = {}", d.0, d.1);
-    }
-}
-
 #[derive(Debug)]
 pub struct FileNotFound {
     pub path: std::path::PathBuf,
@@ -126,31 +118,6 @@ fn find_shader(
     }
 }
 
-struct FoundShader {
-    path: PathBuf,
-    contents: String,
-}
-
-#[derive(Debug)]
-enum ReadShaderError {
-    NotFound(PathBuf),
-    Found(PathBuf, std::io::Error),
-}
-
-fn read_shader(
-    search_directories: &[PathBuf],
-    loc: &ShaderLocation,
-) -> Result<FoundShader, ReadShaderError> {
-    let path = match find_shader(search_directories, loc) {
-        Ok(path) => path,
-        Err(FileNotFound { path }) => return Err(ReadShaderError::NotFound(path)),
-    };
-
-    let contents =
-        std::fs::read_to_string(&path).map_err(|e| ReadShaderError::Found(path.clone(), e))?;
-    return Ok(FoundShader { path, contents });
-}
-
 impl ShaderCompiler {
     pub fn new() -> Result<Self, CompilerError> {
         let compiler = shaderc::Compiler::new().ok_or(CompilerError::Init)?;
@@ -190,9 +157,12 @@ impl ShaderCompiler {
         shader: &ShaderLocation,
         defines: &Defines,
         ty: ShaderType,
-        cache: Option<&mut super::service::ShaderCache>,
     ) -> CompilerResult<SpvBinary> {
-        todo!()
+        let path = self
+            .find(shader)
+            .map_err(|e| CompilerError::NotFound { path: e.path })?;
+        let src = self.preprocess(&path, defines)?;
+        self.compile_source(&src, ty, &path.display().to_string())
     }
 
     pub fn compile_source(
@@ -201,6 +171,7 @@ impl ShaderCompiler {
         ty: ShaderType,
         input_file_name: &str,
     ) -> CompilerResult<SpvBinary> {
+        log::info!("Compiling glsl source {} as {:?}", input_file_name, ty);
         let stage = match ty {
             ShaderType::Fragment => shaderc::ShaderKind::Fragment,
             ShaderType::Vertex => shaderc::ShaderKind::Vertex,

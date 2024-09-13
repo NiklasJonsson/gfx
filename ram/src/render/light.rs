@@ -288,7 +288,7 @@ pub fn pre_frame(world: &World, renderer: &mut Renderer) {
             .skip(vertex_format_size - trekant::util::Format::FLOAT3.size())
             .build();
 
-        let directional_pipeline = create_shadow_pipeline_desc(
+        let directional_pipeline = create_shadow_pipeline_pipeline(
             &pipeline_service,
             renderer,
             frame_data.shadow.directional_light_render_pass,
@@ -296,7 +296,7 @@ pub fn pre_frame(world: &World, renderer: &mut Renderer) {
         )
         .expect("Failed to create shadow pipeline");
 
-        let spotlight_pipeline = create_shadow_pipeline_desc(
+        let spotlight_pipeline = create_shadow_pipeline_pipeline(
             &pipeline_service,
             renderer,
             frame_data.shadow.directional_light_render_pass,
@@ -471,7 +471,7 @@ fn create_shadow_render_pass_pointlight(
         .expect("Failed to create shadow render pass")
 }
 
-fn create_shadow_pipeline_desc(
+fn create_shadow_pipeline_pipeline(
     pipeline_service: &super::shader::PipelineService,
     renderer: &mut Renderer,
     render_pass: Handle<trekant::RenderPass>,
@@ -768,7 +768,7 @@ pub fn setup_shadow_resources(
     }
 
     let pos_only_vertex_format = VertexFormat::from(trekant::Format::FLOAT3);
-    let depth_dummy_pipeline = create_shadow_pipeline_desc(
+    let depth_dummy_pipeline = create_shadow_pipeline_pipeline(
         pipeline_service,
         renderer,
         pointlight_render_pass,

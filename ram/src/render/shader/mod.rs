@@ -33,7 +33,7 @@ impl UserIdGenerator {
         let prev = self
             .counter
             .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-        let id = if prev == std::u64::MAX { 1 } else { prev + 1 };
+        let id = if prev == u64::MAX { 1 } else { prev + 1 };
         UserId(id)
     }
 }
@@ -123,7 +123,7 @@ pub enum ShaderType {
 /// a lot but references are unwanted, for example over thread boundaries. Internally,
 /// it uses reference counting to make it cheap to clone.
 #[derive(Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Debug)]
-struct ShaderAbsPath(Arc<std::path::Path>);
+pub struct ShaderAbsPath(Arc<std::path::Path>);
 
 impl Borrow<std::path::Path> for ShaderAbsPath {
     fn borrow(&self) -> &std::path::Path {
@@ -172,25 +172,20 @@ fn file_notify_callback(service: &ShaderCompilationService, event: notify::Resul
     }
 }
 
-#[derive(Clone, Debug)]
-pub struct RecreatePipeline {
-    pub pipeline: Handle<GraphicsPipeline>,
-    pub descriptor: GraphicsPipelineDescriptor,
-    pub render_pass: Handle<RenderPass>,
-}
-
+#[derive(Debug)]
 pub struct Shader {
     pub loc: ShaderLocation,
     pub defines: Defines,
     pub debug_name: Option<String>,
 }
 
+#[derive(Debug)]
 pub struct Shaders {
     pub vert: Shader,
     pub frag: Option<Shader>,
 }
 
-#[derive(Default)]
+#[derive(Default, Debug)]
 pub struct PipelineSettings {
     pub vertex_format: VertexFormat,
     pub culling: TriangleCulling,
@@ -204,6 +199,7 @@ pub struct PipelineSettings {
 pub struct PipelineServiceConfig {
     pub live_recompile: bool,
     pub n_threads: std::num::NonZero<usize>,
+    pub shader_compiler: ShaderCompiler,
 }
 
 #[derive(Debug)]
@@ -223,6 +219,7 @@ impl std::fmt::Display for Error {
     }
 }
 
+// TODO: Store the PipelineDescriptor instead?
 struct PipelineInfo {
     vert: SpvBinary,
     frag: Option<SpvBinary>,
@@ -275,7 +272,7 @@ pub struct PipelineService {
 impl PipelineService {
     pub fn new(config: PipelineServiceConfig) -> Self {
         let shader_service = ShaderCompilationService::new(
-            ShaderCompiler::new().unwrap(),
+            config.shader_compiler,
             ShaderCompilationServiceConfig {
                 n_threads: config.n_threads,
             },
@@ -306,17 +303,13 @@ impl PipelineService {
     }
 
     pub fn flush(&self, renderer: &mut Renderer) {
-        // START HERE:
-        // 2. Update the rest of 'ram'
-        // 3. Test
-        // 4. Cleanup TODOs in this code
-        // 5. Consider renaming the module to `pipeline`?
-
         // This loop will contain both shaders that we got from the watcher and
         // shaders we got from manual queueing. Therefore, they have to only contain
         // ShaderAbsPath.
 
-        let done_shaders: Vec<CompiledShader> = Vec::new();
+        // TODO perf: tmp alloc
+        let mut done_shaders: Vec<CompiledShader> = Vec::new();
+        self.shader_service.flush(ASYNC_USER_ID, &mut done_shaders);
         let mut state = self.state.lock().unwrap();
         for done_shader in done_shaders {
             let spv = match done_shader.result {
@@ -398,10 +391,10 @@ impl PipelineService {
         render_pass: Handle<trekant::RenderPass>,
         renderer: &mut Renderer,
     ) -> Result<Handle<GraphicsPipeline>, Error> {
+        log::debug!("Creating pipeline with {:?} {:?}", shaders, settings);
         // We want to:
         // 1. Compile vertex and fragment shaders in parallel, async.
         // 2. Register the shader path so that it can be recompiled.
-        // 3. TODO: Store information so that the pipeline can be re-created
         // 4. Create the pipeline
 
         let shaders = [
@@ -420,16 +413,19 @@ impl PipelineService {
 
             let mut state = self.state.lock().unwrap();
             if let Some(watcher) = &mut state.watcher {
-                watcher.watch(&abspath, notify::RecursiveMode::NonRecursive);
+                watcher
+                    .watch(&abspath, notify::RecursiveMode::NonRecursive)
+                    .expect("TOOD: Failed to watch file");
             }
         }
 
         // TODO perf: tmp alloc
         let mut results = Vec::with_capacity(2);
+        log::debug!("Waiting for shader compilation");
         self.shader_service.wait(&[id], &mut results);
 
-        let vert: SpvBinary = results.remove(0).result.map_err(Error::Compilation)?;
-        let frag: Option<SpvBinary> = match results.pop() {
+        let vert_spv: SpvBinary = results.remove(0).result.map_err(Error::Compilation)?;
+        let frag_spv: Option<SpvBinary> = match results.pop() {
             Some(CompiledShader {
                 result: Ok(spv), ..
             }) => Some(spv),
@@ -439,18 +435,18 @@ impl PipelineService {
 
         // TODO: Forward debug name
         let vert = ShaderDescriptor {
-            spirv_code: vert.data(),
+            spirv_code: vert_spv.clone().data(),
             debug_name: None,
         };
 
-        let frag: Option<ShaderDescriptor> = frag.map(|x| ShaderDescriptor {
-            spirv_code: x.data(),
+        let frag: Option<ShaderDescriptor> = frag_spv.as_ref().map(|x| ShaderDescriptor {
+            spirv_code: x.clone().data(),
             debug_name: None,
         });
         let descriptor = GraphicsPipelineDescriptor {
             vert,
             frag,
-            vertex_format: settings.vertex_format,
+            vertex_format: settings.vertex_format.clone(),
             culling: settings.culling,
             winding: settings.winding,
             blend_state: settings.blend_state,
@@ -459,9 +455,21 @@ impl PipelineService {
             primitive_topology: settings.primitive_topology,
         };
 
+        // TODO: We should only record the shader permutation if the entire step finishes
         let pipeline = renderer
             .create_gfx_pipeline(descriptor, &render_pass)
             .map_err(Error::PipelineCreation)?;
+        let mut state = self.state.lock().unwrap();
+        state.pipelines_infos.add(PipelineInfo {
+            vert: vert_spv,
+            frag: frag_spv,
+            settings,
+            render_pass,
+            cur: pipeline,
+        });
+
+        log::debug!("Done creating pipeline");
+
         Ok(pipeline)
     }
 }

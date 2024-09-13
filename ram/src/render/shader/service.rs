@@ -42,20 +42,6 @@ pub struct ShaderCompilationInfo {
     pub ty: ShaderType,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum ShaderWorkItemState {
-    None,
-    Queued,
-    InProgress,
-    Done,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-struct ShaderWorkInfo {
-    state: ShaderWorkItemState,
-    request_count: usize,
-}
-
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub struct UserId(pub u64);
 
@@ -66,6 +52,7 @@ struct WorkItem {
     compilation_info: Arc<ShaderCompilationInfo>,
 }
 
+#[derive(Default)]
 struct UserJobs {
     expected: usize,
     completed: Vec<CompiledShader>,
@@ -106,7 +93,7 @@ pub struct ShaderCompilationService {
     state: Mutex<ShaderCompilationServiceState>,
 }
 
-fn thread_work(ctx: &ThreadContext) {
+fn thread_work(ctx: &ThreadContext, thread_idx: usize) {
     loop {
         let work_item: WorkItem;
 
@@ -122,6 +109,11 @@ fn thread_work(ctx: &ThreadContext) {
             }
             work_item = state.work_queue.remove(0);
         }
+        log::debug!(
+            "Shader compiler thread {} picked up {:?}",
+            thread_idx,
+            work_item
+        );
 
         let WorkItem {
             request_id,
@@ -131,12 +123,13 @@ fn thread_work(ctx: &ThreadContext) {
 
         let preprocess_result = ctx.compiler.preprocess(&path, &compilation_info.defines);
         let compilation_result: CompilerResult<SpvBinary>;
+        let mut cache_key: Option<ShaderSource> = None;
         match preprocess_result {
             Ok(src) => {
                 let mut result = None;
                 {
                     let state = ctx.shared_state.lock().unwrap();
-                    if let Some(bin) = state.shader_cache.cache.get(&src) {
+                    if let Some(bin) = state.shader_cache.get(&src) {
                         let spv = bin.clone();
                         result = Some(Ok(spv));
                     }
@@ -147,6 +140,7 @@ fn thread_work(ctx: &ThreadContext) {
                         ctx.compiler
                             .compile_source(&src, compilation_info.ty, "TODO"),
                     );
+                    cache_key = Some(src);
                 }
                 compilation_result = result.unwrap();
             }
@@ -157,6 +151,9 @@ fn thread_work(ctx: &ThreadContext) {
 
         {
             let mut state = ctx.shared_state.lock().unwrap();
+            if let (Ok(spv), Some(src)) = (&compilation_result, cache_key) {
+                state.shader_cache.insert(src, spv.clone());
+            }
             let jobs = state.jobs.get_mut(&request_id).unwrap_or_else(|| {
                 panic!("Finished a shader for user id {request_id:?} but there is no jobs entry")
             });
@@ -190,7 +187,7 @@ impl ShaderCompilationService {
         });
         let mut r = Self {
             thread_context: Arc::clone(&thread_context),
-            threads: Vec::with_capacity(n_threads as usize),
+            threads: Vec::with_capacity(n_threads),
             state: Mutex::new(ShaderCompilationServiceState {
                 shader_compilation_info: HashMap::default(),
             }),
@@ -200,11 +197,23 @@ impl ShaderCompilationService {
             let ctx = Arc::clone(&thread_context);
             r.threads.push(std::thread::spawn(move || {
                 log::info!("Starting shader compilation thread {i}");
-                thread_work(&ctx);
+                thread_work(&ctx, i);
             }));
         }
 
         r
+    }
+
+    fn queue_work(&self, work: &[WorkItem]) {
+        {
+            let mut thread_state = self.thread_context.shared_state.lock().unwrap();
+            thread_state.work_queue.extend_from_slice(work);
+            for item in work {
+                let jobs: &mut UserJobs = thread_state.jobs.entry(item.request_id).or_default();
+                jobs.expected += 1;
+            }
+        }
+        self.thread_context.has_work.notify_all();
     }
 
     pub fn add_new_permutation(
@@ -214,7 +223,7 @@ impl ShaderCompilationService {
         ty: ShaderType,
         id: UserId,
     ) -> Result<ShaderAbsPath, FileNotFound> {
-        let abspath = self.thread_context.compiler.find(&loc)?;
+        let abspath = self.thread_context.compiler.find(loc)?;
         let sci = Arc::new(ShaderCompilationInfo { defines, ty });
 
         {
@@ -226,14 +235,12 @@ impl ShaderCompilationService {
                 .push(sci.clone());
         }
 
-        {
-            let mut thread_state = self.thread_context.shared_state.lock().unwrap();
-            thread_state.work_queue.push(WorkItem {
-                request_id: id,
-                path: abspath.clone(),
-                compilation_info: sci,
-            });
-        }
+        let work = WorkItem {
+            request_id: id,
+            path: abspath.clone(),
+            compilation_info: sci,
+        };
+        self.queue_work(&[work]);
         Ok(abspath)
     }
 
@@ -251,7 +258,7 @@ impl ShaderCompilationService {
                 .clone();
         }
 
-        let mut new_jobs: Vec<WorkItem> = permutations
+        let new_jobs: Vec<WorkItem> = permutations
             .into_iter()
             .map(|sci| WorkItem {
                 request_id: id,
@@ -259,12 +266,7 @@ impl ShaderCompilationService {
                 compilation_info: Arc::clone(&sci),
             })
             .collect();
-
-        {
-            let mut thread_state = self.thread_context.shared_state.lock().unwrap();
-            thread_state.work_queue.append(&mut new_jobs);
-        }
-        self.thread_context.has_work.notify_all();
+        self.queue_work(&new_jobs);
         Ok(())
     }
 

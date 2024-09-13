@@ -246,6 +246,7 @@ pub fn draw_frame(world: &mut World, ui: &mut imgui::UIContext, renderer: &mut R
         let loader = world.read_resource::<trekant::Loader>();
         loader.progress(renderer);
     }
+    recreate_pipelines(renderer, world);
     material::pre_frame(world, renderer);
     light::pre_frame(world, renderer);
 
@@ -527,16 +528,17 @@ pub fn setup_resources(world: &mut World, renderer: &mut Renderer) {
         shader_compiler.add_include_path(root.as_path().join(&include_path_rel));
     }
 
-    let mut pipeline_service = shader::PipelineService::new(shader::PipelineServiceConfig {
+    let pipeline_service = shader::PipelineService::new(shader::PipelineServiceConfig {
         live_recompile: true,
         n_threads: std::thread::available_parallelism()
             .unwrap_or(std::num::NonZero::<usize>::new(2).unwrap()),
+        shader_compiler,
     });
     let frame_resources = create_frame_resources(renderer, &pipeline_service);
 
     let debug_renderer = debug::DebugRenderer::new(
-        &shader_compiler,
-        &frame_resources.main_render_pass,
+        &pipeline_service,
+        frame_resources.main_render_pass,
         frame_resources.engine_shader_resources.view_data,
         renderer,
     );

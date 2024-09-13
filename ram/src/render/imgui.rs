@@ -17,7 +17,9 @@ use crate::common::Name;
 use crate::io::input;
 use crate::io::input::KeyCode;
 use crate::math::Vec2;
-use crate::render::shader::{Defines, ShaderCompiler, ShaderType};
+use crate::render::shader::{
+    Defines, PipelineService, PipelineSettings, Shader, ShaderCompiler, ShaderType, Shaders,
+};
 use crate::time::Time;
 
 use specs::world::WorldExt;
@@ -317,53 +319,35 @@ impl UIContext {
                 .expect("Failed to create font texture")
         };
 
-        let (vert, frag) = {
-            let compiler = world.read_resource::<ShaderCompiler>();
-            let defines = Defines::empty();
-            let vert = compiler
-                .compile(
-                    &super::shader_path(&["imgui", "vert.glsl"]),
-                    &defines,
-                    ShaderType::Vertex,
-                    None,
-                )
-                .expect("Failed to compile imgui vert");
-            let frag = compiler
-                .compile(
-                    &super::shader_path(&["imgui", "frag.glsl"]),
-                    &defines,
-                    ShaderType::Fragment,
-                    None,
-                )
-                .expect("Failed to compile imgui frag");
-            (vert, frag)
-        };
-
-        let vert = ShaderDescriptor {
-            debug_name: Some("imgui-vert".to_owned()),
-            spirv_code: vert.data(),
-        };
-        let frag = ShaderDescriptor {
-            debug_name: Some("imgui-frag".to_owned()),
-            spirv_code: frag.data(),
-        };
-        let pipeline_descriptor = GraphicsPipelineDescriptor::builder()
-            .vert(vert)
-            .frag(frag)
-            .vertex_format(ImGuiVertex::format())
-            .culling(TriangleCulling::None)
-            .blend_state(BlendState::Enabled)
-            .depth_testing(DepthTest::Disabled)
-            .build()
-            .expect("Failed to build graphics pipeline descriptor");
-
         let pipeline = {
-            let render_pass = &world
+            let render_pass = world
                 .read_resource::<super::FrameResources>()
                 .main_render_pass;
-            renderer
-                .create_gfx_pipeline(pipeline_descriptor, render_pass)
-                .expect("Failed to create graphics pipeline")
+            let service = world.read_resource::<PipelineService>();
+            let vert = Shader {
+                loc: super::shader_path("imgui/vert.glsl"),
+                defines: Defines::empty(),
+                debug_name: Some("imgui-vert".to_owned()),
+            };
+            let frag = Shader {
+                loc: super::shader_path("imgui/frag.glsl"),
+                defines: Defines::empty(),
+                debug_name: Some("imgui-frag".to_owned()),
+            };
+            let shaders = Shaders {
+                vert,
+                frag: Some(frag),
+            };
+            let settings = PipelineSettings {
+                culling: TriangleCulling::None,
+                vertex_format: ImGuiVertex::format(),
+                blend_state: BlendState::Enabled,
+                depth_testing: DepthTest::Disabled,
+                ..Default::default()
+            };
+            service
+                .create(shaders, settings, render_pass, renderer)
+                .expect("Failed to create pipeline for imgui")
         };
 
         let desc_set = PipelineResourceSet::builder(renderer)
