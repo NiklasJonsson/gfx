@@ -7,6 +7,7 @@ fn main() {
     let mut queue = Vec::new();
 
     let cwd = std::env::current_dir().expect("Failed to read CWD");
+    let include_path = cwd.join("ram/src/render/shaders/include");
 
     println!("WORKING DIR: {d}", d = cwd.display());
 
@@ -29,6 +30,10 @@ fn main() {
                 .expect("File is missing filename")
                 .to_str()
                 .expect("Failed to convert OsStr to str");
+            if path.starts_with(&include_path) {
+                println!("Skipping {} as it is a shared header", path.display());
+                continue;
+            }
             if filename.ends_with("frag.glsl") {
                 shaders.push((path, ShaderType::Fragment));
             } else if filename.ends_with("vert.glsl") {
@@ -44,9 +49,11 @@ fn main() {
         }
     }
 
-    let shader_compiler = ram::ShaderCompiler::new().expect("Failed to create shader compiler");
+    let mut shader_compiler = ram::ShaderCompiler::new().expect("Failed to create shader compiler");
+    shader_compiler.add_include_path(include_path);
 
     let count = shaders.len();
+    let mut err_count = 0;
     println!("Found {count} shaders");
     for (idx, (shader, ty)) in shaders.into_iter().enumerate() {
         let display = shader.display();
@@ -59,6 +66,8 @@ fn main() {
             println!("ERROR: Failed to compile shader {display}");
             println!("{e}");
             println!();
+            err_count += 1;
         }
     }
+    println!("{} shaders failed to compile", err_count);
 }

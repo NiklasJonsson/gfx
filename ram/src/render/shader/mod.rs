@@ -421,7 +421,7 @@ impl PipelineService {
 
         // TODO perf: tmp alloc
         let mut results = Vec::with_capacity(2);
-        log::debug!("Waiting for shader compilation");
+        log::debug!("Waiting for shader compilation on ID {}", id);
         self.shader_service.wait(&[id], &mut results);
 
         let vert_spv: SpvBinary = results.remove(0).result.map_err(Error::Compilation)?;

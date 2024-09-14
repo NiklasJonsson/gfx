@@ -201,6 +201,23 @@
         {
             "type": "lldb",
             "request": "launch",
+            "name": "Debug executable 'check-shaders'",
+            "cargo": {
+                "args": [
+                    "build",
+                    "--bin=check-shaders",
+                    "--package=check-shaders"
+                ],
+                "filter": {
+                    "name": "check-shaders",
+                    "kind": "bin"
+                }
+            },
+            "cwd": "${workspaceFolder}"
+        },
+        {
+            "type": "lldb",
+            "request": "launch",
             "name": "Debug unit tests in executable 'dbg'",
             "cargo": {
                 "args": [

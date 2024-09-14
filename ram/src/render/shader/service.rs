@@ -5,12 +5,6 @@ use super::compiler::{CompilerResult, FileNotFound, ShaderCompiler, ShaderSource
 use std::collections::HashMap;
 use std::sync::{Arc, Condvar, Mutex};
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum ShaderCachePolicy {
-    ForceRecompile,
-    AllowCache,
-}
-
 #[derive(Default)]
 pub struct ShaderCache {
     cache: std::collections::HashMap<ShaderSource, SpvBinary>,
@@ -44,6 +38,12 @@ pub struct ShaderCompilationInfo {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub struct UserId(pub u64);
+
+impl std::fmt::Display for UserId {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{:?}", self)
+    }
+}
 
 #[derive(Debug, Clone)]
 struct WorkItem {
@@ -136,9 +136,10 @@ fn thread_work(ctx: &ThreadContext, thread_idx: usize) {
                 }
 
                 if result.is_none() {
+                    let name = path.display().to_string();
                     result = Some(
                         ctx.compiler
-                            .compile_source(&src, compilation_info.ty, "TODO"),
+                            .compile_source(&src, compilation_info.ty, &name),
                     );
                     cache_key = Some(src);
                 }
