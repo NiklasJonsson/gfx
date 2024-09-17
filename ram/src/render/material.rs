@@ -563,8 +563,7 @@ pub mod pbr {
         pipeline_service: &crate::render::shader::PipelineService,
         render_pass: Handle<trekant::RenderPass>,
     ) -> Result<Handle<trekant::GraphicsPipeline>, crate::render::MaterialError> {
-        let vertex_format = trekant::VertexFormat::from(trekant::Format::FLOAT3);
-        let polygon_mode = trekant::PolygonMode::Line;
+        let vertex_format = trekant::VertexFormat::from([trekant::Format::FLOAT3; 2]);
         get_pipeline(
             renderer,
             &vertex_format,
