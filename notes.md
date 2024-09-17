@@ -704,12 +704,14 @@ This implements multi-threaded async shader compilation.
 
 TODO:
 
-1. Validation layers fail, shaders doesn't seem to be correctly compiled.
-  `check-shaders` fails as well, start looking there. Might be due to the upgrade of shaderc and vulkan sdk.
+1. Sporadic errors in pipeline validation.
+    * Get a breakpoint for successfull compilation without this changed and compare.
 2. Imgui UI for inspecting the pipeline service:
     1. Compile times
     2. List all shaders, pipelines etc.
     3. Table of lights for thread work?
+3. Profiling
+4. Cleanup the code
 
 ## Future work
 
