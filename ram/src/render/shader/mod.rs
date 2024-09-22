@@ -100,7 +100,7 @@ impl<'a> IntoIterator for &'a Defines {
     }
 }
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct SpvBinary {
     data: Vec<u32>,
 }
@@ -397,13 +397,21 @@ impl PipelineService {
         // 2. Register the shader path so that it can be recompiled.
         // 4. Create the pipeline
 
-        let shaders = [
+        // TODO: Clean this function up
+        let vert_debug_name = shaders.vert.debug_name.clone();
+        let frag_debug_name = shaders.frag.as_ref().and_then(|f| f.debug_name.clone());
+
+        todo!("TODO: Fix the bug");
+        // The code below is buggy because the order of queues is not reflected in the order of pushes to the result vector.
+        // Either, the queue order needs to be respected or this code needs to handle results appearing in another order than
+        // the queued one.
+        let shader_permutations = [
             Some((shaders.vert, ShaderType::Vertex)),
             shaders.frag.map(|f| (f, ShaderType::Fragment)),
         ];
+
         let id = self.id_generator.next();
-        // TODO: Loop doesn't look to great, try with a lambda
-        for shader in shaders.into_iter().flatten() {
+        for shader in shader_permutations.into_iter().flatten() {
             let (Shader { loc, defines, .. }, ty) = shader;
 
             let abspath = self
@@ -436,12 +444,12 @@ impl PipelineService {
         // TODO: Forward debug name
         let vert = ShaderDescriptor {
             spirv_code: vert_spv.clone().data(),
-            debug_name: None,
+            debug_name: vert_debug_name,
         };
 
         let frag: Option<ShaderDescriptor> = frag_spv.as_ref().map(|x| ShaderDescriptor {
             spirv_code: x.clone().data(),
-            debug_name: None,
+            debug_name: frag_debug_name,
         });
         let descriptor = GraphicsPipelineDescriptor {
             vert,

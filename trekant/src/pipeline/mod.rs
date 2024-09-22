@@ -74,7 +74,7 @@ impl std::ops::Drop for ShaderModule {
 
 impl ShaderModule {
     pub fn new<D: HasVkDevice>(device: &D, spirv: &[u32]) -> Result<Self, PipelineError> {
-        log::trace!("Creating shader module from data (hash) {}", hash(spirv));
+        log::trace!("Creating shader module from data (hash) {:#X}", hash(spirv));
         let info = vk::ShaderModuleCreateInfo::builder().code(spirv);
 
         let vk_device = device.vk_device();

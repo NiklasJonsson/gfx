@@ -706,6 +706,8 @@ TODO:
 
 1. Sporadic errors in pipeline validation.
     * Get a breakpoint for successfull compilation without this changed and compare.
+    * Turned out the best way to debug was to add some more logs and compare a good run with a bad one.
+    * The issue was that the order that you queue doesn't reflect the order that you receive results in.
 2. Imgui UI for inspecting the pipeline service:
     1. Compile times
     2. List all shaders, pipelines etc.

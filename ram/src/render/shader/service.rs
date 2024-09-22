@@ -110,7 +110,7 @@ fn thread_work(ctx: &ThreadContext, thread_idx: usize) {
             work_item = state.work_queue.remove(0);
         }
         log::debug!(
-            "Shader compiler thread {} picked up {:?}",
+            "Shader compiler thread (SCT) {} picked up {:?}",
             thread_idx,
             work_item
         );
@@ -121,7 +121,9 @@ fn thread_work(ctx: &ThreadContext, thread_idx: usize) {
             compilation_info,
         } = work_item;
 
+        log::debug!("[SCT {thread_idx}] Preprocessing...");
         let preprocess_result = ctx.compiler.preprocess(&path, &compilation_info.defines);
+        log::debug!("[SCT {thread_idx}] Preprocessing done");
         let compilation_result: CompilerResult<SpvBinary>;
         let mut cache_key: Option<ShaderSource> = None;
         match preprocess_result {
@@ -130,12 +132,14 @@ fn thread_work(ctx: &ThreadContext, thread_idx: usize) {
                 {
                     let state = ctx.shared_state.lock().unwrap();
                     if let Some(bin) = state.shader_cache.get(&src) {
+                        log::debug!("[SCT {thread_idx}] hit the cache");
                         let spv = bin.clone();
                         result = Some(Ok(spv));
                     }
                 }
 
                 if result.is_none() {
+                    log::debug!("[SCT {thread_idx}] did not hit the cache, compiling");
                     let name = path.display().to_string();
                     result = Some(
                         ctx.compiler
@@ -153,11 +157,13 @@ fn thread_work(ctx: &ThreadContext, thread_idx: usize) {
         {
             let mut state = ctx.shared_state.lock().unwrap();
             if let (Ok(spv), Some(src)) = (&compilation_result, cache_key) {
+                log::debug!("[SCT {thread_idx}] Compilation succeeded, adding to cache");
                 state.shader_cache.insert(src, spv.clone());
             }
             let jobs = state.jobs.get_mut(&request_id).unwrap_or_else(|| {
-                panic!("Finished a shader for user id {request_id:?} but there is no jobs entry")
+                panic!("[SCT {thread_idx}] Finished a shader for user id {request_id:?} but there is no jobs entry")
             });
+            log::debug!("[SCT {thread_idx}] Compilation done: path: {p}, compilation info: {compilation_info:?}, result: {r}", p = path.display(), r = compilation_result.is_ok());
             jobs.completed.push(CompiledShader {
                 path,
                 compilation_info: compilation_info.clone(),
@@ -210,6 +216,7 @@ impl ShaderCompilationService {
             let mut thread_state = self.thread_context.shared_state.lock().unwrap();
             thread_state.work_queue.extend_from_slice(work);
             for item in work {
+                log::debug!("Queueing shader compilation request {:?}", item);
                 let jobs: &mut UserJobs = thread_state.jobs.entry(item.request_id).or_default();
                 jobs.expected += 1;
             }
