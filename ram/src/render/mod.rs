@@ -1,4 +1,4 @@
-use shader::ShaderLocation;
+use pipeline::ShaderLocation;
 use thiserror::Error;
 
 use crate::ecs::prelude::*;
@@ -22,7 +22,7 @@ pub mod imgui;
 pub mod light;
 pub mod material;
 pub mod mesh;
-pub mod shader;
+pub mod pipeline;
 pub mod uniform;
 
 pub use geometry::Shape;
@@ -161,12 +161,12 @@ pub struct RenderableMaterial {
 #[derive(Debug, Error)]
 pub enum MaterialError {
     #[error("Pipeline error: {0}")]
-    Pipeline(#[from] shader::Error),
+    Pipeline(#[from] pipeline::Error),
     #[error("GLSL compiler error: {0}")]
-    GlslCompiler(#[from] shader::CompilerError),
+    GlslCompiler(#[from] pipeline::CompilerError),
 }
 
-pub(crate) fn shader_path<P>(shader_path: P) -> shader::ShaderLocation
+pub(crate) fn shader_path<P>(shader_path: P) -> pipeline::ShaderLocation
 where
     P: AsRef<std::path::Path>,
 {
@@ -228,7 +228,7 @@ fn draw_entities<MaterialFilterComponent: Component>(
 }
 
 fn recreate_pipelines(renderer: &mut Renderer, world: &mut World) {
-    let pipeline_service = world.read_resource::<shader::PipelineService>();
+    let pipeline_service = world.read_resource::<pipeline::PipelineService>();
     pipeline_service.flush(renderer);
 }
 
@@ -381,7 +381,7 @@ pub fn draw_frame(world: &mut World, ui: &mut imgui::UIContext, renderer: &mut R
 
 pub fn create_frame_resources(
     renderer: &mut Renderer,
-    pipeline_service: &shader::PipelineService,
+    pipeline_service: &pipeline::PipelineService,
 ) -> FrameResources {
     use trekant::pipeline::ShaderStage;
 
@@ -488,7 +488,7 @@ pub fn create_frame_resources(
 
 pub fn setup_resources(world: &mut World, renderer: &mut Renderer) {
     let mut shader_compiler =
-        shader::ShaderCompiler::new().expect("Failed to create shader compiler");
+        pipeline::ShaderCompiler::new().expect("Failed to create shader compiler");
 
     let include_path_rel = std::path::PathBuf::from_iter(["render", "shaders", "include"]);
     let mut roots = Vec::with_capacity(3);
@@ -528,7 +528,7 @@ pub fn setup_resources(world: &mut World, renderer: &mut Renderer) {
         shader_compiler.add_include_path(root.as_path().join(&include_path_rel));
     }
 
-    let pipeline_service = shader::PipelineService::new(shader::PipelineServiceConfig {
+    let pipeline_service = pipeline::PipelineService::new(pipeline::PipelineServiceConfig {
         live_recompile: true,
         n_threads: std::thread::available_parallelism()
             .unwrap_or(std::num::NonZero::<usize>::new(2).unwrap()),

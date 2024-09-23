@@ -17,7 +17,7 @@ use crate::common::Name;
 use crate::io::input;
 use crate::io::input::KeyCode;
 use crate::math::Vec2;
-use crate::render::shader::{
+use crate::render::pipeline::{
     Defines, PipelineService, PipelineSettings, Shader, ShaderCompiler, ShaderType, Shaders,
 };
 use crate::time::Time;

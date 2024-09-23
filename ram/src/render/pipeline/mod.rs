@@ -1,5 +1,5 @@
-mod compiler;
-mod service;
+mod shader_compiler;
+mod shader_service;
 
 use std::borrow::Borrow;
 use std::collections::HashMap;
@@ -13,9 +13,11 @@ use trekant::{
     TriangleWinding, VertexFormat,
 };
 
-pub use compiler::{CompilerError, CompilerResult, ShaderCompiler};
+pub use shader_compiler::{CompilerError, CompilerResult, ShaderCompiler};
 
-use service::{CompiledShader, ShaderCompilationService, ShaderCompilationServiceConfig, UserId};
+use shader_service::{
+    CompiledShader, ShaderCompilationService, ShaderCompilationServiceConfig, UserId,
+};
 
 const ASYNC_USER_ID: UserId = UserId(0);
 
@@ -231,7 +233,7 @@ struct PipelineInfo {
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 struct ShaderPermutation {
     path: ShaderAbsPath,
-    compilation_info: Arc<service::ShaderCompilationInfo>,
+    compilation_info: Arc<shader_service::ShaderCompilationInfo>,
 }
 
 #[derive(Default)]
@@ -401,15 +403,16 @@ impl PipelineService {
         let vert_debug_name = shaders.vert.debug_name.clone();
         let frag_debug_name = shaders.frag.as_ref().and_then(|f| f.debug_name.clone());
 
-        todo!("TODO: Fix the bug");
-        // The code below is buggy because the order of queues is not reflected in the order of pushes to the result vector.
-        // Either, the queue order needs to be respected or this code needs to handle results appearing in another order than
-        // the queued one.
         let shader_permutations = [
             Some((shaders.vert, ShaderType::Vertex)),
             shaders.frag.map(|f| (f, ShaderType::Fragment)),
         ];
 
+        // TODO: Consider this API on the shader service
+        // compile_shaders()
+        // * A blocking, batch API.
+        // * Doesn't register.
+        // * Return abspaths for successful shaders
         let id = self.id_generator.next();
         for shader in shader_permutations.into_iter().flatten() {
             let (Shader { loc, defines, .. }, ty) = shader;
@@ -431,9 +434,19 @@ impl PipelineService {
         let mut results = Vec::with_capacity(2);
         log::debug!("Waiting for shader compilation on ID {}", id);
         self.shader_service.wait(&[id], &mut results);
+        log::debug!("Got {} shaders", results.len());
 
-        let vert_spv: SpvBinary = results.remove(0).result.map_err(Error::Compilation)?;
-        let frag_spv: Option<SpvBinary> = match results.pop() {
+        let mut vert_result = results.remove(0);
+        let mut frag_result = results.pop();
+        if vert_result.compilation_info.ty != ShaderType::Vertex {
+            let frag_result = frag_result
+                .as_mut()
+                .expect("Second shader should exist if the first one is not a vertex shader");
+            std::mem::swap(frag_result, &mut vert_result);
+        }
+
+        let vert_spv: SpvBinary = vert_result.result.map_err(Error::Compilation)?;
+        let frag_spv: Option<SpvBinary> = match frag_result {
             Some(CompiledShader {
                 result: Ok(spv), ..
             }) => Some(spv),
@@ -441,7 +454,6 @@ impl PipelineService {
             None => None,
         };
 
-        // TODO: Forward debug name
         let vert = ShaderDescriptor {
             spirv_code: vert_spv.clone().data(),
             debug_name: vert_debug_name,

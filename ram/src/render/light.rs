@@ -4,7 +4,7 @@ use crate::math::{
     Vec2, Vec3,
 };
 use crate::render::debug::LineConfig;
-use crate::render::shader;
+use crate::render::pipeline;
 
 use trekant::{
     vk, BufferDescriptor, BufferHandle, BufferMutability, CommandBuffer, Extent2D,
@@ -272,7 +272,7 @@ pub struct ShadowResources {
 }
 
 pub fn pre_frame(world: &World, renderer: &mut Renderer) {
-    let pipeline_service = world.read_resource::<super::shader::PipelineService>();
+    let pipeline_service = world.read_resource::<super::pipeline::PipelineService>();
     let frame_data = world.read_resource::<super::FrameResources>();
     let meshes = world.read_storage::<super::Mesh>();
     let materials = world.read_storage::<super::material::PhysicallyBased>();
@@ -472,20 +472,20 @@ fn create_shadow_render_pass_pointlight(
 }
 
 fn create_shadow_pipeline_pipeline(
-    pipeline_service: &super::shader::PipelineService,
+    pipeline_service: &super::pipeline::PipelineService,
     renderer: &mut Renderer,
     render_pass: Handle<trekant::RenderPass>,
     format: VertexFormat,
 ) -> Result<Handle<GraphicsPipeline>, super::MaterialError> {
-    let no_defines = shader::Defines::empty();
-    let vert = shader::Shader {
+    let no_defines = pipeline::Defines::empty();
+    let vert = pipeline::Shader {
         loc: super::shader_path("shadow/depth_write_vert.glsl"),
         defines: no_defines.clone(),
         debug_name: Some("shadow-depth-write-vert".to_owned()),
     };
-    let shaders = shader::Shaders { vert, frag: None };
+    let shaders = pipeline::Shaders { vert, frag: None };
 
-    let settings = shader::PipelineSettings {
+    let settings = pipeline::PipelineSettings {
         vertex_format: format,
         culling: trekant::TriangleCulling::Front,
         ..Default::default()
@@ -497,28 +497,28 @@ fn create_shadow_pipeline_pipeline(
 }
 
 fn create_pointlight_shadow_pipeline(
-    pipeline_service: &super::shader::PipelineService,
+    pipeline_service: &super::pipeline::PipelineService,
     renderer: &mut Renderer,
     render_pass: Handle<trekant::RenderPass>,
     format: VertexFormat,
 ) -> Result<Handle<GraphicsPipeline>, super::MaterialError> {
-    let no_defines = shader::Defines::empty();
-    let vert = shader::Shader {
+    let no_defines = pipeline::Defines::empty();
+    let vert = pipeline::Shader {
         loc: super::shader_path("shadow/pointlight_vert.glsl"),
         defines: no_defines.clone(),
         debug_name: Some("pointlight-shadow-vert".to_owned()),
     };
-    let frag = shader::Shader {
+    let frag = pipeline::Shader {
         loc: super::shader_path("shadow/pointlight_frag.glsl"),
         defines: no_defines.clone(),
         debug_name: Some("pointlight-shadow-frag".to_owned()),
     };
-    let shaders = shader::Shaders {
+    let shaders = pipeline::Shaders {
         vert,
         frag: Some(frag),
     };
 
-    let settings = shader::PipelineSettings {
+    let settings = pipeline::PipelineSettings {
         vertex_format: format,
         culling: trekant::TriangleCulling::Front,
         ..Default::default()
@@ -580,7 +580,7 @@ impl ShadowConfig {
 }
 
 pub fn setup_shadow_resources(
-    pipeline_service: &super::shader::PipelineService,
+    pipeline_service: &super::pipeline::PipelineService,
     renderer: &mut Renderer,
 ) -> ShadowResources {
     use trekant::{BorderColor, Filter, SamplerAddressMode};

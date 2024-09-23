@@ -1,6 +1,6 @@
 use super::{Defines, ShaderAbsPath, ShaderLocation, ShaderType, SpvBinary};
 
-use super::compiler::{CompilerResult, FileNotFound, ShaderCompiler, ShaderSource};
+use super::shader_compiler::{CompilerResult, FileNotFound, ShaderCompiler, ShaderSource};
 
 use std::collections::HashMap;
 use std::sync::{Arc, Condvar, Mutex};
@@ -24,10 +24,12 @@ impl ShaderCache {
     }
 }
 
+#[derive(Debug)]
 pub struct CompiledShader {
     pub path: ShaderAbsPath,
     pub compilation_info: Arc<ShaderCompilationInfo>,
     pub result: CompilerResult<SpvBinary>,
+    pub uid: UserId,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
@@ -168,6 +170,7 @@ fn thread_work(ctx: &ThreadContext, thread_idx: usize) {
                 path,
                 compilation_info: compilation_info.clone(),
                 result: compilation_result,
+                uid: request_id,
             });
         }
         ctx.has_done.notify_all();

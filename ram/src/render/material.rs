@@ -149,7 +149,7 @@ pub use pbr::PhysicallyBased;
 
 pub mod pbr {
     use super::*;
-    use crate::render::shader::Defines;
+    use crate::render::pipeline::Defines;
 
     #[derive(Debug, Clone, PartialEq, Eq, Hash, Default)]
     pub struct ShaderDefinition {
@@ -524,31 +524,31 @@ pub mod pbr {
     pub fn get_pipeline(
         renderer: &mut trekant::Renderer,
         vertex_format: &trekant::VertexFormat,
-        pipeline_service: &crate::render::shader::PipelineService,
+        pipeline_service: &crate::render::pipeline::PipelineService,
         render_pass: Handle<trekant::RenderPass>,
         shader_definition: ShaderDefinition,
     ) -> Result<Handle<trekant::GraphicsPipeline>, crate::render::MaterialError> {
-        use crate::render::shader;
+        use crate::render::pipeline;
         let defines = shader_definition.defines();
 
-        let vert = shader::Shader {
+        let vert = pipeline::Shader {
             loc: crate::render::shader_path("pbr/vert.glsl"),
             defines: defines.clone(),
             debug_name: Some("pbr-vert".to_owned()),
         };
 
-        let frag = shader::Shader {
+        let frag = pipeline::Shader {
             loc: crate::render::shader_path("pbr/frag.glsl"),
             defines,
             debug_name: Some("pbr-frag".to_owned()),
         };
 
-        let shaders = shader::Shaders {
+        let shaders = pipeline::Shaders {
             vert,
             frag: Some(frag),
         };
 
-        let settings = shader::PipelineSettings {
+        let settings = pipeline::PipelineSettings {
             vertex_format: vertex_format.clone(),
             polygon_mode: trekant::pipeline::PolygonMode::Fill,
             ..Default::default()
@@ -560,7 +560,7 @@ pub mod pbr {
 
     pub fn get_default_pipeline(
         renderer: &mut Renderer,
-        pipeline_service: &crate::render::shader::PipelineService,
+        pipeline_service: &crate::render::pipeline::PipelineService,
         render_pass: Handle<trekant::RenderPass>,
     ) -> Result<Handle<trekant::GraphicsPipeline>, crate::render::MaterialError> {
         let vertex_format = trekant::VertexFormat::from([trekant::Format::FLOAT3; 2]);
@@ -704,30 +704,30 @@ pub mod unlit {
     pub fn get_pipeline(
         renderer: &mut trekant::Renderer,
         vertex_format: &trekant::VertexFormat,
-        pipeline_service: &crate::render::shader::PipelineService,
+        pipeline_service: &crate::render::pipeline::PipelineService,
         render_pass: Handle<trekant::RenderPass>,
         polygon_mode: PolygonMode,
     ) -> Result<Handle<trekant::GraphicsPipeline>, crate::render::MaterialError> {
-        use crate::render::shader;
+        use crate::render::pipeline;
         use crate::render::shader_path;
 
-        let vert = shader::Shader {
+        let vert = pipeline::Shader {
             loc: shader_path("unlit/vert.glsl"),
-            defines: shader::Defines::empty(),
+            defines: pipeline::Defines::empty(),
             debug_name: Some("unlit-vert".to_owned()),
         };
-        let frag = shader::Shader {
+        let frag = pipeline::Shader {
             loc: shader_path("unlit/frag.glsl"),
-            defines: shader::Defines::empty(),
+            defines: pipeline::Defines::empty(),
             debug_name: Some("unlit-frag".to_owned()),
         };
 
-        let shaders = shader::Shaders {
+        let shaders = pipeline::Shaders {
             vert,
             frag: Some(frag),
         };
 
-        let settings = shader::PipelineSettings {
+        let settings = pipeline::PipelineSettings {
             vertex_format: vertex_format.clone(),
             culling: trekant::pipeline::TriangleCulling::None,
             polygon_mode,
@@ -741,7 +741,7 @@ pub mod unlit {
 
     pub fn get_default_pipeline(
         renderer: &mut Renderer,
-        pipeline_service: &crate::render::shader::PipelineService,
+        pipeline_service: &crate::render::pipeline::PipelineService,
         render_pass: Handle<trekant::RenderPass>,
     ) -> Result<Handle<trekant::GraphicsPipeline>, crate::render::MaterialError> {
         let vertex_format = trekant::VertexFormat::from(trekant::Format::FLOAT3);
@@ -760,7 +760,7 @@ fn create_renderables_pbr(renderer: &mut Renderer, world: &World) {
     let materials = world.read_storage::<pbr::Done>();
     let meshes = world.read_storage::<super::Mesh>();
     let frame_resources = world.read_resource::<super::FrameResources>();
-    let pipeline_service = world.read_resource::<super::shader::PipelineService>();
+    let pipeline_service = world.read_resource::<super::pipeline::PipelineService>();
     let mut renderables = world.write_storage::<super::RenderableMaterial>();
     let entities = world.entities();
 
@@ -796,7 +796,7 @@ fn create_renderables_unlit(renderer: &mut Renderer, world: &World) {
     let materials = world.read_storage::<unlit::Done>();
     let meshes = world.read_storage::<super::Mesh>();
     let frame_resources = world.read_resource::<super::FrameResources>();
-    let pipeline_service = world.read_resource::<super::shader::PipelineService>();
+    let pipeline_service = world.read_resource::<super::pipeline::PipelineService>();
     let mut renderables = world.write_storage::<super::RenderableMaterial>();
     let entities = world.entities();
 

@@ -1,5 +1,5 @@
 use super::imgui::UIModules;
-use super::{geometry, shader};
+use super::{geometry, pipeline};
 use crate::math::{Rgba, Vec3};
 
 use trekant::pipeline::GraphicsPipeline;
@@ -8,7 +8,7 @@ use trekant::{BufferDescriptor, BufferHandle, BufferMutability, Handle, PushCons
 use trekant::{RenderPass, RenderPassEncoder};
 use trekant::{VertexDefinition, VertexFormat};
 
-use crate::render::shader::{Defines, PipelineService, PipelineSettings, Shader, Shaders};
+use crate::render::pipeline::{Defines, PipelineService, PipelineSettings, Shader, Shaders};
 
 use std::sync::Mutex;
 
@@ -144,7 +144,7 @@ impl DebugRenderer {
 
         let frag = Shader {
             loc: super::shader_path("push_constant_color_frag.glsl"),
-            defines: shader::Defines::empty(),
+            defines: pipeline::Defines::empty(),
             debug_name: Some("debug-lines-frag".to_owned()),
         };
 

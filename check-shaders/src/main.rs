@@ -1,4 +1,4 @@
-use ram::render::shader::{Defines, ShaderLocation, ShaderType};
+use ram::render::pipeline::{Defines, ShaderLocation, ShaderType};
 
 use std::fs::DirEntry;
 
