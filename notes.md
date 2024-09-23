@@ -677,22 +677,34 @@ These parts are needed:
 
 ### Design
 
+The design as it is now has to fundamental parts:
+
+1. Immediate, blocking, pipeline creation.
+    * Takes a vertex shader and an optional fragment shader, defines for both etc.
+    * Pipeline settings, e.g. winding order, fill mode, vertex format etc.
+2. If successful, this will register the shader source, the shader compilation info and the resulting pipeline.
+3. It then returns the result.
+4. Async event inputs to the same registry of pipeline creation.o
+5. This can be a file path, e.g. from the file watcher, or it can be ....
+6. A flush API that is called once per-frame that returns newly re-created pipelines.
+
+With this, different parts of the program can queue recompiles of a specific shader but there is a central place
+that updates the pipeline storage and handles.
+
+In addition, there is asynchronous & parallel shader compilation. The shader compilation service has a pool of threads that
+wait for new jobs to show up in a job queue. The immediate API above queues shader compilation to this serves and then
+blocks on waiting for the result.
+
 #### `PipelineService`
 
 This is the top user-facing type. It exposes an API to create trekant pipelines.
-
-This API comes in both blocking and non-blocking flavours. Either, one can pass
-the pipeline input, a render pass and a renderer object directly to it. This will
-create the pipeline and store the information on how to recreate it. The pipeline inputs are:
+The pipeline inputs are:
 
 * Vertex shader. GLSL source path, defines for the compilation.
 * Fragment shader. GLSL source path, defines for the compilation.
 * PipelineSettings. E.g. winding order.
 
-Or, one can use the async API, where a shader is queued for recompilation and then the pipeline
-service is polled every frame to complete the pending graphics pipelines that need to be because
-their shader inputs have changed. The changed graphics pipelines are overwrite the old ones so that
-all uses of a handle are updated to use the new one.
+// TODO: More docs
 
 TODO: What synchronization is required here with regards to command buffers etc. waitDeviceIdle?
 
@@ -702,18 +714,30 @@ Internally, the pipeline service uses the `ShaderCompilationService`.
 
 This implements multi-threaded async shader compilation.
 
-TODO:
+### Bugs
 
-1. Sporadic errors in pipeline validation.
-    * Get a breakpoint for successfull compilation without this changed and compare.
-    * Turned out the best way to debug was to add some more logs and compare a good run with a bad one.
-    * The issue was that the order that you queue doesn't reflect the order that you receive results in.
-2. Imgui UI for inspecting the pipeline service:
+Notes for bugs found during development.
+
+#### Sporadic errors in pipeline validation
+
+The validation layers complain about a missing OpEntryPoint "main" with the correct shader stage.
+
+The issue was that the order that you queue doesn't reflect the order that you receive results in.
+
+Learnings:
+
+* Turned out the best way to debug was to add some more logs and compare a good run with a bad one.
+* Threaded systems have (logic) race conditions. Who would've thought?
+* Let's look at reworking the blocking creation API to reduce the chance of this issue appearing in other uses
+of the shader compilation API.
+
+### TODO
+
+1. Debug UI for inspecting the pipeline service:
     1. Compile times
-    2. List all shaders, pipelines etc.
-    3. Table of lights for thread work?
-3. Profiling
-4. Cleanup the code
+    2. List all shaders, pipelines etc. Also which shader executed them.
+2. Profiling
+3. Cleanup the code
 
 ## Future work
 
@@ -725,14 +749,6 @@ before the mipmaps are generated.
 ### Logging in imgui UI
 
 Would be nice to get logs in the imgui UI.
-
-### Improve the imgui ECS debugger
-
-* Show all systems.
-  * Show timings.
-  * Show passes?
-* List all components an entity has.
-* Don't crash when editing a quat.
 
 ### Rewrite mesh loading to use separate components like materials
 
@@ -750,6 +766,14 @@ fragment shader just like learnopengl.com for this.
 
 Try to reproduce the scene bounds in the opengl or sascha willems examples for directional light shadows and see if the
 issues with pixelated examples can be reproduced.
+
+### Improve the imgui ECS debugger
+
+* Show all systems.
+  * Show timings.
+  * Show passes?
+* List all components an entity has.
+* Don't crash when editing a quat.
 
 ### Multiview rendering for cubemaps
 
