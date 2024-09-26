@@ -677,8 +677,6 @@ These parts are needed:
 
 ### Design
 
-The design as it is now has to fundamental parts:
-
 1. Immediate, blocking, pipeline creation.
     * Takes a vertex shader and an optional fragment shader, defines for both etc.
     * Pipeline settings, e.g. winding order, fill mode, vertex format etc.
@@ -692,7 +690,7 @@ With this, different parts of the program can queue recompiles of a specific sha
 that updates the pipeline storage and handles.
 
 In addition, there is asynchronous & parallel shader compilation. The shader compilation service has a pool of threads that
-wait for new jobs to show up in a job queue. The immediate API above queues shader compilation to this serves and then
+wait for new jobs to show up in a job queue. The immediate API above queues shader compilation to this service and then
 blocks on waiting for the result.
 
 #### `PipelineService`
@@ -731,11 +729,17 @@ Learnings:
 * Let's look at reworking the blocking creation API to reduce the chance of this issue appearing in other uses
 of the shader compilation API.
 
+#### The shader permutation map is not written
+
+This map is never modified during the blocking `create` call.
+
+START HERE: Fix this. Consider rewriting the create function completely.
+
 ### TODO
 
 1. Debug UI for inspecting the pipeline service:
-    1. Compile times
-    2. List all shaders, pipelines etc. Also which shader executed them.
+    1. Compile times for shaders
+    2. Last time recreated
 2. Profiling
 3. Cleanup the code
 

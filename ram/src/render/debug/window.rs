@@ -4,6 +4,7 @@ use crate::ecs::prelude::*;
 use crate::io::input::{ActionId, InputContext, InputContextError, KeyCode, MappedInput};
 use crate::math::{Rgb, Transform, Vec3};
 use crate::render::imgui::UIModule;
+use crate::render::pipeline::PipelineStats;
 use crate::render::{self};
 use crate::visit::{Meta, MetaOrigin, Visitor};
 use render::Light;
@@ -507,6 +508,37 @@ fn build_cameras_tab(world: &mut World, visitor: &mut ImguiVisitor, frame: &UiFr
     }
 }
 
+fn build_pipelines_tab(world: &mut World, _visitor: &mut ImguiVisitor, frame: &UiFrame) {
+    type Data<'a> = (ReadExpect<'a, crate::render::pipeline::PipelineService>,);
+
+    let (pipeline_service,) = Data::fetch(world);
+
+    let ui = frame.inner();
+    let stats = pipeline_service.stats();
+    crate::imdbg!(stats.pipelines.len());
+    if let Some(_table) = ui.begin_table("pipelines_table", 3) {
+        for pipeline in stats.pipelines {
+            let PipelineStats {
+                vert, frag, handle, ..
+            } = pipeline;
+            ui.table_next_row();
+
+            ui.table_next_column();
+            ui.text(format!("{handle:?}"));
+
+            ui.table_next_column();
+            ui.text(format!("{}", vert.path.display()));
+
+            ui.table_next_column();
+            if let Some(frag) = frag {
+                ui.text(format!("{}", frag.path.display()));
+            } else {
+                ui.text("N/A");
+            }
+        }
+    }
+}
+
 struct RenderDebug;
 
 impl UIModule for RenderDebug {
@@ -521,6 +553,7 @@ impl UIModule for RenderDebug {
                     ("Overview", build_overview_tab as TabItemFn),
                     ("Lights", build_lights_tab as TabItemFn),
                     ("Cameras", build_cameras_tab as TabItemFn),
+                    ("Pipelines", build_pipelines_tab as TabItemFn),
                 ];
 
                 for (id, func) in items {

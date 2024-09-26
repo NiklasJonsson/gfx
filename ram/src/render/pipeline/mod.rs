@@ -187,7 +187,7 @@ pub struct Shaders {
     pub frag: Option<Shader>,
 }
 
-#[derive(Default, Debug)]
+#[derive(Default, Debug, Clone)]
 pub struct PipelineSettings {
     pub vertex_format: VertexFormat,
     pub culling: TriangleCulling,
@@ -222,6 +222,7 @@ impl std::fmt::Display for Error {
 }
 
 // TODO: Store the PipelineDescriptor instead?
+#[derive(Clone)]
 struct PipelineInfo {
     vert: SpvBinary,
     frag: Option<SpvBinary>,
@@ -247,6 +248,24 @@ pub struct PipelineService {
     shader_service: Arc<ShaderCompilationService>,
     state: Mutex<PipelineServiceState>,
     id_generator: UserIdGenerator,
+}
+
+#[derive(Clone)]
+pub struct ShaderStats {
+    pub path: ShaderAbsPath,
+}
+
+#[derive(Clone)]
+pub struct PipelineStats {
+    pub vert: ShaderStats,
+    pub frag: Option<ShaderStats>,
+    pub settings: PipelineSettings,
+    pub handle: Handle<GraphicsPipeline>,
+}
+
+#[derive(Clone)]
+pub struct Stats {
+    pub pipelines: Vec<PipelineStats>,
 }
 
 // TODO testing:
@@ -384,6 +403,48 @@ impl PipelineService {
     pub fn queue_recompile(&self, shader: &ShaderLocation) {
         // TODO: Error handling
         self.shader_service.queue(shader, ASYNC_USER_ID).unwrap();
+    }
+
+    pub fn stats(&self) -> Stats {
+        let state = self.state.lock().unwrap();
+        let mut stats = Stats {
+            pipelines: Vec::with_capacity(state.shader_pipelines.len()),
+        };
+
+        let mut map: std::collections::HashMap<
+            Handle<PipelineInfo>,
+            (Option<ShaderPermutation>, Option<ShaderPermutation>),
+        > = HashMap::new();
+
+        crate::imdbg!(state.shader_pipelines.len());
+        for (perm, handles) in &state.shader_pipelines {
+            for handle in handles {
+                if perm.compilation_info.ty == ShaderType::Vertex {
+                    map.entry(*handle)
+                        .and_modify(|entry| entry.0 = Some(perm.clone()))
+                        .or_insert((Some(perm.clone()), None));
+                } else {
+                    map.entry(*handle)
+                        .and_modify(|entry| entry.1 = Some(perm.clone()))
+                        .or_insert((None, Some(perm.clone())));
+                }
+            }
+        }
+
+        for (handle, perms) in map {
+            let info = state.pipelines_infos.get(&handle).unwrap();
+            stats.pipelines.push(PipelineStats {
+                vert: ShaderStats {
+                    path: perms.0.unwrap().path.clone(),
+                },
+                frag: perms.1.map(|x| ShaderStats {
+                    path: x.path.clone(),
+                }),
+                settings: info.settings.clone(),
+                handle: info.cur,
+            });
+        }
+        stats
     }
 
     pub fn create(
