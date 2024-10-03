@@ -516,6 +516,7 @@ fn build_pipelines_tab(world: &mut World, _visitor: &mut ImguiVisitor, frame: &U
     let ui = frame.inner();
     let stats = pipeline_service.stats();
     crate::imdbg!(stats.pipelines.len());
+    todo!("Table is broken");
     if let Some(_table) = ui.begin_table("pipelines_table", 3) {
         for pipeline in stats.pipelines {
             let PipelineStats {

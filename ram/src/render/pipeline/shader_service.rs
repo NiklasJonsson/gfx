@@ -3,7 +3,7 @@ use super::{Defines, ShaderAbsPath, ShaderLocation, ShaderType, SpvBinary};
 use super::shader_compiler::{CompilerResult, FileNotFound, ShaderCompiler, ShaderSource};
 
 use std::collections::HashMap;
-use std::sync::{Arc, Condvar, Mutex};
+use std::sync::{atomic::AtomicU64, Arc, Condvar, Mutex};
 
 #[derive(Default)]
 pub struct ShaderCache {
@@ -29,7 +29,6 @@ pub struct CompiledShader {
     pub path: ShaderAbsPath,
     pub compilation_info: Arc<ShaderCompilationInfo>,
     pub result: CompilerResult<SpvBinary>,
-    pub uid: UserId,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
@@ -39,42 +38,43 @@ pub struct ShaderCompilationInfo {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
-pub struct UserId(pub u64);
+enum JobId {
+    Async,
+    Blocking(u64),
+}
 
-impl std::fmt::Display for UserId {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{}", self.0)
+struct JobIdGenerator {
+    counter: AtomicU64,
+}
+
+impl JobIdGenerator {
+    fn new() -> Self {
+        Self {
+            counter: AtomicU64::new(0),
+        }
+    }
+
+    /// Take 'n' ids from the generator, return a range containing them.
+    fn take(&self, n: u64) -> std::ops::Range<u64> {
+        let start = self
+            .counter
+            .fetch_add(n, std::sync::atomic::Ordering::Relaxed);
+        start..start + n
     }
 }
 
 #[derive(Debug, Clone)]
 struct WorkItem {
-    request_id: UserId,
+    job_id: JobId,
     path: ShaderAbsPath,
     compilation_info: Arc<ShaderCompilationInfo>,
 }
 
-#[derive(Default)]
-struct UserJobs {
-    expected: usize,
-    completed: Vec<CompiledShader>,
-}
-
-impl UserJobs {
-    pub fn is_done(&self) -> bool {
-        self.expected == self.completed.len()
-    }
-
-    pub fn take(&mut self, out: &mut Vec<CompiledShader>) {
-        assert!(self.expected >= self.completed.len());
-        self.expected -= self.completed.len();
-        out.append(&mut self.completed);
-    }
-}
-
 struct SharedThreadState {
     work_queue: Vec<WorkItem>,
-    jobs: HashMap<UserId, UserJobs>,
+    // TODO: Get rid of u64?
+    sync_jobs: HashMap<u64, CompiledShader>,
+    async_jobs: Vec<CompiledShader>,
     shader_cache: ShaderCache,
 }
 
@@ -92,6 +92,7 @@ struct ShaderCompilationServiceState {
 pub struct ShaderCompilationService {
     thread_context: Arc<ThreadContext>,
     threads: Vec<std::thread::JoinHandle<()>>,
+    id_generator: JobIdGenerator,
     state: Mutex<ShaderCompilationServiceState>,
 }
 
@@ -118,7 +119,7 @@ fn thread_work(ctx: &ThreadContext, thread_idx: usize) {
         );
 
         let WorkItem {
-            request_id,
+            job_id,
             path,
             compilation_info,
         } = work_item;
@@ -162,16 +163,26 @@ fn thread_work(ctx: &ThreadContext, thread_idx: usize) {
                 log::debug!("[SCT {thread_idx}] Compilation succeeded, adding to cache");
                 state.shader_cache.insert(src, spv.clone());
             }
-            let jobs = state.jobs.get_mut(&request_id).unwrap_or_else(|| {
-                panic!("[SCT {thread_idx}] Finished a shader for user id {request_id:?} but there is no jobs entry")
-            });
+
             log::debug!("[SCT {thread_idx}] Compilation done: path: {p}, compilation info: {compilation_info:?}, result: {r}", p = path.display(), r = compilation_result.is_ok());
-            jobs.completed.push(CompiledShader {
+            let cs = CompiledShader {
                 path,
                 compilation_info: compilation_info.clone(),
                 result: compilation_result,
-                uid: request_id,
-            });
+            };
+            match job_id {
+                JobId::Async => {
+                    log::debug!("[SCT {thread_idx}] Pushing to async job result queue");
+                    state.async_jobs.push(cs);
+                }
+                JobId::Blocking(id) => {
+                    log::debug!("[SCT {thread_idx}] Pushing to job-result queue for {}", id);
+                    let prev = state.sync_jobs.insert(id, cs);
+                    if let Some(prev) = prev {
+                        panic!("[SCT {thread_idx}] Finished a shader for id {id:?} but there was already a job entry: {prev:?}")
+                    }
+                }
+            }
         }
         ctx.has_done.notify_all();
     }
@@ -191,13 +202,15 @@ impl ShaderCompilationService {
             has_done: Condvar::new(),
             shared_state: Mutex::new(SharedThreadState {
                 work_queue: Vec::with_capacity(16),
-                jobs: HashMap::default(),
+                sync_jobs: HashMap::default(),
                 shader_cache: ShaderCache::new(),
+                async_jobs: Vec::with_capacity(16),
             }),
         });
         let mut r = Self {
             thread_context: Arc::clone(&thread_context),
             threads: Vec::with_capacity(n_threads),
+            id_generator: JobIdGenerator::new(),
             state: Mutex::new(ShaderCompilationServiceState {
                 shader_compilation_info: HashMap::default(),
             }),
@@ -214,65 +227,44 @@ impl ShaderCompilationService {
         r
     }
 
+    // TODO: This helper function should not take self but instead the lock guards
     fn queue_work(&self, work: &[WorkItem]) {
         {
             let mut thread_state = self.thread_context.shared_state.lock().unwrap();
             thread_state.work_queue.extend_from_slice(work);
-            for item in work {
-                log::debug!("Queueing shader compilation request {:?}", item);
-                let jobs: &mut UserJobs = thread_state.jobs.entry(item.request_id).or_default();
-                jobs.expected += 1;
-            }
         }
         self.thread_context.has_work.notify_all();
     }
 
-    pub fn add_new_permutation(
-        &self,
-        loc: &ShaderLocation,
-        defines: Defines,
-        ty: ShaderType,
-        id: UserId,
-    ) -> Result<ShaderAbsPath, FileNotFound> {
-        let abspath = self.thread_context.compiler.find(loc)?;
-        let sci = Arc::new(ShaderCompilationInfo { defines, ty });
-
+    pub fn register_permutation(&self, path: ShaderAbsPath, sci: Arc<ShaderCompilationInfo>) {
+        // TODO: Check if permutation exists?
         {
             let mut state = self.state.lock().unwrap();
             state
                 .shader_compilation_info
-                .entry(abspath.clone())
+                .entry(path)
                 .or_default()
-                .push(sci.clone());
+                .push(sci);
         }
-
-        let work = WorkItem {
-            request_id: id,
-            path: abspath.clone(),
-            compilation_info: sci,
-        };
-        self.queue_work(&[work]);
-        Ok(abspath)
     }
 
-    pub fn queue(&self, loc: &ShaderLocation, id: UserId) -> Result<(), FileNotFound> {
+    pub fn queue(&self, loc: &ShaderLocation) -> Result<(), FileNotFound> {
         let path = self.thread_context.compiler.find(loc)?;
         // TOOD perf: There are some temporary allocations here that are used
         // to avoid locking both the mutexes at once.
-        let permutations: Vec<Arc<ShaderCompilationInfo>>;
-        {
+        let permutations: Vec<Arc<ShaderCompilationInfo>> = {
             let service_state = self.state.lock().unwrap();
-            permutations = service_state
+            service_state
                 .shader_compilation_info
                 .get(&path)
                 .expect("TODO")
-                .clone();
-        }
+                .clone()
+        };
 
         let new_jobs: Vec<WorkItem> = permutations
             .into_iter()
             .map(|sci| WorkItem {
-                request_id: id,
+                job_id: JobId::Async,
                 path: path.clone(),
                 compilation_info: Arc::clone(&sci),
             })
@@ -281,26 +273,41 @@ impl ShaderCompilationService {
         Ok(())
     }
 
-    pub fn flush(&self, id: UserId, results: &mut Vec<CompiledShader>) {
+    pub fn flush(&self, results: &mut Vec<CompiledShader>) {
         let mut state = self.thread_context.shared_state.lock().unwrap();
-
-        if let Some(jobs) = state.jobs.get_mut(&id) {
-            jobs.take(results);
-        }
+        results.append(&mut state.async_jobs);
     }
 
-    pub fn wait(&self, ids: &[UserId], results: &mut Vec<CompiledShader>) {
-        for id in ids {
+    pub fn compile_shaders(
+        &self,
+        shaders: &[(ShaderLocation, Arc<ShaderCompilationInfo>)],
+        results: &mut [Option<CompiledShader>],
+    ) {
+        let id_range = self.id_generator.take(shaders.len() as u64);
+        let mut work_items: Vec<WorkItem> = Vec::with_capacity(shaders.len());
+        for (id, (loc, info)) in id_range.clone().zip(shaders.iter()) {
+            work_items.push(WorkItem {
+                job_id: JobId::Blocking(id),
+                path: self
+                    .thread_context
+                    .compiler
+                    .find(loc)
+                    .expect("TODO: Return error"),
+                compilation_info: info.clone(),
+            });
+        }
+        self.queue_work(&work_items);
+
+        for (idx, id) in id_range.enumerate() {
             let mut state = self.thread_context.shared_state.lock().unwrap();
 
-            let mut jobs = state.jobs.get(id);
-            while jobs.as_ref().map(|x| !x.is_done()).unwrap_or(true) {
+            let mut compiled_shader = state.sync_jobs.remove(&id);
+            while compiled_shader.is_none() {
                 state = self.thread_context.has_done.wait(state).unwrap();
-                jobs = state.jobs.get(id);
+                compiled_shader = state.sync_jobs.remove(&id);
             }
 
-            let mut jobs = state.jobs.remove(id).unwrap();
-            jobs.take(results);
+            results[idx] = compiled_shader;
         }
     }
 }

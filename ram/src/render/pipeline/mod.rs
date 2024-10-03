@@ -5,7 +5,7 @@ use std::borrow::Borrow;
 use std::collections::HashMap;
 use std::hash::Hash;
 use std::path::PathBuf;
-use std::sync::{atomic::AtomicU64, Arc, Mutex};
+use std::sync::{Arc, Mutex};
 
 use trekant::{
     BlendState, DepthTest, GraphicsPipeline, GraphicsPipelineDescriptor, Handle, PipelineError,
@@ -16,29 +16,8 @@ use trekant::{
 pub use shader_compiler::{CompilerError, CompilerResult, ShaderCompiler};
 
 use shader_service::{
-    CompiledShader, ShaderCompilationService, ShaderCompilationServiceConfig, UserId,
+    CompiledShader, ShaderCompilationInfo, ShaderCompilationService, ShaderCompilationServiceConfig,
 };
-
-const ASYNC_USER_ID: UserId = UserId(0);
-
-struct UserIdGenerator {
-    counter: AtomicU64,
-}
-
-impl UserIdGenerator {
-    fn new() -> Self {
-        Self {
-            counter: AtomicU64::new(0),
-        }
-    }
-    fn next(&self) -> UserId {
-        let prev = self
-            .counter
-            .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-        let id = if prev == u64::MAX { 1 } else { prev + 1 };
-        UserId(id)
-    }
-}
 
 #[derive(Clone, Debug)]
 enum ShaderLocationContents {
@@ -162,7 +141,7 @@ fn file_notify_callback(service: &ShaderCompilationService, event: notify::Resul
         Ok(event) if event.kind.is_create() || event.kind.is_modify() => {
             for path in event.paths {
                 let loc = ShaderLocation::abs(path);
-                if let Err(e) = service.queue(&loc, ASYNC_USER_ID) {
+                if let Err(e) = service.queue(&loc) {
                     log::error!("Got event that {loc} was changed but failed to queue it for recompilation: {e}");
                 }
             }
@@ -224,9 +203,7 @@ impl std::fmt::Display for Error {
 // TODO: Store the PipelineDescriptor instead?
 #[derive(Clone)]
 struct PipelineInfo {
-    vert: SpvBinary,
-    frag: Option<SpvBinary>,
-    settings: PipelineSettings,
+    descriptor: GraphicsPipelineDescriptor,
     render_pass: Handle<RenderPass>,
     cur: Handle<GraphicsPipeline>,
 }
@@ -247,7 +224,6 @@ struct PipelineServiceState {
 pub struct PipelineService {
     shader_service: Arc<ShaderCompilationService>,
     state: Mutex<PipelineServiceState>,
-    id_generator: UserIdGenerator,
 }
 
 #[derive(Clone)]
@@ -259,7 +235,7 @@ pub struct ShaderStats {
 pub struct PipelineStats {
     pub vert: ShaderStats,
     pub frag: Option<ShaderStats>,
-    pub settings: PipelineSettings,
+    // pub settings: PipelineSettings,
     pub handle: Handle<GraphicsPipeline>,
 }
 
@@ -319,7 +295,6 @@ impl PipelineService {
                 pipelines_infos: resurs::Storage::new(),
                 watcher,
             }),
-            id_generator: UserIdGenerator::new(),
         }
     }
 
@@ -330,7 +305,7 @@ impl PipelineService {
 
         // TODO perf: tmp alloc
         let mut done_shaders: Vec<CompiledShader> = Vec::new();
-        self.shader_service.flush(ASYNC_USER_ID, &mut done_shaders);
+        self.shader_service.flush(&mut done_shaders);
         let mut state = self.state.lock().unwrap();
         for done_shader in done_shaders {
             let spv = match done_shader.result {
@@ -358,51 +333,33 @@ impl PipelineService {
                 .unwrap()
                 .clone();
             for pipeline_handle in pipelines {
-                let pipeline_info = state
-                    .pipelines_infos
-                    .get_mut(&pipeline_handle)
-                    .expect("Pipeline info was removed but hash map was not cleaned up");
+                let pipeline_info = state.pipelines_infos.get_mut(&pipeline_handle).expect(
+                    "Pipeline info was removed but shader permutation map was not cleaned up",
+                );
+                let shader_desc: &mut ShaderDescriptor;
                 if shader_type == ShaderType::Vertex {
-                    pipeline_info.vert = spv.clone();
+                    shader_desc = &mut pipeline_info.descriptor.vert;
                 } else {
                     assert_eq!(shader_type, ShaderType::Fragment);
-                    pipeline_info.frag = Some(spv.clone());
+                    shader_desc = pipeline_info.descriptor.frag.as_mut().unwrap();
                 }
 
-                // TODO: Debug name
-                let vert = ShaderDescriptor {
-                    spirv_code: pipeline_info.vert.clone().data(),
-                    debug_name: None,
-                };
-
-                let frag: Option<ShaderDescriptor> =
-                    pipeline_info.frag.as_ref().map(|x| ShaderDescriptor {
-                        spirv_code: x.clone().data(),
-                        debug_name: None,
-                    });
-                let settings = &pipeline_info.settings;
-                let descriptor = GraphicsPipelineDescriptor {
-                    vert,
-                    frag,
-                    vertex_format: settings.vertex_format.clone(),
-                    culling: settings.culling,
-                    winding: settings.winding,
-                    blend_state: settings.blend_state,
-                    depth_testing: settings.depth_testing,
-                    polygon_mode: settings.polygon_mode,
-                    primitive_topology: settings.primitive_topology,
-                };
-
-                renderer
-                    .recreate_gfx_pipeline(descriptor, pipeline_info.render_pass, pipeline_info.cur)
+                shader_desc.spirv_code = spv.clone().data();
+                let new_handle = renderer
+                    .recreate_gfx_pipeline(
+                        pipeline_info.descriptor.clone(),
+                        pipeline_info.render_pass,
+                        pipeline_info.cur,
+                    )
                     .unwrap();
+                pipeline_info.cur = new_handle;
             }
         }
     }
 
     pub fn queue_recompile(&self, shader: &ShaderLocation) {
         // TODO: Error handling
-        self.shader_service.queue(shader, ASYNC_USER_ID).unwrap();
+        self.shader_service.queue(shader).unwrap();
     }
 
     pub fn stats(&self) -> Stats {
@@ -440,10 +397,11 @@ impl PipelineService {
                 frag: perms.1.map(|x| ShaderStats {
                     path: x.path.clone(),
                 }),
-                settings: info.settings.clone(),
                 handle: info.cur,
             });
         }
+
+        stats.pipelines.sort_by(|a, b| a.handle.cmp(&b.handle));
         stats
     }
 
@@ -455,74 +413,99 @@ impl PipelineService {
         renderer: &mut Renderer,
     ) -> Result<Handle<GraphicsPipeline>, Error> {
         log::debug!("Creating pipeline with {:?} {:?}", shaders, settings);
+        // TODO: Caching?
         // We want to:
         // 1. Compile vertex and fragment shaders in parallel, async.
         // 2. Register the shader path so that it can be recompiled.
         // 4. Create the pipeline
 
-        // TODO: Clean this function up
-        let vert_debug_name = shaders.vert.debug_name.clone();
-        let frag_debug_name = shaders.frag.as_ref().and_then(|f| f.debug_name.clone());
-
-        let shader_permutations = [
-            Some((shaders.vert, ShaderType::Vertex)),
-            shaders.frag.map(|f| (f, ShaderType::Fragment)),
-        ];
-
-        // TODO: Consider this API on the shader service
-        // compile_shaders()
-        // * A blocking, batch API.
-        // * Doesn't register.
-        // * Return abspaths for successful shaders
-        let id = self.id_generator.next();
-        for shader in shader_permutations.into_iter().flatten() {
-            let (Shader { loc, defines, .. }, ty) = shader;
-
-            let abspath = self
-                .shader_service
-                .add_new_permutation(&loc, defines, ty, id)
-                .map_err(|e| Error::Compilation(CompilerError::NotFound { path: e.path }))?;
-
-            let mut state = self.state.lock().unwrap();
-            if let Some(watcher) = &mut state.watcher {
-                watcher
-                    .watch(&abspath, notify::RecursiveMode::NonRecursive)
-                    .expect("TOOD: Failed to watch file");
-            }
+        #[derive(Debug)]
+        struct CompiledShaderInfo {
+            path: ShaderAbsPath,
+            spv: SpvBinary,
+            ci: Arc<ShaderCompilationInfo>,
+            debug_name: Option<String>,
         }
 
-        // TODO perf: tmp alloc
-        let mut results = Vec::with_capacity(2);
-        log::debug!("Waiting for shader compilation on ID {}", id);
-        self.shader_service.wait(&[id], &mut results);
-        log::debug!("Got {} shaders", results.len());
-
-        let mut vert_result = results.remove(0);
-        let mut frag_result = results.pop();
-        if vert_result.compilation_info.ty != ShaderType::Vertex {
-            let frag_result = frag_result
-                .as_mut()
-                .expect("Second shader should exist if the first one is not a vertex shader");
-            std::mem::swap(frag_result, &mut vert_result);
+        let vert = &shaders.vert;
+        let vert_csi: CompiledShaderInfo;
+        let frag_csi: Option<CompiledShaderInfo>;
+        if let Some(frag) = &shaders.frag {
+            log::debug!("Compiling vert and frag shaders");
+            let mut results = [None, None];
+            self.shader_service.compile_shaders(
+                &[
+                    (
+                        vert.loc.clone(),
+                        Arc::new(ShaderCompilationInfo {
+                            defines: vert.defines.clone(),
+                            ty: ShaderType::Vertex,
+                        }),
+                    ),
+                    (
+                        frag.loc.clone(),
+                        Arc::new(ShaderCompilationInfo {
+                            defines: frag.defines.clone(),
+                            ty: ShaderType::Fragment,
+                        }),
+                    ),
+                ],
+                &mut results,
+            );
+            let [compiled_vert, compiled_frag] = results.map(Option::unwrap);
+            let vert_spv = compiled_vert.result.map_err(Error::Compilation)?;
+            let frag_spv = compiled_frag.result.map_err(Error::Compilation)?;
+            vert_csi = CompiledShaderInfo {
+                path: compiled_vert.path,
+                ci: compiled_vert.compilation_info,
+                spv: vert_spv,
+                debug_name: vert.debug_name.clone(),
+            };
+            frag_csi = Some(CompiledShaderInfo {
+                path: compiled_frag.path,
+                ci: compiled_frag.compilation_info,
+                spv: frag_spv,
+                debug_name: frag.debug_name.clone(),
+            });
+        } else {
+            log::debug!("Compiling vert shader");
+            let mut results = [None];
+            self.shader_service.compile_shaders(
+                &[(
+                    vert.loc.clone(),
+                    Arc::new(ShaderCompilationInfo {
+                        defines: vert.defines.clone(),
+                        ty: ShaderType::Vertex,
+                    }),
+                )],
+                &mut results,
+            );
+            let [CompiledShader {
+                path,
+                compilation_info,
+                result,
+                ..
+            }] = results.map(Option::unwrap);
+            let spv = result.map_err(Error::Compilation)?;
+            vert_csi = CompiledShaderInfo {
+                path,
+                ci: compilation_info,
+                spv,
+                debug_name: vert.debug_name.clone(),
+            };
+            frag_csi = None;
         }
 
-        let vert_spv: SpvBinary = vert_result.result.map_err(Error::Compilation)?;
-        let frag_spv: Option<SpvBinary> = match frag_result {
-            Some(CompiledShader {
-                result: Ok(spv), ..
-            }) => Some(spv),
-            Some(CompiledShader { result: Err(e), .. }) => return Err(Error::Compilation(e)),
-            None => None,
-        };
+        log::debug!("Done compiling. Got vert {vert_csi:?} and frag {frag_csi:?}");
 
         let vert = ShaderDescriptor {
-            spirv_code: vert_spv.clone().data(),
-            debug_name: vert_debug_name,
+            spirv_code: vert_csi.spv.clone().data(),
+            debug_name: vert_csi.debug_name.clone(),
         };
 
-        let frag: Option<ShaderDescriptor> = frag_spv.as_ref().map(|x| ShaderDescriptor {
-            spirv_code: x.clone().data(),
-            debug_name: frag_debug_name,
+        let frag: Option<ShaderDescriptor> = frag_csi.as_ref().map(|x| ShaderDescriptor {
+            spirv_code: x.spv.clone().data(),
+            debug_name: x.debug_name.clone(),
         });
         let descriptor = GraphicsPipelineDescriptor {
             vert,
@@ -536,19 +519,60 @@ impl PipelineService {
             primitive_topology: settings.primitive_topology,
         };
 
-        // TODO: We should only record the shader permutation if the entire step finishes
         let pipeline = renderer
-            .create_gfx_pipeline(descriptor, &render_pass)
+            .create_gfx_pipeline(descriptor.clone(), &render_pass)
             .map_err(Error::PipelineCreation)?;
-        let mut state = self.state.lock().unwrap();
-        state.pipelines_infos.add(PipelineInfo {
-            vert: vert_spv,
-            frag: frag_spv,
-            settings,
-            render_pass,
-            cur: pipeline,
-        });
 
+        self.shader_service
+            .register_permutation(vert_csi.path.clone(), vert_csi.ci.clone());
+        if let Some(frag) = &frag_csi {
+            self.shader_service
+                .register_permutation(frag.path.clone(), frag.ci.clone());
+        }
+
+        {
+            let mut state = self.state.lock().unwrap();
+            if let Some(watcher) = &mut state.watcher {
+                watcher
+                    .watch(&vert_csi.path, notify::RecursiveMode::NonRecursive)
+                    .unwrap_or_else(|_| {
+                        panic!("Failed to watch file: {}", vert_csi.path.display())
+                    });
+                if let Some(frag_csi) = &frag_csi {
+                    watcher
+                        .watch(&frag_csi.path, notify::RecursiveMode::NonRecursive)
+                        .unwrap_or_else(|_| {
+                            panic!("Failed to watch file: {}", frag_csi.path.display())
+                        });
+                }
+            }
+
+            let pipeline_info = state.pipelines_infos.add(PipelineInfo {
+                descriptor,
+                render_pass,
+                cur: pipeline,
+            });
+
+            state
+                .shader_pipelines
+                .entry(ShaderPermutation {
+                    path: vert_csi.path.clone(),
+                    compilation_info: vert_csi.ci.clone(),
+                })
+                .or_default()
+                .push(pipeline_info);
+
+            if let Some(frag_csi) = frag_csi {
+                state
+                    .shader_pipelines
+                    .entry(ShaderPermutation {
+                        path: frag_csi.path.clone(),
+                        compilation_info: frag_csi.ci.clone(),
+                    })
+                    .or_default()
+                    .push(pipeline_info);
+            }
+        }
         log::debug!("Done creating pipeline");
 
         Ok(pipeline)
