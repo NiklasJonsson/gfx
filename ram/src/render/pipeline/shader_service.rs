@@ -132,6 +132,7 @@ fn thread_work(ctx: &ThreadContext, thread_idx: usize) {
         match preprocess_result {
             Ok(src) => {
                 let mut result = None;
+                // Minimize lock window
                 {
                     let state = ctx.shared_state.lock().unwrap();
                     if let Some(bin) = state.shader_cache.get(&src) {
@@ -229,6 +230,10 @@ impl ShaderCompilationService {
 
     // TODO: This helper function should not take self but instead the lock guards
     fn queue_work(&self, work: &[WorkItem]) {
+        log::debug!(
+            "Queued {} jobs to the shader compilation thread pool",
+            work.len()
+        );
         {
             let mut thread_state = self.thread_context.shared_state.lock().unwrap();
             thread_state.work_queue.extend_from_slice(work);
@@ -249,6 +254,7 @@ impl ShaderCompilationService {
     }
 
     pub fn queue(&self, loc: &ShaderLocation) -> Result<(), FileNotFound> {
+        log::debug!("Got shader compilation request for {}", loc);
         let path = self.thread_context.compiler.find(loc)?;
         // TOOD perf: There are some temporary allocations here that are used
         // to avoid locking both the mutexes at once.

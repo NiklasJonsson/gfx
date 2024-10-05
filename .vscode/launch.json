@@ -5,6 +5,45 @@
     "version": "0.2.0",
     "configurations": [
         {
+            "name": "Debug (no build) 'dbg' (Debug Profile)",
+            "type": "cppvsdbg",
+            "request": "launch",
+            "program": "target/debug/dbg.exe",
+            "args": [
+                // "--gltf-file",
+                // "../glTF-Sample-Models/2.0/Sponza/glTF/Sponza.gltf",
+                "--spawn-plane",
+                "--spotlight-test",
+                // "--sun-simulation",
+                "--ambient-light",
+            ],
+            "stopAtEntry": false,
+            "cwd": "${workspaceFolder}",
+            "environment": [
+                {
+                    "name": "RUST_LOG",
+                    "value": "info,ram::render::pipeline=trace",
+                }
+            ],
+            "console": "integratedTerminal"
+        },
+        {
+            "name": "Debug (no build) 'dbg' (Release Profile)",
+            "type": "cppvsdbg",
+            "request": "launch",
+            "program": "target/release/dbg.exe",
+            "args": [],
+            "stopAtEntry": false,
+            "cwd": "${workspaceFolder}",
+            "environment": [
+                {
+                    "name": "RUST_LOG",
+                    "value": "info,trekant=trace,ram=info,ram::render::pipeline=trace",
+                }
+            ],
+            "console": "integratedTerminal"
+        },
+        {
             "type": "lldb",
             "request": "launch",
             "name": "Debug unit tests in library 'trekant'",

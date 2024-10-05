@@ -702,15 +702,19 @@ The pipeline inputs are:
 * Fragment shader. GLSL source path, defines for the compilation.
 * PipelineSettings. E.g. winding order.
 
-// TODO: More docs
+The idea is that the initial creation of a pipeline is done with this class. It will internally
+register all of the inputs to be able to recreate the pipeline if any of the input shader paths
+change or is explicitly asked to recompile.
 
-TODO: What synchronization is required here with regards to command buffers etc. waitDeviceIdle?
-
-Internally, the pipeline service uses the `ShaderCompilationService`.
+Internally, the pipeline service uses the `ShaderCompilationService` to compile shaders
 
 #### `ShaderCompilationService`
 
-This implements multi-threaded async shader compilation.
+This implements multi-threaded async shader compilation. It keeps track of all the shader permutations for a certain
+shader path. This is done to be able to give it a shader path and then it spawns rebuild jobs for all the permutations
+for that shader path.
+
+It exposes both an immediate and async API, corresponding to the needs to the PipelineService.
 
 ### Bugs
 
@@ -733,15 +737,14 @@ of the shader compilation API.
 
 This map is never modified during the blocking `create` call.
 
-START HERE: Fix this. Consider rewriting the create function completely.
+This was fixed and in turn, the shader service now exposes a blocking API for compiling several shaders.
 
 ### TODO
 
-1. Debug UI for inspecting the pipeline service:
-    1. Compile times for shaders
-    2. Last time recreated
-2. Profiling
-3. Cleanup the code
+1. Fix the validation errors when recompiling.
+2. Test the recompile functionality
+3. Profiling
+4. Cleanup the code
 
 ## Future work
 
