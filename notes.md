@@ -739,9 +739,25 @@ This map is never modified during the blocking `create` call.
 
 This was fixed and in turn, the shader service now exposes a blocking API for compiling several shaders.
 
+#### Creating massive amounts of pipelines makes the app freeze
+
+When modifying the pbr fragment shader, it triggers recreation of ~500 pipelines
+
+Problems are several:
+
+* We watch the same file many times meaning that a single modification leads to many events.
+* Each entity creates its own pipeline.
+
+So, we have N duplicated pipeline infos in the pipeline service. For each file that is part of
+M pipelines, we get M * N pipeline creations.
+
 ### TODO
 
-1. Fix the validation errors when recompiling.
+1. Fix the massive amounts of pipelines by proper caching
+  Need to look at the entire pipeline creation and answer:
+    1. How do entities and pipeline permutations relate?
+    2. What can be cached?
+    3. Can we rewrite/rethink pipeline creation? Try to create all permutations upfront and then do lookups for entities.
 2. Test the recompile functionality
 3. Profiling
 4. Cleanup the code
@@ -752,6 +768,10 @@ This was fixed and in turn, the shader service now exposes a blocking API for co
 
 There is a todo in `material.rs` for fixing this. The problem is that we shouldn't create the descriptor set
 before the mipmaps are generated.
+
+### Hook up the profiler
+
+Figure out why puffin doesn't work.
 
 ### Logging in imgui UI
 

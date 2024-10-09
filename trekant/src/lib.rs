@@ -996,6 +996,12 @@ impl Renderer {
         done.blocking_wait().expect("Failed to wait for mipmapping");
         Ok(())
     }
+
+    pub fn wait_device_idle(&self) {
+        self.device
+            .wait_idle()
+            .expect("Failed to wait for all work to finish on gpu")
+    }
 }
 
 impl Renderer {

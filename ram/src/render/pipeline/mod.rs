@@ -138,8 +138,23 @@ impl ShaderAbsPath {
 }
 
 fn file_notify_callback(service: &ShaderCompilationService, event: notify::Result<notify::Event>) {
+    let fmt_paths = |paths: &[std::path::PathBuf]| -> String {
+        let mut buf = String::new();
+        for p in paths {
+            buf.push_str(&p.display().to_string());
+            buf.push_str(", ");
+        }
+        if !buf.is_empty() {
+            buf.truncate(buf.len() - 2);
+        }
+        buf
+    };
     match event {
         Ok(event) if event.kind.is_create() || event.kind.is_modify() => {
+            log::debug!(
+                "Got event from the shader file watcher for {}",
+                fmt_paths(&event.paths)
+            );
             for path in event.paths {
                 let loc = ShaderLocation::abs(path);
                 if let Err(e) = service.queue(&loc) {
@@ -310,6 +325,16 @@ impl PipelineService {
         let mut done_shaders: Vec<CompiledShader> = Vec::new();
         self.shader_service.flush(&mut done_shaders);
         let mut state = self.state.lock().unwrap();
+        if done_shaders.is_empty() {
+            return;
+        }
+
+        println!("Waiting for device idle...");
+        renderer.wait_device_idle();
+        println!("Done idling");
+
+        let start = std::time::Instant::now();
+        println!("Creating pipelines...");
         for done_shader in done_shaders {
             let spv = match done_shader.result {
                 Err(e) => {
@@ -347,6 +372,7 @@ impl PipelineService {
                 };
 
                 shader_desc.spirv_code = spv.clone().data();
+                log::info!("Recreating handle {}", pipeline_info.cur.id());
                 let new_handle = renderer
                     .recreate_gfx_pipeline(
                         pipeline_info.descriptor.clone(),
@@ -357,6 +383,7 @@ impl PipelineService {
                 pipeline_info.cur = new_handle;
             }
         }
+        println!("Created pipelines in {} s", start.elapsed().as_secs_f32());
     }
 
     pub fn queue_recompile(&self, shader: &ShaderLocation) {

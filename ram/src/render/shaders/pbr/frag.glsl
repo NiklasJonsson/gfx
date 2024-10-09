@@ -86,6 +86,12 @@ void main() {
 #if HAS_NORMAL_MAP
     vec3 tangent = normalize(vs_out.world_tangent);
     vec3 bitangent = normalize(vs_out.world_bitangent);
+    
+
+
+
+
+    
     mat3 tbn = mat3(tangent, bitangent, normal);
     vec3 tex_normal = texture(normal_map, vs_out.tex_coords_0).xyz * 2.0 - 1.0;
     // Only scale .xy, as per the gltf spec

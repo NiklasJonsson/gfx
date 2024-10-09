@@ -112,11 +112,7 @@ fn thread_work(ctx: &ThreadContext, thread_idx: usize) {
             }
             work_item = state.work_queue.remove(0);
         }
-        log::debug!(
-            "Shader compiler thread (SCT) {} picked up {:?}",
-            thread_idx,
-            work_item
-        );
+        log::debug!("[SCT {thread_idx}] picked up {:?}", work_item);
 
         let WorkItem {
             job_id,
@@ -219,10 +215,15 @@ impl ShaderCompilationService {
 
         for i in 0..n_threads {
             let ctx = Arc::clone(&thread_context);
-            r.threads.push(std::thread::spawn(move || {
-                log::info!("Starting shader compilation thread {i}");
-                thread_work(&ctx, i);
-            }));
+            let tbuilder = std::thread::Builder::new().name(format!("Shader compilation {i}"));
+            r.threads.push(
+                tbuilder
+                    .spawn(move || {
+                        log::info!("Starting shader compilation thread (SCT) {i}");
+                        thread_work(&ctx, i);
+                    })
+                    .expect("Failed to spawn thread for shader compiler service"),
+            );
         }
 
         r
