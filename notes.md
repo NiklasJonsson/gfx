@@ -761,6 +761,8 @@ M pipelines, we get M * N pipeline creations.
 2. Test the recompile functionality
 3. Profiling
 4. Cleanup the code
+    * Error handling
+    * Many definitions of `Arc<ShaderCompilationInfo>` even though Arc is an optimization
 
 ## Future work
 

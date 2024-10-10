@@ -2,12 +2,11 @@ mod shader_compiler;
 mod shader_service;
 
 use std::borrow::Borrow;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::hash::Hash;
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 
-use notify::Watcher;
 use trekant::{
     BlendState, DepthTest, GraphicsPipeline, GraphicsPipelineDescriptor, Handle, PipelineError,
     PolygonMode, PrimitiveTopology, RenderPass, Renderer, ShaderDescriptor, TriangleCulling,
@@ -137,18 +136,19 @@ impl ShaderAbsPath {
     }
 }
 
+fn fmt_paths(paths: &[std::path::PathBuf]) -> String {
+    let mut buf = String::new();
+    for p in paths {
+        buf.push_str(&p.display().to_string());
+        buf.push_str(", ");
+    }
+    if !buf.is_empty() {
+        buf.truncate(buf.len() - 2);
+    }
+    buf
+}
+
 fn file_notify_callback(service: &ShaderCompilationService, event: notify::Result<notify::Event>) {
-    let fmt_paths = |paths: &[std::path::PathBuf]| -> String {
-        let mut buf = String::new();
-        for p in paths {
-            buf.push_str(&p.display().to_string());
-            buf.push_str(", ");
-        }
-        if !buf.is_empty() {
-            buf.truncate(buf.len() - 2);
-        }
-        buf
-    };
     match event {
         Ok(event) if event.kind.is_create() || event.kind.is_modify() => {
             log::debug!(
@@ -216,6 +216,40 @@ impl std::fmt::Display for Error {
     }
 }
 
+struct ShaderWatcher {
+    watcher: Box<dyn notify::Watcher + Send>,
+    files: HashSet<ShaderAbsPath>,
+}
+
+impl ShaderWatcher {
+    pub fn watch(&mut self, path: &ShaderAbsPath) {
+        assert!(path.is_file());
+        let new = self.files.insert(path.clone());
+        if new {
+            self.watcher
+                .watch(path, notify::RecursiveMode::NonRecursive)
+                .unwrap_or_else(|e| {
+                    panic!(
+                        "Failed to register '{}' with the file watcher: {e}",
+                        path.display()
+                    )
+                });
+        }
+    }
+
+    pub fn new(shader_service: Arc<ShaderCompilationService>) -> Self {
+        Self {
+            watcher: Box::new(
+                notify::recommended_watcher(move |event| {
+                    file_notify_callback(&shader_service, event)
+                })
+                .expect("Failed to launch shader file watcher"),
+            ) as Box<dyn notify::Watcher + Send>,
+            files: HashSet::new(),
+        }
+    }
+}
+
 // TODO: Store the PipelineDescriptor instead?
 #[derive(Clone)]
 struct PipelineInfo {
@@ -234,7 +268,7 @@ struct ShaderPermutation {
 struct PipelineServiceState {
     pipelines_infos: resurs::Storage<PipelineInfo>,
     shader_pipelines: HashMap<ShaderPermutation, Vec<Handle<PipelineInfo>>>,
-    watcher: Option<Box<dyn notify::Watcher + Send>>,
+    watcher: Option<ShaderWatcher>,
 }
 
 pub struct PipelineService {
@@ -296,12 +330,7 @@ impl PipelineService {
 
         let watcher = if config.live_recompile {
             let shader_service = Arc::clone(&shader_service);
-            Some(Box::new(
-                notify::recommended_watcher(move |event| {
-                    file_notify_callback(&shader_service, event)
-                })
-                .expect("Failed to launch shader file watcher"),
-            ) as Box<dyn notify::Watcher + Send>)
+            Some(ShaderWatcher::new(shader_service))
         } else {
             None
         };
@@ -439,13 +468,6 @@ impl PipelineService {
         stats
     }
 
-    fn watch_file(watcher: &mut (dyn Watcher + Send), path: &ShaderAbsPath) {
-        assert!(path.is_file());
-        watcher
-            .watch(path, notify::RecursiveMode::NonRecursive)
-            .unwrap_or_else(|_| panic!("Failed to watch file: {}", path.display()));
-    }
-
     pub fn create(
         &self,
         shaders: Shaders,
@@ -565,9 +587,9 @@ impl PipelineService {
         {
             let mut state = self.state.lock().unwrap();
             if let Some(watcher) = &mut state.watcher {
-                Self::watch_file(&mut **watcher, &vert_csi.path);
+                watcher.watch(&vert_csi.path);
                 if let Some(frag_csi) = &frag_csi {
-                    Self::watch_file(&mut **watcher, &frag_csi.path);
+                    watcher.watch(&frag_csi.path);
                 }
             }
 
