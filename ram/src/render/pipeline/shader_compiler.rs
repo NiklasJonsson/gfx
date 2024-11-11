@@ -1,11 +1,8 @@
 use thiserror::Error;
 
-use std::borrow::Borrow;
 use std::path::{Path, PathBuf};
 
-use super::{
-    Defines, ShaderAbsPath, ShaderLocation, ShaderLocationContents, ShaderType, SpvBinary,
-};
+use super::{Defines, ShaderAbsPath, ShaderLocation, ShaderType, SpvBinary};
 
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub struct ShaderSource(pub String);
@@ -109,12 +106,9 @@ fn find_shader(
     search_directories: &[PathBuf],
     loc: &ShaderLocation,
 ) -> Result<std::path::PathBuf, FileNotFound> {
-    match &loc.0 {
-        ShaderLocationContents::Absolute(path) => {
-            let path: &Path = path.borrow();
-            Ok(path.to_path_buf())
-        }
-        ShaderLocationContents::Search(path) => find_file_in(path, search_directories),
+    match &loc {
+        ShaderLocation::Absolute(path) => Ok(path.to_path_buf()),
+        ShaderLocation::Search(path) => find_file_in(path, search_directories),
     }
 }
 
@@ -228,7 +222,7 @@ impl ShaderCompiler {
         options.set_include_callback(callback);
         let compiler = &self.compiler;
 
-        let path_as_str = shader.0.display().to_string();
+        let path_as_str = shader.display().to_string();
         let source =
             match compiler.preprocess(&source, &path_as_str.to_string(), "main", Some(&options)) {
                 Ok(artifact) => artifact.as_text(),

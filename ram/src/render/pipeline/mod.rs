@@ -1,10 +1,9 @@
 mod shader_compiler;
+mod shader_path;
 mod shader_service;
 
-use std::borrow::Borrow;
 use std::collections::{HashMap, HashSet};
 use std::hash::Hash;
-use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 
 use trekant::{
@@ -14,49 +13,11 @@ use trekant::{
 };
 
 pub use shader_compiler::{CompilerError, CompilerResult, ShaderCompiler};
+pub use shader_path::{ShaderAbsPath, ShaderLocation};
 
 use shader_service::{
     CompiledShader, ShaderCompilationInfo, ShaderCompilationService, ShaderCompilationServiceConfig,
 };
-
-#[derive(Clone, Debug)]
-enum ShaderLocationContents {
-    /// Absolute path to a shader
-    Absolute(ShaderAbsPath),
-    /// Search relative to one of the shader search paths in the shader compiler.
-    Search(PathBuf),
-}
-
-#[derive(Clone, Debug)]
-pub struct ShaderLocation(ShaderLocationContents);
-
-impl ShaderLocation {
-    pub fn abs<P>(p: P) -> Self
-    where
-        P: Into<PathBuf>,
-    {
-        let path = ShaderAbsPath::from_abspath(p.into());
-        Self(ShaderLocationContents::Absolute(path))
-    }
-
-    /// Search relative to one of the shader search paths in the shader compiler.
-    pub fn search<P>(p: P) -> Self
-    where
-        P: Into<PathBuf>,
-    {
-        let pathbuf: PathBuf = p.into();
-        Self(ShaderLocationContents::Search(pathbuf))
-    }
-}
-
-impl std::fmt::Display for ShaderLocation {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match &self.0 {
-            ShaderLocationContents::Absolute(p) => write!(f, "{p}", p = p.display()),
-            ShaderLocationContents::Search(p) => write!(f, "<SHADER_PATH>/{p}", p = p.display()),
-        }
-    }
-}
 
 #[derive(Debug, Clone, Default, PartialEq, Eq, Hash)]
 pub struct Defines {
@@ -96,44 +57,6 @@ impl SpvBinary {
 pub enum ShaderType {
     Vertex,
     Fragment,
-}
-
-/// The absolute path to a shader.
-///
-/// This is intended to be used in places where the shader path needs to be passed around
-/// a lot but references are unwanted, for example over thread boundaries. Internally,
-/// it uses reference counting to make it cheap to clone.
-#[derive(Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Debug)]
-pub struct ShaderAbsPath(Arc<std::path::Path>);
-
-impl Borrow<std::path::Path> for ShaderAbsPath {
-    fn borrow(&self) -> &std::path::Path {
-        &self.0
-    }
-}
-
-impl std::ops::Deref for ShaderAbsPath {
-    type Target = std::path::Path;
-    fn deref(&self) -> &Self::Target {
-        &self.0
-    }
-}
-
-impl AsRef<std::path::Path> for ShaderAbsPath {
-    fn as_ref(&self) -> &std::path::Path {
-        &self.0
-    }
-}
-
-impl ShaderAbsPath {
-    fn from_abspath(abspath: std::path::PathBuf) -> Self {
-        assert!(
-            abspath.is_absolute(),
-            "Expected {p} to be an absolute path to a shader",
-            p = abspath.display()
-        );
-        Self(Arc::from(abspath.as_path()))
-    }
 }
 
 fn fmt_paths(paths: &[std::path::PathBuf]) -> String {

@@ -751,13 +751,26 @@ Problems are several:
 So, we have N duplicated pipeline infos in the pipeline service. For each file that is part of
 M pipelines, we get M * N pipeline creations.
 
+### Pipeline creation
+
+Pipelines are dynamically created at runtime, partly because the vertex format is not known. It is combinatorial.
+It might be possible to warm up the cache for shadow pipelines because they only have vec3 + skip as the format so
+we could potentially build pipelines up to some N of skip size so that we always this the cache during runtime.
+
+This does however, assume that the pipeline service has a cache which is it does not.
+
+I think it should be possible to cache the inputs we get in `create()` directly in the PipelineService. Since modifications
+of files trigger recompiles, the cache should always be valid assuming that the render pass has not changed since last time
+which should be fine.
+
+So, I think that this should be done:
+
+* Cache in PipelineService::create.
+* For now, let two pipeline creation requests race to the cache.
+
 ### TODO
 
 1. Fix the massive amounts of pipelines by proper caching
-  Need to look at the entire pipeline creation and answer:
-    1. How do entities and pipeline permutations relate?
-    2. What can be cached?
-    3. Can we rewrite/rethink pipeline creation? Try to create all permutations upfront and then do lookups for entities.
 2. Test the recompile functionality
 3. Profiling
 4. Cleanup the code
