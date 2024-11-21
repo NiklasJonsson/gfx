@@ -138,8 +138,10 @@ impl ShaderCompiler {
         self.include_paths.insert(0, path.into());
     }
 
-    pub fn find(&self, loc: &ShaderLocation) -> Result<ShaderAbsPath, FileNotFound> {
-        let result = find_shader(&self.shader_paths, loc).map(ShaderAbsPath::from_abspath);
+    pub fn find(&self, loc: &ShaderLocation) -> CompilerResult<ShaderAbsPath> {
+        let result = find_shader(&self.shader_paths, loc)
+            .map(ShaderAbsPath::from_abspath)
+            .map_err(|e| CompilerError::NotFound { path: e.path });
         if let Ok(path) = &result {
             log::debug!("Resolved '{loc}' to '{p}'", p = path.display());
         }
@@ -152,9 +154,7 @@ impl ShaderCompiler {
         defines: &Defines,
         ty: ShaderType,
     ) -> CompilerResult<SpvBinary> {
-        let path = self
-            .find(shader)
-            .map_err(|e| CompilerError::NotFound { path: e.path })?;
+        let path = self.find(shader)?;
         let src = self.preprocess(&path, defines)?;
         self.compile_source(&src, ty, &path.display().to_string())
     }

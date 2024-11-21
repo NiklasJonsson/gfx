@@ -254,17 +254,23 @@ impl ShaderCompilationService {
         }
     }
 
-    pub fn queue(&self, loc: &ShaderLocation) -> Result<(), FileNotFound> {
+    // TODO: Can this take a resolved shader location so that it can never fail?
+    pub fn queue(&self, loc: &ShaderLocation) -> CompilerResult<()> {
         log::debug!("Got shader compilation request for {}", loc);
         let path = self.thread_context.compiler.find(loc)?;
         // TOOD perf: There are some temporary allocations here that are used
-        // to avoid locking both the mutexes at once.
+        // to avoid locking both the mutexes at once (to avoid potential deadlocks).
         let permutations: Vec<Arc<ShaderCompilationInfo>> = {
             let service_state = self.state.lock().unwrap();
             service_state
                 .shader_compilation_info
                 .get(&path)
-                .expect("TODO")
+                .unwrap_or_else(|| {
+                    panic!(
+                        "No compilation info registerd for file {}. Is it part of a pipeline?",
+                        path.display()
+                    )
+                })
                 .clone()
         };
 

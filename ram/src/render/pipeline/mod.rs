@@ -92,20 +92,20 @@ fn file_notify_callback(service: &ShaderCompilationService, event: notify::Resul
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct Shader {
     pub loc: ShaderLocation,
     pub defines: Defines,
     pub debug_name: Option<String>,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct Shaders {
     pub vert: Shader,
     pub frag: Option<Shader>,
 }
 
-#[derive(Default, Debug, Clone)]
+#[derive(Default, Debug, Clone, PartialEq, Eq, Hash)]
 pub struct PipelineSettings {
     pub vertex_format: VertexFormat,
     pub culling: TriangleCulling,
@@ -125,7 +125,7 @@ pub struct PipelineServiceConfig {
 #[derive(Debug)]
 pub enum Error {
     Compilation(CompilerError),
-    PipelineCreation(trekant::PipelineError),
+    PipelineCreation(PipelineError),
 }
 
 impl std::error::Error for Error {}
@@ -173,6 +173,13 @@ impl ShaderWatcher {
     }
 }
 
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+struct PipelineCacheKey {
+    shaders: Shaders,
+    settings: PipelineSettings,
+    render_pass: Handle<trekant::RenderPass>,
+}
+
 // TODO: Store the PipelineDescriptor instead?
 #[derive(Clone)]
 struct PipelineInfo {
@@ -189,8 +196,10 @@ struct ShaderPermutation {
 
 #[derive(Default)]
 struct PipelineServiceState {
+    // TODO: Can we merge the cache with the other data structures?
     pipelines_infos: resurs::Storage<PipelineInfo>,
     shader_pipelines: HashMap<ShaderPermutation, Vec<Handle<PipelineInfo>>>,
+    cache: HashMap<PipelineCacheKey, Handle<GraphicsPipeline>>,
     watcher: Option<ShaderWatcher>,
 }
 
@@ -228,9 +237,9 @@ pub struct Stats {
 // 4. Delete a/x/y
 // 5. Queue recompile of x/y
 // 6. It should use the contents of b/x/y and the pipeline should be replaced.
-// *
+// * File notify callback for unmodified contents should hit the cache.
 
-/// A service to create graphics pipeline (descriptors).
+/// A service to create graphics pipeline descriptors.
 ///
 /// It exposes a blocking API with `create()` which is intended to be used
 /// the first time a pipeline is created. After that, the async API can be
@@ -263,6 +272,7 @@ impl PipelineService {
             state: Mutex::new(PipelineServiceState {
                 shader_pipelines: HashMap::new(),
                 pipelines_infos: resurs::Storage::new(),
+                cache: HashMap::new(),
                 watcher,
             }),
         }
@@ -338,9 +348,10 @@ impl PipelineService {
         println!("Created pipelines in {} s", start.elapsed().as_secs_f32());
     }
 
-    pub fn queue_recompile(&self, shader: &ShaderLocation) {
-        // TODO: Error handling
-        self.shader_service.queue(shader).unwrap();
+    pub fn queue_recompile(&self, shader: &ShaderLocation) -> Result<(), Error> {
+        self.shader_service
+            .queue(shader)
+            .map_err(Error::Compilation)
     }
 
     pub fn stats(&self) -> Stats {
@@ -403,6 +414,19 @@ impl PipelineService {
         // 1. Compile vertex and fragment shaders in parallel, async.
         // 2. Register the shader path so that it can be recompiled.
         // 4. Create the pipeline
+
+        let cache_key = PipelineCacheKey {
+            shaders: shaders.clone(),
+            settings: settings.clone(),
+            render_pass,
+        };
+
+        {
+            let state = self.state.lock().unwrap();
+            if let Some(pipeline) = state.cache.get(&cache_key) {
+                return Ok(*pipeline);
+            }
+        }
 
         #[derive(Debug)]
         struct CompiledShaderInfo {
@@ -541,6 +565,8 @@ impl PipelineService {
                     .or_default()
                     .push(pipeline_info);
             }
+
+            state.cache.insert(cache_key, pipeline);
         }
         log::debug!("Done creating pipeline");
 

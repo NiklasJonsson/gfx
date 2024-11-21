@@ -41,7 +41,7 @@ impl ShaderAbsPath {
 
 /// A shader location, either an absolute path or a path that is relative to the shader
 /// search directories.
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub enum ShaderLocation {
     /// Absolute path to a shader
     Absolute(ShaderAbsPath),
