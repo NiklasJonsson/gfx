@@ -770,12 +770,14 @@ So, I think that this should be done:
 
 ### TODO
 
-1. Fix the massive amounts of pipelines by proper caching
-2. Test the recompile functionality
-3. Profiling
-4. Cleanup the code
+1. Test the recompile functionality
+2. Profiling
+3. Cleanup the code
     * Error handling
     * Many definitions of `Arc<ShaderCompilationInfo>` even though Arc is an optimization
+    * Review data structures for storing pipelines. Can it be simplfiied?
+    * Review API boundary between pipeline service and shader compilation service.
+4. Remove caching in the pipeline storage type in trekant?
 
 ## Future work
 
