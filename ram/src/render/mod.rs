@@ -3,18 +3,15 @@ use thiserror::Error;
 
 use crate::ecs::prelude::*;
 
-use trekant::{BufferDescriptor, BufferMutability, RenderPass};
+use trekant::{BufferDescriptor, BufferMutability};
 
-use trekant::pipeline::{
-    GraphicsPipeline, GraphicsPipelineDescriptor, PipelineError, ShaderDescriptor,
-};
+use trekant::pipeline::GraphicsPipeline;
 use trekant::pipeline_resource::PipelineResourceSet;
 use trekant::resource::Handle;
 use trekant::util;
 use trekant::BufferHandle;
 use trekant::RenderPassEncoder;
 use trekant::Renderer;
-use trekant::VertexFormat;
 
 pub mod debug;
 pub mod geometry;

@@ -770,7 +770,7 @@ So, I think that this should be done:
 
 ### TODO
 
-1. Test the recompile functionality
+1. Figure out the error when recompiling PBR shaders.
 2. Profiling
 3. Cleanup the code
     * Error handling

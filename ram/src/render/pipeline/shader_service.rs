@@ -1,6 +1,6 @@
 use super::{Defines, ShaderAbsPath, ShaderLocation, ShaderType, SpvBinary};
 
-use super::shader_compiler::{CompilerResult, FileNotFound, ShaderCompiler, ShaderSource};
+use super::shader_compiler::{CompilerResult, ShaderCompiler, ShaderSource};
 
 use std::collections::HashMap;
 use std::sync::{atomic::AtomicU64, Arc, Condvar, Mutex};

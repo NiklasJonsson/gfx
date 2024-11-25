@@ -1,8 +1,5 @@
 use polymap::polymap;
-use trekant::pipeline::{
-    BlendState, DepthTest, GraphicsPipeline, GraphicsPipelineDescriptor, ShaderDescriptor,
-    ShaderStage, TriangleCulling,
-};
+use trekant::pipeline::{BlendState, DepthTest, GraphicsPipeline, ShaderStage, TriangleCulling};
 use trekant::pipeline_resource::PipelineResourceSet;
 use trekant::util::{cast_transparent_slice, Extent2D, Format, Offset2D, Rect2D, Viewport};
 use trekant::BufferMutability;
@@ -17,9 +14,7 @@ use crate::common::Name;
 use crate::io::input;
 use crate::io::input::KeyCode;
 use crate::math::Vec2;
-use crate::render::pipeline::{
-    Defines, PipelineService, PipelineSettings, Shader, ShaderCompiler, ShaderType, Shaders,
-};
+use crate::render::pipeline::{Defines, PipelineService, PipelineSettings, Shader, Shaders};
 use crate::time::Time;
 
 use specs::world::WorldExt;
