@@ -477,7 +477,9 @@ WIP Solution:
 
 ### Validation layer errors
 
-`= 0x4dae5635 | Submitted command buffer expects VkImage 0x932ea900000000ac[] (subresource: aspectMask 0x2 array layer 1, mip level 0) to be in layout VK_IMAGE_LAYOUT_DEPTH_STENCIL_READ_ONLY_OPTIMAL--instead, current layout is VK_IMAGE_LAYOUT_UNDEFINED.")`
+```txt
+= 0x4dae5635 | Submitted command buffer expects VkImage 0x932ea900000000ac[] (subresource: aspectMask 0x2 array layer 1, mip level 0) to be in layout VK_IMAGE_LAYOUT_DEPTH_STENCIL_READ_ONLY_OPTIMAL--instead, current layout is VK_IMAGE_LAYOUT_UNDEFINED.")
+```
 
 #### Solution
 
@@ -570,8 +572,8 @@ and handling includes.
 
 Start sketching out a TextureAssetLoader that contains the storage and cache for file -> raw image data.
 
-The code is in the middle of changing texture loading. The problem is that the current Loader API - that there can only be one
-instance, means that there is only one place where pending resources can be resolved. When they are flushed to the
+The code is in the middle of changing texture loading. The problem is that the current Loader API - that there can only
+be one instance, means that there is only one place where pending resources can be resolved. When they are flushed to the
 renderer. IIRC, this was to simplify the code to not send too much data around but instead, it would be good if mapping
 does not have to take effect immediately but instead be done in individual systems.
 
@@ -720,7 +722,7 @@ It exposes both an immediate and async API, corresponding to the needs to the Pi
 
 Notes for bugs found during development.
 
-#### Sporadic errors in pipeline validation
+#### Sporadic errors in pipeline validation :check:
 
 The validation layers complain about a missing OpEntryPoint "main" with the correct shader stage.
 
@@ -733,13 +735,13 @@ Learnings:
 * Let's look at reworking the blocking creation API to reduce the chance of this issue appearing in other uses
 of the shader compilation API.
 
-#### The shader permutation map is not written
+#### The shader permutation map is not written :check:
 
 This map is never modified during the blocking `create` call.
 
 This was fixed and in turn, the shader service now exposes a blocking API for compiling several shaders.
 
-#### Creating massive amounts of pipelines makes the app freeze
+#### Creating massive amounts of pipelines makes the app freeze :check:
 
 When modifying the pbr fragment shader, it triggers recreation of ~500 pipelines
 
@@ -751,7 +753,7 @@ Problems are several:
 So, we have N duplicated pipeline infos in the pipeline service. For each file that is part of
 M pipelines, we get M * N pipeline creations.
 
-### Pipeline creation
+##### Pipeline creation
 
 Pipelines are dynamically created at runtime, partly because the vertex format is not known. It is combinatorial.
 It might be possible to warm up the cache for shadow pipelines because they only have vec3 + skip as the format so
@@ -768,16 +770,35 @@ So, I think that this should be done:
 * Cache in PipelineService::create.
 * For now, let two pipeline creation requests race to the cache.
 
+#### Solution
+
+There is now a cache in `PipelineService` so that no redundant pipelines are created.
+
+#### Spurios unrelated errors for shader compilation failures :cross:
+
+It seems like that sometimes when a compilation error occurs for a shaders, this error is also emitted:
+
+```txt
+[2025-01-07T04:41:36Z ERROR ram::render::pipeline] Failed to recompile shader '\\?\C:\Users\jonss\src\gfx\ram\src\render\shaders\pbr\frag.glsl':
+
+Failed to compile shader:
+
+compilation error:
+\\?\C:\Users\jonss\src\gfx\ram\src\render\shaders\pbr\frag.glsl: error: #version: Desktop shaders for Vulkan SPIR-V require version 140 or higher
+```
+
 ### TODO
 
-1. Figure out the error when recompiling PBR shaders.
-2. Profiling
-3. Cleanup the code
+1. Fix remaining bugs
+1. Profiling
+1. Cleanup the code
     * Error handling
     * Many definitions of `Arc<ShaderCompilationInfo>` even though Arc is an optimization
     * Review data structures for storing pipelines. Can it be simplfiied?
     * Review API boundary between pipeline service and shader compilation service.
-4. Remove caching in the pipeline storage type in trekant?
+1. Remove caching in the pipeline storage type in trekant?
+1. Remove ReloadMaterial code?
+1. Hook up R key to reload?
 
 ## Future work
 
@@ -834,7 +855,8 @@ As far as I remember, this API was designed to ensure that frames are started an
 But looking at it now, it is a lot of API surface just for maintaining the frame idx. It might be more wortwhile to track
 this internally in the renderer and panic if it is not done correctly. In addition, it duplicates the renderer API.
 
-* Add assert in Renderer that mutability functions are not using if a frame is in-flight
+Another idea would be to have the Renderer give a FrameToken in `beginFrame()` that is required for the
+function that modify potentially in-flight resources.
 
 ### Buffer API
 

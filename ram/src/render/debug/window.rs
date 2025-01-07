@@ -520,16 +520,20 @@ fn build_pipelines_tab(world: &mut World, _visitor: &mut ImguiVisitor, frame: &U
         "#Shader permutations: {}",
         stats.n_shader_pipelines
     ));
-    if let Some(_table) = ui.begin_table_header_with_flags(
+    if let Some(_table) = ui.begin_table_header_with_sizing(
         "pipelines_table",
         [
             imgui::TableColumnSetup::new("Pipeline Handle"),
+            imgui::TableColumnSetup::new("Vertex Shader Name"),
             imgui::TableColumnSetup::new("Vertex Shader Path"),
             imgui::TableColumnSetup::new("Vertex Shader Defines"),
+            imgui::TableColumnSetup::new("Fragment Shader Name"),
             imgui::TableColumnSetup::new("Fragment Shader Path"),
             imgui::TableColumnSetup::new("Fragment Shader Defines"),
         ],
-        imgui::TableFlags::BORDERS | imgui::TableFlags::SIZING_FIXED_FIT,
+        imgui::TableFlags::BORDERS | imgui::TableFlags::SCROLL_X | imgui::TableFlags::SCROLL_Y,
+        [ui.window_size()[0], 0.0],
+        0.0,
     ) {
         for pipeline in stats.pipelines {
             let PipelineStats {
@@ -540,11 +544,13 @@ fn build_pipelines_tab(world: &mut World, _visitor: &mut ImguiVisitor, frame: &U
             ui.text(format!("{}", handle.id()));
 
             ui.table_next_column();
+            ui.text(vert.debug_name.as_deref().unwrap_or("N/A"));
+
+            ui.table_next_column();
             ui.text(format!("{}", vert.path.display()));
 
             ui.table_next_column();
             let mut defines_str = String::with_capacity(128);
-            crate::imdbg!(&vert.compilation_info.defines);
             for (k, v) in &vert.compilation_info.defines {
                 defines_str.push_str(k);
                 defines_str.push_str(" = ");
@@ -555,7 +561,9 @@ fn build_pipelines_tab(world: &mut World, _visitor: &mut ImguiVisitor, frame: &U
 
             ui.table_next_column();
             if let Some(frag) = frag {
-                crate::imdbg!(&frag.compilation_info.defines);
+                ui.text(frag.debug_name.as_deref().unwrap_or("N/A"));
+
+                ui.table_next_column();
                 ui.text(format!("{}", frag.path.display()));
 
                 ui.table_next_column();
@@ -568,6 +576,8 @@ fn build_pipelines_tab(world: &mut World, _visitor: &mut ImguiVisitor, frame: &U
                 }
                 ui.text(&defines_str);
             } else {
+                ui.text("N/A");
+                ui.table_next_column();
                 ui.text("N/A");
                 ui.table_next_column();
                 ui.text("N/A");

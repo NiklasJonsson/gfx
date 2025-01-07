@@ -15,7 +15,7 @@ fn name(world: &World, ent: Entity) -> String {
     let names = world.read_storage::<Name>();
     match names.get(ent) {
         Some(name) => format!("{ent_id} {}", name.0),
-        None => format!("{ent_id}"),
+        None => format!("Entity {ent_id}"),
     }
 }
 

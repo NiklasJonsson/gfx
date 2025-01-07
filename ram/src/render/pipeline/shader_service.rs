@@ -55,7 +55,7 @@ impl JobIdGenerator {
     }
 
     /// Take 'n' ids from the generator, return a range containing them.
-    fn take(&self, n: u64) -> std::ops::Range<u64> {
+    fn generate(&self, n: u64) -> std::ops::Range<u64> {
         let start = self
             .counter
             .fetch_add(n, std::sync::atomic::Ordering::Relaxed);
@@ -296,7 +296,7 @@ impl ShaderCompilationService {
         shaders: &[(ShaderLocation, Arc<ShaderCompilationInfo>)],
         results: &mut [Option<CompiledShader>],
     ) {
-        let id_range = self.id_generator.take(shaders.len() as u64);
+        let id_range = self.id_generator.generate(shaders.len() as u64);
         let mut work_items: Vec<WorkItem> = Vec::with_capacity(shaders.len());
         for (id, (loc, info)) in id_range.clone().zip(shaders.iter()) {
             work_items.push(WorkItem {

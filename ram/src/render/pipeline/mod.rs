@@ -211,6 +211,7 @@ pub struct PipelineService {
 #[derive(Clone)]
 pub struct ShaderStats {
     pub path: ShaderAbsPath,
+    pub debug_name: Option<String>,
     pub compilation_info: Arc<ShaderCompilationInfo>,
 }
 
@@ -291,17 +292,20 @@ impl PipelineService {
             return;
         }
 
-        println!("Waiting for device idle...");
+        log::info!("Waiting for device idle...");
         renderer.wait_device_idle();
-        println!("Done idling");
+        log::info!("Done idling");
 
         let start = std::time::Instant::now();
-        println!("Creating pipelines...");
+        log::info!(
+            "Creating pipelines for {} changed shaders",
+            done_shaders.len()
+        );
         for done_shader in done_shaders {
             let spv = match done_shader.result {
                 Err(e) => {
                     log::error!(
-                        "Failed to recompile shader '{}' due to:\n{}",
+                        "Failed to recompile shader '{}':\n{}",
                         done_shader.path.display(),
                         e
                     );
@@ -345,7 +349,7 @@ impl PipelineService {
                 pipeline_info.cur = new_handle;
             }
         }
-        println!("Created pipelines in {} s", start.elapsed().as_secs_f32());
+        log::info!("Created pipelines in {} s", start.elapsed().as_secs_f32());
     }
 
     pub fn queue_recompile(&self, shader: &ShaderLocation) -> Result<(), Error> {
@@ -367,7 +371,6 @@ impl PipelineService {
             (Option<ShaderPermutation>, Option<ShaderPermutation>),
         > = HashMap::new();
 
-        crate::imdbg!(state.shader_pipelines.len());
         for (perm, handles) in &state.shader_pipelines {
             for handle in handles {
                 if perm.compilation_info.ty == ShaderType::Vertex {
@@ -388,10 +391,12 @@ impl PipelineService {
             stats.pipelines.push(PipelineStats {
                 vert: ShaderStats {
                     path: vert.path.clone(),
+                    debug_name: info.descriptor.vert.debug_name.clone(),
                     compilation_info: vert.compilation_info.clone(),
                 },
                 frag: perms.1.map(|x| ShaderStats {
                     path: x.path.clone(),
+                    debug_name: info.descriptor.frag.as_ref().unwrap().debug_name.clone(),
                     compilation_info: x.compilation_info.clone(),
                 }),
                 handle: info.cur,
